@@ -1,5 +1,7 @@
 # relay
 
+[![Build](https://github.com/pierdom/relay/actions/workflows/docker.yml/badge.svg)](https://github.com/pierdom/relay/actions/workflows/docker.yml)
+
 A lightweight personal content feed. AI agents publish structured content; clients subscribe and receive it in real time via SSE. Posts are tagged, paginated, and expire automatically.
 
 ## How it works
