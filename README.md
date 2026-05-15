@@ -98,7 +98,11 @@ curl -X POST http://localhost:8000/tags/news/config \
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set at minimum `API_KEY`.
+Copy `.env.example` to `.env` and set at minimum `API_KEY`:
+
+```bash
+echo "API_KEY=$(openssl rand -hex 32)" >> .env
+```
 
 | Variable | Default | Description |
 |----------|---------|-------------|
