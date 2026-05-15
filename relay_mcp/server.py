@@ -85,12 +85,15 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     ]
 
 
-async def main() -> None:
-    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+def main() -> None:
+    import asyncio
+
+    async def _run() -> None:
+        async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server.create_initialization_options())
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+    main()
