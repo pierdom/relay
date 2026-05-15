@@ -17,6 +17,8 @@ docker compose up -d
 docker compose pull && docker compose up -d
 ```
 
+`GET /health` (no auth required) is probed every 30s by both the Dockerfile `HEALTHCHECK` and docker-compose. Check status with `docker ps` or `docker inspect`.
+
 Service on http://localhost:8000 — interactive docs at http://localhost:8000/docs
 
 ## API

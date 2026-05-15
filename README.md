@@ -31,6 +31,8 @@ docker compose up -d
 docker compose pull && docker compose up -d
 ```
 
+The container exposes `GET /health` (no auth) and includes a Docker healthcheck — `docker ps` will show the container status as `healthy` once it's ready.
+
 Service on `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`
 
 ## API
