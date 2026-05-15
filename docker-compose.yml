@@ -1,6 +1,6 @@
 services:
   relay:
-    build: .
+    image: ghcr.io/pierdom/relay:latest
     env_file:
       - .env
     ports:

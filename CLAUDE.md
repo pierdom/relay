@@ -12,8 +12,9 @@ uv run uvicorn relay.main:app --reload
 ## Docker
 
 ```bash
-docker compose up --build
-docker compose up -d   # detached
+docker compose up -d
+# to update to the latest image:
+docker compose pull && docker compose up -d
 ```
 
 Service on http://localhost:8000 — interactive docs at http://localhost:8000/docs

@@ -21,10 +21,12 @@ cp .env.example .env   # set API_KEY to a strong secret
 uv run uvicorn relay.main:app --reload
 ```
 
-Or with Docker:
+Or with Docker (uses the pre-built image from GHCR):
 
 ```bash
-docker compose up --build
+docker compose up -d
+# update to latest:
+docker compose pull && docker compose up -d
 ```
 
 Service on `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`
