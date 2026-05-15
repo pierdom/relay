@@ -32,6 +32,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="relay", version="0.1.0", lifespan=lifespan)
 
+
+@app.get("/health", include_in_schema=False)
+async def health() -> dict:
+    return {"status": "ok"}
+
+
 app.include_router(posts_router)
 app.include_router(tags_router)
 app.include_router(events_router)
