@@ -9,7 +9,11 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "pydantic-settings>=2.7.0",
     "sse-starlette>=3.4.4",
+    "mcp>=1.27.1",
 ]
+
+[project.scripts]
+relay-mcp = "relay_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]

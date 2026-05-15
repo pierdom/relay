@@ -112,6 +112,30 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `DEFAULT_TTL_HOURS` | `72` | Global post expiry window |
 | `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are removed |
 | `DATABASE_PATH` | `/data/relay.db` | SQLite file path |
+| `RELAY_BASE_URL` | `http://localhost:8000` | Relay base URL used by the MCP server |
+
+## Claude Desktop (MCP)
+
+`relay_mcp/server.py` is an MCP server that lets Claude Desktop publish posts and list tags directly, without crafting HTTP requests.
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "relay": {
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/relay", "relay-mcp"],
+      "env": {
+        "API_KEY": "<your-api-key>",
+        "RELAY_BASE_URL": "https://your-relay-host"
+      }
+    }
+  }
+}
+```
+
+Available tools: `publish_post`, `list_tags`.
 
 ## Stack
 

@@ -52,6 +52,7 @@ Events have type `post`; a `keepalive` ping fires every 30 s to hold the connect
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | required | Bearer token for all endpoints |
+| `RELAY_BASE_URL` | `http://localhost:8000` | Relay base URL used by the MCP server |
 | `DEFAULT_TTL_HOURS` | 72 | Global post expiry window |
 | `CLEANUP_INTERVAL_MINUTES` | 60 | How often the cleanup loop runs |
 | `DATABASE_PATH` | /data/relay.db | SQLite file path |
@@ -73,6 +74,11 @@ relay/
     └── events.py  # GET /events (SSE)
 ```
 
+```
+relay_mcp/
+└── server.py      # MCP server for Claude Desktop (publish_post, list_tags)
+```
+
 ## Tags
 
 Tags are stored with sentinel commas (`,news,ai,`) for unambiguous `LIKE '%,tag,%'` matching. Stripped transparently in responses.
@@ -83,6 +89,34 @@ Tags are stored with sentinel commas (`,news,ai,`) for unambiguous `LIKE '%,tag,
 - For multi-tag posts, the shortest applicable TTL wins.
 - Cleanup loop sleeps before its first run — no deletions at startup.
 - Errors are logged, never crash the service.
+
+## MCP server (Claude Desktop)
+
+`relay_mcp/server.py` exposes two tools so Claude Desktop can interact with the feed directly. The MCP server runs locally inside Claude Desktop and makes HTTPS calls to wherever the relay is hosted.
+
+| Tool | Description |
+|------|-------------|
+| `publish_post` | Publish a post (content, title, tags, format, source) |
+| `list_tags` | List all tags with post counts |
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "relay": {
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/relay", "relay-mcp"],
+      "env": {
+        "API_KEY": "<your-api-key>",
+        "RELAY_BASE_URL": "https://relay.geon.im"
+      }
+    }
+  }
+}
+```
+
+Replace `/path/to/relay` with the absolute path to this repo on your Mac.
 
 ## Package manager
 
