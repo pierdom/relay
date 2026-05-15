@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     api_key: str
     default_ttl_hours: int = 72
     cleanup_interval_minutes: int = 60
-    database_path: str = "/data/mywebhook.db"
+    database_path: str = "/data/relay.db"
 
 
 settings = Settings()
