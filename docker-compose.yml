@@ -1,5 +1,6 @@
 services:
   relay:
+    container_name: relay
     image: ghcr.io/pierdom/relay:latest
     env_file:
       - .env
