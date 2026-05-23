@@ -43,6 +43,29 @@ async def list_tools() -> list[types.Tool]:
             description="List all tags in the relay feed with their post counts.",
             inputSchema={"type": "object", "properties": {}},
         ),
+        types.Tool(
+            name="list_posts",
+            description="List posts from the relay feed, optionally filtered by tag.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tag": {"type": "string", "description": "Filter by tag"},
+                    "limit": {"type": "integer", "description": "Max number of posts to return (default 20)"},
+                    "offset": {"type": "integer", "description": "Pagination offset (default 0)"},
+                },
+            },
+        ),
+        types.Tool(
+            name="get_post",
+            description="Get a single post by its ID.",
+            inputSchema={
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "integer", "description": "Post ID"},
+                },
+            },
+        ),
     ]
 
 
@@ -63,6 +86,49 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         else:
             text = "\n".join(f"{t['tag']} ({t['count']} posts)" for t in tags)
         return [types.TextContent(type="text", text=text)]
+
+    if name == "list_posts":
+        params = {k: v for k, v in arguments.items() if k in ("tag", "limit", "offset")}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/posts",
+                params=params,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            data = response.json()
+        posts = data.get("posts", [])
+        if not posts:
+            return [types.TextContent(type="text", text="No posts found.")]
+        lines = []
+        for p in posts:
+            header = f"#{p['id']}"
+            if p.get("title"):
+                header += f" — {p['title']}"
+            if p.get("tags"):
+                header += f" [{p['tags']}]"
+            lines.append(header)
+            lines.append(p["content"])
+            lines.append("")
+        return [types.TextContent(type="text", text="\n".join(lines).strip())]
+
+    if name == "get_post":
+        post_id = arguments["id"]
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/posts/{post_id}",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            p = response.json()
+        header = f"#{p['id']}"
+        if p.get("title"):
+            header += f" — {p['title']}"
+        if p.get("tags"):
+            header += f" [{p['tags']}]"
+        return [types.TextContent(type="text", text=f"{header}\n\n{p['content']}")]
 
     if name != "publish_post":
         raise ValueError(f"Unknown tool: {name}")
