@@ -66,6 +66,17 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="delete_post",
+            description="Delete a post from the relay feed by its ID.",
+            inputSchema={
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "integer", "description": "Post ID to delete"},
+                },
+            },
+        ),
     ]
 
 
@@ -129,6 +140,19 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         if p.get("tags"):
             header += f" [{p['tags']}]"
         return [types.TextContent(type="text", text=f"{header}\n\n{p['content']}")]
+
+    if name == "delete_post":
+        post_id = arguments["id"]
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{RELAY_BASE_URL}/posts/{post_id}",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 404:
+                return [types.TextContent(type="text", text=f"Post #{post_id} not found.")]
+            response.raise_for_status()
+        return [types.TextContent(type="text", text=f"Deleted post #{post_id}.")]
 
     if name != "publish_post":
         raise ValueError(f"Unknown tool: {name}")
