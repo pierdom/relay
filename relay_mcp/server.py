@@ -98,7 +98,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             )
             response.raise_for_status()
             data = response.json()
-        posts = data.get("posts", [])
+        posts = data.get("items", [])
         if not posts:
             return [types.TextContent(type="text", text="No posts found.")]
         lines = []
