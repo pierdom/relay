@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relay</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e2e4ec;
+      --muted: #6b7280;
+      --accent: #6366f1;
+      --accent-dim: #3730a3;
+      --tag-bg: #1e2035;
+      --tag-active: #312e81;
+      --green: #22c55e;
+      --red: #ef4444;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Header */
+    header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      background: var(--surface); flex-shrink: 0;
+    }
+    header h1 { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: -0.3px; }
+    .key-wrap { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+    .key-wrap input {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 5px 10px; border-radius: 6px; font-size: 13px; width: 240px;
+      font-family: monospace;
+    }
+    .key-wrap input:focus { outline: none; border-color: var(--accent); }
+    .key-wrap button {
+      background: var(--accent); border: none; color: #fff;
+      padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    }
+    .key-wrap button:hover { background: var(--accent-dim); }
+    .live-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--muted);
+      flex-shrink: 0; transition: background 0.3s;
+    }
+    .live-dot.connected { background: var(--green); }
+    .live-dot.error { background: var(--red); }
+
+    /* Layout */
+    .layout { display: flex; flex: 1; overflow: hidden; }
+
+    /* Sidebar */
+    aside {
+      width: 200px; flex-shrink: 0; border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .sidebar-header { padding: 12px 14px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .tag-list { overflow-y: auto; flex: 1; padding-bottom: 8px; }
+    .tag-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 14px; cursor: pointer; border-radius: 0; transition: background 0.15s;
+      border-left: 2px solid transparent;
+    }
+    .tag-item:hover { background: var(--tag-bg); }
+    .tag-item.active { background: var(--tag-active); border-left-color: var(--accent); }
+    .tag-name { font-size: 13px; }
+    .tag-count { font-size: 11px; color: var(--muted); }
+
+    /* Feed */
+    main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .feed::-webkit-scrollbar { width: 5px; }
+    .feed::-webkit-scrollbar-track { background: transparent; }
+    .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Post card */
+    .post {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px; transition: border-color 0.2s;
+    }
+    .post:hover { border-color: #3a3d4a; }
+    .post.new { animation: flash 1s ease; }
+    @keyframes flash {
+      0% { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+      100% { border-color: var(--border); box-shadow: none; }
+    }
+    .post-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    .post-title { font-size: 14px; font-weight: 600; color: var(--text); }
+    .post-time { font-size: 11px; color: var(--muted); margin-left: auto; white-space: nowrap; }
+    .post-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+    .tag-pill {
+      font-size: 11px; padding: 2px 8px; border-radius: 12px;
+      background: var(--tag-bg); color: var(--accent); cursor: pointer;
+      border: 1px solid var(--border);
+    }
+    .tag-pill:hover { background: var(--tag-active); }
+    .post-source { font-size: 11px; color: var(--muted); }
+    .post-body { color: #c9ccd4; line-height: 1.65; font-size: 13.5px; }
+    .post-body.format-text { white-space: pre-wrap; font-family: monospace; font-size: 13px; }
+    .post-body.format-json { white-space: pre-wrap; font-family: monospace; font-size: 12px; background: var(--bg); padding: 10px; border-radius: 6px; }
+    .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 12px 0 6px; }
+    .post-body p { margin: 6px 0; }
+    .post-body ul, .post-body ol { padding-left: 20px; margin: 6px 0; }
+    .post-body li { margin: 3px 0; }
+    .post-body a { color: var(--accent); text-decoration: none; }
+    .post-body a:hover { text-decoration: underline; }
+    .post-body code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-family: monospace; font-size: 12px; }
+    .post-body pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
+    .post-body pre code { background: none; padding: 0; }
+    .post-body blockquote { border-left: 3px solid var(--accent-dim); padding-left: 12px; color: var(--muted); margin: 8px 0; }
+    .post-body strong { color: var(--text); }
+    .post-actions { margin-top: 10px; display: flex; justify-content: flex-end; }
+    .btn-delete {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      padding: 3px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;
+    }
+    .btn-delete:hover { border-color: var(--red); color: var(--red); }
+
+    /* Load more / empty */
+    .load-more {
+      text-align: center; padding: 12px;
+    }
+    .load-more button {
+      background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      padding: 7px 20px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    }
+    .load-more button:hover { border-color: var(--accent); color: var(--accent); }
+    .empty { text-align: center; color: var(--muted); padding: 48px 16px; font-size: 14px; }
+    .auth-prompt { text-align: center; color: var(--muted); padding: 48px 16px; }
+    .auth-prompt p { margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>relay</h1>
+  <span class="live-dot" id="liveDot" title="SSE disconnected"></span>
+  <div class="key-wrap">
+    <input type="password" id="apiKeyInput" placeholder="API key" autocomplete="off">
+    <button id="connectBtn">Connect</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="sidebar-header">Tags</div>
+    <div class="tag-list" id="tagList"></div>
+  </aside>
+  <main>
+    <div class="feed" id="feed"></div>
+    <div class="load-more" id="loadMore" style="display:none">
+      <button id="loadMoreBtn">Load more</button>
+    </div>
+  </main>
+</div>
+
+<script>
+const LIMIT = 20;
+let apiKey = localStorage.getItem('relay_api_key') || '';
+let activeTag = null;
+let offset = 0;
+let total = 0;
+let es = null;
+
+const feed = document.getElementById('feed');
+const tagList = document.getElementById('tagList');
+const loadMoreWrap = document.getElementById('loadMore');
+const loadMoreBtn = document.getElementById('loadMoreBtn');
+const liveDot = document.getElementById('liveDot');
+const apiKeyInput = document.getElementById('apiKeyInput');
+const connectBtn = document.getElementById('connectBtn');
+
+if (apiKey) {
+  apiKeyInput.value = apiKey;
+  init();
+}
+
+connectBtn.addEventListener('click', () => {
+  const val = apiKeyInput.value.trim();
+  if (!val) return;
+  apiKey = val;
+  localStorage.setItem('relay_api_key', apiKey);
+  init();
+});
+
+apiKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') connectBtn.click(); });
+
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+async function init() {
+  offset = 0;
+  total = 0;
+  feed.innerHTML = '';
+  loadMoreWrap.style.display = 'none';
+  await Promise.all([loadTags(), loadPosts(true)]);
+  connectSSE();
+}
+
+async function loadTags() {
+  try {
+    const data = await apiFetch('/tags');
+    renderTags(data.tags);
+  } catch {}
+}
+
+function renderTags(tags) {
+  tagList.innerHTML = '';
+  const all = makeTagItem('All', null, tags.reduce((s, t) => s + t.count, 0));
+  tagList.appendChild(all);
+  tags.forEach(t => tagList.appendChild(makeTagItem(t.tag, t.tag, t.count)));
+}
+
+function makeTagItem(label, value, count) {
+  const el = document.createElement('div');
+  el.className = 'tag-item' + (activeTag === value ? ' active' : '');
+  el.innerHTML = `<span class="tag-name">${label}</span><span class="tag-count">${count}</span>`;
+  el.addEventListener('click', () => selectTag(value));
+  return el;
+}
+
+async function selectTag(tag) {
+  activeTag = tag;
+  offset = 0;
+  total = 0;
+  feed.innerHTML = '';
+  loadMoreWrap.style.display = 'none';
+  document.querySelectorAll('.tag-item').forEach(el => el.classList.remove('active'));
+  const items = tagList.querySelectorAll('.tag-item');
+  items.forEach(el => {
+    const name = el.querySelector('.tag-name').textContent;
+    if ((tag === null && name === 'All') || name === tag) el.classList.add('active');
+  });
+  await loadPosts(true);
+  connectSSE();
+}
+
+async function loadPosts(replace = false) {
+  if (!apiKey) return;
+  try {
+    const params = new URLSearchParams({ limit: LIMIT, offset });
+    if (activeTag) params.set('tag', activeTag);
+    const data = await apiFetch(`/posts?${params}`);
+    total = data.total;
+    offset += data.items.length;
+
+    if (replace) feed.innerHTML = '';
+
+    if (data.items.length === 0 && offset === 0) {
+      feed.innerHTML = '<div class="empty">No posts yet.</div>';
+    } else {
+      data.items.forEach(p => feed.appendChild(renderPost(p)));
+    }
+
+    loadMoreWrap.style.display = offset < total ? 'block' : 'none';
+  } catch (e) {
+    if (replace) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${e.message}</p></div>`;
+  }
+}
+
+loadMoreBtn.addEventListener('click', () => loadPosts(false));
+
+function renderPost(post, prepend = false) {
+  const el = document.createElement('div');
+  el.className = 'post';
+  el.dataset.id = post.id;
+
+  const time = relativeTime(post.created_at);
+  const titleHtml = post.title ? `<span class="post-title">${escHtml(post.title)}</span>` : '';
+  const tagsHtml = post.tags.length
+    ? post.tags.map(t => `<span class="tag-pill" data-tag="${t}">${escHtml(t)}</span>`).join('')
+    : '';
+  const sourceHtml = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
+
+  let bodyHtml;
+  if (post.format === 'markdown') {
+    bodyHtml = `<div class="post-body">${marked.parse(post.content)}</div>`;
+  } else if (post.format === 'html') {
+    bodyHtml = `<div class="post-body">${post.content}</div>`;
+  } else if (post.format === 'json') {
+    let pretty = post.content;
+    try { pretty = JSON.stringify(JSON.parse(post.content), null, 2); } catch {}
+    bodyHtml = `<div class="post-body format-json">${escHtml(pretty)}</div>`;
+  } else {
+    bodyHtml = `<div class="post-body format-text">${escHtml(post.content)}</div>`;
+  }
+
+  el.innerHTML = `
+    <div class="post-meta">
+      ${titleHtml}
+      <span class="post-time" title="${post.created_at}">${time}</span>
+    </div>
+    ${post.tags.length || post.source ? `<div class="post-meta" style="margin-bottom:10px">${tagsHtml}${sourceHtml}</div>` : ''}
+    ${bodyHtml}
+    <div class="post-actions">
+      <button class="btn-delete" data-id="${post.id}">Delete</button>
+    </div>
+  `;
+
+  el.querySelectorAll('.tag-pill').forEach(pill => {
+    pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); });
+  });
+
+  el.querySelector('.btn-delete').addEventListener('click', async () => {
+    if (!confirm('Delete this post?')) return;
+    try {
+      await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
+      el.remove();
+      total--;
+      loadMoreWrap.style.display = offset < total ? 'block' : 'none';
+      await loadTags();
+    } catch {}
+  });
+
+  return el;
+}
+
+function connectSSE() {
+  if (es) { es.close(); es = null; }
+  if (!apiKey) return;
+
+  const params = new URLSearchParams();
+  params.set('key', apiKey);
+  if (activeTag) params.set('tag', activeTag);
+  es = new EventSource(`/events?${params}`);
+
+  es.addEventListener('post', e => {
+    const post = JSON.parse(e.data);
+    const existing = feed.querySelector(`[data-id="${post.id}"]`);
+    if (existing) return;
+    const empty = feed.querySelector('.empty');
+    if (empty) empty.remove();
+    const el = renderPost(post);
+    el.classList.add('new');
+    feed.prepend(el);
+    total++;
+    loadTags();
+  });
+
+  es.onopen = () => setDot('connected');
+  es.onerror = () => setDot('error');
+}
+
+function setDot(state) {
+  liveDot.className = 'live-dot ' + state;
+  liveDot.title = state === 'connected' ? 'Live' : state === 'error' ? 'SSE error' : 'Disconnected';
+}
+
+function relativeTime(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>

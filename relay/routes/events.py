@@ -4,10 +4,9 @@ import asyncio
 import logging
 
 import aiosqlite
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth import require_api_key
 from ..config import settings
 from ..events import subscribe, unsubscribe
 from ..models import PostResponse
@@ -18,16 +17,27 @@ router = APIRouter(tags=["events"])
 _KEEPALIVE_SECONDS = 30
 
 
-@router.get("/events", dependencies=[Depends(require_api_key)])
+
+@router.get("/events")
 async def stream_events(
     request: Request,
     tag: str | None = Query(default=None),
+    key: str | None = Query(default=None),
 ) -> EventSourceResponse:
     """
     SSE stream. Sends a 'post' event whenever new content is published.
     On reconnect, set the Last-Event-ID header to replay missed posts.
     Optional ?tag= filter to receive only matching content.
+    Auth: Authorization: Bearer <key> header or ?key= query param (for EventSource).
     """
+    auth_header = request.headers.get("authorization")
+    token = key
+    if token is None and auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    if token != settings.api_key:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
     last_event_id = request.headers.get("last-event-id")
 
     async def generator():
