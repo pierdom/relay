@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Relay</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
@@ -319,6 +319,69 @@
     }
     .auth-prompt p        { font-size: 12px; }
     .auth-prompt p + p    { font-size: 11px; opacity: 0.6; margin-top: 4px; }
+
+    /* ── Responsive ──────────────────────────────────────── */
+
+    /* iOS dynamic viewport height */
+    @supports (height: 100dvh) { body { height: 100dvh; } }
+
+    /* Hamburger button — desktop hidden */
+    .menu-btn {
+      display: none; background: none; border: none; cursor: pointer;
+      flex-direction: column; justify-content: space-between;
+      width: 18px; height: 12px; padding: 0; flex-shrink: 0;
+    }
+    .menu-btn span {
+      display: block; width: 100%; height: 1.5px;
+      background: var(--muted); border-radius: 1px; transition: background 0.15s;
+    }
+    .menu-btn:hover span, .menu-btn.active span { background: var(--accent); }
+
+    /* Sidebar overlay */
+    .sidebar-overlay {
+      display: none; position: fixed; inset: 0; z-index: 49;
+      background: rgba(0,0,0,0.6);
+      -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+    }
+    .sidebar-overlay.visible { display: block; }
+
+    @media (max-width: 768px) {
+      /* Header */
+      header { padding: 0 14px; gap: 10px; }
+      .menu-btn { display: flex; }
+      .brand-sep { display: none; }
+      .live-label { display: none; }
+      .key-wrap input { width: 140px; }
+      .btn-new-post { font-size: 10px; padding: 5px 9px; letter-spacing: 0.06em; }
+
+      /* Sidebar → slide-in drawer */
+      aside {
+        position: fixed; top: 48px; left: 0; bottom: 0; z-index: 50;
+        width: 260px;
+        transform: translateX(-100%);
+        transition: transform 0.24s cubic-bezier(0.4,0,0.2,1);
+        box-shadow: 8px 0 40px rgba(0,0,0,0.6);
+      }
+      aside.open { transform: translateX(0); }
+
+      /* Feed — full width, tighter spacing */
+      .feed { padding: 12px; gap: 8px; }
+      .compose-panel { padding: 0 12px; }
+      .compose-panel.open { padding: 12px 12px 0; }
+      .post { padding: 12px; }
+      .load-more { padding: 10px 12px; }
+    }
+
+    /* Touch devices: always show post actions (no hover) */
+    @media (hover: none) {
+      .post-actions { opacity: 1; }
+    }
+
+    @media (max-width: 400px) {
+      header { gap: 8px; }
+      .key-wrap input { width: 110px; font-size: 11px; }
+      .btn-connect, .btn-new-post { padding: 5px 8px; }
+    }
   </style>
 </head>
 <body>
@@ -330,6 +393,9 @@
     <span class="live-dot" id="liveDot"></span>
     <span class="live-label" id="liveLabel">offline</span>
   </div>
+  <button class="menu-btn" id="menuBtn" aria-label="Toggle tags">
+    <span></span><span></span><span></span>
+  </button>
   <div class="header-right">
     <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
     <div class="key-wrap">
@@ -342,8 +408,9 @@
   </div>
 </header>
 
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
 <div class="layout">
-  <aside>
+  <aside id="sidebarEl">
     <div class="sidebar-header">
       Tags
       <button class="sidebar-add-btn" id="newTagBtn" title="New tag" style="display:none">+</button>
@@ -409,8 +476,16 @@ const composePanel = document.getElementById('composePanel');
 const newTagBtn    = document.getElementById('newTagBtn');
 const tagNewWrap   = document.getElementById('tagNew');
 const tagNewInput  = document.getElementById('tagNewInput');
-const connectedBar = document.getElementById('connectedBar');
-const disconnectBtn = document.getElementById('disconnectBtn');
+const connectedBar    = document.getElementById('connectedBar');
+const disconnectBtn   = document.getElementById('disconnectBtn');
+const menuBtn         = document.getElementById('menuBtn');
+const sidebarEl       = document.getElementById('sidebarEl');
+const sidebarOverlay  = document.getElementById('sidebarOverlay');
+
+function openSidebar()  { sidebarEl.classList.add('open'); sidebarOverlay.classList.add('visible'); menuBtn.classList.add('active'); }
+function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.classList.remove('visible'); menuBtn.classList.remove('active'); }
+menuBtn.addEventListener('click', () => sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar());
+sidebarOverlay.addEventListener('click', closeSidebar);
 
 if (apiKey) { apiKeyInput.value = apiKey; init(); }
 
@@ -429,6 +504,7 @@ disconnectBtn.addEventListener('click', () => {
   localStorage.removeItem('relay_api_key');
   if (es) { es.close(); es = null; }
   if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
+  closeSidebar();
   closeCompose();
   feed.innerHTML = '';
   tagList.innerHTML = '';
@@ -583,6 +659,7 @@ function startTagRename(el, oldName) {
 }
 
 async function selectTag(tag) {
+  closeSidebar();
   activeTag = tag; offset = 0; total = 0;
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
