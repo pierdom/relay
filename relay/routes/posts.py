@@ -7,7 +7,7 @@ import aiosqlite
 from ..auth import require_api_key
 from ..database import get_db
 from .. import events
-from ..models import PostCreate, PostListResponse, PostResponse
+from ..models import PostCreate, PostListResponse, PostResponse, PostUpdate
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
@@ -89,6 +89,46 @@ async def get_post(
         row = await cur.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+    return PostResponse.from_row(row)
+
+
+@router.patch(
+    "/{post_id}",
+    response_model=PostResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def update_post(
+    post_id: int,
+    body: PostUpdate,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> PostResponse:
+    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
+    updates: dict[str, object] = {}
+    if "title" in body.model_fields_set:
+        updates["title"] = body.title
+    if "content" in body.model_fields_set:
+        updates["content"] = body.content
+    if "format" in body.model_fields_set:
+        updates["format"] = body.format
+    if "tags" in body.model_fields_set:
+        updates["tags"] = "," + ",".join(body.tags) + "," if body.tags else ""
+    if "source" in body.model_fields_set:
+        updates["source"] = body.source
+
+    if updates:
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        await db.execute(
+            f"UPDATE posts SET {set_clause} WHERE id = ?",
+            list(updates.values()) + [post_id],
+        )
+        await db.commit()
+
+    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
+        row = await cur.fetchone()
     return PostResponse.from_row(row)
 
 

@@ -71,6 +71,15 @@
     .tag-item.active { background: var(--tag-active); border-left-color: var(--accent); }
     .tag-name { font-size: 13px; }
     .tag-count { font-size: 11px; color: var(--muted); }
+    .tag-rename {
+      background: none; border: none; cursor: pointer; padding: 0 2px;
+      font-size: 11px; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; line-height: 1;
+    }
+    .tag-item:hover .tag-rename { opacity: 1; }
+    .tag-rename-input {
+      background: var(--bg); border: 1px solid var(--accent); color: var(--text);
+      border-radius: 4px; font-size: 13px; padding: 1px 5px; width: 100%; outline: none;
+    }
 
     /* Feed */
     main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -115,12 +124,36 @@
     .post-body pre code { background: none; padding: 0; }
     .post-body blockquote { border-left: 3px solid var(--accent-dim); padding-left: 12px; color: var(--muted); margin: 8px 0; }
     .post-body strong { color: var(--text); }
-    .post-actions { margin-top: 10px; display: flex; justify-content: flex-end; }
+    .post-actions { margin-top: 10px; display: flex; gap: 6px; justify-content: flex-end; }
     .btn-delete {
+      background: none; border: 1px solid var(--red); color: var(--red);
+      padding: 3px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;
+    }
+    .btn-delete:hover { background: var(--red); color: #fff; }
+    .btn-edit {
       background: none; border: 1px solid var(--border); color: var(--muted);
       padding: 3px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;
     }
-    .btn-delete:hover { border-color: var(--red); color: var(--red); }
+    .btn-edit:hover { border-color: var(--accent); color: var(--accent); }
+    .edit-form { display: flex; flex-direction: column; gap: 8px; }
+    .edit-form input, .edit-form textarea, .edit-form select {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; width: 100%;
+    }
+    .edit-form textarea { resize: vertical; min-height: 120px; }
+    .edit-form input:focus, .edit-form textarea:focus, .edit-form select:focus { outline: none; border-color: var(--accent); }
+    .edit-form label { font-size: 11px; color: var(--muted); margin-bottom: 2px; display: block; }
+    .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+    .btn-save {
+      background: var(--accent); border: none; color: #fff;
+      padding: 4px 14px; border-radius: 5px; cursor: pointer; font-size: 12px;
+    }
+    .btn-save:hover { background: var(--accent-dim); }
+    .btn-cancel {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      padding: 4px 14px; border-radius: 5px; cursor: pointer; font-size: 12px;
+    }
+    .btn-cancel:hover { border-color: var(--text); color: var(--text); }
 
     /* Load more / empty */
     .load-more {
@@ -226,9 +259,51 @@ function renderTags(tags) {
 function makeTagItem(label, value, count) {
   const el = document.createElement('div');
   el.className = 'tag-item' + (activeTag === value ? ' active' : '');
-  el.innerHTML = `<span class="tag-name">${label}</span><span class="tag-count">${count}</span>`;
+  const renameBtn = value !== null ? `<button class="tag-rename" title="Rename">✏️</button>` : '';
+  el.innerHTML = `<span class="tag-name">${label}</span>${renameBtn}<span class="tag-count">${count}</span>`;
   el.addEventListener('click', () => selectTag(value));
+  if (value !== null) {
+    el.querySelector('.tag-rename').addEventListener('click', e => {
+      e.stopPropagation();
+      startTagRename(el, value);
+    });
+  }
   return el;
+}
+
+function startTagRename(el, oldName) {
+  const nameSpan = el.querySelector('.tag-name');
+  const input = document.createElement('input');
+  input.className = 'tag-rename-input';
+  input.value = oldName;
+  nameSpan.replaceWith(input);
+  input.focus();
+  input.select();
+
+  async function commit() {
+    const newName = input.value.trim().toLowerCase();
+    if (!newName || newName === oldName) { cancelRename(); return; }
+    try {
+      const data = await apiFetch(`/tags/${encodeURIComponent(oldName)}`, {
+        method: 'PATCH', body: JSON.stringify({ new_name: newName }),
+      });
+      if (activeTag === oldName) activeTag = newName;
+      renderTags(data.tags);
+    } catch (e) { alert(`Rename failed: ${e.message}`); cancelRename(); }
+  }
+
+  function cancelRename() {
+    const span = document.createElement('span');
+    span.className = 'tag-name';
+    span.textContent = oldName;
+    input.replaceWith(span);
+  }
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') cancelRename();
+  });
+  input.addEventListener('blur', commit);
 }
 
 async function selectTag(tag) {
@@ -305,7 +380,8 @@ function renderPost(post, prepend = false) {
     ${post.tags.length || post.source ? `<div class="post-meta" style="margin-bottom:10px">${tagsHtml}${sourceHtml}</div>` : ''}
     ${bodyHtml}
     <div class="post-actions">
-      <button class="btn-delete" data-id="${post.id}">Delete</button>
+      <button class="btn-edit" data-id="${post.id}">✏️ Edit</button>
+      <button class="btn-delete" data-id="${post.id}">🗑️ Delete</button>
     </div>
   `;
 
@@ -324,7 +400,72 @@ function renderPost(post, prepend = false) {
     } catch {}
   });
 
+  el.querySelector('.btn-edit').addEventListener('click', () => enterEditMode(el, post));
+
   return el;
+}
+
+function enterEditMode(el, post) {
+  const savedHtml = el.innerHTML;
+
+  el.innerHTML = `
+    <div class="edit-form">
+      <div><label>Title</label><input class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
+      <div><label>Format</label>
+        <select class="ef-format">
+          <option value="markdown"${post.format === 'markdown' ? ' selected' : ''}>markdown</option>
+          <option value="text"${post.format === 'text' ? ' selected' : ''}>text</option>
+          <option value="html"${post.format === 'html' ? ' selected' : ''}>html</option>
+          <option value="json"${post.format === 'json' ? ' selected' : ''}>json</option>
+        </select>
+      </div>
+      <div><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea></div>
+      <div><label>Tags (comma-separated)</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
+      <div><label>Source</label><input class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
+      <div class="edit-actions">
+        <button class="btn-cancel">Cancel</button>
+        <button class="btn-save">Save</button>
+      </div>
+    </div>
+  `;
+
+  el.querySelector('.btn-cancel').addEventListener('click', () => { el.innerHTML = savedHtml; rewirePost(el, post); });
+
+  el.querySelector('.btn-save').addEventListener('click', async () => {
+    const tagsRaw = el.querySelector('.ef-tags').value.split(',').map(s => s.trim()).filter(Boolean);
+    const body = {
+      title: el.querySelector('.ef-title').value.trim() || null,
+      content: el.querySelector('.ef-content').value,
+      format: el.querySelector('.ef-format').value,
+      tags: tagsRaw,
+      source: el.querySelector('.ef-source').value.trim() || null,
+    };
+    try {
+      const updated = await apiFetch(`/posts/${post.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+      const newEl = renderPost(updated);
+      el.replaceWith(newEl);
+      await loadTags();
+    } catch (e) {
+      alert(`Save failed: ${e.message}`);
+    }
+  });
+}
+
+function rewirePost(el, post) {
+  el.querySelectorAll('.tag-pill').forEach(pill => {
+    pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); });
+  });
+  el.querySelector('.btn-delete').addEventListener('click', async () => {
+    if (!confirm('Delete this post?')) return;
+    try {
+      await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
+      el.remove();
+      total--;
+      loadMoreWrap.style.display = offset < total ? 'block' : 'none';
+      await loadTags();
+    } catch {}
+  });
+  el.querySelector('.btn-edit').addEventListener('click', () => enterEditMode(el, post));
 }
 
 function connectSSE() {

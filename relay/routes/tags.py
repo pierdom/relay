@@ -8,7 +8,7 @@ import aiosqlite
 
 from ..auth import require_api_key
 from ..database import get_db
-from ..models import TagConfigCreate, TagConfigResponse, TagCount, TagListResponse
+from ..models import TagConfigCreate, TagConfigResponse, TagCount, TagListResponse, TagRename
 
 router = APIRouter(tags=["tags"])
 
@@ -27,6 +27,29 @@ async def list_tags(db: aiosqlite.Connection = Depends(get_db)) -> TagListRespon
             if t:
                 counter[t] += 1
     return TagListResponse(tags=[TagCount(tag=t, count=c) for t, c in counter.most_common()])
+
+
+@router.patch(
+    "/tags/{tag}",
+    response_model=TagListResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def rename_tag(
+    tag: str,
+    body: TagRename,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> TagListResponse:
+    old = tag.strip().lower()
+    new = body.new_name
+    if old == new:
+        return await list_tags(db)
+    await db.execute(
+        "UPDATE posts SET tags = REPLACE(tags, ?, ?) WHERE tags LIKE ?",
+        (f",{old},", f",{new},", f"%,{old},%"),
+    )
+    await db.execute("UPDATE tag_config SET tag = ? WHERE tag = ?", (new, old))
+    await db.commit()
+    return await list_tags(db)
 
 
 @router.post(

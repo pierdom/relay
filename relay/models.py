@@ -49,6 +49,33 @@ class PostListResponse(BaseModel):
     offset: int
 
 
+class PostUpdate(BaseModel):
+    title: str | None = None
+    content: str | None = None
+    format: FormatEnum | None = None
+    tags: list[str] | None = None
+    source: str | None = None
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        return [t.strip().lower() for t in v if t.strip()]
+
+
+class TagRename(BaseModel):
+    new_name: str
+
+    @field_validator("new_name")
+    @classmethod
+    def clean(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v:
+            raise ValueError("new_name must not be empty")
+        return v
+
+
 class TagCount(BaseModel):
     tag: str
     count: int
