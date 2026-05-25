@@ -394,6 +394,7 @@ let activeTag = null;
 let offset = 0;
 let total = 0;
 let es = null;
+let sseErrorTimer = null;
 
 const feed         = document.getElementById('feed');
 const tagList      = document.getElementById('tagList');
@@ -427,6 +428,7 @@ disconnectBtn.addEventListener('click', () => {
   apiKey = '';
   localStorage.removeItem('relay_api_key');
   if (es) { es.close(); es = null; }
+  if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
   closeCompose();
   feed.innerHTML = '';
   tagList.innerHTML = '';
@@ -457,6 +459,7 @@ async function init() {
   newPostBtn.style.display = '';
   newTagBtn.style.display = '';
   await Promise.all([loadTags(), loadPosts(true)]);
+  setDot('connected');
   connectSSE();
 }
 
@@ -754,8 +757,14 @@ function connectSSE() {
     loadTags();
   });
 
-  es.onopen  = () => setDot('connected');
-  es.onerror = () => setDot('error');
+  es.onopen = () => {
+    if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
+    setDot('connected');
+  };
+  es.onerror = () => {
+    if (sseErrorTimer) clearTimeout(sseErrorTimer);
+    sseErrorTimer = setTimeout(() => setDot('error'), 3000);
+  };
 }
 
 function setDot(state) {
