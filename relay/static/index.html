@@ -60,7 +60,22 @@
       width: 200px; flex-shrink: 0; border-right: 1px solid var(--border);
       display: flex; flex-direction: column; overflow: hidden;
     }
-    .sidebar-header { padding: 12px 14px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .sidebar-header {
+      padding: 12px 14px; font-size: 11px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .sidebar-add-btn {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      font-size: 16px; line-height: 1; padding: 0; flex-shrink: 0;
+    }
+    .sidebar-add-btn:hover { color: var(--accent); }
+    .tag-new { padding: 4px 10px 8px; }
+    .tag-new-input {
+      background: var(--bg); border: 1px solid var(--accent); color: var(--text);
+      border-radius: 4px; font-size: 13px; padding: 3px 8px; width: 100%; outline: none;
+      font-family: inherit;
+    }
     .tag-list { overflow-y: auto; flex: 1; padding-bottom: 8px; }
     .tag-item {
       display: flex; align-items: center; justify-content: space-between;
@@ -167,6 +182,13 @@
     .empty { text-align: center; color: var(--muted); padding: 48px 16px; font-size: 14px; }
     .auth-prompt { text-align: center; color: var(--muted); padding: 48px 16px; }
     .auth-prompt p { margin-bottom: 8px; }
+    .btn-new-post {
+      background: var(--accent); border: none; color: #fff;
+      padding: 5px 13px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+    }
+    .btn-new-post:hover { background: var(--accent-dim); }
+    .compose-panel { padding: 16px 16px 0; }
+    .compose-panel .post { border-color: var(--accent-dim); }
   </style>
 </head>
 <body>
@@ -174,6 +196,7 @@
 <header>
   <h1>relay</h1>
   <span class="live-dot" id="liveDot" title="SSE disconnected"></span>
+  <button class="btn-new-post" id="newPostBtn" style="display:none">✏️ New Post</button>
   <div class="key-wrap">
     <input type="password" id="apiKeyInput" placeholder="API key" autocomplete="off">
     <button id="connectBtn">Connect</button>
@@ -182,10 +205,39 @@
 
 <div class="layout">
   <aside>
-    <div class="sidebar-header">Tags</div>
+    <div class="sidebar-header">
+      Tags
+      <button class="sidebar-add-btn" id="newTagBtn" title="New tag" style="display:none">+</button>
+    </div>
+    <div class="tag-new" id="tagNew" style="display:none">
+      <input class="tag-new-input" id="tagNewInput" placeholder="tag name" autocomplete="off">
+    </div>
     <div class="tag-list" id="tagList"></div>
   </aside>
   <main>
+    <div class="compose-panel" id="composePanel" style="display:none">
+      <div class="post">
+        <div class="edit-form">
+          <div><label>Title</label><input type="text" id="cpTitle" placeholder="(optional)"></div>
+          <div>
+            <label>Format</label>
+            <select id="cpFormat">
+              <option value="markdown">markdown</option>
+              <option value="text">text</option>
+              <option value="html">html</option>
+              <option value="json">json</option>
+            </select>
+          </div>
+          <div><label>Content</label><textarea id="cpContent" placeholder="Content…"></textarea></div>
+          <div><label>Tags (comma-separated)</label><input type="text" id="cpTags"></div>
+          <div><label>Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
+          <div class="edit-actions">
+            <button class="btn-cancel" id="cpCancel">Cancel</button>
+            <button class="btn-save" id="cpPublish">Publish</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="feed" id="feed"></div>
     <div class="load-more" id="loadMore" style="display:none">
       <button id="loadMoreBtn">Load more</button>
@@ -208,6 +260,11 @@ const loadMoreBtn = document.getElementById('loadMoreBtn');
 const liveDot = document.getElementById('liveDot');
 const apiKeyInput = document.getElementById('apiKeyInput');
 const connectBtn = document.getElementById('connectBtn');
+const newPostBtn = document.getElementById('newPostBtn');
+const composePanel = document.getElementById('composePanel');
+const newTagBtn = document.getElementById('newTagBtn');
+const tagNewWrap = document.getElementById('tagNew');
+const tagNewInput = document.getElementById('tagNewInput');
 
 if (apiKey) {
   apiKeyInput.value = apiKey;
@@ -238,9 +295,67 @@ async function init() {
   total = 0;
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
+  newPostBtn.style.display = '';
+  newTagBtn.style.display = '';
   await Promise.all([loadTags(), loadPosts(true)]);
   connectSSE();
 }
+
+newPostBtn.addEventListener('click', () => {
+  const visible = composePanel.style.display !== 'none';
+  if (visible) {
+    closeCompose();
+  } else {
+    composePanel.style.display = '';
+    if (activeTag) document.getElementById('cpTags').value = activeTag;
+    document.getElementById('cpContent').focus();
+  }
+});
+
+document.getElementById('cpCancel').addEventListener('click', closeCompose);
+
+document.getElementById('cpPublish').addEventListener('click', async () => {
+  const content = document.getElementById('cpContent').value.trim();
+  if (!content) return;
+  const body = {
+    title: document.getElementById('cpTitle').value.trim() || null,
+    content,
+    format: document.getElementById('cpFormat').value,
+    tags: document.getElementById('cpTags').value.split(',').map(s => s.trim()).filter(Boolean),
+    source: document.getElementById('cpSource').value.trim() || null,
+  };
+  try {
+    await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
+    closeCompose();
+    await loadTags();
+  } catch (e) { alert(`Publish failed: ${e.message}`); }
+});
+
+function closeCompose() {
+  composePanel.style.display = 'none';
+  ['cpTitle', 'cpContent', 'cpTags', 'cpSource'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('cpFormat').value = 'markdown';
+}
+
+newTagBtn.addEventListener('click', () => {
+  const visible = tagNewWrap.style.display !== 'none';
+  tagNewWrap.style.display = visible ? 'none' : '';
+  if (!visible) { tagNewInput.value = ''; tagNewInput.focus(); }
+});
+
+tagNewInput.addEventListener('keydown', async e => {
+  if (e.key === 'Escape') { tagNewWrap.style.display = 'none'; return; }
+  if (e.key !== 'Enter') return;
+  const name = tagNewInput.value.trim().toLowerCase();
+  if (!name) return;
+  try {
+    await apiFetch(`/tags/${encodeURIComponent(name)}/config`, {
+      method: 'POST', body: JSON.stringify({ ttl_hours: 72 }),
+    });
+    tagNewWrap.style.display = 'none';
+    await loadTags();
+  } catch (e) { alert(`Failed: ${e.message}`); }
+});
 
 async function loadTags() {
   try {

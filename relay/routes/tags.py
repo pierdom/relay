@@ -26,6 +26,10 @@ async def list_tags(db: aiosqlite.Connection = Depends(get_db)) -> TagListRespon
         for t in row["tags"].split(","):
             if t:
                 counter[t] += 1
+    async with db.execute("SELECT tag FROM tag_config") as cur:
+        for row in await cur.fetchall():
+            if row["tag"] not in counter:
+                counter[row["tag"]] = 0
     return TagListResponse(tags=[TagCount(tag=t, count=c) for t, c in counter.most_common()])
 
 
