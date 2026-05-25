@@ -30,9 +30,11 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | POST | /posts | Publish a post |
 | GET | /posts | List posts (`tag`, `limit`, `offset`, `format` filters) |
 | GET | /posts/{id} | Get single post |
+| PATCH | /posts/{id} | Update post fields (title, content, format, tags, source) |
 | DELETE | /posts/{id} | Delete post |
-| GET | /tags | List tags with post counts |
+| GET | /tags | List tags with post counts (includes 0-count tags from tag_config) |
 | POST | /tags/{tag}/config | Set per-tag TTL override |
+| PATCH | /tags/{tag} | Rename a tag across all posts and tag_config |
 | GET | /events | SSE stream of new posts (`?tag=` filter) |
 
 ## SSE / real-time
@@ -76,12 +78,28 @@ relay/
 
 ```
 relay_mcp/
-└── server.py      # MCP server for Claude Desktop (publish_post, list_tags)
+└── server.py      # MCP server for Claude Desktop (publish_post, list_posts, get_post, delete_post, list_tags)
 ```
+
+```
+relay/static/
+└── index.html     # Browser UI served at /ui
+```
+
+## Browser UI
+
+`GET /ui` serves a single-page interface backed by the REST API and SSE.
+
+- **Posts**: create (compose panel), edit inline, delete with confirmation
+- **Tags**: filter feed by tag; create a new tag (registers it in `tag_config`); rename inline
+- **Live feed**: SSE connection with amber dot + "live/offline/error" label; new posts flash and prepend automatically
+- **Responsive**: sidebar collapses to a slide-in drawer on mobile (≤ 768 px) with hamburger toggle; post action buttons always visible on touch devices
 
 ## Tags
 
 Tags are stored with sentinel commas (`,news,ai,`) for unambiguous `LIKE '%,tag,%'` matching. Stripped transparently in responses.
+
+`GET /tags` returns tags derived from posts plus any tags registered in `tag_config` (shown with count 0 until posts carry them). `PATCH /tags/{tag}` uses SQL `REPLACE()` to rewrite the tag string across all matching posts atomically.
 
 ## TTL / cleanup
 
@@ -97,6 +115,9 @@ Tags are stored with sentinel commas (`,news,ai,`) for unambiguous `LIKE '%,tag,
 | Tool | Description |
 |------|-------------|
 | `publish_post` | Publish a post (content, title, tags, format, source) |
+| `list_posts` | List posts with optional tag filter |
+| `get_post` | Get a single post by ID |
+| `delete_post` | Delete a post by ID |
 | `list_tags` | List all tags with post counts |
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
