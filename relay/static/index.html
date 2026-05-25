@@ -4,202 +4,341 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Relay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --border: #2a2d3a;
-      --text: #e2e4ec;
-      --muted: #6b7280;
-      --accent: #6366f1;
-      --accent-dim: #3730a3;
-      --tag-bg: #1e2035;
-      --tag-active: #312e81;
-      --green: #22c55e;
-      --red: #ef4444;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
+      --bg:          #090a0d;
+      --surface:     #0f1116;
+      --border:      #1d2230;
+      --text:        #d8dde8;
+      --muted:       #4a5568;
+      --accent:      #f59e0b;
+      --accent-dim:  #d97706;
+      --accent-glow: rgba(245, 158, 11, 0.10);
+      --tag-bg:      #141208;
+      --tag-active:  #231a05;
+      --green:       #10b981;
+      --red:         #f87171;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
     }
 
-    body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    body {
+      background: var(--bg); color: var(--text);
+      height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+    }
 
-    /* Header */
+    /* ── Header ─────────────────────────────────────────── */
     header {
-      display: flex; align-items: center; gap: 12px;
-      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 14px;
+      padding: 0 20px; height: 48px;
+      border-bottom: 1px solid var(--border);
       background: var(--surface); flex-shrink: 0;
     }
-    header h1 { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: -0.3px; }
-    .key-wrap { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+    .brand-name {
+      font-size: 11px; font-weight: 600; color: var(--accent);
+      letter-spacing: 0.3em; text-transform: uppercase;
+    }
+    .brand-sep { color: var(--border); font-weight: 300; font-size: 18px; line-height: 1; }
+
+    .live-indicator { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+    .live-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s;
+    }
+    .live-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .live-dot.error     { background: var(--red); }
+    .live-label {
+      font-size: 10px; color: var(--muted); letter-spacing: 0.1em;
+      text-transform: uppercase; transition: color 0.3s;
+    }
+    .live-dot.connected ~ .live-label { color: var(--green); }
+    .live-dot.error     ~ .live-label { color: var(--red); }
+
+    .header-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+
+    .key-wrap { display: flex; align-items: center; gap: 6px; }
     .key-wrap input {
       background: var(--bg); border: 1px solid var(--border); color: var(--text);
-      padding: 5px 10px; border-radius: 6px; font-size: 13px; width: 240px;
-      font-family: monospace;
+      padding: 5px 10px; border-radius: 4px; font-size: 12px; width: 220px;
+      font-family: inherit; letter-spacing: 0.04em; transition: border-color 0.15s;
     }
-    .key-wrap input:focus { outline: none; border-color: var(--accent); }
-    .key-wrap button {
-      background: var(--accent); border: none; color: #fff;
-      padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
-    }
-    .key-wrap button:hover { background: var(--accent-dim); }
-    .live-dot {
-      width: 8px; height: 8px; border-radius: 50%; background: var(--muted);
-      flex-shrink: 0; transition: background 0.3s;
-    }
-    .live-dot.connected { background: var(--green); }
-    .live-dot.error { background: var(--red); }
+    .key-wrap input:focus  { outline: none; border-color: var(--accent); }
+    .key-wrap input::placeholder { color: var(--muted); }
 
-    /* Layout */
+    .btn-connect {
+      background: var(--accent); border: none; color: #000;
+      padding: 5px 12px; border-radius: 4px; cursor: pointer;
+      font-family: inherit; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      transition: background 0.15s;
+    }
+    .btn-connect:hover { background: var(--accent-dim); }
+
+    .connected-bar { display: flex; align-items: center; }
+    .disconnect-btn {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      font-family: inherit; font-size: 11px; letter-spacing: 0.04em;
+      padding: 3px 0; border-bottom: 1px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .disconnect-btn:hover { color: var(--text); border-color: var(--border); }
+
+    .btn-new-post {
+      background: var(--accent); border: none; color: #000;
+      padding: 5px 12px; border-radius: 4px; cursor: pointer;
+      font-family: inherit; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      transition: background 0.15s;
+    }
+    .btn-new-post:hover { background: var(--accent-dim); }
+
+    /* ── Layout ──────────────────────────────────────────── */
     .layout { display: flex; flex: 1; overflow: hidden; }
 
-    /* Sidebar */
+    /* ── Sidebar ─────────────────────────────────────────── */
     aside {
-      width: 200px; flex-shrink: 0; border-right: 1px solid var(--border);
+      width: 220px; flex-shrink: 0;
+      border-right: 1px solid var(--border);
       display: flex; flex-direction: column; overflow: hidden;
+      background: var(--bg);
     }
     .sidebar-header {
-      padding: 12px 14px; font-size: 11px; font-weight: 600; color: var(--muted);
-      text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 14px 16px 10px;
+      font-size: 9px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.18em;
       display: flex; align-items: center; justify-content: space-between;
     }
     .sidebar-add-btn {
-      background: none; border: none; color: var(--muted); cursor: pointer;
-      font-size: 16px; line-height: 1; padding: 0; flex-shrink: 0;
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; font-size: 14px; line-height: 1; padding: 1px 6px;
+      border-radius: 3px; font-family: inherit;
+      transition: border-color 0.15s, color 0.15s;
     }
-    .sidebar-add-btn:hover { color: var(--accent); }
-    .tag-new { padding: 4px 10px 8px; }
+    .sidebar-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .tag-new { padding: 0 12px 10px; }
     .tag-new-input {
-      background: var(--bg); border: 1px solid var(--accent); color: var(--text);
-      border-radius: 4px; font-size: 13px; padding: 3px 8px; width: 100%; outline: none;
-      font-family: inherit;
+      background: var(--surface); border: 1px solid var(--accent); color: var(--text);
+      border-radius: 3px; font-size: 12px; padding: 4px 8px; width: 100%;
+      outline: none; font-family: inherit;
     }
+
     .tag-list { overflow-y: auto; flex: 1; padding-bottom: 8px; }
+    .tag-list::-webkit-scrollbar { width: 3px; }
+    .tag-list::-webkit-scrollbar-track { background: transparent; }
+    .tag-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
     .tag-item {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 7px 14px; cursor: pointer; border-radius: 0; transition: background 0.15s;
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 16px; cursor: pointer;
       border-left: 2px solid transparent;
+      transition: background 0.12s;
     }
-    .tag-item:hover { background: var(--tag-bg); }
+    .tag-item:hover  { background: rgba(255,255,255,0.02); }
     .tag-item.active { background: var(--tag-active); border-left-color: var(--accent); }
-    .tag-name { font-size: 13px; }
-    .tag-count { font-size: 11px; color: var(--muted); }
-    .tag-rename {
-      background: none; border: none; cursor: pointer; padding: 0 2px;
-      font-size: 11px; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; line-height: 1;
+
+    .tag-name  { font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tag-count {
+      font-size: 9px; color: var(--muted);
+      background: var(--border); padding: 1px 5px; border-radius: 8px;
+      flex-shrink: 0; font-variant-numeric: tabular-nums;
+      transition: background 0.12s, color 0.12s;
     }
-    .tag-item:hover .tag-rename { opacity: 1; }
+    .tag-item.active .tag-count { background: var(--accent); color: #000; }
+
+    .tag-rename {
+      background: none; border: none; cursor: pointer;
+      padding: 0 1px; font-size: 10px; opacity: 0; flex-shrink: 0;
+      transition: opacity 0.12s; line-height: 1;
+    }
+    .tag-item:hover .tag-rename { opacity: 0.6; }
+    .tag-rename:hover { opacity: 1 !important; }
+
     .tag-rename-input {
       background: var(--bg); border: 1px solid var(--accent); color: var(--text);
-      border-radius: 4px; font-size: 13px; padding: 1px 5px; width: 100%; outline: none;
+      border-radius: 3px; font-size: 12px; padding: 1px 5px;
+      width: 100%; outline: none; font-family: inherit;
     }
 
-    /* Feed */
+    /* ── Feed ────────────────────────────────────────────── */
     main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    .feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-    .feed::-webkit-scrollbar { width: 5px; }
-    .feed::-webkit-scrollbar-track { background: transparent; }
-    .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-    /* Post card */
+    .compose-panel {
+      overflow: hidden; max-height: 0; opacity: 0;
+      transition: max-height 0.28s ease, opacity 0.2s ease, padding 0.28s ease;
+      padding: 0 20px;
+    }
+    .compose-panel.open { max-height: 660px; opacity: 1; padding: 16px 20px 0; }
+    .compose-panel .post { border-style: dashed; border-color: rgba(245,158,11,0.4); }
+
+    .feed {
+      flex: 1; overflow-y: auto;
+      padding: 16px 20px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .feed::-webkit-scrollbar { width: 4px; }
+    .feed::-webkit-scrollbar-track { background: transparent; }
+    .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── Post card ───────────────────────────────────────── */
     .post {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 10px; padding: 16px; transition: border-color 0.2s;
+      border-radius: 6px; padding: 16px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      animation: cardIn 0.3s ease both;
     }
-    .post:hover { border-color: #3a3d4a; }
-    .post.new { animation: flash 1s ease; }
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .post:hover { border-color: #2d3348; box-shadow: 0 4px 24px rgba(0,0,0,0.35); }
+    .post.new { animation: cardIn 0.3s ease, flash 1.4s ease; }
     @keyframes flash {
-      0% { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+      0%   { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 24px var(--accent-glow); }
       100% { border-color: var(--border); box-shadow: none; }
     }
-    .post-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-    .post-title { font-size: 14px; font-weight: 600; color: var(--text); }
-    .post-time { font-size: 11px; color: var(--muted); margin-left: auto; white-space: nowrap; }
-    .post-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+
+    .post-header { margin-bottom: 10px; }
+    .post-title  { font-size: 13px; font-weight: 600; color: var(--text); display: block; margin-bottom: 6px; }
+
+    .post-tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
     .tag-pill {
-      font-size: 11px; padding: 2px 8px; border-radius: 12px;
+      font-size: 10px; padding: 2px 7px; border-radius: 3px;
       background: var(--tag-bg); color: var(--accent); cursor: pointer;
-      border: 1px solid var(--border);
+      border: 1px solid rgba(245,158,11,0.2); letter-spacing: 0.02em;
+      transition: background 0.12s;
     }
     .tag-pill:hover { background: var(--tag-active); }
-    .post-source { font-size: 11px; color: var(--muted); }
-    .post-body { color: #c9ccd4; line-height: 1.65; font-size: 13.5px; }
-    .post-body.format-text { white-space: pre-wrap; font-family: monospace; font-size: 13px; }
-    .post-body.format-json { white-space: pre-wrap; font-family: monospace; font-size: 12px; background: var(--bg); padding: 10px; border-radius: 6px; }
-    .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 12px 0 6px; }
-    .post-body p { margin: 6px 0; }
-    .post-body ul, .post-body ol { padding-left: 20px; margin: 6px 0; }
-    .post-body li { margin: 3px 0; }
-    .post-body a { color: var(--accent); text-decoration: none; }
-    .post-body a:hover { text-decoration: underline; }
-    .post-body code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-family: monospace; font-size: 12px; }
-    .post-body pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
-    .post-body pre code { background: none; padding: 0; }
-    .post-body blockquote { border-left: 3px solid var(--accent-dim); padding-left: 12px; color: var(--muted); margin: 8px 0; }
-    .post-body strong { color: var(--text); }
-    .post-actions { margin-top: 10px; display: flex; gap: 6px; justify-content: flex-end; }
-    .btn-delete {
-      background: none; border: 1px solid var(--red); color: var(--red);
-      padding: 3px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;
+    .post-source { font-size: 10px; color: var(--muted); }
+
+    .post-body { color: #b8bfcc; line-height: 1.72; font-size: 13px; }
+    .post-body.format-text { white-space: pre-wrap; font-size: 12px; }
+    .post-body.format-json {
+      white-space: pre-wrap; font-size: 11px;
+      background: var(--bg); padding: 10px 12px;
+      border-radius: 4px; border: 1px solid var(--border);
     }
-    .btn-delete:hover { background: var(--red); color: #fff; }
+    .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 14px 0 6px; font-weight: 600; }
+    .post-body h1 { font-size: 14px; }
+    .post-body h2 { font-size: 13px; }
+    .post-body h3 { font-size: 12px; }
+    .post-body p         { margin: 6px 0; }
+    .post-body ul, .post-body ol { padding-left: 18px; margin: 6px 0; }
+    .post-body li        { margin: 3px 0; }
+    .post-body a         { color: var(--accent); text-decoration: none; }
+    .post-body a:hover   { text-decoration: underline; }
+    .post-body code      { background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 11px; border: 1px solid var(--border); }
+    .post-body pre       { background: var(--bg); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; border: 1px solid var(--border); }
+    .post-body pre code  { background: none; padding: 0; border: none; font-size: 11px; }
+    .post-body blockquote { border-left: 2px solid var(--accent); padding-left: 12px; color: var(--muted); margin: 8px 0; }
+    .post-body strong    { color: var(--text); font-weight: 600; }
+    .post-body em        { font-style: italic; color: #c4cad8; }
+
+    .post-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+    }
+    .post-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
+    .post-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.15s; }
+    .post:hover .post-actions { opacity: 1; }
+
+    .btn-delete {
+      background: none; border: 1px solid rgba(248,113,113,0.25); color: var(--red);
+      padding: 3px 9px; border-radius: 3px; cursor: pointer;
+      font-family: inherit; font-size: 11px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .btn-delete:hover { background: rgba(248,113,113,0.1); border-color: var(--red); }
+
     .btn-edit {
       background: none; border: 1px solid var(--border); color: var(--muted);
-      padding: 3px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;
+      padding: 3px 9px; border-radius: 3px; cursor: pointer;
+      font-family: inherit; font-size: 11px;
+      transition: border-color 0.15s, color 0.15s;
     }
     .btn-edit:hover { border-color: var(--accent); color: var(--accent); }
-    .edit-form { display: flex; flex-direction: column; gap: 8px; }
+
+    /* ── Edit / Compose form ─────────────────────────────── */
+    .edit-form { display: flex; flex-direction: column; gap: 10px; }
     .edit-form input, .edit-form textarea, .edit-form select {
       background: var(--bg); border: 1px solid var(--border); color: var(--text);
-      padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; width: 100%;
+      padding: 7px 10px; border-radius: 4px; font-size: 12px; font-family: inherit; width: 100%;
+      transition: border-color 0.15s;
     }
-    .edit-form textarea { resize: vertical; min-height: 120px; }
-    .edit-form input:focus, .edit-form textarea:focus, .edit-form select:focus { outline: none; border-color: var(--accent); }
-    .edit-form label { font-size: 11px; color: var(--muted); margin-bottom: 2px; display: block; }
-    .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+    .edit-form textarea       { resize: vertical; min-height: 120px; line-height: 1.65; }
+    .edit-form input:focus,
+    .edit-form textarea:focus,
+    .edit-form select:focus   { outline: none; border-color: var(--accent); }
+    .edit-form label {
+      font-size: 9px; color: var(--muted); margin-bottom: 3px;
+      display: block; text-transform: uppercase; letter-spacing: 0.12em;
+    }
+    .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
+
     .btn-save {
-      background: var(--accent); border: none; color: #fff;
-      padding: 4px 14px; border-radius: 5px; cursor: pointer; font-size: 12px;
+      background: var(--accent); border: none; color: #000;
+      padding: 5px 14px; border-radius: 3px; cursor: pointer;
+      font-family: inherit; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      transition: background 0.15s;
     }
     .btn-save:hover { background: var(--accent-dim); }
+
     .btn-cancel {
       background: none; border: 1px solid var(--border); color: var(--muted);
-      padding: 4px 14px; border-radius: 5px; cursor: pointer; font-size: 12px;
+      padding: 5px 14px; border-radius: 3px; cursor: pointer;
+      font-family: inherit; font-size: 11px;
+      transition: border-color 0.15s, color 0.15s;
     }
     .btn-cancel:hover { border-color: var(--text); color: var(--text); }
 
-    /* Load more / empty */
-    .load-more {
-      text-align: center; padding: 12px;
-    }
+    /* ── Load more / states ──────────────────────────────── */
+    .load-more { text-align: center; padding: 14px 20px; }
     .load-more button {
-      background: var(--surface); border: 1px solid var(--border); color: var(--text);
-      padding: 7px 20px; border-radius: 6px; cursor: pointer; font-size: 13px;
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      padding: 7px 20px; border-radius: 4px; cursor: pointer;
+      font-family: inherit; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+      transition: border-color 0.15s, color 0.15s;
     }
     .load-more button:hover { border-color: var(--accent); color: var(--accent); }
-    .empty { text-align: center; color: var(--muted); padding: 48px 16px; font-size: 14px; }
-    .auth-prompt { text-align: center; color: var(--muted); padding: 48px 16px; }
-    .auth-prompt p { margin-bottom: 8px; }
-    .btn-new-post {
-      background: var(--accent); border: none; color: #fff;
-      padding: 5px 13px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+
+    .empty {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: var(--muted); padding: 64px 16px; gap: 14px; flex: 1;
     }
-    .btn-new-post:hover { background: var(--accent-dim); }
-    .compose-panel { padding: 16px 16px 0; }
-    .compose-panel .post { border-color: var(--accent-dim); }
+    .empty svg { opacity: 0.25; }
+    .empty p   { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+    .auth-prompt {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: var(--muted); padding: 64px 16px; gap: 8px;
+    }
+    .auth-prompt p        { font-size: 12px; }
+    .auth-prompt p + p    { font-size: 11px; opacity: 0.6; margin-top: 4px; }
   </style>
 </head>
 <body>
 
 <header>
-  <h1>relay</h1>
-  <span class="live-dot" id="liveDot" title="SSE disconnected"></span>
-  <button class="btn-new-post" id="newPostBtn" style="display:none">✏️ New Post</button>
-  <div class="key-wrap">
-    <input type="password" id="apiKeyInput" placeholder="API key" autocomplete="off">
-    <button id="connectBtn">Connect</button>
+  <h1 class="brand-name">Relay</h1>
+  <span class="brand-sep">·</span>
+  <div class="live-indicator">
+    <span class="live-dot" id="liveDot"></span>
+    <span class="live-label" id="liveLabel">offline</span>
+  </div>
+  <div class="header-right">
+    <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
+    <div class="key-wrap">
+      <input type="password" id="apiKeyInput" placeholder="API key" autocomplete="off">
+      <button class="btn-connect" id="connectBtn">Connect</button>
+    </div>
+    <div class="connected-bar" id="connectedBar" style="display:none">
+      <button class="disconnect-btn" id="disconnectBtn">disconnect</button>
+    </div>
   </div>
 </header>
 
@@ -214,8 +353,9 @@
     </div>
     <div class="tag-list" id="tagList"></div>
   </aside>
+
   <main>
-    <div class="compose-panel" id="composePanel" style="display:none">
+    <div class="compose-panel" id="composePanel">
       <div class="post">
         <div class="edit-form">
           <div><label>Title</label><input type="text" id="cpTitle" placeholder="(optional)"></div>
@@ -228,8 +368,8 @@
               <option value="json">json</option>
             </select>
           </div>
-          <div><label>Content</label><textarea id="cpContent" placeholder="Content…"></textarea></div>
-          <div><label>Tags (comma-separated)</label><input type="text" id="cpTags"></div>
+          <div><label>Content</label><textarea id="cpContent" placeholder="Write something…"></textarea></div>
+          <div><label>Tags</label><input type="text" id="cpTags" placeholder="comma-separated"></div>
           <div><label>Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
           <div class="edit-actions">
             <button class="btn-cancel" id="cpCancel">Cancel</button>
@@ -238,7 +378,9 @@
         </div>
       </div>
     </div>
+
     <div class="feed" id="feed"></div>
+
     <div class="load-more" id="loadMore" style="display:none">
       <button id="loadMoreBtn">Load more</button>
     </div>
@@ -253,23 +395,23 @@ let offset = 0;
 let total = 0;
 let es = null;
 
-const feed = document.getElementById('feed');
-const tagList = document.getElementById('tagList');
+const feed         = document.getElementById('feed');
+const tagList      = document.getElementById('tagList');
 const loadMoreWrap = document.getElementById('loadMore');
-const loadMoreBtn = document.getElementById('loadMoreBtn');
-const liveDot = document.getElementById('liveDot');
-const apiKeyInput = document.getElementById('apiKeyInput');
-const connectBtn = document.getElementById('connectBtn');
-const newPostBtn = document.getElementById('newPostBtn');
+const loadMoreBtn  = document.getElementById('loadMoreBtn');
+const liveDot      = document.getElementById('liveDot');
+const liveLabel    = document.getElementById('liveLabel');
+const apiKeyInput  = document.getElementById('apiKeyInput');
+const connectBtn   = document.getElementById('connectBtn');
+const newPostBtn   = document.getElementById('newPostBtn');
 const composePanel = document.getElementById('composePanel');
-const newTagBtn = document.getElementById('newTagBtn');
-const tagNewWrap = document.getElementById('tagNew');
-const tagNewInput = document.getElementById('tagNewInput');
+const newTagBtn    = document.getElementById('newTagBtn');
+const tagNewWrap   = document.getElementById('tagNew');
+const tagNewInput  = document.getElementById('tagNewInput');
+const connectedBar = document.getElementById('connectedBar');
+const disconnectBtn = document.getElementById('disconnectBtn');
 
-if (apiKey) {
-  apiKeyInput.value = apiKey;
-  init();
-}
+if (apiKey) { apiKeyInput.value = apiKey; init(); }
 
 connectBtn.addEventListener('click', () => {
   const val = apiKeyInput.value.trim();
@@ -281,6 +423,22 @@ connectBtn.addEventListener('click', () => {
 
 apiKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') connectBtn.click(); });
 
+disconnectBtn.addEventListener('click', () => {
+  apiKey = '';
+  localStorage.removeItem('relay_api_key');
+  if (es) { es.close(); es = null; }
+  closeCompose();
+  feed.innerHTML = '';
+  tagList.innerHTML = '';
+  loadMoreWrap.style.display = 'none';
+  newPostBtn.style.display = 'none';
+  newTagBtn.style.display = 'none';
+  document.querySelector('.key-wrap').style.display = '';
+  connectedBar.style.display = 'none';
+  apiKeyInput.value = '';
+  setDot('');
+});
+
 async function apiFetch(path, opts = {}) {
   const res = await fetch(path, {
     ...opts,
@@ -291,22 +449,23 @@ async function apiFetch(path, opts = {}) {
 }
 
 async function init() {
-  offset = 0;
-  total = 0;
+  offset = 0; total = 0;
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
+  document.querySelector('.key-wrap').style.display = 'none';
+  connectedBar.style.display = '';
   newPostBtn.style.display = '';
   newTagBtn.style.display = '';
   await Promise.all([loadTags(), loadPosts(true)]);
   connectSSE();
 }
 
+/* ── Compose ──────────────────────────────────────────────── */
 newPostBtn.addEventListener('click', () => {
-  const visible = composePanel.style.display !== 'none';
-  if (visible) {
+  if (composePanel.classList.contains('open')) {
     closeCompose();
   } else {
-    composePanel.style.display = '';
+    composePanel.classList.add('open');
     if (activeTag) document.getElementById('cpTags').value = activeTag;
     document.getElementById('cpContent').focus();
   }
@@ -318,10 +477,10 @@ document.getElementById('cpPublish').addEventListener('click', async () => {
   const content = document.getElementById('cpContent').value.trim();
   if (!content) return;
   const body = {
-    title: document.getElementById('cpTitle').value.trim() || null,
+    title:  document.getElementById('cpTitle').value.trim() || null,
     content,
     format: document.getElementById('cpFormat').value,
-    tags: document.getElementById('cpTags').value.split(',').map(s => s.trim()).filter(Boolean),
+    tags:   document.getElementById('cpTags').value.split(',').map(s => s.trim()).filter(Boolean),
     source: document.getElementById('cpSource').value.trim() || null,
   };
   try {
@@ -332,11 +491,12 @@ document.getElementById('cpPublish').addEventListener('click', async () => {
 });
 
 function closeCompose() {
-  composePanel.style.display = 'none';
+  composePanel.classList.remove('open');
   ['cpTitle', 'cpContent', 'cpTags', 'cpSource'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('cpFormat').value = 'markdown';
 }
 
+/* ── New tag ──────────────────────────────────────────────── */
 newTagBtn.addEventListener('click', () => {
   const visible = tagNewWrap.style.display !== 'none';
   tagNewWrap.style.display = visible ? 'none' : '';
@@ -357,24 +517,21 @@ tagNewInput.addEventListener('keydown', async e => {
   } catch (e) { alert(`Failed: ${e.message}`); }
 });
 
+/* ── Tags ─────────────────────────────────────────────────── */
 async function loadTags() {
-  try {
-    const data = await apiFetch('/tags');
-    renderTags(data.tags);
-  } catch {}
+  try { const data = await apiFetch('/tags'); renderTags(data.tags); } catch {}
 }
 
 function renderTags(tags) {
   tagList.innerHTML = '';
-  const all = makeTagItem('All', null, tags.reduce((s, t) => s + t.count, 0));
-  tagList.appendChild(all);
+  tagList.appendChild(makeTagItem('all', null, tags.reduce((s, t) => s + t.count, 0)));
   tags.forEach(t => tagList.appendChild(makeTagItem(t.tag, t.tag, t.count)));
 }
 
 function makeTagItem(label, value, count) {
   const el = document.createElement('div');
   el.className = 'tag-item' + (activeTag === value ? ' active' : '');
-  const renameBtn = value !== null ? `<button class="tag-rename" title="Rename">✏️</button>` : '';
+  const renameBtn = value !== null ? `<button class="tag-rename" title="Rename">✏︎</button>` : '';
   el.innerHTML = `<span class="tag-name">${label}</span>${renameBtn}<span class="tag-count">${count}</span>`;
   el.addEventListener('click', () => selectTag(value));
   if (value !== null) {
@@ -392,10 +549,11 @@ function startTagRename(el, oldName) {
   input.className = 'tag-rename-input';
   input.value = oldName;
   nameSpan.replaceWith(input);
-  input.focus();
-  input.select();
+  input.focus(); input.select();
 
+  let committed = false;
   async function commit() {
+    if (committed) return; committed = true;
     const newName = input.value.trim().toLowerCase();
     if (!newName || newName === oldName) { cancelRename(); return; }
     try {
@@ -408,9 +566,9 @@ function startTagRename(el, oldName) {
   }
 
   function cancelRename() {
+    committed = true;
     const span = document.createElement('span');
-    span.className = 'tag-name';
-    span.textContent = oldName;
+    span.className = 'tag-name'; span.textContent = oldName;
     input.replaceWith(span);
   }
 
@@ -422,21 +580,19 @@ function startTagRename(el, oldName) {
 }
 
 async function selectTag(tag) {
-  activeTag = tag;
-  offset = 0;
-  total = 0;
+  activeTag = tag; offset = 0; total = 0;
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
-  document.querySelectorAll('.tag-item').forEach(el => el.classList.remove('active'));
-  const items = tagList.querySelectorAll('.tag-item');
-  items.forEach(el => {
+  tagList.querySelectorAll('.tag-item').forEach(el => {
+    el.classList.remove('active');
     const name = el.querySelector('.tag-name').textContent;
-    if ((tag === null && name === 'All') || name === tag) el.classList.add('active');
+    if ((tag === null && name === 'all') || name === tag) el.classList.add('active');
   });
   await loadPosts(true);
   connectSSE();
 }
 
+/* ── Posts ────────────────────────────────────────────────── */
 async function loadPosts(replace = false) {
   if (!apiKey) return;
   try {
@@ -449,11 +605,20 @@ async function loadPosts(replace = false) {
     if (replace) feed.innerHTML = '';
 
     if (data.items.length === 0 && offset === 0) {
-      feed.innerHTML = '<div class="empty">No posts yet.</div>';
+      feed.innerHTML = `
+        <div class="empty">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <p>No posts yet</p>
+        </div>`;
     } else {
-      data.items.forEach(p => feed.appendChild(renderPost(p)));
+      data.items.forEach((p, i) => {
+        const el = renderPost(p);
+        if (replace) el.style.animationDelay = `${i * 35}ms`;
+        feed.appendChild(el);
+      });
     }
-
     loadMoreWrap.style.display = offset < total ? 'block' : 'none';
   } catch (e) {
     if (replace) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${e.message}</p></div>`;
@@ -462,17 +627,17 @@ async function loadPosts(replace = false) {
 
 loadMoreBtn.addEventListener('click', () => loadPosts(false));
 
-function renderPost(post, prepend = false) {
+function renderPost(post) {
   const el = document.createElement('div');
   el.className = 'post';
   el.dataset.id = post.id;
 
-  const time = relativeTime(post.created_at);
-  const titleHtml = post.title ? `<span class="post-title">${escHtml(post.title)}</span>` : '';
-  const tagsHtml = post.tags.length
-    ? post.tags.map(t => `<span class="tag-pill" data-tag="${t}">${escHtml(t)}</span>`).join('')
-    : '';
-  const sourceHtml = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
+  const time      = relativeTime(post.created_at);
+  const titleHtml = post.title ? `<div class="post-title">${escHtml(post.title)}</div>` : '';
+  const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${t}">${escHtml(t)}</span>`).join('');
+  const srcHtml   = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
+  const metaRow   = (tagsHtml || srcHtml) ? `<div class="post-tags">${tagsHtml}${srcHtml}</div>` : '';
+  const headerHtml = (titleHtml || metaRow) ? `<div class="post-header">${titleHtml}${metaRow}</div>` : '';
 
   let bodyHtml;
   if (post.format === 'markdown') {
@@ -488,94 +653,80 @@ function renderPost(post, prepend = false) {
   }
 
   el.innerHTML = `
-    <div class="post-meta">
-      ${titleHtml}
-      <span class="post-time" title="${post.created_at}">${time}</span>
-    </div>
-    ${post.tags.length || post.source ? `<div class="post-meta" style="margin-bottom:10px">${tagsHtml}${sourceHtml}</div>` : ''}
+    ${headerHtml}
     ${bodyHtml}
-    <div class="post-actions">
-      <button class="btn-edit" data-id="${post.id}">✏️ Edit</button>
-      <button class="btn-delete" data-id="${post.id}">🗑️ Delete</button>
-    </div>
-  `;
+    <div class="post-footer">
+      <span class="post-time" title="${post.created_at}">${time}</span>
+      <div class="post-actions">
+        <button class="btn-edit">✏️ Edit</button>
+        <button class="btn-delete">🗑️ Delete</button>
+      </div>
+    </div>`;
 
-  el.querySelectorAll('.tag-pill').forEach(pill => {
-    pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); });
-  });
-
+  el.querySelectorAll('.tag-pill').forEach(pill =>
+    pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
+  );
   el.querySelector('.btn-delete').addEventListener('click', async () => {
     if (!confirm('Delete this post?')) return;
     try {
       await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
-      el.remove();
-      total--;
+      el.remove(); total--;
       loadMoreWrap.style.display = offset < total ? 'block' : 'none';
       await loadTags();
     } catch {}
   });
-
   el.querySelector('.btn-edit').addEventListener('click', () => enterEditMode(el, post));
-
   return el;
 }
 
 function enterEditMode(el, post) {
   const savedHtml = el.innerHTML;
-
   el.innerHTML = `
     <div class="edit-form">
       <div><label>Title</label><input class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
       <div><label>Format</label>
         <select class="ef-format">
-          <option value="markdown"${post.format === 'markdown' ? ' selected' : ''}>markdown</option>
-          <option value="text"${post.format === 'text' ? ' selected' : ''}>text</option>
-          <option value="html"${post.format === 'html' ? ' selected' : ''}>html</option>
-          <option value="json"${post.format === 'json' ? ' selected' : ''}>json</option>
+          <option value="markdown"${post.format==='markdown'?' selected':''}>markdown</option>
+          <option value="text"${post.format==='text'?' selected':''}>text</option>
+          <option value="html"${post.format==='html'?' selected':''}>html</option>
+          <option value="json"${post.format==='json'?' selected':''}>json</option>
         </select>
       </div>
       <div><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea></div>
-      <div><label>Tags (comma-separated)</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
+      <div><label>Tags</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
       <div><label>Source</label><input class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
       <div class="edit-actions">
         <button class="btn-cancel">Cancel</button>
         <button class="btn-save">Save</button>
       </div>
-    </div>
-  `;
+    </div>`;
 
   el.querySelector('.btn-cancel').addEventListener('click', () => { el.innerHTML = savedHtml; rewirePost(el, post); });
-
   el.querySelector('.btn-save').addEventListener('click', async () => {
-    const tagsRaw = el.querySelector('.ef-tags').value.split(',').map(s => s.trim()).filter(Boolean);
     const body = {
-      title: el.querySelector('.ef-title').value.trim() || null,
+      title:   el.querySelector('.ef-title').value.trim() || null,
       content: el.querySelector('.ef-content').value,
-      format: el.querySelector('.ef-format').value,
-      tags: tagsRaw,
-      source: el.querySelector('.ef-source').value.trim() || null,
+      format:  el.querySelector('.ef-format').value,
+      tags:    el.querySelector('.ef-tags').value.split(',').map(s => s.trim()).filter(Boolean),
+      source:  el.querySelector('.ef-source').value.trim() || null,
     };
     try {
       const updated = await apiFetch(`/posts/${post.id}`, { method: 'PATCH', body: JSON.stringify(body) });
-      const newEl = renderPost(updated);
-      el.replaceWith(newEl);
+      el.replaceWith(renderPost(updated));
       await loadTags();
-    } catch (e) {
-      alert(`Save failed: ${e.message}`);
-    }
+    } catch (e) { alert(`Save failed: ${e.message}`); }
   });
 }
 
 function rewirePost(el, post) {
-  el.querySelectorAll('.tag-pill').forEach(pill => {
-    pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); });
-  });
+  el.querySelectorAll('.tag-pill').forEach(pill =>
+    pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
+  );
   el.querySelector('.btn-delete').addEventListener('click', async () => {
     if (!confirm('Delete this post?')) return;
     try {
       await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
-      el.remove();
-      total--;
+      el.remove(); total--;
       loadMoreWrap.style.display = offset < total ? 'block' : 'none';
       await loadTags();
     } catch {}
@@ -583,19 +734,17 @@ function rewirePost(el, post) {
   el.querySelector('.btn-edit').addEventListener('click', () => enterEditMode(el, post));
 }
 
+/* ── SSE ──────────────────────────────────────────────────── */
 function connectSSE() {
   if (es) { es.close(); es = null; }
   if (!apiKey) return;
-
-  const params = new URLSearchParams();
-  params.set('key', apiKey);
+  const params = new URLSearchParams({ key: apiKey });
   if (activeTag) params.set('tag', activeTag);
   es = new EventSource(`/events?${params}`);
 
   es.addEventListener('post', e => {
     const post = JSON.parse(e.data);
-    const existing = feed.querySelector(`[data-id="${post.id}"]`);
-    if (existing) return;
+    if (feed.querySelector(`[data-id="${post.id}"]`)) return;
     const empty = feed.querySelector('.empty');
     if (empty) empty.remove();
     const el = renderPost(post);
@@ -605,26 +754,28 @@ function connectSSE() {
     loadTags();
   });
 
-  es.onopen = () => setDot('connected');
+  es.onopen  = () => setDot('connected');
   es.onerror = () => setDot('error');
 }
 
 function setDot(state) {
-  liveDot.className = 'live-dot ' + state;
-  liveDot.title = state === 'connected' ? 'Live' : state === 'error' ? 'SSE error' : 'Disconnected';
+  liveDot.className = 'live-dot' + (state ? ' ' + state : '');
+  liveLabel.textContent = state === 'connected' ? 'live' : state === 'error' ? 'error' : 'offline';
 }
 
+/* ── Helpers ──────────────────────────────────────────────── */
 function relativeTime(iso) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const s = Math.floor(diff / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60)    return 'just now';
+  if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
 }
 
 function escHtml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 </script>
 </body>
