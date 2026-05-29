@@ -1,0 +1,25 @@
+# tuidash colour palette — pastel (soft lavender and muted rainbow)
+# ────────────────────────────────────────────────────────────────
+# Values are either hex colours (#rrggbb) or Rich colour names
+# (e.g. bright_green, cyan, red, bold red, …).
+#
+# Select this palette with:  TUIDASH_PALETTE=pastel
+
+# ── Core palette ─────────────────────────────────────────────────────────────
+primary = "#c9a0dc"   # soft lavender        — border titles, clock, nav arrows, accents
+border  = "#6b4f8a"   # muted violet         — widget / button borders
+bg      = "#13101c"   # very dark violet     — header & footer background
+
+# ── Progress bar gradient (left → right as bar fills) ────────────────────────
+bar_low  = "#8ecf9e"  # soft mint green   — 0 – 60 % of bar width
+bar_mid  = "#f7c97e"  # soft golden amber — 60 – 80 % of bar width
+bar_high = "#f09090"  # soft rose red     — 80 – 100 % of bar width
+bar_bg   = "#2a2040"  # dim violet        — unfilled bar background
+
+# ── Performance heatmap (Ghostfolio stat cells) ───────────────────────────────
+perf_great    = "#8ecf9e"  # soft mint green    — > +10 %
+perf_good     = "#a0c8a0"  # soft sage green    —   0 to +10 %
+perf_flat     = "#a0b8d8"  # soft periwinkle    —  −5 to   0 %
+perf_bad      = "#f0d090"  # soft buttercup     — −10 to  −5 %
+perf_poor     = "#f0a880"  # soft peach apricot — −20 to −10 %
+perf_terrible = "#f09090"  # soft rose          — < −20 %

@@ -1,0 +1,22 @@
+# tuidash colour palette — Solarized Dark (Ethan Schoonover)
+# ────────────────────────────────────────────────────────────
+# Select with:  TUIDASH_PALETTE=solarized
+
+# ── Core palette ─────────────────────────────────────────────────────────────
+primary = "#2aa198"   # solarized cyan   — border titles, clock, nav arrows, accents
+border  = "#073642"   # base02           — widget / button borders
+bg      = "#002b36"   # base03           — header & footer background
+
+# ── Progress bar gradient (left → right as bar fills) ────────────────────────
+bar_low  = "#859900"  # green  — 0 – 60 % of bar width
+bar_mid  = "#b58900"  # yellow — 60 – 80 % of bar width
+bar_high = "#dc322f"  # red    — 80 – 100 % of bar width
+bar_bg   = "#0a3a45"  # base01 dim — unfilled bar background
+
+# ── Performance heatmap ───────────────────────────────────────────────────────
+perf_great    = "#859900"  # green   — > +10 %
+perf_good     = "#2aa198"  # cyan    —   0 to +10 %
+perf_flat     = "#268bd2"  # blue    —  −5 to   0 %
+perf_bad      = "#b58900"  # yellow  — −10 to  −5 %
+perf_poor     = "#cb4b16"  # orange  — −20 to −10 %
+perf_terrible = "#dc322f"  # red     — < −20 %

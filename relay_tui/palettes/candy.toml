@@ -1,0 +1,25 @@
+# tuidash colour palette — candy (bold neon sweets)
+# ───────────────────────────────────────────────────
+# Values are either hex colours (#rrggbb) or Rich colour names
+# (e.g. bright_green, cyan, red, bold red, …).
+#
+# Select this palette with:  TUIDASH_PALETTE=candy
+
+# ── Core palette ─────────────────────────────────────────────────────────────
+primary = "#ff4dd2"   # hot pink             — border titles, clock, nav arrows, accents
+border  = "#7a1a6e"   # deep magenta         — widget / button borders
+bg      = "#150010"   # near-black purple    — header & footer background
+
+# ── Progress bar gradient (left → right as bar fills) ────────────────────────
+bar_low  = "#4dff91"  # electric lime green — 0 – 60 % of bar width
+bar_mid  = "#ffdd00"  # bright lemon yellow — 60 – 80 % of bar width
+bar_high = "#ff4dd2"  # hot pink            — 80 – 100 % of bar width
+bar_bg   = "#2a0a28"  # dim purple          — unfilled bar background
+
+# ── Performance heatmap (Ghostfolio stat cells) ───────────────────────────────
+perf_great    = "#4dff91"  # electric lime   — > +10 %
+perf_good     = "#00e5cc"  # candy teal      —   0 to +10 %
+perf_flat     = "#a78bfa"  # bubblegum lilac —  −5 to   0 %
+perf_bad      = "#ffdd00"  # lemon yellow    — −10 to  −5 %
+perf_poor     = "#ff7b2e"  # tangerine       — −20 to −10 %
+perf_terrible = "#ff2255"  # cherry red      — < −20 %

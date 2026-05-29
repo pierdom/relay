@@ -1,0 +1,22 @@
+# tuidash colour palette — Nord (Arctic Ice Studio)
+# ────────────────────────────────────────────────────────────
+# Select with:  TUIDASH_PALETTE=nord
+
+# ── Core palette ─────────────────────────────────────────────────────────────
+primary = "#88c0d0"   # nord8 (frost)   — border titles, clock, nav arrows, accents
+border  = "#434c5e"   # nord2           — widget / button borders
+bg      = "#2e3440"   # nord0           — header & footer background
+
+# ── Progress bar gradient (left → right as bar fills) ────────────────────────
+bar_low  = "#a3be8c"  # nord14 green  — 0 – 60 % of bar width
+bar_mid  = "#ebcb8b"  # nord13 yellow — 60 – 80 % of bar width
+bar_high = "#bf616a"  # nord11 red    — 80 – 100 % of bar width
+bar_bg   = "#3b4252"  # nord1         — unfilled bar background
+
+# ── Performance heatmap ───────────────────────────────────────────────────────
+perf_great    = "#a3be8c"  # nord14 green   — > +10 %
+perf_good     = "#88c0d0"  # nord8 frost    —   0 to +10 %
+perf_flat     = "#81a1c1"  # nord9 frost    —  −5 to   0 %
+perf_bad      = "#ebcb8b"  # nord13 yellow  — −10 to  −5 %
+perf_poor     = "#d08770"  # nord12 orange  — −20 to −10 %
+perf_terrible = "#bf616a"  # nord11 red     — < −20 %
