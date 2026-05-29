@@ -712,7 +712,12 @@ function renderPost(post) {
   el.className = 'post';
   el.dataset.id = post.id;
 
-  const time      = relativeTime(post.created_at);
+  const timeLabel  = post.updated_at
+    ? `${relativeTime(post.created_at)} · edited ${relativeTime(post.updated_at)}`
+    : relativeTime(post.created_at);
+  const timeTitle  = post.updated_at
+    ? `created ${post.created_at}\nedited ${post.updated_at}`
+    : post.created_at;
   const titleHtml = post.title ? `<div class="post-title">${escHtml(post.title)}</div>` : '';
   const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${t}">${escHtml(t)}</span>`).join('');
   const srcHtml   = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
@@ -736,7 +741,7 @@ function renderPost(post) {
     ${headerHtml}
     ${bodyHtml}
     <div class="post-footer">
-      <span class="post-time" title="${post.created_at}">${time}</span>
+      <span class="post-time" title="${timeTitle}">${timeLabel}</span>
       <div class="post-actions">
         <button class="btn-edit">✏️ Edit</button>
         <button class="btn-delete">🗑️ Delete</button>
