@@ -121,6 +121,7 @@ async def update_post(
 
     if updates:
         set_clause = ", ".join(f"{k} = ?" for k in updates)
+        set_clause += ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
         await db.execute(
             f"UPDATE posts SET {set_clause} WHERE id = ?",
             list(updates.values()) + [post_id],

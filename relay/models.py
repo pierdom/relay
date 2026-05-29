@@ -28,6 +28,7 @@ class PostResponse(BaseModel):
     tags: list[str]
     source: str | None
     created_at: str
+    updated_at: str | None = None
 
     @classmethod
     def from_row(cls, row) -> PostResponse:
@@ -39,6 +40,7 @@ class PostResponse(BaseModel):
             tags=[t for t in row["tags"].split(",") if t],
             source=row["source"],
             created_at=row["created_at"],
+            updated_at=row["updated_at"] if "updated_at" in row.keys() else None,
         )
 
 

@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS posts (
                    CHECK (format IN ('markdown', 'text', 'html', 'json')),
     tags       TEXT NOT NULL DEFAULT '',
     source     TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts (created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_tags ON posts (tags);
@@ -34,6 +35,12 @@ async def init_db() -> None:
         await db.executescript(_SCHEMA)
         await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA busy_timeout=5000;")
+        # Migration: add updated_at to existing databases
+        async with db.execute("PRAGMA table_info(posts)") as cur:
+            cols = {row[1] async for row in cur}
+        if "updated_at" not in cols:
+            await db.execute("ALTER TABLE posts ADD COLUMN updated_at TEXT")
+            await db.execute("UPDATE posts SET updated_at = created_at")
         await db.commit()
 
 

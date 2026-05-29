@@ -78,7 +78,7 @@ relay/
 
 ```
 relay_mcp/
-└── server.py      # MCP server for Claude Desktop (publish_post, list_posts, get_post, delete_post, list_tags)
+└── server.py      # MCP server for Claude Desktop (publish_post, update_post, list_posts, get_post, delete_post, list_tags)
 ```
 
 ```
@@ -110,11 +110,12 @@ Tags are stored with sentinel commas (`,news,ai,`) for unambiguous `LIKE '%,tag,
 
 ## MCP server (Claude Desktop)
 
-`relay_mcp/server.py` exposes two tools so Claude Desktop can interact with the feed directly. The MCP server runs locally inside Claude Desktop and makes HTTPS calls to wherever the relay is hosted.
+`relay_mcp/server.py` exposes tools so Claude Desktop can interact with the feed directly. The MCP server runs locally inside Claude Desktop and makes HTTPS calls to wherever the relay is hosted.
 
 | Tool | Description |
 |------|-------------|
 | `publish_post` | Publish a post (content, title, tags, format, source) |
+| `update_post` | Partially update an existing post by ID (only provided fields change) |
 | `list_posts` | List posts with optional tag filter |
 | `get_post` | Get a single post by ID |
 | `delete_post` | Delete a post by ID |
@@ -138,6 +139,43 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```
 
 Replace `/path/to/relay` with the absolute path to this repo on your Mac.
+
+## Terminal UI (TUI)
+
+`relay_tui/` is a [Textual](https://github.com/Textualize/textual)-based terminal interface.
+
+```bash
+uv run relay-tui
+```
+
+Set `RELAY_PALETTE=<name>` to pick a colour theme (same palettes as tuidash). Available: `default` (amber), `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`.
+
+**Layout:** two-panel split — TOPICS sidebar on the left, FEED on the right.
+
+| Key | Action |
+|-----|--------|
+| `n` | Compose new post |
+| `e` | Edit selected post |
+| `d` | Delete selected post (with confirmation) |
+| `r` | Refresh |
+| `Enter` | View full post |
+| `Tab` | Switch between TOPICS / FEED panels |
+| `q` | Quit |
+
+SSE live feed runs in a background thread; the header shows `● live` / `○ offline`. New posts arriving via SSE prepend automatically. On reconnect the `Last-Event-ID` replay catches up missed posts.
+
+```
+relay_tui/
+├── app.py          # RelayTuiApp + main()
+├── theme.py        # RELAY_PALETTE loader + build_textual_theme()
+├── api.py          # Sync requests-based HTTP client
+├── sse.py          # SSE background thread with reconnect/backoff
+├── palettes/       # 10 TOML palette files (default, dracula, nord, …)
+└── widgets/
+    ├── tag_panel.py    # TOPICS sidebar
+    ├── post_panel.py   # FEED list
+    └── modals.py       # Compose / Edit / Confirm / PostDetail modals
+```
 
 ## Package manager
 

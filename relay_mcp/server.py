@@ -77,6 +77,34 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="update_post",
+            description=(
+                "Update an existing post in the relay feed. "
+                "Only fields that are explicitly provided are changed; omitted fields are left untouched. "
+                "Providing tags replaces the tag list wholesale; an empty array clears all tags."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "integer", "description": "ID of the post to update"},
+                    "title": {"type": "string", "description": "New title"},
+                    "content": {"type": "string", "description": "New post body"},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Replacement tag list (empty array clears all tags)",
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["markdown", "text", "html", "json"],
+                        "description": "Content format",
+                    },
+                    "source": {"type": "string", "description": "Source URL or label"},
+                },
+            },
+        ),
     ]
 
 
@@ -153,6 +181,27 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 return [types.TextContent(type="text", text=f"Post #{post_id} not found.")]
             response.raise_for_status()
         return [types.TextContent(type="text", text=f"Deleted post #{post_id}.")]
+
+    if name == "update_post":
+        post_id = arguments["id"]
+        payload = {k: v for k, v in arguments.items() if k != "id"}
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                f"{RELAY_BASE_URL}/posts/{post_id}",
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 404:
+                return [types.TextContent(type="text", text=f"Post #{post_id} not found.")]
+            response.raise_for_status()
+            p = response.json()
+        header = f"#{p['id']}"
+        if p.get("title"):
+            header += f" — {p['title']}"
+        if p.get("tags"):
+            header += f" [{', '.join(p['tags'])}]"
+        return [types.TextContent(type="text", text=f"Updated post {header}\n\n{p['content']}")]
 
     if name != "publish_post":
         raise ValueError(f"Unknown tool: {name}")
