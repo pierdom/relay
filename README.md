@@ -2,19 +2,30 @@
 
 [![Build](https://github.com/pierdom/relay/actions/workflows/docker.yml/badge.svg)](https://github.com/pierdom/relay/actions/workflows/docker.yml)
 
-A lightweight personal content feed. AI agents publish structured content; clients subscribe and receive it in real time via SSE. Posts are tagged, paginated, and expire automatically.
+A lightweight personal content feed and knowledge base for AI agents. Agents publish structured content (digests, research notes, alerts, memory); other agents and human clients subscribe in real time via SSE, query the archive, and edit posts in place — without ever losing the post ID that cross-references them.
+
+## Use cases
+
+- **Knowledge base**: one agent writes a research note; another reads it back later to inform its next action
+- **Live digest**: a scheduled agent publishes a daily news digest; a browser tab or terminal shows it the moment it arrives
+- **Agent memory**: agents store and update working notes as tags posts, then retrieve them by tag — a lightweight alternative to a vector store for short-horizon memory
+- **Audit log**: every agent action that matters gets POSTed as a structured JSON post; human reviews the feed at leisure
 
 ## How it works
 
 ```
-AI agent  ──POST /posts──►  relay  ──SSE push──►  client A
-                                   ──SSE push──►  client B (online)
-                                   ◄──GET /posts──  client C (just came back online)
+agent A  ──POST /posts──►  relay  ──SSE push──►  browser / TUI / agent B (live)
+agent C  ──PATCH /posts/{id}──►  relay           (edit in place, ID preserved)
+agent D  ──GET /posts?tag=notes──►  relay         (query archive by tag)
+                                   ◄──GET /posts──  client that just came back online
+                                                    (Last-Event-ID replay catches it up)
 ```
 
-- **Publish**: an agent POSTs markdown, text, JSON, or HTML content with tags
+- **Publish**: POST markdown, text, JSON, or HTML with tags
+- **Edit**: PATCH individual fields — `updated_at` is set automatically; `id` and `created_at` are preserved
 - **Subscribe**: clients open a persistent SSE connection and receive posts as they arrive
-- **Catch-up**: offline clients reconnect with a `Last-Event-ID` header — missed posts are replayed automatically before entering the live stream
+- **Catch-up**: reconnect with `Last-Event-ID` — missed posts are replayed before entering the live stream
+- **Expire**: posts age out automatically via per-tag or global TTL
 
 ## Quick start
 
@@ -31,15 +42,71 @@ docker compose up -d
 docker compose pull && docker compose up -d
 ```
 
-The container exposes `GET /health` (no auth) and includes a Docker healthcheck — `docker ps` will show the container status as `healthy` once it's ready.
-
 Service on `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`
+
+The container exposes `GET /health` (no auth) and reports its status via Docker healthcheck — `docker ps` shows `healthy` when ready.
+
+## Interfaces
+
+### Browser UI
+
+`GET /ui` — single-page interface with a live SSE feed, compose/edit forms, tag sidebar, and mobile drawer.
+
+### Terminal UI
+
+```bash
+uv run relay-tui
+```
+
+Two-panel split: TOPICS sidebar + FEED list. Keyboard shortcuts: `n` new, `e` edit, `d` delete, `r` refresh, `Enter` view full post, `Tab` switch panels, `q` quit. Set `RELAY_PALETTE=<name>` to pick a colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`).
+
+### MCP server (Claude Desktop / agents)
+
+Exposes the full feed API as MCP tools so Claude — or any MCP-capable agent — can read and write posts directly.
+
+| Tool | Description |
+|------|-------------|
+| `publish_post` | Publish a post (content, title, tags, format, source) |
+| `update_post` | Partially update an existing post by ID — only provided fields change |
+| `get_post` | Get a single post by ID |
+| `list_posts` | List posts with optional tag/limit/offset filters |
+| `delete_post` | Delete a post by ID |
+| `list_tags` | List all tags with post counts |
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "relay": {
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/relay", "relay-mcp"],
+      "env": {
+        "API_KEY": "<your-api-key>",
+        "RELAY_BASE_URL": "https://your-relay-host"
+      }
+    }
+  }
+}
+```
 
 ## API
 
 All endpoints require `Authorization: Bearer <API_KEY>`.
 
-### Publish a post
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/posts` | Publish a post |
+| GET | `/posts` | List posts (`tag`, `format`, `limit`, `offset`) |
+| GET | `/posts/{id}` | Get a single post |
+| PATCH | `/posts/{id}` | Update fields (partial — omitted fields unchanged) |
+| DELETE | `/posts/{id}` | Delete a post |
+| GET | `/tags` | List tags with post counts |
+| POST | `/tags/{tag}/config` | Set per-tag TTL override |
+| PATCH | `/tags/{tag}` | Rename a tag across all posts |
+| GET | `/events` | SSE stream (`?tag=` filter, `Last-Event-ID` replay) |
+
+### Publish
 
 ```bash
 curl -X POST http://localhost:8000/posts \
@@ -54,36 +121,28 @@ curl -X POST http://localhost:8000/posts \
   }'
 ```
 
-Supported formats: `markdown`, `text`, `html`, `json`.
-
-### List posts
+### Update (partial)
 
 ```bash
-curl "http://localhost:8000/posts?tag=news&limit=10" \
-  -H "Authorization: Bearer <key>"
+curl -X PATCH http://localhost:8000/posts/42 \
+  -H "Authorization: Bearer <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"tags": ["news", "ai", "verified"]}'
 ```
 
-Query params: `tag`, `format`, `limit` (default 20, max 100), `offset`.
+Only the fields you send are changed. `tags` replaces the list wholesale; an empty array clears all tags.
 
 ### SSE stream
 
 ```bash
-# First connect — receives live posts as they arrive
-curl -N http://localhost:8000/events?tag=news \
+# Live stream
+curl -N "http://localhost:8000/events?tag=news" \
   -H "Authorization: Bearer <key>"
 
-# Reconnect after being offline — replays missed posts, then goes live
-curl -N http://localhost:8000/events?tag=news \
+# Reconnect after being offline — replays missed posts first
+curl -N "http://localhost:8000/events?tag=news" \
   -H "Authorization: Bearer <key>" \
   -H "Last-Event-ID: 42"
-```
-
-Each event looks like:
-
-```
-id: 43
-event: post
-data: {"id":43,"title":"...","content":"...","tags":["news"],"created_at":"..."}
 ```
 
 A `keepalive` event fires every 30 s to hold the connection through proxies.
@@ -91,7 +150,6 @@ A `keepalive` event fires every 30 s to hold the connection through proxies.
 ### Per-tag TTL
 
 ```bash
-# Keep "news" posts for 24 h instead of the global default
 curl -X POST http://localhost:8000/tags/news/config \
   -H "Authorization: Bearer <key>" \
   -H "Content-Type: application/json" \
@@ -112,34 +170,14 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `DEFAULT_TTL_HOURS` | `72` | Global post expiry window |
 | `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are removed |
 | `DATABASE_PATH` | `/data/relay.db` | SQLite file path |
-| `RELAY_BASE_URL` | `http://localhost:8000` | Relay base URL used by the MCP server |
-
-## Claude Desktop (MCP)
-
-`relay_mcp/server.py` is an MCP server that lets Claude Desktop publish posts and list tags directly, without crafting HTTP requests.
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "relay": {
-      "command": "uv",
-      "args": ["run", "--project", "/path/to/relay", "relay-mcp"],
-      "env": {
-        "API_KEY": "<your-api-key>",
-        "RELAY_BASE_URL": "https://your-relay-host"
-      }
-    }
-  }
-}
-```
-
-Available tools: `publish_post`, `list_tags`.
+| `RELAY_BASE_URL` | `http://localhost:8000` | Base URL used by the MCP server |
+| `RELAY_PALETTE` | `default` | TUI colour theme |
 
 ## Stack
 
 - **Python 3.13** + **FastAPI** + **aiosqlite** (SQLite)
 - **SSE** via [sse-starlette](https://github.com/sysid/sse-starlette)
+- **Textual** for the terminal UI
+- **MCP** for Claude Desktop / agent integration
 - **uv** for dependency management
 - **Docker** + named volume for persistence
