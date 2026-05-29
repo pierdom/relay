@@ -382,6 +382,73 @@
       .key-wrap input { width: 110px; font-size: 11px; }
       .btn-connect, .btn-new-post { padding: 5px 8px; }
     }
+
+    /* ── Card truncation ─────────────────────────────────── */
+    .post:not(.editing) { cursor: pointer; }
+    .post-body-wrap { position: relative; max-height: 72px; overflow: hidden; }
+    .post-body-wrap::after {
+      content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+      height: 36px;
+      background: linear-gradient(transparent, var(--surface));
+      pointer-events: none;
+    }
+    .post.editing .post-body-wrap { max-height: none; overflow: visible; }
+    .post.editing .post-body-wrap::after { display: none; }
+
+    /* ── Post modal ──────────────────────────────────────── */
+    .post-modal { display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; }
+    .post-modal.open { display: flex; }
+
+    .pm-backdrop {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.72);
+      backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+      cursor: pointer;
+    }
+    .pm-inner {
+      position: relative; z-index: 1;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; width: 92%; max-width: 760px; max-height: 88vh;
+      display: flex; flex-direction: column;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+      animation: modalIn 0.18s ease both;
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: translateY(10px) scale(0.98); }
+      to   { opacity: 1; transform: none; }
+    }
+    .pm-header {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 20px 20px 0; flex-shrink: 0;
+    }
+    .pm-title { flex: 1; font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.4; }
+    .pm-close {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      font-size: 22px; line-height: 1; padding: 0; margin-top: -2px; flex-shrink: 0;
+      font-family: inherit; transition: color 0.15s;
+    }
+    .pm-close:hover { color: var(--text); }
+    .pm-meta { padding: 10px 20px 0; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+    .pm-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
+    .pm-body {
+      flex: 1; overflow-y: auto; padding: 16px 20px;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .pm-body::-webkit-scrollbar { width: 4px; }
+    .pm-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .pm-footer {
+      display: flex; gap: 8px; justify-content: flex-end;
+      padding: 12px 20px; border-top: 1px solid var(--border); flex-shrink: 0;
+    }
+    @media (max-width: 768px) {
+      .pm-inner { width: 100%; max-width: 100%; max-height: 100vh; border-radius: 0; }
+      .post-modal.open { align-items: flex-end; }
+      .pm-inner { animation: modalInMobile 0.22s ease both; }
+      @keyframes modalInMobile {
+        from { opacity: 0; transform: translateY(20px); }
+        to   { opacity: 1; transform: none; }
+      }
+    }
   </style>
 </head>
 <body>
@@ -452,6 +519,22 @@
       <button id="loadMoreBtn">Load more</button>
     </div>
   </main>
+</div>
+
+<div class="post-modal" id="postModal">
+  <div class="pm-backdrop" id="pmBackdrop"></div>
+  <div class="pm-inner">
+    <div class="pm-header">
+      <span class="pm-title" id="pmTitle"></span>
+      <button class="pm-close" id="pmClose">×</button>
+    </div>
+    <div class="pm-meta" id="pmMeta"></div>
+    <div class="pm-body" id="pmBody"></div>
+    <div class="pm-footer">
+      <button class="btn-edit" id="pmEdit">✏️ Edit</button>
+      <button class="btn-delete" id="pmDelete">🗑️ Delete</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -739,7 +822,7 @@ function renderPost(post) {
 
   el.innerHTML = `
     ${headerHtml}
-    ${bodyHtml}
+    <div class="post-body-wrap">${bodyHtml}</div>
     <div class="post-footer">
       <span class="post-time" title="${timeTitle}">${timeLabel}</span>
       <div class="post-actions">
@@ -751,7 +834,8 @@ function renderPost(post) {
   el.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
   );
-  el.querySelector('.btn-delete').addEventListener('click', async () => {
+  el.querySelector('.btn-delete').addEventListener('click', async (e) => {
+    e.stopPropagation();
     if (!confirm('Delete this post?')) return;
     try {
       await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
@@ -760,11 +844,13 @@ function renderPost(post) {
       await loadTags();
     } catch {}
   });
-  el.querySelector('.btn-edit').addEventListener('click', () => enterEditMode(el, post));
+  el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); enterEditMode(el, post); });
+  el.addEventListener('click', () => { if (!el.classList.contains('editing')) openPostModal(post); });
   return el;
 }
 
 function enterEditMode(el, post) {
+  el.classList.add('editing');
   const savedHtml = el.innerHTML;
   el.innerHTML = `
     <div class="edit-form">
@@ -786,7 +872,7 @@ function enterEditMode(el, post) {
       </div>
     </div>`;
 
-  el.querySelector('.btn-cancel').addEventListener('click', () => { el.innerHTML = savedHtml; rewirePost(el, post); });
+  el.querySelector('.btn-cancel').addEventListener('click', () => { el.classList.remove('editing'); el.innerHTML = savedHtml; rewirePost(el, post); });
   el.querySelector('.btn-save').addEventListener('click', async () => {
     const body = {
       title:   el.querySelector('.ef-title').value.trim() || null,
@@ -807,7 +893,8 @@ function rewirePost(el, post) {
   el.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
   );
-  el.querySelector('.btn-delete').addEventListener('click', async () => {
+  el.querySelector('.btn-delete').addEventListener('click', async (e) => {
+    e.stopPropagation();
     if (!confirm('Delete this post?')) return;
     try {
       await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
@@ -816,7 +903,7 @@ function rewirePost(el, post) {
       await loadTags();
     } catch {}
   });
-  el.querySelector('.btn-edit').addEventListener('click', () => enterEditMode(el, post));
+  el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); enterEditMode(el, post); });
 }
 
 /* ── SSE ──────────────────────────────────────────────────── */
@@ -853,6 +940,81 @@ function setDot(state) {
   liveDot.className = 'live-dot' + (state ? ' ' + state : '');
   liveLabel.textContent = state === 'connected' ? 'live' : state === 'error' ? 'error' : 'offline';
 }
+
+/* ── Post modal ───────────────────────────────────────────── */
+const postModal  = document.getElementById('postModal');
+const pmBackdrop = document.getElementById('pmBackdrop');
+const pmClose    = document.getElementById('pmClose');
+const pmTitle    = document.getElementById('pmTitle');
+const pmMeta     = document.getElementById('pmMeta');
+const pmBody     = document.getElementById('pmBody');
+const pmEdit     = document.getElementById('pmEdit');
+const pmDelete   = document.getElementById('pmDelete');
+let _modalPost   = null;
+
+function openPostModal(post) {
+  _modalPost = post;
+  pmTitle.textContent = post.title || '';
+  pmTitle.style.display = post.title ? '' : 'none';
+
+  const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${t}">${escHtml(t)}</span>`).join('');
+  const srcHtml   = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
+  const timeLabel = post.updated_at
+    ? `${relativeTime(post.created_at)} · edited ${relativeTime(post.updated_at)}`
+    : relativeTime(post.created_at);
+  pmMeta.innerHTML = (tagsHtml || srcHtml)
+    ? `<div class="post-tags">${tagsHtml}${srcHtml}</div><div class="pm-time">${timeLabel}</div>`
+    : `<div class="pm-time">${timeLabel}</div>`;
+  pmMeta.querySelectorAll('.tag-pill').forEach(pill =>
+    pill.addEventListener('click', e => { e.stopPropagation(); closePostModal(); selectTag(pill.dataset.tag); })
+  );
+
+  if (post.format === 'markdown') {
+    pmBody.innerHTML = `<div class="post-body">${marked.parse(post.content)}</div>`;
+  } else if (post.format === 'html') {
+    pmBody.innerHTML = `<div class="post-body">${post.content}</div>`;
+  } else if (post.format === 'json') {
+    let pretty = post.content;
+    try { pretty = JSON.stringify(JSON.parse(post.content), null, 2); } catch {}
+    pmBody.innerHTML = `<div class="post-body format-json">${escHtml(pretty)}</div>`;
+  } else {
+    pmBody.innerHTML = `<div class="post-body format-text">${escHtml(post.content)}</div>`;
+  }
+
+  postModal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closePostModal() {
+  postModal.classList.remove('open');
+  document.body.style.overflow = '';
+  pmBody.innerHTML = '';
+  _modalPost = null;
+}
+
+pmClose.addEventListener('click', closePostModal);
+pmBackdrop.addEventListener('click', closePostModal);
+pmEdit.addEventListener('click', () => {
+  const post = _modalPost; if (!post) return;
+  closePostModal();
+  const card = feed.querySelector(`[data-id="${post.id}"]`);
+  if (card) enterEditMode(card, post);
+});
+pmDelete.addEventListener('click', async () => {
+  const post = _modalPost; if (!post) return;
+  if (!confirm('Delete this post?')) return;
+  try {
+    await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
+    closePostModal();
+    const card = feed.querySelector(`[data-id="${post.id}"]`);
+    if (card) { card.remove(); total--; }
+    loadMoreWrap.style.display = offset < total ? 'block' : 'none';
+    await loadTags();
+  } catch {}
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && postModal.classList.contains('open')) closePostModal();
+});
 
 /* ── Helpers ──────────────────────────────────────────────── */
 function relativeTime(iso) {
