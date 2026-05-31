@@ -55,7 +55,7 @@ Events have type `post`; a `keepalive` ping fires every 30 s to hold the connect
 |----------|---------|-------------|
 | `API_KEY` | required | Bearer token for all endpoints |
 | `RELAY_BASE_URL` | `http://localhost:8000` | Relay base URL used by the MCP server |
-| `DEFAULT_TTL_HOURS` | 72 | Global post expiry window |
+| `DEFAULT_TTL_HOURS` | 0 | Global post expiry window; `0` disables expiry (per-tag TTLs still apply) |
 | `CLEANUP_INTERVAL_MINUTES` | 60 | How often the cleanup loop runs |
 | `DATABASE_PATH` | /data/relay.db | SQLite file path |
 
@@ -114,7 +114,7 @@ Update it via MCP: `update_post(id=0, content="...")`.
 
 ## TTL / cleanup
 
-- Posts expire after `DEFAULT_TTL_HOURS` unless overridden per tag via `POST /tags/{tag}/config`.
+- Posts never expire by default (`DEFAULT_TTL_HOURS=0`). Set it to a positive integer to enable global expiry.
 - For multi-tag posts, the shortest applicable TTL wins.
 - Cleanup loop sleeps before its first run — no deletions at startup.
 - Post `id=0` (master document) is exempt from cleanup regardless of TTL settings.
