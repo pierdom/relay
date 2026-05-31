@@ -18,7 +18,14 @@ class PostCreate(BaseModel):
     @field_validator("tags")
     @classmethod
     def clean_tags(cls, v: list[str]) -> list[str]:
-        return [t.strip().lower() for t in v if t.strip()]
+        import re
+        cleaned = []
+        for t in v:
+            t = t.strip().lower()
+            t = re.sub(r"[^a-z0-9_-]", "", t)
+            if t:
+                cleaned.append(t)
+        return cleaned
 
 
 class PostResponse(BaseModel):
@@ -68,7 +75,14 @@ class PostUpdate(BaseModel):
     def clean_tags(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return None
-        return [t.strip().lower() for t in v if t.strip()]
+        import re
+        cleaned = []
+        for t in v:
+            t = t.strip().lower()
+            t = re.sub(r"[^a-z0-9_-]", "", t)
+            if t:
+                cleaned.append(t)
+        return cleaned
 
 
 class TagRename(BaseModel):

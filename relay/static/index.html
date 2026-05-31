@@ -6,7 +6,8 @@
   <title>Relay</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@14.1.4/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -624,7 +625,7 @@
 
 <script>
 const LIMIT = 20;
-let apiKey = localStorage.getItem('relay_api_key') || '';
+let apiKey = '';
 let activeTag = null;
 let activeSearch = null;
 let searchDebounce = null;
@@ -660,21 +661,29 @@ function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.cla
 menuBtn.addEventListener('click', () => sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar());
 sidebarOverlay.addEventListener('click', closeSidebar);
 
-if (apiKey) { apiKeyInput.value = apiKey; init(); }
-
-connectBtn.addEventListener('click', () => {
+connectBtn.addEventListener('click', async () => {
   const val = apiKeyInput.value.trim();
   if (!val) return;
-  apiKey = val;
-  localStorage.setItem('relay_api_key', apiKey);
-  init();
+  try {
+    const res = await fetch('/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: val }),
+      credentials: 'same-origin',
+    });
+    if (!res.ok) { alert('Invalid API key'); return; }
+    apiKey = val;
+    init();
+  } catch (e) {
+    alert('Connection failed: ' + e.message);
+  }
 });
 
 apiKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') connectBtn.click(); });
 
-disconnectBtn.addEventListener('click', () => {
+disconnectBtn.addEventListener('click', async () => {
   apiKey = '';
-  localStorage.removeItem('relay_api_key');
+  fetch('/session', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
   if (es) { es.close(); es = null; }
   if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
   closeSidebar();
@@ -815,7 +824,7 @@ function makeTagItem(label, value, count) {
   el.className = 'tag-item' + (activeTag === value ? ' active' : '');
   const renameBtn = value !== null ? `<button class="tag-rename" title="Rename">✏︎</button>` : '';
   const configBtn = value !== null ? `<button class="tag-config-btn" title="Configure">⚙</button>` : '';
-  el.innerHTML = `<span class="tag-name">${label}</span>${renameBtn}${configBtn}<span class="tag-count">${count}</span>`;
+  el.innerHTML = `<span class="tag-name">${escHtml(label)}</span>${renameBtn}${configBtn}<span class="tag-count">${count}</span>`;
   el.addEventListener('click', () => selectTag(value));
   if (value !== null) {
     el.querySelector('.tag-rename').addEventListener('click', e => {
@@ -980,16 +989,16 @@ function renderPost(post) {
     : '';
   const masterBadge = post.id === 0 ? `<div class="master-badge">✦ master document</div>` : '';
   const titleHtml = post.title ? `<div class="post-title">${escHtml(post.title)}</div>` : '';
-  const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${t}">${escHtml(t)}</span>`).join('');
+  const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
   const srcHtml   = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
   const metaRow   = (tagsHtml || srcHtml) ? `<div class="post-tags">${tagsHtml}${srcHtml}</div>` : '';
   const headerHtml = (titleHtml || metaRow) ? `<div class="post-header">${titleHtml}${metaRow}</div>` : '';
 
   let bodyHtml;
   if (post.format === 'markdown') {
-    bodyHtml = `<div class="post-body">${marked.parse(post.content)}</div>`;
+    bodyHtml = `<div class="post-body">${DOMPurify.sanitize(marked.parse(post.content))}</div>`;
   } else if (post.format === 'html') {
-    bodyHtml = `<div class="post-body">${post.content}</div>`;
+    bodyHtml = `<div class="post-body">${DOMPurify.sanitize(post.content)}</div>`;
   } else if (post.format === 'json') {
     let pretty = post.content;
     try { pretty = JSON.stringify(JSON.parse(post.content), null, 2); } catch {}
@@ -1095,9 +1104,10 @@ function rewirePost(el, post) {
 function connectSSE() {
   if (es) { es.close(); es = null; }
   if (!apiKey) return;
-  const params = new URLSearchParams({ key: apiKey });
+  const params = new URLSearchParams();
   if (activeTag) params.set('tag', activeTag);
-  es = new EventSource(`/events?${params}`);
+  const qs = params.toString();
+  es = new EventSource(`/events${qs ? '?' + qs : ''}`);
 
   es.addEventListener('post', e => {
     const post = JSON.parse(e.data);
@@ -1142,7 +1152,7 @@ function openPostModal(post) {
   pmTitle.textContent = post.title || '';
   pmTitle.style.display = post.title ? '' : 'none';
 
-  const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${t}">${escHtml(t)}</span>`).join('');
+  const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
   const srcHtml   = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
   const timeLabel = post.updated_at
     ? `${relativeTime(post.created_at)} · edited ${relativeTime(post.updated_at)}`
@@ -1160,9 +1170,9 @@ function openPostModal(post) {
   );
 
   if (post.format === 'markdown') {
-    pmBody.innerHTML = `<div class="post-body">${marked.parse(post.content)}</div>`;
+    pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(marked.parse(post.content))}</div>`;
   } else if (post.format === 'html') {
-    pmBody.innerHTML = `<div class="post-body">${post.content}</div>`;
+    pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(post.content)}</div>`;
   } else if (post.format === 'json') {
     let pretty = post.content;
     try { pretty = JSON.stringify(JSON.parse(post.content), null, 2); } catch {}
