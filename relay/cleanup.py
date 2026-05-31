@@ -11,8 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 async def _delete_expired(db: aiosqlite.Connection) -> int:
-    async with db.execute("SELECT tag, ttl_hours FROM tag_config") as cur:
-        tag_configs = {row["tag"]: row["ttl_hours"] for row in await cur.fetchall()}
+    async with db.execute("SELECT tag, ttl_hours, expires_at FROM tag_config") as cur:
+        tag_configs = {
+            row["tag"]: {"ttl_hours": row["ttl_hours"], "expires_at": row["expires_at"]}
+            for row in await cur.fetchall()
+        }
 
     deleted = 0
 
@@ -62,20 +65,39 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         row = await cur.fetchone()
         deleted += row[0]
 
-    for tag, ttl_hours in tag_configs.items():
-        await db.execute(
-            f"""
-            DELETE FROM posts
-            WHERE id != 0
-              AND expires_at IS NULL
-              AND tags LIKE ?
-              AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-{ttl_hours} hours')
-            """,
-            (f"%,{tag},%",),
-        )
-        async with db.execute("SELECT changes()") as cur:
-            row = await cur.fetchone()
-            deleted += row[0]
+    for tag, cfg in tag_configs.items():
+        ttl_hours = cfg["ttl_hours"]
+        tag_expires_at = cfg["expires_at"]
+
+        if tag_expires_at:
+            await db.execute(
+                """
+                DELETE FROM posts
+                WHERE id != 0
+                  AND expires_at IS NULL
+                  AND tags LIKE ?
+                  AND ? < strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                """,
+                (f"%,{tag},%", tag_expires_at),
+            )
+            async with db.execute("SELECT changes()") as cur:
+                row = await cur.fetchone()
+                deleted += row[0]
+
+        if ttl_hours:
+            await db.execute(
+                f"""
+                DELETE FROM posts
+                WHERE id != 0
+                  AND expires_at IS NULL
+                  AND tags LIKE ?
+                  AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-{ttl_hours} hours')
+                """,
+                (f"%,{tag},%",),
+            )
+            async with db.execute("SELECT changes()") as cur:
+                row = await cur.fetchone()
+                deleted += row[0]
 
     await db.commit()
     return deleted

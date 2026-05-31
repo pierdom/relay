@@ -69,9 +69,9 @@ async def set_tag_config(
 ) -> TagConfigResponse:
     clean_tag = tag.strip().lower()
     await db.execute(
-        "INSERT INTO tag_config (tag, ttl_hours) VALUES (?, ?)"
-        " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours",
-        (clean_tag, body.ttl_hours),
+        "INSERT INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)"
+        " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours, expires_at = excluded.expires_at",
+        (clean_tag, body.ttl_hours or 0, body.expires_at),
     )
     await db.commit()
-    return TagConfigResponse(tag=clean_tag, ttl_hours=body.ttl_hours)
+    return TagConfigResponse(tag=clean_tag, ttl_hours=body.ttl_hours, expires_at=body.expires_at)

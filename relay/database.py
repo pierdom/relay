@@ -23,7 +23,8 @@ CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts (created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_tags ON posts (tags);
 CREATE TABLE IF NOT EXISTS tag_config (
     tag       TEXT PRIMARY KEY,
-    ttl_hours INTEGER NOT NULL
+    ttl_hours INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT
 );
 """
 
@@ -45,6 +46,13 @@ async def init_db() -> None:
         if "expires_at" not in cols:
             await db.execute("ALTER TABLE posts ADD COLUMN expires_at TEXT")
         await db.commit()
+
+    async with aiosqlite.connect(settings.database_path) as db:
+        async with db.execute("PRAGMA table_info(tag_config)") as cur:
+            tag_cols = {row[1] async for row in cur}
+        if "expires_at" not in tag_cols:
+            await db.execute("ALTER TABLE tag_config ADD COLUMN expires_at TEXT")
+            await db.commit()
 
     # Seed the master document at id=0 (reserved, never auto-assigned, never expires)
     async with aiosqlite.connect(settings.database_path) as db:

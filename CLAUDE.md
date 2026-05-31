@@ -33,7 +33,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | PATCH | /posts/{id} | Update post fields (title, content, format, tags, source, expires_at) |
 | DELETE | /posts/{id} | Delete post |
 | GET | /tags | List tags with post counts (includes 0-count tags from tag_config) |
-| POST | /tags/{tag}/config | Set per-tag TTL override |
+| POST | /tags/{tag}/config | Set per-tag expiry (`ttl_hours`, `expires_at`, or both) |
 | PATCH | /tags/{tag} | Rename a tag across all posts and tag_config |
 | GET | /events | SSE stream of new posts (`?tag=` filter) |
 
@@ -116,6 +116,7 @@ Update it via MCP: `update_post(id=0, content="...")`.
 
 - Posts never expire by default (`DEFAULT_TTL_HOURS=0`). Set it to a positive integer to enable global expiry.
 - A per-post `expires_at` ISO datetime field overrides tag/global TTL for that post. Set it via `POST /posts` or `PATCH /posts/{id}`; clear it by patching with `expires_at: null`.
+- Per-tag expiry is configurable via `POST /tags/{tag}/config` with `ttl_hours` (relative), `expires_at` (absolute), or both. At least one must be provided. Tag-level expiry only applies to posts without an explicit `expires_at`.
 - For multi-tag posts without an explicit `expires_at`, the shortest applicable TTL wins.
 - Cleanup loop sleeps before its first run — no deletions at startup.
 - Post `id=0` (master document) is exempt from cleanup regardless of TTL settings.

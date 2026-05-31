@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 FormatEnum = Literal["markdown", "text", "html", "json"]
 
@@ -93,9 +93,17 @@ class TagListResponse(BaseModel):
 
 
 class TagConfigCreate(BaseModel):
-    ttl_hours: int = Field(gt=0)
+    ttl_hours: int | None = Field(default=None, gt=0)
+    expires_at: str | None = None
+
+    @model_validator(mode="after")
+    def require_one(self) -> "TagConfigCreate":
+        if self.ttl_hours is None and self.expires_at is None:
+            raise ValueError("at least one of ttl_hours or expires_at must be provided")
+        return self
 
 
 class TagConfigResponse(BaseModel):
     tag: str
-    ttl_hours: int
+    ttl_hours: int | None
+    expires_at: str | None = None
