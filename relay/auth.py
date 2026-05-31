@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import secrets
+import hashlib
+import hmac
 
 from fastapi import Cookie, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -9,18 +10,24 @@ from .config import settings
 
 _bearer = HTTPBearer(auto_error=False)
 
-# In-memory session store: token → True (all sessions share the same key)
-_sessions: dict[str, bool] = {}
+_SESSION_LABEL = b"relay-session-v1"
+
+
+def _derive_token() -> str:
+    """Deterministic session token derived from the API key — survives restarts."""
+    return hmac.new(settings.api_key.encode(), _SESSION_LABEL, hashlib.sha256).hexdigest()
 
 
 def create_session() -> str:
-    token = secrets.token_urlsafe(32)
-    _sessions[token] = True
-    return token
+    return _derive_token()
+
+
+def verify_session(token: str) -> bool:
+    return hmac.compare_digest(token, _derive_token())
 
 
 def revoke_session(token: str) -> None:
-    _sessions.pop(token, None)
+    pass  # stateless — revocation happens by deleting the cookie
 
 
 async def require_api_key(
@@ -28,10 +35,8 @@ async def require_api_key(
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
     relay_session: str | None = Cookie(default=None),
 ) -> None:
-    # Accept HttpOnly session cookie
-    if relay_session and _sessions.get(relay_session):
+    if relay_session and verify_session(relay_session):
         return
-    # Accept Bearer token
     if credentials and credentials.credentials == settings.api_key:
         return
     raise HTTPException(

@@ -7,7 +7,7 @@ import aiosqlite
 from fastapi import APIRouter, Cookie, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth import _sessions
+from ..auth import verify_session
 from ..config import settings
 from ..events import subscribe, unsubscribe
 from ..models import PostResponse
@@ -35,7 +35,7 @@ async def stream_events(
     from fastapi import HTTPException, status as http_status
 
     authed = False
-    if relay_session and _sessions.get(relay_session):
+    if relay_session and verify_session(relay_session):
         authed = True
     if not authed:
         auth_header = request.headers.get("authorization", "")
