@@ -30,7 +30,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | POST | /posts | Publish a post |
 | GET | /posts | List posts (`tag`, `limit`, `offset`, `format` filters) |
 | GET | /posts/{id} | Get single post |
-| PATCH | /posts/{id} | Update post fields (title, content, format, tags, source) |
+| PATCH | /posts/{id} | Update post fields (title, content, format, tags, source, expires_at) |
 | DELETE | /posts/{id} | Delete post |
 | GET | /tags | List tags with post counts (includes 0-count tags from tag_config) |
 | POST | /tags/{tag}/config | Set per-tag TTL override |
@@ -115,7 +115,8 @@ Update it via MCP: `update_post(id=0, content="...")`.
 ## TTL / cleanup
 
 - Posts never expire by default (`DEFAULT_TTL_HOURS=0`). Set it to a positive integer to enable global expiry.
-- For multi-tag posts, the shortest applicable TTL wins.
+- A per-post `expires_at` ISO datetime field overrides tag/global TTL for that post. Set it via `POST /posts` or `PATCH /posts/{id}`; clear it by patching with `expires_at: null`.
+- For multi-tag posts without an explicit `expires_at`, the shortest applicable TTL wins.
 - Cleanup loop sleeps before its first run — no deletions at startup.
 - Post `id=0` (master document) is exempt from cleanup regardless of TTL settings.
 - Errors are logged, never crash the service.

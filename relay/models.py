@@ -13,6 +13,7 @@ class PostCreate(BaseModel):
     format: FormatEnum = "markdown"
     tags: list[str] = Field(default_factory=list)
     source: str | None = None
+    expires_at: str | None = None
 
     @field_validator("tags")
     @classmethod
@@ -29,9 +30,11 @@ class PostResponse(BaseModel):
     source: str | None
     created_at: str
     updated_at: str | None = None
+    expires_at: str | None = None
 
     @classmethod
     def from_row(cls, row) -> PostResponse:
+        keys = row.keys()
         return cls(
             id=row["id"],
             title=row["title"],
@@ -40,7 +43,8 @@ class PostResponse(BaseModel):
             tags=[t for t in row["tags"].split(",") if t],
             source=row["source"],
             created_at=row["created_at"],
-            updated_at=row["updated_at"] if "updated_at" in row.keys() else None,
+            updated_at=row["updated_at"] if "updated_at" in keys else None,
+            expires_at=row["expires_at"] if "expires_at" in keys else None,
         )
 
 
@@ -57,6 +61,7 @@ class PostUpdate(BaseModel):
     format: FormatEnum | None = None
     tags: list[str] | None = None
     source: str | None = None
+    expires_at: str | None = None
 
     @field_validator("tags")
     @classmethod

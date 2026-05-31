@@ -24,8 +24,8 @@ async def create_post(
 ) -> PostResponse:
     tags_str = "," + ",".join(body.tags) + "," if body.tags else ""
     cursor = await db.execute(
-        "INSERT INTO posts (title, content, format, tags, source) VALUES (?, ?, ?, ?, ?)",
-        (body.title, body.content, body.format, tags_str, body.source),
+        "INSERT INTO posts (title, content, format, tags, source, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (body.title, body.content, body.format, tags_str, body.source, body.expires_at),
     )
     await db.commit()
     async with db.execute("SELECT * FROM posts WHERE id = ?", (cursor.lastrowid,)) as cur:
@@ -118,6 +118,8 @@ async def update_post(
         updates["tags"] = "," + ",".join(body.tags) + "," if body.tags else ""
     if "source" in body.model_fields_set:
         updates["source"] = body.source
+    if "expires_at" in body.model_fields_set:
+        updates["expires_at"] = body.expires_at
 
     if updates:
         set_clause = ", ".join(f"{k} = ?" for k in updates)

@@ -16,6 +16,19 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
 
     deleted = 0
 
+    # Explicit per-post expiry (overrides tag/global TTL)
+    await db.execute(
+        """
+        DELETE FROM posts
+        WHERE id != 0
+          AND expires_at IS NOT NULL
+          AND expires_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        """
+    )
+    async with db.execute("SELECT changes()") as cur:
+        row = await cur.fetchone()
+        deleted += row[0]
+
     if tag_configs:
         # Posts with no per-tag config → global TTL (skipped when default_ttl_hours=0)
         tag_likes = [f"%,{tag},%" for tag in tag_configs]
@@ -25,6 +38,7 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
                 f"""
                 DELETE FROM posts
                 WHERE id != 0
+                  AND expires_at IS NULL
                   AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
                                             '-{settings.default_ttl_hours} hours')
                   AND id NOT IN (
@@ -38,6 +52,7 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
             f"""
             DELETE FROM posts
             WHERE id != 0
+              AND expires_at IS NULL
               AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
                                         '-{settings.default_ttl_hours} hours')
             """
@@ -52,6 +67,7 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
             f"""
             DELETE FROM posts
             WHERE id != 0
+              AND expires_at IS NULL
               AND tags LIKE ?
               AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-{ttl_hours} hours')
             """,

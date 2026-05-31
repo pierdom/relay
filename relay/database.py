@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS posts (
     tags       TEXT NOT NULL DEFAULT '',
     source     TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at TEXT
+    updated_at TEXT,
+    expires_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts (created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_tags ON posts (tags);
@@ -41,6 +42,8 @@ async def init_db() -> None:
         if "updated_at" not in cols:
             await db.execute("ALTER TABLE posts ADD COLUMN updated_at TEXT")
             await db.execute("UPDATE posts SET updated_at = created_at")
+        if "expires_at" not in cols:
+            await db.execute("ALTER TABLE posts ADD COLUMN expires_at TEXT")
         await db.commit()
 
     # Seed the master document at id=0 (reserved, never auto-assigned, never expires)
