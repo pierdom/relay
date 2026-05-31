@@ -383,6 +383,33 @@
       .btn-connect, .btn-new-post { padding: 5px 8px; }
     }
 
+    /* ── Post ID pill ────────────────────────────────────── */
+    .post-id-pill {
+      font-size: 10px; color: var(--muted);
+      background: var(--border); padding: 1px 6px; border-radius: 3px;
+      letter-spacing: 0.02em; font-variant-numeric: tabular-nums; flex-shrink: 0;
+    }
+
+    /* ── Master document card ────────────────────────────── */
+    .post.master-doc {
+      border-color: rgba(245,158,11,0.45);
+      background: rgba(245,158,11,0.025);
+    }
+    .post.master-doc:hover {
+      border-color: var(--accent);
+      box-shadow: 0 4px 28px rgba(245,158,11,0.12);
+    }
+    .master-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 9px; font-weight: 600; color: var(--accent);
+      background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3);
+      padding: 2px 8px; border-radius: 3px; letter-spacing: 0.14em;
+      text-transform: uppercase; margin-bottom: 10px;
+    }
+
+    /* ── Post footer left group ──────────────────────────── */
+    .post-footer-left { display: flex; align-items: center; gap: 8px; }
+
     /* ── Post expires label ──────────────────────────────── */
     .post-expires {
       font-size: 10px; color: var(--accent-dim); letter-spacing: 0.02em;
@@ -872,7 +899,7 @@ loadMoreBtn.addEventListener('click', () => loadPosts(false));
 
 function renderPost(post) {
   const el = document.createElement('div');
-  el.className = 'post';
+  el.className = 'post' + (post.id === 0 ? ' master-doc' : '');
   el.dataset.id = post.id;
 
   const timeLabel  = post.updated_at
@@ -884,6 +911,7 @@ function renderPost(post) {
   const expiresHtml = post.expires_at
     ? `<span class="post-expires">expires ${relativeTime(post.expires_at)}</span>`
     : '';
+  const masterBadge = post.id === 0 ? `<div class="master-badge">✦ master document</div>` : '';
   const titleHtml = post.title ? `<div class="post-title">${escHtml(post.title)}</div>` : '';
   const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${t}">${escHtml(t)}</span>`).join('');
   const srcHtml   = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
@@ -904,10 +932,15 @@ function renderPost(post) {
   }
 
   el.innerHTML = `
+    ${masterBadge}
     ${headerHtml}
     <div class="post-body-wrap">${bodyHtml}</div>
     <div class="post-footer">
-      <span class="post-time" title="${timeTitle}">${timeLabel}</span>${expiresHtml}
+      <div class="post-footer-left">
+        <span class="post-id-pill">#${post.id}</span>
+        <span class="post-time" title="${timeTitle}">${timeLabel}</span>
+        ${expiresHtml}
+      </div>
       <div class="post-actions">
         <button class="btn-edit">✏️ Edit</button>
         <button class="btn-delete">🗑️ Delete</button>
@@ -1050,9 +1083,11 @@ function openPostModal(post) {
   const pmExpiresHtml = post.expires_at
     ? `<div class="pm-time">expires ${relativeTime(post.expires_at)}</div>`
     : '';
+  const pmMasterBadge = post.id === 0 ? `<div class="master-badge" style="margin-bottom:8px">✦ master document</div>` : '';
+  const pmIdPill = `<span class="post-id-pill" style="margin-right:6px">#${post.id}</span>`;
   pmMeta.innerHTML = (tagsHtml || srcHtml)
-    ? `<div class="post-tags">${tagsHtml}${srcHtml}</div><div class="pm-time">${timeLabel}</div>${pmExpiresHtml}`
-    : `<div class="pm-time">${timeLabel}</div>${pmExpiresHtml}`;
+    ? `${pmMasterBadge}<div class="post-tags">${tagsHtml}${srcHtml}</div><div class="pm-time">${pmIdPill}${timeLabel}</div>${pmExpiresHtml}`
+    : `${pmMasterBadge}<div class="pm-time">${pmIdPill}${timeLabel}</div>${pmExpiresHtml}`;
   pmMeta.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); closePostModal(); selectTag(pill.dataset.tag); })
   );

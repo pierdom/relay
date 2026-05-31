@@ -97,8 +97,15 @@ class PostDetailModal(ModalScreen[None]):
             meta_parts.append(f"expires {_time_ago(post.expires_at)}")
         meta_text = "  •  ".join(meta_parts)
 
+        is_master = post.id == 0
+        id_badge = f"[on {BORDER}] #{post.id} [/on {BORDER}]"
+        master_label = f"  [bold {ACCENT}]✦ MASTER DOCUMENT[/]" if is_master else ""
         with Vertical():
-            yield Label(escape(title_text), classes="detail-title")
+            yield Label(
+                f"{id_badge}{master_label}  [bold]{escape(title_text)}[/]",
+                markup=True,
+                classes="detail-title",
+            )
             yield Label(
                 f"[dim]{escape(meta_text)}[/dim]  {tags_str}",
                 markup=True,

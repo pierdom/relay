@@ -30,16 +30,20 @@ def _time_ago(iso: str) -> str:
 
 
 class PostItem(ListItem):
-    DEFAULT_CSS = """
-    PostItem { height: 4; padding: 0 1; border-bottom: solid $surface; }
-    PostItem Label { width: 1fr; }
+    DEFAULT_CSS = f"""
+    PostItem {{ height: 4; padding: 0 1; border-bottom: solid $surface; }}
+    PostItem.master {{ border: solid {ACCENT}; background: $boost; }}
+    PostItem Label {{ width: 1fr; }}
     """
 
     def __init__(self, post: api.Post) -> None:
         super().__init__()
         self.post = post
+        if post.id == 0:
+            self.add_class("master")
 
     def compose(self) -> ComposeResult:
+        is_master = self.post.id == 0
         title = self.post.title or self.post.content.split("\n")[0]
         if len(title) > 60:
             title = title[:57] + "…"
@@ -55,9 +59,14 @@ class PostItem(ListItem):
             meta_parts.append(f"edited {_time_ago(self.post.updated_at)}")
         if self.post.source:
             meta_parts.append(self.post.source[:40])
-        yield Label(f"[bold]{escape(title)}[/]  {tags_markup}", markup=True)
+        id_badge = f"[on {BORDER}] #{self.post.id} [/on {BORDER}]"
+        master_prefix = f"[bold {ACCENT}]✦ MASTER  [/]" if is_master else ""
         yield Label(
-            f"[dim]{'  •  '.join(meta_parts)}[/dim]  [dim]#{self.post.id}[/dim]",
+            f"{id_badge}  {master_prefix}[bold]{escape(title)}[/]  {tags_markup}",
+            markup=True,
+        )
+        yield Label(
+            f"[dim]{'  •  '.join(meta_parts)}[/dim]",
             markup=True,
         )
 
