@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from rich.markup import escape
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Label, ListView, ListItem
@@ -31,6 +32,15 @@ class TagPanel(Widget):
         def __init__(self, tag: str | None) -> None:
             super().__init__()
             self.tag = tag  # None means all posts
+
+    class ConfigureTag(Message):
+        def __init__(self, tag_name: str) -> None:
+            super().__init__()
+            self.tag_name = tag_name
+
+    BINDINGS = [
+        Binding("c", "configure_tag", "Config"),
+    ]
 
     DEFAULT_CSS = """
     TagPanel ListView { background: transparent; border: none; height: 1fr; }
@@ -65,3 +75,9 @@ class TagPanel(Widget):
         if isinstance(event.item, TagItem):
             tag = event.item.tag_name or None
             self.post_message(self.TagSelected(tag))
+
+    def action_configure_tag(self) -> None:
+        lv = self.query_one("#tag-listview", ListView)
+        highlighted = lv.highlighted_child
+        if isinstance(highlighted, TagItem) and highlighted.tag_name:
+            self.post_message(self.ConfigureTag(highlighted.tag_name))

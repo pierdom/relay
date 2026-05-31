@@ -383,6 +383,30 @@
       .btn-connect, .btn-new-post { padding: 5px 8px; }
     }
 
+    /* ── Post expires label ──────────────────────────────── */
+    .post-expires {
+      font-size: 10px; color: var(--accent-dim); letter-spacing: 0.02em;
+      margin-left: 8px;
+    }
+
+    /* ── Tag config inline form ──────────────────────────── */
+    .tag-config-form {
+      padding: 4px 12px 8px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .tag-config-form input {
+      background: var(--bg); border: 1px solid var(--accent); color: var(--text);
+      border-radius: 3px; font-size: 11px; padding: 3px 6px; width: 100%;
+      outline: none; font-family: inherit;
+    }
+    .tag-config-btn {
+      background: none; border: none; cursor: pointer;
+      padding: 0 1px; font-size: 10px; opacity: 0; flex-shrink: 0;
+      transition: opacity 0.12s; line-height: 1;
+    }
+    .tag-item:hover .tag-config-btn { opacity: 0.6; }
+    .tag-config-btn:hover { opacity: 1 !important; }
+
     /* ── Card truncation ─────────────────────────────────── */
     .post:not(.editing) { cursor: pointer; }
     .post-body-wrap { position: relative; max-height: 72px; overflow: hidden; }
@@ -505,6 +529,7 @@
           <div><label>Content</label><textarea id="cpContent" placeholder="Write something…"></textarea></div>
           <div><label>Tags</label><input type="text" id="cpTags" placeholder="comma-separated"></div>
           <div><label>Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
+          <div><label>Expires</label><input type="datetime-local" id="cpExpires"></div>
           <div class="edit-actions">
             <button class="btn-cancel" id="cpCancel">Cancel</button>
             <button class="btn-save" id="cpPublish">Publish</button>
@@ -644,6 +669,7 @@ document.getElementById('cpPublish').addEventListener('click', async () => {
     format: document.getElementById('cpFormat').value,
     tags:   document.getElementById('cpTags').value.split(',').map(s => s.trim()).filter(Boolean),
     source: document.getElementById('cpSource').value.trim() || null,
+    expires_at: toUtcIso(document.getElementById('cpExpires').value) || null,
   };
   try {
     await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
@@ -656,6 +682,7 @@ function closeCompose() {
   composePanel.classList.remove('open');
   ['cpTitle', 'cpContent', 'cpTags', 'cpSource'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('cpFormat').value = 'markdown';
+  document.getElementById('cpExpires').value = '';
 }
 
 /* ── New tag ──────────────────────────────────────────────── */
@@ -672,7 +699,7 @@ tagNewInput.addEventListener('keydown', async e => {
   if (!name) return;
   try {
     await apiFetch(`/tags/${encodeURIComponent(name)}/config`, {
-      method: 'POST', body: JSON.stringify({ ttl_hours: 72 }),
+      method: 'POST', body: JSON.stringify({}),
     });
     tagNewWrap.style.display = 'none';
     await loadTags();
@@ -694,12 +721,17 @@ function makeTagItem(label, value, count) {
   const el = document.createElement('div');
   el.className = 'tag-item' + (activeTag === value ? ' active' : '');
   const renameBtn = value !== null ? `<button class="tag-rename" title="Rename">✏︎</button>` : '';
-  el.innerHTML = `<span class="tag-name">${label}</span>${renameBtn}<span class="tag-count">${count}</span>`;
+  const configBtn = value !== null ? `<button class="tag-config-btn" title="Configure">⚙</button>` : '';
+  el.innerHTML = `<span class="tag-name">${label}</span>${renameBtn}${configBtn}<span class="tag-count">${count}</span>`;
   el.addEventListener('click', () => selectTag(value));
   if (value !== null) {
     el.querySelector('.tag-rename').addEventListener('click', e => {
       e.stopPropagation();
       startTagRename(el, value);
+    });
+    el.querySelector('.tag-config-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      startTagConfig(el, value);
     });
   }
   return el;
@@ -739,6 +771,54 @@ function startTagRename(el, oldName) {
     if (e.key === 'Escape') cancelRename();
   });
   input.addEventListener('blur', commit);
+}
+
+function startTagConfig(el, tagName) {
+  const savedHtml = el.innerHTML;
+  const form = document.createElement('div');
+  form.className = 'tag-config-form';
+  form.innerHTML = `
+    <input type="number" class="tc-ttl" placeholder="TTL hours (optional)" min="1">
+    <input type="datetime-local" class="tc-expires">`;
+  el.innerHTML = '';
+  el.appendChild(form);
+
+  const ttlInput = form.querySelector('.tc-ttl');
+  const expiresInput = form.querySelector('.tc-expires');
+  ttlInput.focus();
+
+  let committed = false;
+  async function commit() {
+    if (committed) return; committed = true;
+    const ttlVal = ttlInput.value.trim();
+    const expiresVal = expiresInput.value;
+    if (!ttlVal && !expiresVal) { cancel(); return; }
+    const body = {};
+    if (ttlVal) body.ttl_hours = parseInt(ttlVal, 10);
+    if (expiresVal) body.expires_at = toUtcIso(expiresVal);
+    try {
+      await apiFetch(`/tags/${encodeURIComponent(tagName)}/config`, {
+        method: 'POST', body: JSON.stringify(body),
+      });
+      await loadTags();
+    } catch (e) { alert(`Config failed: ${e.message}`); cancel(); }
+  }
+
+  function cancel() {
+    committed = true;
+    el.innerHTML = savedHtml;
+    el.querySelector('.tag-rename')?.addEventListener('click', ev => {
+      ev.stopPropagation(); startTagRename(el, tagName);
+    });
+    el.querySelector('.tag-config-btn')?.addEventListener('click', ev => {
+      ev.stopPropagation(); startTagConfig(el, tagName);
+    });
+  }
+
+  form.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') cancel();
+  });
 }
 
 async function selectTag(tag) {
@@ -801,6 +881,9 @@ function renderPost(post) {
   const timeTitle  = post.updated_at
     ? `created ${post.created_at}\nedited ${post.updated_at}`
     : post.created_at;
+  const expiresHtml = post.expires_at
+    ? `<span class="post-expires">expires ${relativeTime(post.expires_at)}</span>`
+    : '';
   const titleHtml = post.title ? `<div class="post-title">${escHtml(post.title)}</div>` : '';
   const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${t}">${escHtml(t)}</span>`).join('');
   const srcHtml   = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
@@ -824,7 +907,7 @@ function renderPost(post) {
     ${headerHtml}
     <div class="post-body-wrap">${bodyHtml}</div>
     <div class="post-footer">
-      <span class="post-time" title="${timeTitle}">${timeLabel}</span>
+      <span class="post-time" title="${timeTitle}">${timeLabel}</span>${expiresHtml}
       <div class="post-actions">
         <button class="btn-edit">✏️ Edit</button>
         <button class="btn-delete">🗑️ Delete</button>
@@ -866,6 +949,7 @@ function enterEditMode(el, post) {
       <div><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea></div>
       <div><label>Tags</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
       <div><label>Source</label><input class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
+      <div><label>Expires</label><input class="ef-expires" type="datetime-local" value="${toDatetimeLocal(post.expires_at || '')}"></div>
       <div class="edit-actions">
         <button class="btn-cancel">Cancel</button>
         <button class="btn-save">Save</button>
@@ -875,11 +959,12 @@ function enterEditMode(el, post) {
   el.querySelector('.btn-cancel').addEventListener('click', () => { el.classList.remove('editing'); el.innerHTML = savedHtml; rewirePost(el, post); });
   el.querySelector('.btn-save').addEventListener('click', async () => {
     const body = {
-      title:   el.querySelector('.ef-title').value.trim() || null,
-      content: el.querySelector('.ef-content').value,
-      format:  el.querySelector('.ef-format').value,
-      tags:    el.querySelector('.ef-tags').value.split(',').map(s => s.trim()).filter(Boolean),
-      source:  el.querySelector('.ef-source').value.trim() || null,
+      title:      el.querySelector('.ef-title').value.trim() || null,
+      content:    el.querySelector('.ef-content').value,
+      format:     el.querySelector('.ef-format').value,
+      tags:       el.querySelector('.ef-tags').value.split(',').map(s => s.trim()).filter(Boolean),
+      source:     el.querySelector('.ef-source').value.trim() || null,
+      expires_at: toUtcIso(el.querySelector('.ef-expires').value) || null,
     };
     try {
       const updated = await apiFetch(`/posts/${post.id}`, { method: 'PATCH', body: JSON.stringify(body) });
@@ -962,9 +1047,12 @@ function openPostModal(post) {
   const timeLabel = post.updated_at
     ? `${relativeTime(post.created_at)} · edited ${relativeTime(post.updated_at)}`
     : relativeTime(post.created_at);
+  const pmExpiresHtml = post.expires_at
+    ? `<div class="pm-time">expires ${relativeTime(post.expires_at)}</div>`
+    : '';
   pmMeta.innerHTML = (tagsHtml || srcHtml)
-    ? `<div class="post-tags">${tagsHtml}${srcHtml}</div><div class="pm-time">${timeLabel}</div>`
-    : `<div class="pm-time">${timeLabel}</div>`;
+    ? `<div class="post-tags">${tagsHtml}${srcHtml}</div><div class="pm-time">${timeLabel}</div>${pmExpiresHtml}`
+    : `<div class="pm-time">${timeLabel}</div>${pmExpiresHtml}`;
   pmMeta.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); closePostModal(); selectTag(pill.dataset.tag); })
   );
@@ -1019,10 +1107,26 @@ document.addEventListener('keydown', e => {
 /* ── Helpers ──────────────────────────────────────────────── */
 function relativeTime(iso) {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60)    return 'just now';
-  if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
+  if (Math.abs(s) < 60)    return s < 0 ? 'in a moment' : 'just now';
+  if (Math.abs(s) < 3600)  return s < 0 ? `in ${Math.floor(-s/60)}m` : `${Math.floor(s/60)}m ago`;
+  if (Math.abs(s) < 86400) return s < 0 ? `in ${Math.floor(-s/3600)}h` : `${Math.floor(s/3600)}h ago`;
+  return s < 0 ? `in ${Math.floor(-s/86400)}d` : `${Math.floor(s/86400)}d ago`;
+}
+
+function toUtcIso(localDatetimeStr) {
+  if (!localDatetimeStr) return '';
+  const d = new Date(localDatetimeStr);
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function toDatetimeLocal(utcIso) {
+  if (!utcIso) return '';
+  const d = new Date(utcIso);
+  if (isNaN(d.getTime())) return '';
+  // Format as YYYY-MM-DDTHH:MM in local time for datetime-local input
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function escHtml(str) {

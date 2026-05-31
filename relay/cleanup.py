@@ -34,22 +34,38 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
 
     if tag_configs:
         # Posts with no per-tag config → global TTL (skipped when default_ttl_hours=0)
-        tag_likes = [f"%,{tag},%" for tag in tag_configs]
-        exclusion = " OR ".join(["tags LIKE ?"] * len(tag_likes))
+        # Only exclude tags that actually have a config (ttl_hours > 0 or expires_at set)
+        configured_tags = [
+            tag for tag, cfg in tag_configs.items()
+            if cfg["ttl_hours"] or cfg["expires_at"]
+        ]
+        tag_likes = [f"%,{tag},%" for tag in configured_tags]
         if settings.default_ttl_hours:
-            await db.execute(
-                f"""
-                DELETE FROM posts
-                WHERE id != 0
-                  AND expires_at IS NULL
-                  AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
-                                            '-{settings.default_ttl_hours} hours')
-                  AND id NOT IN (
-                      SELECT id FROM posts WHERE {exclusion}
-                  )
-                """,
-                tag_likes,
-            )
+            if tag_likes:
+                exclusion = " OR ".join(["tags LIKE ?"] * len(tag_likes))
+                await db.execute(
+                    f"""
+                    DELETE FROM posts
+                    WHERE id != 0
+                      AND expires_at IS NULL
+                      AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
+                                                '-{settings.default_ttl_hours} hours')
+                      AND id NOT IN (
+                          SELECT id FROM posts WHERE {exclusion}
+                      )
+                    """,
+                    tag_likes,
+                )
+            else:
+                await db.execute(
+                    f"""
+                    DELETE FROM posts
+                    WHERE id != 0
+                      AND expires_at IS NULL
+                      AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
+                                                '-{settings.default_ttl_hours} hours')
+                    """
+                )
     elif settings.default_ttl_hours:
         await db.execute(
             f"""

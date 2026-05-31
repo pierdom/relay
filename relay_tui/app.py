@@ -9,7 +9,7 @@ from textual import work
 from . import api
 from .sse import SSESubscriber
 from .theme import ACCENT, BORDER, HEADER_BG, build_textual_theme, palette_name
-from .widgets.modals import ComposeModal, ConfirmModal, EditModal, PostDetailModal
+from .widgets.modals import ComposeModal, ConfirmModal, EditModal, PostDetailModal, TagConfigModal
 from .widgets.post_panel import PostPanel
 from .widgets.tag_panel import TagPanel
 
@@ -146,6 +146,7 @@ class RelayTuiApp(App):
                 title=data.get("title") or None,
                 tags=data.get("tags", []),
                 fmt=data.get("format", "markdown"),
+                expires_at=data.get("expires_at"),
             )
             self.call_from_thread(self._on_post_created, post)
         except Exception as e:
@@ -177,6 +178,7 @@ class RelayTuiApp(App):
                 title=data.get("title"),
                 tags=data.get("tags"),
                 fmt=data.get("format"),
+                expires_at=data["expires_at"],
             )
             self.call_from_thread(self._on_post_updated, post)
         except Exception as e:
@@ -208,6 +210,25 @@ class RelayTuiApp(App):
         self.query_one(PostPanel).remove_post(post_id)
         self.notify("Deleted", severity="information", timeout=3)
         self._refresh_tags()
+
+    def on_tag_panel_configure_tag(self, event: TagPanel.ConfigureTag) -> None:
+        tag_name = event.tag_name
+        def _on_result(result: dict | None) -> None:
+            if result:
+                self._do_set_tag_config(tag_name, result)
+        self.push_screen(TagConfigModal(tag_name), callback=_on_result)
+
+    @work(thread=True)
+    def _do_set_tag_config(self, tag: str, result: dict) -> None:
+        try:
+            api.set_tag_config(
+                tag,
+                ttl_hours=result.get("ttl_hours"),
+                expires_at=result.get("expires_at"),
+            )
+            self.call_from_thread(self.notify, f"Config saved for [{tag}]", severity="information", timeout=3)
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Config failed: {e}", severity="error")
 
     def action_focus_next_panel(self) -> None:
         focused = self.focused

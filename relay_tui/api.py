@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import requests
 
 from relay.config import settings
+
+_UNSET = object()
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 
@@ -19,6 +21,7 @@ class Post:
     source: str | None
     created_at: str
     updated_at: str | None = None
+    expires_at: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "Post":
@@ -31,6 +34,7 @@ class Post:
             source=d.get("source"),
             created_at=d.get("created_at", ""),
             updated_at=d.get("updated_at"),
+            expires_at=d.get("expires_at"),
         )
 
 
@@ -81,6 +85,7 @@ def create_post(
     tags: list[str] | None = None,
     fmt: str = "markdown",
     source: str | None = None,
+    expires_at: str | None = None,
 ) -> Post:
     body: dict[str, object] = {"content": content, "format": fmt}
     if title is not None:
@@ -89,6 +94,8 @@ def create_post(
         body["tags"] = tags
     if source is not None:
         body["source"] = source
+    if expires_at is not None:
+        body["expires_at"] = expires_at
     resp = requests.post(
         f"{_base()}/posts",
         headers=_headers(),
@@ -107,6 +114,7 @@ def update_post(
     tags: list[str] | None = None,
     fmt: str | None = None,
     source: str | None = None,
+    expires_at: object = _UNSET,
 ) -> Post:
     body: dict[str, object] = {}
     if content is not None:
@@ -119,6 +127,8 @@ def update_post(
         body["format"] = fmt
     if source is not None:
         body["source"] = source
+    if expires_at is not _UNSET:
+        body["expires_at"] = expires_at
     resp = requests.patch(
         f"{_base()}/posts/{post_id}",
         headers=_headers(),
@@ -158,3 +168,22 @@ def rename_tag(old: str, new: str) -> list[Tag]:
     )
     resp.raise_for_status()
     return [Tag(name=t["tag"], count=t["count"]) for t in resp.json().get("tags", [])]
+
+
+def set_tag_config(
+    tag: str,
+    ttl_hours: int | None = None,
+    expires_at: str | None = None,
+) -> None:
+    body: dict[str, object] = {}
+    if ttl_hours is not None:
+        body["ttl_hours"] = ttl_hours
+    if expires_at is not None:
+        body["expires_at"] = expires_at
+    resp = requests.post(
+        f"{_base()}/tags/{tag}/config",
+        headers=_headers(),
+        json=body,
+        timeout=10,
+    )
+    resp.raise_for_status()

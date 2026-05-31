@@ -93,6 +93,8 @@ class PostDetailModal(ModalScreen[None]):
             meta_parts.append(f"edited {_time_ago(post.updated_at)}")
         if post.source:
             meta_parts.append(post.source)
+        if post.expires_at:
+            meta_parts.append(f"expires {_time_ago(post.expires_at)}")
         meta_text = "  •  ".join(meta_parts)
 
         with Vertical():
@@ -183,6 +185,7 @@ class ComposeModal(ModalScreen[dict | None]):
                 id="fmt-select",
             )
             yield TextArea(id="content-input", language="markdown")
+            yield Input(placeholder="Expires at (ISO, optional)", id="expires-input")
             with Horizontal(classes="modal-actions"):
                 yield Button("Cancel", id="cancel-btn", variant="default")
                 yield Button("Publish", id="submit-btn", variant="primary")
@@ -200,12 +203,14 @@ class ComposeModal(ModalScreen[dict | None]):
         if not content.strip():
             self.app.notify("Content cannot be empty", severity="warning")
             return
+        expires_val = self.query_one("#expires-input", Input).value.strip() or None
         self.dismiss(
             {
                 "title": title,
                 "tags": tags,
                 "format": fmt,
                 "content": content,
+                "expires_at": expires_val,
             }
         )
 
@@ -297,6 +302,11 @@ class EditModal(ModalScreen[dict | None]):
                 id="fmt-select",
             )
             yield TextArea(post.content, id="content-input", language="markdown")
+            yield Input(
+                value=post.expires_at or "",
+                placeholder="Expires at (ISO, optional)",
+                id="expires-input",
+            )
             with Horizontal(classes="modal-actions"):
                 yield Button("Cancel", id="cancel-btn", variant="default")
                 yield Button("Save", id="submit-btn", variant="primary")
@@ -314,12 +324,14 @@ class EditModal(ModalScreen[dict | None]):
         if not content.strip():
             self.app.notify("Content cannot be empty", severity="warning")
             return
+        expires_val = self.query_one("#expires-input", Input).value.strip() or None
         self.dismiss(
             {
                 "title": title,
                 "tags": tags,
                 "format": fmt,
                 "content": content,
+                "expires_at": expires_val,
             }
         )
 
@@ -449,3 +461,87 @@ class RenameTagModal(ModalScreen[str | None]):
                 self.dismiss(new_name)
             else:
                 self.app.notify("Tag name cannot be empty", severity="warning")
+
+
+# ── TagConfigModal ────────────────────────────────────────────────────────────
+
+
+class TagConfigModal(ModalScreen[dict | None]):
+    """Dialog for setting per-tag TTL or expiry."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    DEFAULT_CSS = f"""
+    TagConfigModal > Vertical {{
+        width: 60;
+        height: auto;
+        background: {HEADER_BG};
+        border: solid {ACCENT};
+        padding: 1 2;
+    }}
+    TagConfigModal .config-label {{
+        color: {ACCENT};
+        text-style: bold;
+        margin-bottom: 1;
+    }}
+    TagConfigModal Input {{
+        width: 1fr;
+        margin-bottom: 1;
+        border: solid {BORDER};
+    }}
+    TagConfigModal .config-actions {{
+        height: 3;
+        align: right middle;
+        margin-top: 1;
+    }}
+    TagConfigModal .config-actions Button {{
+        margin-left: 1;
+    }}
+    """
+
+    def __init__(self, tag: str) -> None:
+        super().__init__()
+        self._tag = tag
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(
+                f"Configure tag: {escape(self._tag)}",
+                markup=True,
+                classes="config-label",
+            )
+            yield Input(placeholder="TTL hours (integer, optional)", id="ttl-input")
+            yield Input(placeholder="Expires at (ISO, optional)", id="expires-input")
+            with Horizontal(classes="config-actions"):
+                yield Button("Cancel", id="cancel-btn", variant="default")
+                yield Button("Save", id="save-btn", variant="primary")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-btn":
+            self.dismiss(None)
+        elif event.button.id == "save-btn":
+            ttl_raw = self.query_one("#ttl-input", Input).value.strip()
+            expires_raw = self.query_one("#expires-input", Input).value.strip()
+            if not ttl_raw and not expires_raw:
+                self.app.notify("Enter TTL hours or an expiry datetime", severity="warning")
+                return
+            ttl_hours: int | None = None
+            if ttl_raw:
+                try:
+                    ttl_hours = int(ttl_raw)
+                    if ttl_hours <= 0:
+                        raise ValueError
+                except ValueError:
+                    self.app.notify("TTL must be a positive integer", severity="warning")
+                    return
+            self.dismiss(
+                {
+                    "ttl_hours": ttl_hours,
+                    "expires_at": expires_raw or None,
+                }
+            )
