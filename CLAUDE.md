@@ -90,8 +90,8 @@ relay/static/
 
 `GET /ui` serves a single-page interface backed by the REST API and SSE.
 
-- **Posts**: create (compose panel), edit inline, delete with confirmation
-- **Tags**: filter feed by tag; create a new tag (registers it in `tag_config`); rename inline
+- **Posts**: create (compose panel), edit inline, delete with confirmation; `expires_at` datetime picker in both compose and edit forms; posts with an expiry show "expires in X" in the footer
+- **Tags**: filter feed by tag; create a new tag (registers it in `tag_config`); rename inline; ⚙ button per tag opens an inline form to set `ttl_hours` and/or `expires_at`
 - **Live feed**: SSE connection with amber dot + "live/offline/error" label; new posts flash and prepend automatically
 - **Responsive**: sidebar collapses to a slide-in drawer on mobile (≤ 768 px) with hamburger toggle; post action buttons always visible on touch devices
 
@@ -116,7 +116,7 @@ Update it via MCP: `update_post(id=0, content="...")`.
 
 - Posts never expire by default (`DEFAULT_TTL_HOURS=0`). Set it to a positive integer to enable global expiry.
 - A per-post `expires_at` ISO datetime field overrides tag/global TTL for that post. Set it via `POST /posts` or `PATCH /posts/{id}`; clear it by patching with `expires_at: null`.
-- Per-tag expiry is configurable via `POST /tags/{tag}/config` with `ttl_hours` (relative), `expires_at` (absolute), or both. At least one must be provided. Tag-level expiry only applies to posts without an explicit `expires_at`.
+- Per-tag expiry is configurable via `POST /tags/{tag}/config` with `ttl_hours` (relative), `expires_at` (absolute), or both. Omitting both just registers the tag with no expiry. Tag-level expiry only applies to posts without an explicit `expires_at`. Only tags with actual config are excluded from the global TTL sweep.
 - For multi-tag posts without an explicit `expires_at`, the shortest applicable TTL wins.
 - Cleanup loop sleeps before its first run — no deletions at startup.
 - Post `id=0` (master document) is exempt from cleanup regardless of TTL settings.
@@ -172,6 +172,7 @@ Set `RELAY_PALETTE=<name>` to pick a colour theme (same palettes as tuidash). Av
 | `n` | Compose new post |
 | `e` | Edit selected post |
 | `d` | Delete selected post (with confirmation) |
+| `c` | Configure expiry for selected tag (TOPICS panel) |
 | `r` | Refresh |
 | `Enter` | View full post |
 | `Tab` | Switch between TOPICS / FEED panels |
@@ -189,7 +190,7 @@ relay_tui/
 └── widgets/
     ├── tag_panel.py    # TOPICS sidebar
     ├── post_panel.py   # FEED list
-    └── modals.py       # Compose / Edit / Confirm / PostDetail modals
+    └── modals.py       # Compose / Edit / Confirm / PostDetail / TagConfig modals
 ```
 
 ## Package manager
