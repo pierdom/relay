@@ -35,6 +35,10 @@ async def list_tools() -> list[types.Tool]:
                         "description": "Content format (default: markdown)",
                     },
                     "source": {"type": "string", "description": "Optional source URL or label"},
+                    "expires_at": {
+                        "type": "string",
+                        "description": "Optional ISO 8601 datetime after which the post expires, e.g. '2026-06-30T00:00:00Z'. Overrides tag/global TTL.",
+                    },
                 },
             },
         ),
@@ -102,6 +106,35 @@ async def list_tools() -> list[types.Tool]:
                         "description": "Content format",
                     },
                     "source": {"type": "string", "description": "Source URL or label"},
+                    "expires_at": {
+                        "type": "string",
+                        "description": "ISO 8601 datetime after which the post expires. Pass null to clear an existing expiry.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="set_tag_config",
+            description=(
+                "Set expiry configuration for a tag. "
+                "At least one of ttl_hours or expires_at must be provided. "
+                "ttl_hours is relative to each post's creation time; "
+                "expires_at is an absolute cutoff for all posts with this tag. "
+                "Only applies to posts that don't have their own expires_at set."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["tag"],
+                "properties": {
+                    "tag": {"type": "string", "description": "Tag name to configure"},
+                    "ttl_hours": {
+                        "type": "integer",
+                        "description": "Hours after creation before posts with this tag expire",
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "description": "Absolute ISO 8601 datetime after which all posts with this tag expire",
+                    },
                 },
             },
         ),
@@ -202,6 +235,25 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         if p.get("tags"):
             header += f" [{', '.join(p['tags'])}]"
         return [types.TextContent(type="text", text=f"Updated post {header}\n\n{p['content']}")]
+
+    if name == "set_tag_config":
+        tag = arguments["tag"]
+        payload = {k: v for k, v in arguments.items() if k != "tag"}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{RELAY_BASE_URL}/tags/{tag}/config",
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            cfg = response.json()
+        parts = [f"Tag '{cfg['tag']}' configured:"]
+        if cfg.get("ttl_hours"):
+            parts.append(f"  ttl_hours = {cfg['ttl_hours']}")
+        if cfg.get("expires_at"):
+            parts.append(f"  expires_at = {cfg['expires_at']}")
+        return [types.TextContent(type="text", text="\n".join(parts))]
 
     if name != "publish_post":
         raise ValueError(f"Unknown tool: {name}")

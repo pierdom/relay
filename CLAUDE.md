@@ -128,12 +128,13 @@ Update it via MCP: `update_post(id=0, content="...")`.
 
 | Tool | Description |
 |------|-------------|
-| `publish_post` | Publish a post (content, title, tags, format, source) |
-| `update_post` | Partially update an existing post by ID (only provided fields change) |
+| `publish_post` | Publish a post (content, title, tags, format, source, expires_at) |
+| `update_post` | Partially update an existing post by ID (only provided fields change, including expires_at) |
 | `list_posts` | List posts with optional tag filter |
 | `get_post` | Get a single post by ID |
 | `delete_post` | Delete a post by ID |
 | `list_tags` | List all tags with post counts |
+| `set_tag_config` | Set per-tag expiry (ttl_hours, expires_at, or both) |
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
