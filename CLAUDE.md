@@ -28,7 +28,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | /posts | Publish a post |
-| GET | /posts | List posts (`tag`, `limit`, `offset`, `format` filters) |
+| GET | /posts | List posts (`tag`, `limit`, `offset`, `format`, `search` filters) |
 | GET | /posts/{id} | Get single post |
 | PATCH | /posts/{id} | Update post fields (title, content, format, tags, source, expires_at) |
 | DELETE | /posts/{id} | Delete post |
@@ -91,6 +91,7 @@ relay/static/
 `GET /ui` serves a single-page interface backed by the REST API and SSE.
 
 - **Posts**: create (compose panel), edit inline, delete with confirmation; `expires_at` datetime picker in both compose and edit forms; posts with an expiry show "expires in X" in the footer
+- **Search**: search bar above the feed (visible after connect); 300 ms debounce; filters by title, content, or source; combinable with tag filter; `×` button or Escape to clear
 - **Tags**: filter feed by tag; create a new tag (registers it in `tag_config`); rename inline; ⚙ button per tag opens an inline form to set `ttl_hours` and/or `expires_at`
 - **Live feed**: SSE connection with amber dot + "live/offline/error" label; new posts flash and prepend automatically
 - **Responsive**: sidebar collapses to a slide-in drawer on mobile (≤ 768 px) with hamburger toggle; post action buttons always visible on touch devices
@@ -172,6 +173,7 @@ Set `RELAY_PALETTE=<name>` to pick a colour theme (same palettes as tuidash). Av
 | `n` | Compose new post |
 | `e` | Edit selected post |
 | `d` | Delete selected post (with confirmation) |
+| `/` | Search posts (by title, content, source) |
 | `c` | Configure expiry for selected tag (TOPICS panel) |
 | `r` | Refresh |
 | `Enter` | View full post |
