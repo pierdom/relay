@@ -142,6 +142,8 @@ async def delete_post(
     post_id: int,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> None:
+    if post_id == 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Master document (id=0) cannot be deleted")
     async with db.execute("SELECT id FROM posts WHERE id = ?", (post_id,)) as cur:
         row = await cur.fetchone()
     if row is None:

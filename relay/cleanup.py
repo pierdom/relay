@@ -23,7 +23,8 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         await db.execute(
             f"""
             DELETE FROM posts
-            WHERE created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
+            WHERE id != 0
+              AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
                                         '-{settings.default_ttl_hours} hours')
               AND id NOT IN (
                   SELECT id FROM posts WHERE {exclusion}
@@ -35,7 +36,8 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         await db.execute(
             f"""
             DELETE FROM posts
-            WHERE created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
+            WHERE id != 0
+              AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
                                         '-{settings.default_ttl_hours} hours')
             """
         )
@@ -48,7 +50,8 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         await db.execute(
             f"""
             DELETE FROM posts
-            WHERE tags LIKE ?
+            WHERE id != 0
+              AND tags LIKE ?
               AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-{ttl_hours} hours')
             """,
             (f"%,{tag},%",),

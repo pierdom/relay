@@ -101,11 +101,23 @@ Tags are stored with sentinel commas (`,news,ai,`) for unambiguous `LIKE '%,tag,
 
 `GET /tags` returns tags derived from posts plus any tags registered in `tag_config` (shown with count 0 until posts carry them). `PATCH /tags/{tag}` uses SQL `REPLACE()` to rewrite the tag string across all matching posts atomically.
 
+## Master document (id=0)
+
+Post `id=0` is a reserved, permanent document seeded at startup. It is intended as an index and instruction set for AI agents: naming conventions, tag taxonomy, content guidelines, etc.
+
+- `GET /posts/0` — read the master document
+- `PATCH /posts/0` — update it (title, content, tags, format, source all work normally)
+- `DELETE /posts/0` — **blocked** (returns `403 Forbidden`)
+- TTL cleanup **never** touches id=0 regardless of tag config
+
+Update it via MCP: `update_post(id=0, content="...")`.
+
 ## TTL / cleanup
 
 - Posts expire after `DEFAULT_TTL_HOURS` unless overridden per tag via `POST /tags/{tag}/config`.
 - For multi-tag posts, the shortest applicable TTL wins.
 - Cleanup loop sleeps before its first run — no deletions at startup.
+- Post `id=0` (master document) is exempt from cleanup regardless of TTL settings.
 - Errors are logged, never crash the service.
 
 ## MCP server (Claude Desktop)

@@ -43,6 +43,16 @@ async def init_db() -> None:
             await db.execute("UPDATE posts SET updated_at = created_at")
         await db.commit()
 
+    # Seed the master document at id=0 (reserved, never auto-assigned, never expires)
+    async with aiosqlite.connect(settings.database_path) as db:
+        async with db.execute("SELECT id FROM posts WHERE id = 0") as cur:
+            if await cur.fetchone() is None:
+                await db.execute(
+                    "INSERT INTO posts (id, title, content, format, tags) VALUES (0, ?, ?, 'markdown', '')",
+                    ("Master Document", "# Master Document\n\nIndex, naming conventions, and instructions for AI agents interacting with this relay."),
+                )
+                await db.commit()
+
 
 async def get_db():
     async with aiosqlite.connect(settings.database_path) as db:
