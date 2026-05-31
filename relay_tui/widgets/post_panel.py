@@ -96,7 +96,12 @@ class PostPanel(Widget):
         yield Label("FEED")
         yield ListView(id="post-listview")
 
-    def set_posts(self, posts: list[api.Post]) -> None:
+    def set_posts(self, posts: list[api.Post], search: str | None = None) -> None:
+        header = self.query_one(Label)
+        if search:
+            header.update(f"[bold]FEED[/]  [dim]search: {escape(search)}[/dim]")
+        else:
+            header.update("FEED")
         lv = self.query_one("#post-listview", ListView)
         lv.clear()
         for p in posts:

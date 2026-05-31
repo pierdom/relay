@@ -552,3 +552,68 @@ class TagConfigModal(ModalScreen[dict | None]):
                     "expires_at": expires_raw or None,
                 }
             )
+
+
+# ── SearchModal ───────────────────────────────────────────────────────────────
+
+
+class SearchModal(ModalScreen[str | None]):
+    """Prompt for a search query; returns the string or None on cancel."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    DEFAULT_CSS = f"""
+    SearchModal > Vertical {{
+        width: 60;
+        height: auto;
+        background: {HEADER_BG};
+        border: solid {ACCENT};
+        padding: 1 2;
+    }}
+    SearchModal .search-label {{
+        color: {ACCENT};
+        text-style: bold;
+        margin-bottom: 1;
+    }}
+    SearchModal Input {{
+        width: 1fr;
+        margin-bottom: 1;
+        border: solid {BORDER};
+    }}
+    SearchModal .search-actions {{
+        height: 3;
+        align: right middle;
+    }}
+    SearchModal .search-actions Button {{
+        margin-left: 1;
+    }}
+    """
+
+    def __init__(self, current: str = "") -> None:
+        super().__init__()
+        self._current = current
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Search posts", classes="search-label")
+            yield Input(value=self._current, placeholder="title, content or source…", id="search-input")
+            with Horizontal(classes="search-actions"):
+                yield Button("Cancel", id="cancel-btn", variant="default")
+                yield Button("Search", id="search-btn", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#search-input", Input).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-btn":
+            self.dismiss(None)
+        elif event.button.id == "search-btn":
+            self.dismiss(self.query_one("#search-input", Input).value.strip() or "")
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip() or "")

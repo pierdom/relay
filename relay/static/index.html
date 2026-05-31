@@ -296,6 +296,33 @@
     }
     .btn-cancel:hover { border-color: var(--text); color: var(--text); }
 
+    /* ── Search bar ─────────────────────────────────────── */
+    .search-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 20px; border-bottom: 1px solid var(--border);
+      background: var(--surface); flex-shrink: 0;
+    }
+    .search-bar input {
+      flex: 1; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); padding: 5px 10px; border-radius: 4px;
+      font-size: 12px; font-family: inherit; transition: border-color 0.15s;
+    }
+    .search-bar input:focus { outline: none; border-color: var(--accent); }
+    .search-bar input::placeholder { color: var(--muted); }
+    .search-clear {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      font-family: inherit; font-size: 18px; line-height: 1; padding: 0 2px;
+      transition: color 0.15s; display: none;
+    }
+    .search-clear:hover { color: var(--text); }
+    .search-bar.active input { border-color: rgba(245,158,11,0.5); }
+    .search-bar.active .search-clear { display: block; }
+    .search-label {
+      font-size: 10px; color: var(--accent); letter-spacing: 0.08em;
+      text-transform: uppercase; flex-shrink: 0; display: none;
+    }
+    .search-bar.active .search-label { display: block; }
+
     /* ── Load more / states ──────────────────────────────── */
     .load-more { text-align: center; padding: 14px 20px; }
     .load-more button {
@@ -565,6 +592,12 @@
       </div>
     </div>
 
+    <div class="search-bar" id="searchBar" style="display:none">
+      <span class="search-label">search</span>
+      <input type="text" id="searchInput" placeholder="Search title, content, source…" autocomplete="off">
+      <button class="search-clear" id="searchClear" title="Clear search">×</button>
+    </div>
+
     <div class="feed" id="feed"></div>
 
     <div class="load-more" id="loadMore" style="display:none">
@@ -593,6 +626,8 @@
 const LIMIT = 20;
 let apiKey = localStorage.getItem('relay_api_key') || '';
 let activeTag = null;
+let activeSearch = null;
+let searchDebounce = null;
 let offset = 0;
 let total = 0;
 let es = null;
@@ -616,6 +651,9 @@ const disconnectBtn   = document.getElementById('disconnectBtn');
 const menuBtn         = document.getElementById('menuBtn');
 const sidebarEl       = document.getElementById('sidebarEl');
 const sidebarOverlay  = document.getElementById('sidebarOverlay');
+const searchBar       = document.getElementById('searchBar');
+const searchInput     = document.getElementById('searchInput');
+const searchClear     = document.getElementById('searchClear');
 
 function openSidebar()  { sidebarEl.classList.add('open'); sidebarOverlay.classList.add('visible'); menuBtn.classList.add('active'); }
 function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.classList.remove('visible'); menuBtn.classList.remove('active'); }
@@ -646,6 +684,8 @@ disconnectBtn.addEventListener('click', () => {
   loadMoreWrap.style.display = 'none';
   newPostBtn.style.display = 'none';
   newTagBtn.style.display = 'none';
+  searchBar.style.display = 'none';
+  activeSearch = null; searchInput.value = ''; searchBar.classList.remove('active');
   document.querySelector('.key-wrap').style.display = '';
   connectedBar.style.display = 'none';
   apiKeyInput.value = '';
@@ -669,6 +709,7 @@ async function init() {
   connectedBar.style.display = '';
   newPostBtn.style.display = '';
   newTagBtn.style.display = '';
+  searchBar.style.display = '';
   await Promise.all([loadTags(), loadPosts(true)]);
   setDot('connected');
   connectSSE();
@@ -711,6 +752,31 @@ function closeCompose() {
   document.getElementById('cpFormat').value = 'markdown';
   document.getElementById('cpExpires').value = '';
 }
+
+/* ── Search ───────────────────────────────────────────────── */
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(async () => {
+    const q = searchInput.value.trim();
+    activeSearch = q || null;
+    searchBar.classList.toggle('active', !!activeSearch);
+    offset = 0; total = 0;
+    await loadPosts(true);
+  }, 300);
+});
+
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { searchClear.click(); }
+});
+
+searchClear.addEventListener('click', async () => {
+  searchInput.value = '';
+  activeSearch = null;
+  searchBar.classList.remove('active');
+  offset = 0; total = 0;
+  await loadPosts(true);
+  searchInput.focus();
+});
 
 /* ── New tag ──────────────────────────────────────────────── */
 newTagBtn.addEventListener('click', () => {
@@ -868,6 +934,7 @@ async function loadPosts(replace = false) {
   try {
     const params = new URLSearchParams({ limit: LIMIT, offset });
     if (activeTag) params.set('tag', activeTag);
+    if (activeSearch) params.set('search', activeSearch);
     const data = await apiFetch(`/posts?${params}`);
     total = data.total;
     offset += data.items.length;

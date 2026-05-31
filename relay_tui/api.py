@@ -62,10 +62,13 @@ def list_posts(
     tag: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    search: str | None = None,
 ) -> tuple[list[Post], int]:
     params: dict[str, object] = {"limit": limit, "offset": offset}
     if tag is not None:
         params["tag"] = tag
+    if search is not None:
+        params["search"] = search
     resp = requests.get(
         f"{_base()}/posts",
         headers=_headers(),

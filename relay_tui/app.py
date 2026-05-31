@@ -9,7 +9,7 @@ from textual import work
 from . import api
 from .sse import SSESubscriber
 from .theme import ACCENT, BORDER, HEADER_BG, build_textual_theme, palette_name
-from .widgets.modals import ComposeModal, ConfirmModal, EditModal, PostDetailModal, TagConfigModal
+from .widgets.modals import ComposeModal, ConfirmModal, EditModal, PostDetailModal, SearchModal, TagConfigModal
 from .widgets.post_panel import PostPanel
 from .widgets.tag_panel import TagPanel
 
@@ -36,6 +36,7 @@ class RelayTuiApp(App):
         Binding("n", "compose_post", "New post"),
         Binding("e", "edit_post", "Edit"),
         Binding("d", "delete_post", "Delete"),
+        Binding("slash", "search", "Search"),
         Binding("r", "reload", "Refresh"),
         Binding("tab", "focus_next_panel", "Switch panel", show=False),
         Binding("shift+tab", "focus_prev_panel", "Switch panel", show=False),
@@ -55,6 +56,7 @@ class RelayTuiApp(App):
         self.sub_title = palette_name()
 
         self._active_tag: str | None = None
+        self._search: str | None = None
         self._sse = SSESubscriber(
             on_post=self._on_sse_post,
             on_connect=self._on_sse_connect,
@@ -95,7 +97,7 @@ class RelayTuiApp(App):
     @work(thread=True)
     def _reload(self) -> None:
         try:
-            posts, _ = api.list_posts(tag=self._active_tag)
+            posts, _ = api.list_posts(tag=self._active_tag, search=self._search)
             tags = api.list_tags()
             if posts:
                 self._sse.set_last_id(posts[0].id)
@@ -104,7 +106,7 @@ class RelayTuiApp(App):
             self.call_from_thread(self.notify, f"Reload failed: {e}", severity="error")
 
     def _update_data(self, posts: list[api.Post], tags: list[api.Tag]) -> None:
-        self.query_one(PostPanel).set_posts(posts)
+        self.query_one(PostPanel).set_posts(posts, search=self._search)
         self.query_one(TagPanel).set_tags(tags, active=self._active_tag)
 
     @work(thread=True)
@@ -131,6 +133,14 @@ class RelayTuiApp(App):
     async def action_reload(self) -> None:
         self._reload()
         self.notify("Refreshing…", severity="information", timeout=2)
+
+    def action_search(self) -> None:
+        def _on_result(query: str | None) -> None:
+            if query is None:
+                return
+            self._search = query or None
+            self._reload()
+        self.push_screen(SearchModal(current=self._search or ""), callback=_on_result)
 
     def action_compose_post(self) -> None:
         def _on_result(result: dict | None) -> None:

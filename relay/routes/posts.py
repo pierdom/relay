@@ -45,6 +45,7 @@ async def list_posts(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     format: str | None = Query(default=None),
+    search: str | None = Query(default=None),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostListResponse:
     conditions: list[str] = []
@@ -56,6 +57,10 @@ async def list_posts(
     if format:
         conditions.append("format = ?")
         params.append(format)
+    if search:
+        q = f"%{search}%"
+        conditions.append("(title LIKE ? OR content LIKE ? OR source LIKE ?)")
+        params.extend([q, q, q])
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
