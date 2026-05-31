@@ -203,10 +203,10 @@
       100% { border-color: var(--border); box-shadow: none; }
     }
 
-    .post-header { margin-bottom: 10px; }
-    .post-title  { font-size: 13px; font-weight: 600; color: var(--text); display: block; margin-bottom: 6px; }
+    .post-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .post-title  { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    .post-tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+    .post-tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; flex-shrink: 0; }
     .tag-pill {
       font-size: 10px; padding: 2px 7px; border-radius: 3px;
       background: var(--tag-bg); color: var(--accent); cursor: pointer;
@@ -988,15 +988,27 @@ function renderPost(post) {
     ? `<span class="post-expires">expires ${relativeTime(post.expires_at)}</span>`
     : '';
   const masterBadge = post.id === 0 ? `<div class="master-badge">✦ master document</div>` : '';
-  const titleHtml = post.title ? `<div class="post-title">${escHtml(post.title)}</div>` : '';
-  const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
-  const srcHtml   = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
-  const metaRow   = (tagsHtml || srcHtml) ? `<div class="post-tags">${tagsHtml}${srcHtml}</div>` : '';
-  const headerHtml = (titleHtml || metaRow) ? `<div class="post-header">${titleHtml}${metaRow}</div>` : '';
+  const titleHtml  = post.title ? `<span class="post-title">${escHtml(post.title)}</span>` : '';
+  const tagsHtml   = post.tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
+  const srcHtml    = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
+  const tagsRow    = (tagsHtml || srcHtml) ? `<div class="post-tags">${tagsHtml}${srcHtml}</div>` : '';
+  const headerHtml = (titleHtml || tagsRow) ? `<div class="post-header">${titleHtml}${tagsRow}</div>` : '';
+
+  let contentToRender = post.content;
+  let extractedUpdated = null;
+  if (post.format === 'markdown' && post.title) {
+    const esc = post.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    contentToRender = contentToRender.replace(new RegExp(`^#{1,6}\\s+${esc}\\s*\\n+`), '');
+    const m = contentToRender.match(/^\s*Last updated:\s*([^\n]+)\n?/i);
+    if (m) {
+      extractedUpdated = m[1].trim();
+      contentToRender = contentToRender.replace(/^\s*Last updated:\s*[^\n]+\n?/i, '');
+    }
+  }
 
   let bodyHtml;
   if (post.format === 'markdown') {
-    bodyHtml = `<div class="post-body">${DOMPurify.sanitize(marked.parse(post.content))}</div>`;
+    bodyHtml = `<div class="post-body">${DOMPurify.sanitize(marked.parse(contentToRender))}</div>`;
   } else if (post.format === 'html') {
     bodyHtml = `<div class="post-body">${DOMPurify.sanitize(post.content)}</div>`;
   } else if (post.format === 'json') {
@@ -1015,6 +1027,7 @@ function renderPost(post) {
       <div class="post-footer-left">
         <span class="post-id-pill">#${post.id}</span>
         <span class="post-time" title="${timeTitle}">${timeLabel}</span>
+        ${extractedUpdated ? `<span class="post-time">· updated ${escHtml(extractedUpdated)}</span>` : ''}
         ${expiresHtml}
       </div>
       <div class="post-actions">
@@ -1193,7 +1206,7 @@ function closePostModal() {
 }
 
 pmClose.addEventListener('click', closePostModal);
-pmBackdrop.addEventListener('click', closePostModal);
+postModal.addEventListener('click', (e) => { if (!e.target.closest('.pm-inner')) closePostModal(); });
 pmEdit.addEventListener('click', () => {
   const post = _modalPost; if (!post) return;
   closePostModal();
