@@ -1,4 +1,5 @@
 .env
+.mcp.json
 *.db
 *.db-shm
 *.db-wal
