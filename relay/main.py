@@ -70,7 +70,7 @@ async def session_create(request: Request, response: Response) -> dict:
         value=token,
         httponly=True,
         samesite="strict",
-        secure=False,  # nginx terminates TLS externally
+        secure=settings.secure_cookies,
         max_age=86400 * 30,
     )
     return {"ok": True}

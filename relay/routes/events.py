@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 
 import aiosqlite
@@ -23,14 +24,13 @@ _KEEPALIVE_SECONDS = 30
 async def stream_events(
     request: Request,
     tag: str | None = Query(default=None),
-    key: str | None = Query(default=None),
     relay_session: str | None = Cookie(default=None),
 ) -> EventSourceResponse:
     """
     SSE stream. Sends a 'post' event whenever new content is published.
     On reconnect, set the Last-Event-ID header to replay missed posts.
     Optional ?tag= filter to receive only matching content.
-    Auth: relay_session cookie (preferred), Authorization Bearer header, or ?key= query param.
+    Auth: relay_session cookie or Authorization Bearer header.
     """
     from fastapi import HTTPException, status as http_status
 
@@ -39,8 +39,8 @@ async def stream_events(
         authed = True
     if not authed:
         auth_header = request.headers.get("authorization", "")
-        bearer = key or (auth_header[7:] if auth_header.startswith("Bearer ") else "")
-        authed = bearer == settings.api_key
+        bearer = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+        authed = bool(bearer) and hmac.compare_digest(bearer, settings.api_key)
     if not authed:
         raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 

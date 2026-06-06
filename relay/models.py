@@ -91,7 +91,8 @@ class TagRename(BaseModel):
     @field_validator("new_name")
     @classmethod
     def clean(cls, v: str) -> str:
-        v = v.strip().lower()
+        import re
+        v = re.sub(r"[^a-z0-9_-]", "", v.strip().lower())
         if not v:
             raise ValueError("new_name must not be empty")
         return v
