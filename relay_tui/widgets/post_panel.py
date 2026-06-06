@@ -49,7 +49,7 @@ class PostItem(ListItem):
             title = title[:57] + "…"
         tags_markup = (
             "  ".join(
-                f"[bold {ACCENT}]\[{escape(t)}][/]" for t in self.post.tags
+                f"[bold {ACCENT} on {BORDER}] {escape(t)} [/]" for t in self.post.tags
             )
             if self.post.tags
             else ""

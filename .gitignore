@@ -1,5 +1,6 @@
 .env
 .mcp.json
+.claude/
 *.db
 *.db-shm
 *.db-wal
