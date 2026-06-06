@@ -997,8 +997,7 @@ function renderPost(post) {
   let contentToRender = post.content;
   let extractedUpdated = null;
   if (post.format === 'markdown' && post.title) {
-    const esc = post.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    contentToRender = contentToRender.replace(new RegExp(`^#{1,6}\\s+${esc}\\s*\\n+`), '');
+    contentToRender = contentToRender.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '');
     const m = contentToRender.match(/^\s*Last updated:\s*([^\n]+)\n?/i);
     if (m) {
       extractedUpdated = m[1].trim();
@@ -1182,8 +1181,11 @@ function openPostModal(post) {
     pill.addEventListener('click', e => { e.stopPropagation(); closePostModal(); selectTag(pill.dataset.tag); })
   );
 
+  const pmContent = (post.format === 'markdown' && post.title)
+    ? post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '')
+    : post.content;
   if (post.format === 'markdown') {
-    pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(marked.parse(post.content))}</div>`;
+    pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(marked.parse(pmContent))}</div>`;
   } else if (post.format === 'html') {
     pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(post.content)}</div>`;
   } else if (post.format === 'json') {
