@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 
 from fastapi import APIRouter, Depends, status
@@ -43,7 +44,7 @@ async def rename_tag(
     body: TagRename,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> TagListResponse:
-    old = tag.strip().lower()
+    old = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
     new = body.new_name
     if old == new:
         return await list_tags(db)
@@ -67,7 +68,7 @@ async def set_tag_config(
     body: TagConfigCreate,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> TagConfigResponse:
-    clean_tag = tag.strip().lower()
+    clean_tag = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
     await db.execute(
         "INSERT INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)"
         " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours, expires_at = excluded.expires_at",

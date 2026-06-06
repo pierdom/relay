@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     cleanup_interval_minutes: int = 60
     database_path: str = "/data/relay.db"
     relay_palette: str = "default"
+    secure_cookies: bool = True
 
 
 settings = Settings()

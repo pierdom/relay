@@ -41,6 +41,7 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         ]
         tag_likes = [f"%,{tag},%" for tag in configured_tags]
         if settings.default_ttl_hours:
+            ttl_modifier = f"-{settings.default_ttl_hours} hours"
             if tag_likes:
                 exclusion = " OR ".join(["tags LIKE ?"] * len(tag_likes))
                 await db.execute(
@@ -48,33 +49,32 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
                     DELETE FROM posts
                     WHERE id != 0
                       AND expires_at IS NULL
-                      AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
-                                                '-{settings.default_ttl_hours} hours')
+                      AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
                       AND id NOT IN (
                           SELECT id FROM posts WHERE {exclusion}
                       )
                     """,
-                    tag_likes,
+                    [ttl_modifier] + tag_likes,
                 )
             else:
                 await db.execute(
-                    f"""
+                    """
                     DELETE FROM posts
                     WHERE id != 0
                       AND expires_at IS NULL
-                      AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
-                                                '-{settings.default_ttl_hours} hours')
-                    """
+                      AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+                    """,
+                    (ttl_modifier,),
                 )
     elif settings.default_ttl_hours:
         await db.execute(
-            f"""
+            """
             DELETE FROM posts
             WHERE id != 0
               AND expires_at IS NULL
-              AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now',
-                                        '-{settings.default_ttl_hours} hours')
-            """
+              AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+            """,
+            (f"-{settings.default_ttl_hours} hours",),
         )
 
     async with db.execute("SELECT changes()") as cur:
@@ -102,14 +102,14 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
 
         if ttl_hours:
             await db.execute(
-                f"""
+                """
                 DELETE FROM posts
                 WHERE id != 0
                   AND expires_at IS NULL
                   AND tags LIKE ?
-                  AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-{ttl_hours} hours')
+                  AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
                 """,
-                (f"%,{tag},%",),
+                (f"%,{tag},%", f"-{ttl_hours} hours"),
             )
             async with db.execute("SELECT changes()") as cur:
                 row = await cur.fetchone()
