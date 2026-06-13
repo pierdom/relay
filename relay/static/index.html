@@ -501,6 +501,13 @@
       padding: 20px 20px 0; flex-shrink: 0;
     }
     .pm-title { flex: 1; font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.4; }
+    .pm-back {
+      display: none; background: none; border: none;
+      color: var(--muted); cursor: pointer; font-family: inherit;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 0; flex-shrink: 0; transition: color 0.15s;
+    }
+    .pm-back:hover { color: var(--accent); }
     .pm-close {
       background: none; border: none; color: var(--muted); cursor: pointer;
       font-size: 22px; line-height: 1; padding: 0; margin-top: -2px; flex-shrink: 0;
@@ -527,6 +534,8 @@
         from { opacity: 0; transform: translateY(20px); }
         to   { opacity: 1; transform: none; }
       }
+      .pm-back { display: flex; align-items: center; padding: 4px 14px 4px 0; min-height: 44px; }
+      .pm-close { display: none; }
     }
   </style>
 </head>
@@ -611,6 +620,7 @@
   <div class="pm-backdrop" id="pmBackdrop"></div>
   <div class="pm-inner">
     <div class="pm-header">
+      <button class="pm-back" id="pmBack">← back</button>
       <span class="pm-title" id="pmTitle"></span>
       <button class="pm-close" id="pmClose">×</button>
     </div>
@@ -1152,11 +1162,14 @@ function setDot(state) {
 const postModal  = document.getElementById('postModal');
 const pmBackdrop = document.getElementById('pmBackdrop');
 const pmClose    = document.getElementById('pmClose');
+const pmBack     = document.getElementById('pmBack');
 const pmTitle    = document.getElementById('pmTitle');
 const pmMeta     = document.getElementById('pmMeta');
 const pmBody     = document.getElementById('pmBody');
 const pmEdit     = document.getElementById('pmEdit');
 const pmDelete   = document.getElementById('pmDelete');
+const pmInner    = document.querySelector('.pm-inner');
+const pmHeader   = document.querySelector('.pm-header');
 let _modalPost   = null;
 
 function openPostModal(post) {
@@ -1208,7 +1221,25 @@ function closePostModal() {
 }
 
 pmClose.addEventListener('click', closePostModal);
+pmBack.addEventListener('click', closePostModal);
 postModal.addEventListener('click', (e) => { if (!e.target.closest('.pm-inner')) closePostModal(); });
+
+/* Swipe-down-to-dismiss on the modal header (mobile bottom-sheet) */
+let _swipeStartY = 0, _swipeDeltaY = 0;
+pmHeader.addEventListener('touchstart', e => {
+  _swipeStartY = e.touches[0].clientY;
+  _swipeDeltaY = 0;
+  pmInner.style.transition = 'none';
+}, { passive: true });
+pmHeader.addEventListener('touchmove', e => {
+  _swipeDeltaY = e.touches[0].clientY - _swipeStartY;
+  if (_swipeDeltaY > 0) pmInner.style.transform = `translateY(${_swipeDeltaY}px)`;
+}, { passive: true });
+pmHeader.addEventListener('touchend', () => {
+  pmInner.style.transition = '';
+  pmInner.style.transform = '';
+  if (_swipeDeltaY > 72) closePostModal();
+});
 pmEdit.addEventListener('click', () => {
   const post = _modalPost; if (!post) return;
   closePostModal();
