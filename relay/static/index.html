@@ -403,6 +403,8 @@
     /* Touch devices: always show post actions (no hover) */
     @media (hover: none) {
       .post-actions { opacity: 1; }
+      /* Prevent iOS auto-zoom on input focus (triggered when font-size < 16px) */
+      input, textarea, select { font-size: 16px !important; }
     }
 
     @media (max-width: 400px) {
