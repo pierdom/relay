@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
-import secrets
 
 from fastapi import Cookie, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -10,21 +10,18 @@ from .config import settings
 
 _bearer = HTTPBearer(auto_error=False)
 
-_valid_tokens: set[str] = set()
-
 
 def create_session() -> str:
-    token = secrets.token_hex(32)
-    _valid_tokens.add(token)
-    return token
+    return hmac.new(settings.api_key.encode(), b"relay-session", hashlib.sha256).hexdigest()
 
 
 def verify_session(token: str) -> bool:
-    return token in _valid_tokens
+    expected = hmac.new(settings.api_key.encode(), b"relay-session", hashlib.sha256).hexdigest()
+    return hmac.compare_digest(token, expected)
 
 
 def revoke_session(token: str) -> None:
-    _valid_tokens.discard(token)
+    pass  # cookie deletion in the endpoint is sufficient; no server-side state to clear
 
 
 async def require_api_key(
