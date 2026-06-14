@@ -555,10 +555,13 @@
   </button>
   <div class="header-right">
     <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
-    <div class="key-wrap">
-      <input type="password" id="apiKeyInput" placeholder="API key" autocomplete="off">
-      <button class="btn-connect" id="connectBtn">Connect</button>
-    </div>
+    <form class="key-wrap" id="connectForm">
+      <input type="text" id="apiUserInput" autocomplete="username" value="relay"
+             aria-hidden="true" tabindex="-1"
+             style="position:absolute;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none">
+      <input type="password" id="apiKeyInput" placeholder="API key" autocomplete="current-password" name="password">
+      <button class="btn-connect" id="connectBtn" type="submit">Connect</button>
+    </form>
     <div class="connected-bar" id="connectedBar" style="display:none">
       <button class="disconnect-btn" id="disconnectBtn">disconnect</button>
     </div>
@@ -673,7 +676,8 @@ function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.cla
 menuBtn.addEventListener('click', () => sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar());
 sidebarOverlay.addEventListener('click', closeSidebar);
 
-connectBtn.addEventListener('click', async () => {
+document.getElementById('connectForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
   const val = apiKeyInput.value.trim();
   if (!val) return;
   try {
@@ -690,8 +694,6 @@ connectBtn.addEventListener('click', async () => {
     alert('Connection failed: ' + e.message);
   }
 });
-
-apiKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') connectBtn.click(); });
 
 disconnectBtn.addEventListener('click', async () => {
   apiKey = '';
