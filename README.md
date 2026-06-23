@@ -66,14 +66,45 @@ Exposes the full feed API as MCP tools so Claude — or any MCP-capable agent �
 
 | Tool | Description |
 |------|-------------|
-| `publish_post` | Publish a post (content, title, tags, format, source) |
+| `publish_post` | Publish a post (content, title, tags, format, source, expires_at) |
 | `update_post` | Partially update an existing post by ID — only provided fields change |
-| `get_post` | Get a single post by ID |
-| `list_posts` | List posts with optional tag/limit/offset filters |
+| `get_post` | Get a single post by ID (use `id=0` for the master document) |
+| `list_posts` | List posts with optional tag/search/limit/offset filters |
 | `delete_post` | Delete a post by ID |
 | `list_tags` | List all tags with post counts |
+| `set_tag_config` | Set per-tag expiry (`ttl_hours`, `expires_at`) |
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+There are two ways to connect, depending on the client.
+
+**Remote — Streamable HTTP (recommended).** The relay serves an MCP endpoint at
+`/mcp` on the same port as the REST API. Any MCP client that supports the
+Streamable HTTP transport connects directly over the network with the relay
+bearer key — no local checkout, no subprocess. The tools call the relay's
+service layer in-process, so this stays in lockstep with the REST API.
+
+```bash
+claude mcp add --transport http relay https://your-relay-host/mcp \
+  --header "Authorization: Bearer <your-api-key>"
+```
+
+Or in a client config that speaks `streamable-http`:
+
+```json
+{
+  "mcpServers": {
+    "relay": {
+      "type": "streamable-http",
+      "url": "https://your-relay-host/mcp",
+      "headers": { "Authorization": "Bearer <your-api-key>" }
+    }
+  }
+}
+```
+
+**Local — stdio proxy (legacy).** For clients that can't yet speak remote MCP,
+`relay-mcp` runs a stdio server on the client machine that proxies to the relay
+over REST. It needs a checkout of this repo and `uv`. Add to
+`~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -105,6 +136,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | POST | `/tags/{tag}/config` | Set per-tag TTL override |
 | PATCH | `/tags/{tag}` | Rename a tag across all posts |
 | GET | `/events` | SSE stream (`?tag=` filter, `Last-Event-ID` replay) |
+| POST/GET | `/mcp` | Streamable HTTP MCP endpoint (see [MCP server](#mcp-server-claude-desktop--agents)) |
 
 ### Publish
 

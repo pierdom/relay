@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 import aiosqlite
 
+from .. import service
 from ..auth import require_api_key
 from ..database import get_db
-from .. import events
 from ..models import PostCreate, PostListResponse, PostResponse, PostUpdate
 
 router = APIRouter(prefix="/posts", tags=["posts"])
@@ -22,17 +22,7 @@ async def create_post(
     body: PostCreate,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostResponse:
-    tags_str = "," + ",".join(body.tags) + "," if body.tags else ""
-    cursor = await db.execute(
-        "INSERT INTO posts (title, content, format, tags, source, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (body.title, body.content, body.format, tags_str, body.source, body.expires_at),
-    )
-    await db.commit()
-    async with db.execute("SELECT * FROM posts WHERE id = ?", (cursor.lastrowid,)) as cur:
-        row = await cur.fetchone()
-    post = PostResponse.from_row(row)
-    await events.publish(post.model_dump())
-    return post
+    return await service.create_post(db, body)
 
 
 @router.get(
@@ -48,36 +38,8 @@ async def list_posts(
     search: str | None = Query(default=None),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostListResponse:
-    conditions: list[str] = []
-    params: list[str | int] = []
-
-    if tag:
-        conditions.append("tags LIKE ?")
-        params.append(f"%,{tag.strip().lower()},%")
-    if format:
-        conditions.append("format = ?")
-        params.append(format)
-    if search:
-        q = f"%{search}%"
-        conditions.append("(title LIKE ? OR content LIKE ? OR source LIKE ?)")
-        params.extend([q, q, q])
-
-    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
-    async with db.execute(f"SELECT COUNT(*) FROM posts {where}", params) as cur:
-        count_row = await cur.fetchone()
-
-    async with db.execute(
-        f"SELECT * FROM posts {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        params + [limit, offset],
-    ) as cur:
-        rows = await cur.fetchall()
-
-    return PostListResponse(
-        items=[PostResponse.from_row(r) for r in rows],
-        total=count_row[0],
-        limit=limit,
-        offset=offset,
+    return await service.list_posts(
+        db, tag=tag, limit=limit, offset=offset, format=format, search=search
     )
 
 
@@ -90,11 +52,10 @@ async def get_post(
     post_id: int,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostResponse:
-    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
-        row = await cur.fetchone()
-    if row is None:
+    post = await service.get_post(db, post_id)
+    if post is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-    return PostResponse.from_row(row)
+    return post
 
 
 @router.patch(
@@ -107,37 +68,10 @@ async def update_post(
     body: PostUpdate,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostResponse:
-    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
-        row = await cur.fetchone()
-    if row is None:
+    try:
+        return await service.update_post(db, post_id, body)
+    except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-
-    updates: dict[str, object] = {}
-    if "title" in body.model_fields_set:
-        updates["title"] = body.title
-    if "content" in body.model_fields_set:
-        updates["content"] = body.content
-    if "format" in body.model_fields_set:
-        updates["format"] = body.format
-    if "tags" in body.model_fields_set:
-        updates["tags"] = "," + ",".join(body.tags) + "," if body.tags else ""
-    if "source" in body.model_fields_set:
-        updates["source"] = body.source
-    if "expires_at" in body.model_fields_set:
-        updates["expires_at"] = body.expires_at
-
-    if updates:
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        set_clause += ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
-        await db.execute(
-            f"UPDATE posts SET {set_clause} WHERE id = ?",
-            list(updates.values()) + [post_id],
-        )
-        await db.commit()
-
-    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
-        row = await cur.fetchone()
-    return PostResponse.from_row(row)
 
 
 @router.delete(
@@ -149,11 +83,12 @@ async def delete_post(
     post_id: int,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> None:
-    if post_id == 0:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Master document (id=0) cannot be deleted")
-    async with db.execute("SELECT id FROM posts WHERE id = ?", (post_id,)) as cur:
-        row = await cur.fetchone()
-    if row is None:
+    try:
+        await service.delete_post(db, post_id)
+    except service.ProtectedPost:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Master document (id=0) cannot be deleted",
+        )
+    except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-    await db.execute("DELETE FROM posts WHERE id = ?", (post_id,))
-    await db.commit()

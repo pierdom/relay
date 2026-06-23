@@ -36,6 +36,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | POST | /tags/{tag}/config | Set per-tag expiry (`ttl_hours`, `expires_at`, or both) |
 | PATCH | /tags/{tag} | Rename a tag across all posts and tag_config |
 | GET | /events | SSE stream of new posts (`?tag=` filter) |
+| POST/GET | /mcp | Streamable HTTP MCP endpoint (in-process MCP server; bearer auth) |
 
 ## SSE / real-time
 
@@ -63,23 +64,30 @@ Events have type `post`; a `keepalive` ping fires every 30 s to hold the connect
 
 ```
 relay/
-├── main.py        # FastAPI app + lifespan (init DB, start cleanup loop)
+├── main.py        # FastAPI app + lifespan (init DB, cleanup loop, MCP session); mounts /mcp
 ├── config.py      # pydantic-settings Settings (reads .env)
 ├── database.py    # aiosqlite connection, schema, get_db dependency
 ├── models.py      # Pydantic request/response models
 ├── auth.py        # require_api_key dependency (all endpoints)
+├── service.py     # Shared post/tag logic — used by both routes and the in-process MCP server
+├── mcp_server.py  # In-process FastMCP server (Streamable HTTP at /mcp), bearer-gated
 ├── events.py      # In-memory SSE broadcast hub
 ├── cleanup.py     # Background TTL cleanup loop (asyncio)
 └── routes/
-    ├── posts.py   # POST/GET/DELETE /posts
-    ├── tags.py    # GET /tags, POST /tags/{tag}/config
+    ├── posts.py   # POST/GET/DELETE /posts (thin — delegate to service)
+    ├── tags.py    # GET /tags, POST /tags/{tag}/config (thin — delegate to service)
     └── events.py  # GET /events (SSE)
 ```
 
 ```
 relay_mcp/
-└── server.py      # MCP server for Claude Desktop (publish_post, update_post, list_posts, get_post, delete_post, list_tags)
+└── server.py      # Legacy stdio MCP proxy — runs on the client machine, talks to a (possibly remote) relay over REST
 ```
+
+Two MCP surfaces exist:
+
+- **`relay/mcp_server.py`** — the in-process server, served over Streamable HTTP at `/mcp` by the main app. Tools call `relay.service` directly (no network hop, no schema duplication). This is the remote-capable, recommended path; any MCP client connects with the bearer key. See README for `claude mcp add --transport http`.
+- **`relay_mcp/server.py`** — the legacy stdio proxy. Still useful for clients that can't speak remote MCP; it spawns locally and proxies to the relay's REST API over `RELAY_BASE_URL`. Kept for transition; prefer `/mcp`.
 
 ```
 relay/static/
