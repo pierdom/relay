@@ -166,6 +166,8 @@ uv run relay-tui
 
 Set `RELAY_PALETTE=<name>` to pick a colour theme (same palettes as tuidash). Available: `default` (amber), `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`.
 
+Set `RELAY_TRANSPARENT=1` to let the terminal's own background (transparency / background image) show through the base canvas (Screen, header, footer, scrollbars). The single-post detail popup follows the same transparency; the editing modals (compose/edit/confirm/etc.) stay opaque for readability. Same mechanism as tuidash: the canvas uses `ansi_default` (SGR 49) and a custom `ANSIToTruecolor` line filter preserves it instead of baking in a solid colour.
+
 **Layout:** two-panel split — TOPICS sidebar on the left, FEED on the right.
 
 | Key | Action |

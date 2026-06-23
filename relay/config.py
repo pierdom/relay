@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     cleanup_interval_minutes: int = 60
     database_path: str = "/data/relay.db"
     relay_palette: str = "default"
+    relay_transparent: bool = False
     secure_cookies: bool = True
 
 
