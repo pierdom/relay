@@ -203,10 +203,11 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | **required** | Bearer token for all endpoints |
-| `DEFAULT_TTL_HOURS` | `72` | Global post expiry window |
+| `DEFAULT_TTL_HOURS` | `0` | Global post expiry window; `0` disables expiry (per-tag TTLs still apply) |
 | `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are removed |
 | `DATABASE_PATH` | `/data/relay.db` | SQLite file path |
-| `RELAY_BASE_URL` | `http://localhost:8000` | Base URL used by the MCP server |
+| `RELAY_BASE_URL` | `http://localhost:8000` | Base URL used by the stdio MCP proxy |
+| `SECURE_COOKIES` | `true` | `Secure` flag on the browser-UI session cookie; set `false` to use the UI over plain HTTP |
 | `RELAY_PALETTE` | `default` | TUI colour theme |
 | `RELAY_TRANSPARENT` | `0` | TUI: show terminal background through the canvas |
 
@@ -215,6 +216,6 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 - **Python 3.13** + **FastAPI** + **aiosqlite** (SQLite)
 - **SSE** via [sse-starlette](https://github.com/sysid/sse-starlette)
 - **Textual** for the terminal UI
-- **MCP** for Claude Desktop / agent integration
+- **MCP** (Streamable HTTP at `/mcp` + stdio proxy) for agent integration
 - **uv** for dependency management
 - **Docker** + named volume for persistence

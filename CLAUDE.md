@@ -55,10 +55,11 @@ Events have type `post`; a `keepalive` ping fires every 30 s to hold the connect
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | required | Bearer token for all endpoints |
-| `RELAY_BASE_URL` | `http://localhost:8000` | Relay base URL used by the MCP server |
+| `RELAY_BASE_URL` | `http://localhost:8000` | Relay base URL used by the stdio MCP proxy |
 | `DEFAULT_TTL_HOURS` | 0 | Global post expiry window; `0` disables expiry (per-tag TTLs still apply) |
 | `CLEANUP_INTERVAL_MINUTES` | 60 | How often the cleanup loop runs |
 | `DATABASE_PATH` | /data/relay.db | SQLite file path |
+| `SECURE_COOKIES` | true | `Secure` flag on the browser-UI session cookie; set `false` to use the UI over plain HTTP |
 
 ## Project layout
 
@@ -131,21 +132,36 @@ Update it via MCP: `update_post(id=0, content="...")`.
 - Post `id=0` (master document) is exempt from cleanup regardless of TTL settings.
 - Errors are logged, never crash the service.
 
-## MCP server (Claude Desktop)
+## MCP server
 
-`relay_mcp/server.py` exposes tools so Claude Desktop can interact with the feed directly. The MCP server runs locally inside Claude Desktop and makes HTTPS calls to wherever the relay is hosted.
+Relay speaks MCP through two surfaces that offer identical tools, server
+`instructions`, and the `relay://master-document` resource (the master document,
+post 0, as `text/markdown`). See [Project layout](#project-layout) for how they
+differ internally.
 
 | Tool | Description |
 |------|-------------|
 | `publish_post` | Publish a post (content, title, tags, format, source, expires_at) |
 | `update_post` | Partially update an existing post by ID (only provided fields change, including expires_at) |
-| `list_posts` | List posts with optional tag filter |
-| `get_post` | Get a single post by ID |
-| `delete_post` | Delete a post by ID |
+| `list_posts` | List posts (tag/search/limit/offset; the stdio proxy omits search) |
+| `get_post` | Get a single post by ID (use `id=0` for the master document) |
+| `delete_post` | Delete a post by ID (id=0 is blocked) |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (ttl_hours, expires_at, or both) |
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**Remote — Streamable HTTP (recommended).** Served in-process at `/mcp` by the
+main app; tools call `relay.service` directly. Any MCP client connects with the
+bearer key, no checkout:
+
+```bash
+claude mcp add --transport http relay https://relay.geon.im/mcp \
+  --header "Authorization: Bearer <your-api-key>"
+```
+
+**Local — stdio proxy (legacy).** `relay-mcp` runs `relay_mcp/server.py` on the
+client machine and proxies to the relay over REST. Needs a checkout of this repo
+and `uv`; used by clients that can't speak remote MCP (e.g. Claude Desktop). Add
+to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -162,7 +178,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Replace `/path/to/relay` with the absolute path to this repo on your Mac.
+Replace `/path/to/relay` with the absolute path to this repo on the client
+machine. Because the proxy runs the local checkout, `git pull` there to pick up
+changes, then fully restart the client.
 
 ## Terminal UI (TUI)
 
