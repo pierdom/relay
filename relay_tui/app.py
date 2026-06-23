@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import sys
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -8,28 +11,83 @@ from textual import work
 
 from . import api
 from .sse import SSESubscriber
-from .theme import ACCENT, BORDER, HEADER_BG, build_textual_theme, palette_name
+from .theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG, TRANSPARENT, build_textual_theme, palette_name
 from .widgets.modals import ComposeModal, ConfirmModal, EditModal, PostDetailModal, SearchModal, TagConfigModal
 from .widgets.post_panel import PostPanel
 from .widgets.tag_panel import TagPanel
 
 
+# ── terminal-transparency filter ──────────────────────────────────────────────
+# Textual renders in truecolor, and its built-in ANSIToTruecolor line filter
+# rewrites any "terminal default" background into a concrete RGB colour pulled
+# from the ANSI terminal theme — which makes the canvas opaque and defeats the
+# `ansi_default` backgrounds set when RELAY_TRANSPARENT is on.  This subclass
+# leaves a default *background* untouched (so it is emitted as SGR 49 and the
+# terminal's own background / transparency shows through) while still converting
+# ANSI foreground colours to truecolor like the stock filter.
+if TRANSPARENT:
+    from functools import lru_cache
+
+    from rich.color import Color as _RichColor, ColorType as _ColorType
+    from rich.style import Style as _RichStyle
+    from textual.filter import ANSIToTruecolor as _ANSIToTruecolor, NO_DIM, dim_color
+
+    class _TransparentANSIToTruecolor(_ANSIToTruecolor):
+        @lru_cache(1024)
+        def truecolor_style(self, style: "_RichStyle", background: "_RichColor") -> "_RichStyle":
+            terminal_theme = self._terminal_theme
+            changed = False
+
+            color = style.color
+            if color is not None and color.triplet is None:
+                color = _RichColor.from_triplet(
+                    color.get_truecolor(terminal_theme, foreground=True)
+                )
+                changed = True
+
+            bgcolor = style.bgcolor
+            keep_default_bg = bgcolor is not None and bgcolor.type == _ColorType.DEFAULT
+            if bgcolor is not None and bgcolor.triplet is None and not keep_default_bg:
+                bgcolor = _RichColor.from_triplet(
+                    bgcolor.get_truecolor(terminal_theme, foreground=False)
+                )
+                changed = True
+
+            if style.dim and color is not None:
+                if bgcolor is not None and bgcolor.triplet is not None:
+                    dim_bg = bgcolor
+                elif background.triplet is not None:
+                    dim_bg = background
+                else:
+                    dim_bg = _RichColor.from_triplet(
+                        _RichColor.default().get_truecolor(terminal_theme, foreground=False)
+                    )
+                color = dim_color(dim_bg, color)
+                style += NO_DIM
+                changed = True
+
+            return style + _RichStyle.from_color(color, bgcolor) if changed else style
+
+
 class RelayTuiApp(App):
     TITLE = "relay"
     CSS = f"""
-    Screen {{ background: $background; layers: base overlay; }}
+    Screen {{ background: {SCREEN_BG}; layers: base overlay; }}
     Widget {{
-        scrollbar-background: {HEADER_BG};
+        scrollbar-background: {SCREEN_BG};
+        scrollbar-background-hover: {SCREEN_BG};
+        scrollbar-background-active: {SCREEN_BG};
         scrollbar-color: {BORDER};
         scrollbar-color-hover: {ACCENT};
-        scrollbar-corner-color: {HEADER_BG};
+        scrollbar-corner-color: {SCREEN_BG};
     }}
+    Header {{ background: {SCREEN_BG}; }}
     #main {{ height: 1fr; layout: horizontal; }}
     TagPanel {{ width: 26; border-right: solid $accent; }}
     PostPanel {{ width: 1fr; }}
-    Footer {{ background: {HEADER_BG}; }}
+    Footer {{ background: {SCREEN_BG}; }}
     FooterKey .footer-key--key {{ background: {BORDER}; color: {ACCENT}; }}
-    FooterKey .footer-key--description {{ color: {ACCENT}; background: {HEADER_BG}; }}
+    FooterKey .footer-key--description {{ color: {ACCENT}; background: {SCREEN_BG}; }}
     """
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -41,6 +99,36 @@ class RelayTuiApp(App):
         Binding("tab", "focus_next_panel", "Switch panel", show=False),
         Binding("shift+tab", "focus_prev_panel", "Switch panel", show=False),
     ]
+
+    def _refresh_truecolor_filter(self, theme) -> None:
+        # Textual reinstalls a stock ANSIToTruecolor filter whenever the theme
+        # changes.  In transparent mode, swap in our subclass that preserves the
+        # terminal-default background instead.
+        if not TRANSPARENT or self.native_ansi_color:
+            return super()._refresh_truecolor_filter(theme)
+        for index, flt in enumerate(self._filters):
+            if isinstance(flt, _ANSIToTruecolor):
+                self._filters[index] = _TransparentANSIToTruecolor(theme, enabled=True)
+                return
+
+    async def _shutdown(self) -> None:
+        # Custom background colours (and the ansi_default canvas in transparent
+        # mode) can leave stray SGR state on the terminal.  Close the driver so
+        # its queued escape sequences flush, then write an explicit reset +
+        # show-cursor + alt-screen-exit so the terminal is clean before exit.
+        if TRANSPARENT:
+            if self._driver is not None:
+                try:
+                    self._driver.close()
+                except Exception:
+                    pass
+            try:
+                sys.stdout.write("\033[?25h\033[?1049l\033[0m")
+                sys.stdout.flush()
+            except Exception:
+                pass
+            os._exit(0)
+        await super()._shutdown()
 
     def compose(self) -> ComposeResult:
         yield Header()

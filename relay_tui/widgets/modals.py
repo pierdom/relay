@@ -17,7 +17,7 @@ from textual.widgets import (
 from textual.containers import Horizontal, Vertical, VerticalScroll
 
 from .. import api
-from ..theme import ACCENT, BORDER, HEADER_BG
+from ..theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG
 from .post_panel import _time_ago
 
 
@@ -34,11 +34,12 @@ class PostDetailModal(ModalScreen[None]):
     DEFAULT_CSS = f"""
     PostDetailModal {{
         align: center middle;
+        background: {SCREEN_BG};
     }}
     PostDetailModal > Vertical {{
         width: 92%;
         height: 92%;
-        background: {HEADER_BG};
+        background: {SCREEN_BG};
         border: solid {ACCENT};
         padding: 1 2;
     }}
