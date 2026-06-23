@@ -12,6 +12,7 @@ from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
 from .config import settings
 from .database import init_db
+from .mcp_server import mcp, mcp_asgi_app
 from .routes.events import router as events_router
 from .routes.posts import router as posts_router
 from .routes.tags import router as tags_router
@@ -26,7 +27,11 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     await init_db()
     task = asyncio.create_task(cleanup_loop())
-    yield
+    # The Streamable HTTP MCP app needs its session manager running for the
+    # lifetime of the server; mounted sub-apps don't get their lifespan run
+    # automatically, so we drive it from here.
+    async with mcp.session_manager.run():
+        yield
     task.cancel()
     try:
         await task
@@ -90,3 +95,9 @@ async def session_delete(
 app.include_router(posts_router)
 app.include_router(tags_router)
 app.include_router(events_router)
+
+# Remote MCP endpoint (Streamable HTTP). Any MCP client can connect to /mcp
+# with the relay bearer key; shares relay.service with the REST routes. The
+# MCP route is at /mcp so the path matches exactly (no trailing-slash redirect);
+# mounted last so every declared route above takes priority over this catch-all.
+app.mount("/", mcp_asgi_app())

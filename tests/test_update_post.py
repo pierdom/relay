@@ -21,11 +21,13 @@ _SCHEMA = """
         tags       TEXT NOT NULL DEFAULT '',
         source     TEXT,
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-        updated_at TEXT
+        updated_at TEXT,
+        expires_at TEXT
     );
     CREATE TABLE IF NOT EXISTS tag_config (
         tag       TEXT PRIMARY KEY,
-        ttl_hours INTEGER NOT NULL
+        ttl_hours INTEGER NOT NULL DEFAULT 0,
+        expires_at TEXT
     );
 """
 
