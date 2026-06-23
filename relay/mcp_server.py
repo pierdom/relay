@@ -42,6 +42,21 @@ async def _db():
         yield db
 
 
+@mcp.resource(
+    "relay://master-document",
+    name="Master Document",
+    description=(
+        "The relay master document (post id=0): index, tag taxonomy, naming "
+        "conventions, and house rules. Read before publishing."
+    ),
+    mime_type="text/markdown",
+)
+async def master_document() -> str:
+    async with _db() as db:
+        post = await service.get_post(db, 0)
+    return post.content if post is not None else "Master document not found."
+
+
 @mcp.tool(description="Publish a post to the relay feed. Subscribers receive it in real time.")
 async def publish_post(
     content: str,
