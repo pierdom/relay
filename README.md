@@ -58,7 +58,7 @@ The container exposes `GET /health` (no auth) and reports its status via Docker 
 uv run relay-tui
 ```
 
-Two-panel split: TOPICS sidebar + FEED list. Keyboard shortcuts: `n` new, `e` edit, `d` delete, `r` refresh, `Enter` view full post, `Tab` switch panels, `q` quit. Set `RELAY_PALETTE=<name>` to pick a colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`).
+Two-panel split: TOPICS sidebar + FEED list. Keyboard shortcuts: `n` new, `e` edit, `d` delete, `r` refresh, `Enter` view full post, `Tab` switch panels, `q` quit. Set `RELAY_PALETTE=<name>` to pick a colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`). Set `RELAY_TRANSPARENT=1` to let the terminal's own background show through the base canvas (Screen, header, footer, scrollbars, single-post detail); editing modals stay opaque.
 
 ### MCP server (Claude Desktop / agents)
 
@@ -172,6 +172,7 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `DATABASE_PATH` | `/data/relay.db` | SQLite file path |
 | `RELAY_BASE_URL` | `http://localhost:8000` | Base URL used by the MCP server |
 | `RELAY_PALETTE` | `default` | TUI colour theme |
+| `RELAY_TRANSPARENT` | `0` | TUI: show terminal background through the canvas |
 
 ## Stack
 
