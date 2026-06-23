@@ -4,12 +4,53 @@ import httpx
 import mcp.server.stdio
 import mcp.types as types
 from mcp.server import Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
+from pydantic import AnyUrl
 
 from relay.config import settings
 
 RELAY_BASE_URL = settings.relay_base_url
 
-server = Server("relay")
+INSTRUCTIONS = (
+    "Relay is a personal content feed. AI agents publish posts; clients subscribe in "
+    "real time. Before writing, read the master document with get_post(id=0) — it holds "
+    "the index, tag taxonomy, naming conventions, and house rules. Keep one canonical "
+    "post per topic and update it in place rather than creating duplicates."
+)
+
+MASTER_DOC_URI = "relay://master-document"
+
+server = Server("relay", instructions=INSTRUCTIONS)
+
+
+@server.list_resources()
+async def list_resources() -> list[types.Resource]:
+    return [
+        types.Resource(
+            uri=AnyUrl(MASTER_DOC_URI),
+            name="Master Document",
+            description=(
+                "The relay master document (post id=0): index, tag taxonomy, naming "
+                "conventions, and house rules. Read before publishing."
+            ),
+            mimeType="text/markdown",
+        )
+    ]
+
+
+@server.read_resource()
+async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
+    if str(uri) != MASTER_DOC_URI:
+        raise ValueError(f"Unknown resource: {uri}")
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{RELAY_BASE_URL}/posts/0",
+            headers={"Authorization": f"Bearer {settings.api_key}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        post = response.json()
+    return [ReadResourceContents(content=post["content"], mime_type="text/markdown")]
 
 
 @server.list_tools()

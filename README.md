@@ -74,6 +74,10 @@ Exposes the full feed API as MCP tools so Claude — or any MCP-capable agent �
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours`, `expires_at`) |
 
+Both connection methods below also ship server `instructions` and expose the
+master document (post 0) as the MCP resource `relay://master-document`
+(`text/markdown`), so clients can attach it to context directly.
+
 There are two ways to connect, depending on the client.
 
 **Remote — Streamable HTTP (recommended).** The relay serves an MCP endpoint at

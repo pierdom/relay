@@ -87,7 +87,7 @@ relay_mcp/
 Two MCP surfaces exist:
 
 - **`relay/mcp_server.py`** — the in-process server, served over Streamable HTTP at `/mcp` by the main app. Tools call `relay.service` directly (no network hop, no schema duplication). This is the remote-capable, recommended path; any MCP client connects with the bearer key. See README for `claude mcp add --transport http`. Also exposes the master document (post 0) as the MCP resource `relay://master-document` (text/markdown) so clients can attach it to context structurally, and ships server `instructions` pointing at it.
-- **`relay_mcp/server.py`** — the legacy stdio proxy. Still useful for clients that can't speak remote MCP; it spawns locally and proxies to the relay's REST API over `RELAY_BASE_URL`. Kept for transition; prefer `/mcp`.
+- **`relay_mcp/server.py`** — the legacy stdio proxy. Still useful for clients that can't speak remote MCP (e.g. Claude Desktop); it spawns locally and proxies to the relay's REST API over `RELAY_BASE_URL`. At full parity with the in-process server: same seven tools, the same server `instructions`, and the `relay://master-document` resource (read via REST `GET /posts/0`). Kept for transition; prefer `/mcp`.
 
 ```
 relay/static/
