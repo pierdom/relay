@@ -38,8 +38,14 @@ class TagPanel(Widget):
             super().__init__()
             self.tag_name = tag_name
 
+    class RenameTag(Message):
+        def __init__(self, tag_name: str) -> None:
+            super().__init__()
+            self.tag_name = tag_name
+
     BINDINGS = [
         Binding("c", "configure_tag", "Config"),
+        Binding("R", "rename_tag", "Rename"),
     ]
 
     DEFAULT_CSS = """
@@ -81,3 +87,9 @@ class TagPanel(Widget):
         highlighted = lv.highlighted_child
         if isinstance(highlighted, TagItem) and highlighted.tag_name:
             self.post_message(self.ConfigureTag(highlighted.tag_name))
+
+    def action_rename_tag(self) -> None:
+        lv = self.query_one("#tag-listview", ListView)
+        highlighted = lv.highlighted_child
+        if isinstance(highlighted, TagItem) and highlighted.tag_name:
+            self.post_message(self.RenameTag(highlighted.tag_name))

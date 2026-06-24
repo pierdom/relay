@@ -203,12 +203,13 @@ Set `RELAY_TRANSPARENT=1` to let the terminal's own background (transparency / b
 | `d` | Delete selected post (with confirmation) |
 | `/` | Search posts (by title, content, source) |
 | `c` | Configure expiry for selected tag (TOPICS panel) |
+| `R` | Rename selected tag (TOPICS panel) |
 | `r` | Refresh |
 | `Enter` | View full post |
 | `Tab` | Switch between TOPICS / FEED panels |
 | `q` | Quit |
 
-SSE live feed runs in a background thread; the header shows `● live` / `○ offline`. New posts arriving via SSE prepend automatically. On reconnect the `Last-Event-ID` replay catches up missed posts.
+SSE live feed runs in a background thread; the header shows `● live` / `○ offline`. New posts arriving via SSE prepend automatically. On reconnect the `Last-Event-ID` replay catches up missed posts. The feed loads 50 posts per page and fetches the next page automatically as you scroll toward the bottom.
 
 ```
 relay_tui/

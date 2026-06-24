@@ -21,6 +21,24 @@ from ..theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG
 from .post_panel import _time_ago, _time_until
 
 
+# Map a post format to a TextArea syntax-highlighting language (None = plain).
+_FORMAT_LANGUAGE = {
+    "markdown": "markdown",
+    "html": "html",
+    "json": "json",
+    "text": None,
+}
+
+
+def _apply_format_language(text_area: TextArea, fmt: object) -> None:
+    """Set the TextArea language for *fmt*, tolerating unavailable grammars."""
+    language = _FORMAT_LANGUAGE.get(str(fmt))
+    try:
+        text_area.language = language
+    except Exception:
+        text_area.language = None
+
+
 # ── PostDetailModal ───────────────────────────────────────────────────────────
 
 
@@ -182,6 +200,7 @@ class ComposeModal(ModalScreen[dict | None]):
             yield Label("New Post", classes="modal-title")
             yield Input(placeholder="Title (optional)", id="title-input")
             yield Input(placeholder="Tags (comma-separated)", id="tags-input")
+            yield Input(placeholder="Source (optional)", id="source-input")
             yield Select(
                 options=[
                     ("Markdown", "markdown"),
@@ -212,6 +231,7 @@ class ComposeModal(ModalScreen[dict | None]):
             self.app.notify("Content cannot be empty", severity="warning")
             return
         expires_val = self.query_one("#expires-input", Input).value.strip() or None
+        source = self.query_one("#source-input", Input).value.strip() or None
         self.dismiss(
             {
                 "title": title,
@@ -219,6 +239,7 @@ class ComposeModal(ModalScreen[dict | None]):
                 "format": fmt,
                 "content": content,
                 "expires_at": expires_val,
+                "source": source,
             }
         )
 
@@ -227,6 +248,10 @@ class ComposeModal(ModalScreen[dict | None]):
             self.action_cancel()
         elif event.button.id == "submit-btn":
             self.action_submit()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "fmt-select":
+            _apply_format_language(self.query_one("#content-input", TextArea), event.value)
 
 
 # ── EditModal ─────────────────────────────────────────────────────────────────
@@ -299,6 +324,11 @@ class EditModal(ModalScreen[dict | None]):
                 placeholder="Tags (comma-separated)",
                 id="tags-input",
             )
+            yield Input(
+                value=post.source or "",
+                placeholder="Source (optional)",
+                id="source-input",
+            )
             yield Select(
                 options=[
                     ("Markdown", "markdown"),
@@ -309,7 +339,7 @@ class EditModal(ModalScreen[dict | None]):
                 value=post.format,
                 id="fmt-select",
             )
-            yield TextArea(post.content, id="content-input", language="markdown")
+            yield TextArea(post.content, id="content-input")
             yield Input(
                 value=post.expires_at or "",
                 placeholder="Expires at (ISO, optional)",
@@ -318,6 +348,15 @@ class EditModal(ModalScreen[dict | None]):
             with Horizontal(classes="modal-actions"):
                 yield Button("Cancel", id="cancel-btn", variant="default")
                 yield Button("Save", id="submit-btn", variant="primary")
+
+    def on_mount(self) -> None:
+        _apply_format_language(
+            self.query_one("#content-input", TextArea), self._post.format
+        )
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "fmt-select":
+            _apply_format_language(self.query_one("#content-input", TextArea), event.value)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -333,6 +372,7 @@ class EditModal(ModalScreen[dict | None]):
             self.app.notify("Content cannot be empty", severity="warning")
             return
         expires_val = self.query_one("#expires-input", Input).value.strip() or None
+        source = self.query_one("#source-input", Input).value.strip() or None
         self.dismiss(
             {
                 "title": title,
@@ -340,6 +380,7 @@ class EditModal(ModalScreen[dict | None]):
                 "format": fmt,
                 "content": content,
                 "expires_at": expires_val,
+                "source": source,
             }
         )
 
@@ -358,7 +399,6 @@ class ConfirmModal(ModalScreen[bool]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
-        Binding("enter", "confirm", "Confirm"),
     ]
 
     DEFAULT_CSS = f"""
@@ -396,9 +436,6 @@ class ConfirmModal(ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
-
-    def action_confirm(self) -> None:
-        self.dismiss(True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel-btn":
@@ -457,18 +494,27 @@ class RenameTagModal(ModalScreen[str | None]):
                 yield Button("Cancel", id="cancel-btn", variant="default")
                 yield Button("Rename", id="rename-btn", variant="primary")
 
+    def on_mount(self) -> None:
+        self.query_one("#new-name", Input).focus()
+
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def _submit(self) -> None:
+        new_name = self.query_one("#new-name", Input).value.strip()
+        if new_name:
+            self.dismiss(new_name)
+        else:
+            self.app.notify("Tag name cannot be empty", severity="warning")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel-btn":
             self.dismiss(None)
         elif event.button.id == "rename-btn":
-            new_name = self.query_one("#new-name", Input).value.strip()
-            if new_name:
-                self.dismiss(new_name)
-            else:
-                self.app.notify("Tag name cannot be empty", severity="warning")
+            self._submit()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._submit()
 
 
 # ── TagConfigModal ────────────────────────────────────────────────────────────
