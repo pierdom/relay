@@ -12,6 +12,16 @@ from .. import api
 from ..theme import ACCENT, BORDER
 
 
+def _fmt_span(seconds: int) -> str:
+    if seconds < 60:
+        return "<1m"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
+
+
 def _time_ago(iso: str) -> str:
     try:
         dt = datetime.fromisoformat(iso)
@@ -20,11 +30,23 @@ def _time_ago(iso: str) -> str:
         s = int((datetime.now(timezone.utc) - dt).total_seconds())
         if s < 60:
             return "just now"
-        if s < 3600:
-            return f"{s // 60}m ago"
-        if s < 86400:
-            return f"{s // 3600}h ago"
-        return f"{s // 86400}d ago"
+        return f"{_fmt_span(s)} ago"
+    except Exception:
+        return iso[:10]
+
+
+def _time_until(iso: str) -> str:
+    """Human span for a (usually future) timestamp, e.g. ``in 3d`` / ``2h ago``."""
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        s = int((dt - datetime.now(timezone.utc)).total_seconds())
+        if s < 0:
+            return f"{_fmt_span(-s)} ago"
+        if s < 60:
+            return "now"
+        return f"in {_fmt_span(s)}"
     except Exception:
         return iso[:10]
 
@@ -58,7 +80,7 @@ class PostItem(ListItem):
         if self.post.updated_at:
             meta_parts.append(f"edited {_time_ago(self.post.updated_at)}")
         if self.post.source:
-            meta_parts.append(self.post.source[:40])
+            meta_parts.append(escape(self.post.source[:40]))
         id_badge = f"[on {BORDER}] #{self.post.id} [/on {BORDER}]"
         master_prefix = f"[bold {ACCENT}]✦ MASTER  [/]" if is_master else ""
         yield Label(
@@ -109,6 +131,12 @@ class PostPanel(Widget):
 
     def prepend_post(self, post: api.Post) -> None:
         lv = self.query_one("#post-listview", ListView)
+        # Skip if already present: the server echoes published posts back over
+        # SSE, so a post created in this client arrives both optimistically and
+        # via the stream (also guards against reconnect replay overlap).
+        for child in lv.children:
+            if isinstance(child, PostItem) and child.post.id == post.id:
+                return
         item = PostItem(post)
         if lv.children:
             lv.mount(item, before=lv.children[0])

@@ -18,7 +18,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 
 from .. import api
 from ..theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG
-from .post_panel import _time_ago
+from .post_panel import _time_ago, _time_until
 
 
 # ── PostDetailModal ───────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ class PostDetailModal(ModalScreen[None]):
         if post.source:
             meta_parts.append(post.source)
         if post.expires_at:
-            meta_parts.append(f"expires {_time_ago(post.expires_at)}")
+            meta_parts.append(f"expires {_time_until(post.expires_at)}")
         meta_text = "  •  ".join(meta_parts)
 
         is_master = post.id == 0
