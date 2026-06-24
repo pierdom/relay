@@ -99,6 +99,9 @@ class PostPanel(Widget):
             super().__init__()
             self.post = post
 
+    class LoadMore(Message):
+        """Posted when the highlight nears the end of the loaded feed."""
+
     DEFAULT_CSS = """
     PostPanel ListView { background: transparent; border: none; height: 1fr; }
     PostPanel ListView:focus { border: none; }
@@ -143,6 +146,15 @@ class PostPanel(Widget):
         else:
             lv.mount(item)
 
+    def append_posts(self, posts: list[api.Post]) -> None:
+        lv = self.query_one("#post-listview", ListView)
+        existing = {
+            c.post.id for c in lv.children if isinstance(c, PostItem)
+        }
+        for p in posts:
+            if p.id not in existing:
+                lv.mount(PostItem(p))
+
     def remove_post(self, post_id: int) -> None:
         for item in list(self.query_one(ListView).children):
             if isinstance(item, PostItem) and item.post.id == post_id:
@@ -171,3 +183,8 @@ class PostPanel(Widget):
         event.stop()
         if isinstance(event.item, PostItem):
             self.post_message(self.ViewPost(event.item.post))
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        lv = event.list_view
+        if lv.index is not None and lv.index >= len(lv.children) - 5:
+            self.post_message(self.LoadMore())

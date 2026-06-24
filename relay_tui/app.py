@@ -12,7 +12,15 @@ from textual import work
 from . import api
 from .sse import SSESubscriber
 from .theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG, TRANSPARENT, build_textual_theme, palette_name
-from .widgets.modals import ComposeModal, ConfirmModal, EditModal, PostDetailModal, SearchModal, TagConfigModal
+from .widgets.modals import (
+    ComposeModal,
+    ConfirmModal,
+    EditModal,
+    PostDetailModal,
+    RenameTagModal,
+    SearchModal,
+    TagConfigModal,
+)
 from .widgets.post_panel import PostPanel
 from .widgets.tag_panel import TagPanel
 
@@ -145,6 +153,10 @@ class RelayTuiApp(App):
 
         self._active_tag: str | None = None
         self._search: str | None = None
+        self._page_size = 50
+        self._offset = 0
+        self._total = 0
+        self._loading_more = False
         self._sse = SSESubscriber(
             on_post=self._on_sse_post,
             on_connect=self._on_sse_connect,
@@ -179,23 +191,62 @@ class RelayTuiApp(App):
         try:
             if self._active_tag is None or self._active_tag in post.tags:
                 self.query_one(PostPanel).prepend_post(post)
+            # A streamed post may carry a brand-new tag or bump a count, so
+            # refresh the sidebar regardless of the active-tag filter.
+            self._refresh_tags()
         except Exception:
             pass
 
     @work(thread=True)
     def _reload(self) -> None:
         try:
-            posts, _ = api.list_posts(tag=self._active_tag, search=self._search)
+            posts, total = api.list_posts(
+                tag=self._active_tag, search=self._search, limit=self._page_size
+            )
             tags = api.list_tags()
             if posts:
                 self._sse.set_last_id(posts[0].id)
-            self.call_from_thread(self._update_data, posts, tags)
+            self.call_from_thread(self._update_data, posts, total, tags)
         except Exception as e:
             self.call_from_thread(self.notify, f"Reload failed: {e}", severity="error")
 
-    def _update_data(self, posts: list[api.Post], tags: list[api.Tag]) -> None:
+    def _update_data(
+        self, posts: list[api.Post], total: int, tags: list[api.Tag]
+    ) -> None:
+        self._total = total
+        self._offset = len(posts)
+        self._loading_more = False
         self.query_one(PostPanel).set_posts(posts, search=self._search)
         self.query_one(TagPanel).set_tags(tags, active=self._active_tag)
+
+    def on_post_panel_load_more(self, event: PostPanel.LoadMore) -> None:
+        if self._loading_more or self._offset >= self._total:
+            return
+        self._loading_more = True
+        self._load_more(self._offset)
+
+    @work(thread=True)
+    def _load_more(self, offset: int) -> None:
+        try:
+            posts, total = api.list_posts(
+                tag=self._active_tag,
+                search=self._search,
+                limit=self._page_size,
+                offset=offset,
+            )
+            self.call_from_thread(self._append_page, posts, total)
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Load failed: {e}", severity="error")
+            self.call_from_thread(self._reset_loading_more)
+
+    def _append_page(self, posts: list[api.Post], total: int) -> None:
+        self._total = total
+        self._offset += len(posts)
+        self._loading_more = False
+        self.query_one(PostPanel).append_posts(posts)
+
+    def _reset_loading_more(self) -> None:
+        self._loading_more = False
 
     @work(thread=True)
     def _refresh_tags(self) -> None:
@@ -244,6 +295,7 @@ class RelayTuiApp(App):
                 title=data.get("title") or None,
                 tags=data.get("tags", []),
                 fmt=data.get("format", "markdown"),
+                source=data.get("source"),
                 expires_at=data.get("expires_at"),
             )
             self.call_from_thread(self._on_post_created, post)
@@ -276,6 +328,7 @@ class RelayTuiApp(App):
                 title=data.get("title"),
                 tags=data.get("tags"),
                 fmt=data.get("format"),
+                source=data.get("source"),
                 expires_at=data["expires_at"],
             )
             self.call_from_thread(self._on_post_updated, post)
@@ -315,6 +368,29 @@ class RelayTuiApp(App):
             if result:
                 self._do_set_tag_config(tag_name, result)
         self.push_screen(TagConfigModal(tag_name), callback=_on_result)
+
+    def on_tag_panel_rename_tag(self, event: TagPanel.RenameTag) -> None:
+        old_name = event.tag_name
+        def _on_result(new_name: str | None) -> None:
+            if new_name and new_name != old_name:
+                self._do_rename_tag(old_name, new_name)
+        self.push_screen(RenameTagModal(old_name), callback=_on_result)
+
+    @work(thread=True)
+    def _do_rename_tag(self, old: str, new: str) -> None:
+        try:
+            tags = api.rename_tag(old, new)
+            if self._active_tag == old:
+                self._active_tag = new
+            self.call_from_thread(
+                self.query_one(TagPanel).set_tags, tags, self._active_tag
+            )
+            self.call_from_thread(self._reload)
+            self.call_from_thread(
+                self.notify, f"Renamed [{old}] → [{new}]", severity="information", timeout=3
+            )
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Rename failed: {e}", severity="error")
 
     @work(thread=True)
     def _do_set_tag_config(self, tag: str, result: dict) -> None:
