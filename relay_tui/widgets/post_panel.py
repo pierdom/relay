@@ -6,10 +6,10 @@ from rich.markup import escape
 from textual.app import ComposeResult
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Label, ListView, ListItem
+from textual.widgets import Label, ListView, ListItem, Static
 
 from .. import api
-from ..theme import ACCENT, BORDER
+from ..theme import ACCENT, BORDER, PERF_BAD, PERF_TERRIBLE
 
 
 def _fmt_span(seconds: int) -> str:
@@ -51,10 +51,29 @@ def _time_until(iso: str) -> str:
         return iso[:10]
 
 
+def _expiry_markup(iso: str) -> str:
+    """Colour-graded expiry pill: red <24h (or expired), amber <3d, accent beyond."""
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        s = int((dt - datetime.now(timezone.utc)).total_seconds())
+    except Exception:
+        return ""
+    if s < 86400:
+        color = PERF_TERRIBLE
+    elif s < 3 * 86400:
+        color = PERF_BAD
+    else:
+        color = ACCENT
+    return f"[{color} on {BORDER}] expires {_time_until(iso)} [/]"
+
+
 class PostItem(ListItem):
     DEFAULT_CSS = f"""
     PostItem {{ height: 4; padding: 0 1; border-bottom: solid $surface; }}
     PostItem.master {{ border: solid {ACCENT}; background: $boost; }}
+    PostItem.flash {{ background: {ACCENT} 25%; }}
     PostItem Label {{ width: 1fr; }}
     """
 
@@ -87,10 +106,12 @@ class PostItem(ListItem):
             f"{id_badge}  {master_prefix}[bold]{escape(title)}[/]  {tags_markup}",
             markup=True,
         )
-        yield Label(
-            f"[dim]{'  •  '.join(meta_parts)}[/dim]",
-            markup=True,
-        )
+        meta_line = f"[dim]{'  •  '.join(meta_parts)}[/dim]"
+        if self.post.expires_at:
+            pill = _expiry_markup(self.post.expires_at)
+            if pill:
+                meta_line += f"  {pill}"
+        yield Label(meta_line, markup=True)
 
 
 class PostPanel(Widget):
@@ -106,8 +127,22 @@ class PostPanel(Widget):
     PostPanel ListView { background: transparent; border: none; height: 1fr; }
     PostPanel ListView:focus { border: none; }
     PostPanel { padding: 0; }
-    PostPanel > Label { color: $accent; text-style: bold; padding: 0 1; }
+    PostPanel > Label { color: $surface; text-style: bold; padding: 0 1; }
+    PostPanel:focus-within > Label { color: $accent; }
+    PostPanel #post-empty {
+        display: none;
+        height: 1fr;
+        width: 1fr;
+        content-align: center middle;
+        color: $surface;
+        text-style: italic;
+    }
     """
+
+    _empty_message = "No posts yet."
+    # Tracked explicitly: widget removal/mount is async, so counting live DOM
+    # children can't tell whether the feed is empty within a single tick.
+    _count = 0
 
     @property
     def selected_post(self) -> api.Post | None:
@@ -120,6 +155,19 @@ class PostPanel(Widget):
     def compose(self) -> ComposeResult:
         yield Label("FEED")
         yield ListView(id="post-listview")
+        yield Static("", id="post-empty")
+
+    def _apply_visibility(self) -> None:
+        """Show the feed when it has posts, the empty-state placeholder otherwise."""
+        lv = self.query_one("#post-listview", ListView)
+        empty = self.query_one("#post-empty", Static)
+        if self._count > 0:
+            lv.display = True
+            empty.display = False
+        else:
+            empty.update(self._empty_message)
+            lv.display = False
+            empty.display = True
 
     def set_posts(self, posts: list[api.Post], search: str | None = None) -> None:
         header = self.query_one(Label)
@@ -127,8 +175,13 @@ class PostPanel(Widget):
             header.update(f"[bold]FEED[/]  [dim]search: {escape(search)}[/dim]")
         else:
             header.update("FEED")
+        self._empty_message = (
+            f'No posts match "{escape(search)}"' if search else "No posts yet."
+        )
         lv = self.query_one("#post-listview", ListView)
         lv.clear()
+        self._count = len(posts)
+        self._apply_visibility()
         for p in posts:
             lv.mount(PostItem(p))
 
@@ -140,11 +193,16 @@ class PostPanel(Widget):
         for child in lv.children:
             if isinstance(child, PostItem) and child.post.id == post.id:
                 return
+        self._count += 1
+        self._apply_visibility()
         item = PostItem(post)
         if lv.children:
             lv.mount(item, before=lv.children[0])
         else:
             lv.mount(item)
+        # Briefly highlight live arrivals so the eye catches new posts.
+        item.add_class("flash")
+        self.set_timer(1.2, lambda: item.remove_class("flash"))
 
     def append_posts(self, posts: list[api.Post]) -> None:
         lv = self.query_one("#post-listview", ListView)
@@ -154,12 +212,16 @@ class PostPanel(Widget):
         for p in posts:
             if p.id not in existing:
                 lv.mount(PostItem(p))
+                self._count += 1
+        self._apply_visibility()
 
     def remove_post(self, post_id: int) -> None:
         for item in list(self.query_one(ListView).children):
             if isinstance(item, PostItem) and item.post.id == post_id:
                 item.remove()
+                self._count -= 1
                 break
+        self._apply_visibility()
 
     def update_post(self, post: api.Post) -> None:
         lv = self.query_one(ListView)

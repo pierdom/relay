@@ -52,7 +52,8 @@ class TagPanel(Widget):
     TagPanel ListView { background: transparent; border: none; height: 1fr; }
     TagPanel ListView:focus { border: none; }
     TagPanel { padding: 0; }
-    TagPanel > Label { color: $accent; text-style: bold; padding: 0 1; }
+    TagPanel > Label { color: $surface; text-style: bold; padding: 0 1; }
+    TagPanel:focus-within > Label { color: $accent; }
     """
 
     def compose(self) -> ComposeResult:
