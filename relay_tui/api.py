@@ -14,9 +14,8 @@ _UNSET = object()
 @dataclass
 class Post:
     id: int
-    title: str | None
+    title: str
     content: str
-    format: str
     tags: list[str]
     source: str | None
     created_at: str
@@ -27,9 +26,8 @@ class Post:
     def from_dict(cls, d: dict) -> "Post":
         return cls(
             id=d["id"],
-            title=d.get("title"),
+            title=d.get("title") or "",
             content=d.get("content", ""),
-            format=d.get("format", "markdown"),
             tags=d.get("tags", []),
             source=d.get("source"),
             created_at=d.get("created_at", ""),
@@ -84,15 +82,12 @@ def list_posts(
 
 def create_post(
     content: str,
-    title: str | None = None,
+    title: str,
     tags: list[str] | None = None,
-    fmt: str = "markdown",
     source: str | None = None,
     expires_at: str | None = None,
 ) -> Post:
-    body: dict[str, object] = {"content": content, "format": fmt}
-    if title is not None:
-        body["title"] = title
+    body: dict[str, object] = {"content": content, "title": title}
     if tags is not None:
         body["tags"] = tags
     if source is not None:
@@ -115,7 +110,6 @@ def update_post(
     content: str | None = None,
     title: str | None = None,
     tags: list[str] | None = None,
-    fmt: str | None = None,
     source: str | None = None,
     expires_at: object = _UNSET,
 ) -> Post:
@@ -126,8 +120,6 @@ def update_post(
         body["title"] = title
     if tags is not None:
         body["tags"] = tags
-    if fmt is not None:
-        body["format"] = fmt
     if source is not None:
         body["source"] = source
     if expires_at is not _UNSET:

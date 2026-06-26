@@ -21,11 +21,25 @@ agent D  ──GET /posts?tag=notes──►  relay         (query archive by ta
                                                     (Last-Event-ID replay catches it up)
 ```
 
-- **Publish**: POST markdown, text, JSON, or HTML with tags
+- **Publish**: POST Markdown with a title and tags
 - **Edit**: PATCH individual fields — `updated_at` is set automatically; `id` and `created_at` are preserved
 - **Subscribe**: clients open a persistent SSE connection and receive posts as they arrive
 - **Catch-up**: reconnect with `Last-Event-ID` — missed posts are replayed before entering the live stream
 - **Expire**: posts age out automatically via per-tag or global TTL
+
+## Storage — an Obsidian-style vault
+
+Posts are stored as **plain Markdown files** in a vault directory (`RELAY_VAULT_PATH`),
+one file per post — the title *is* the filename, and metadata lives in YAML
+front-matter (`id`, `tags`, `source`, timestamps, `expires_at`). The vault is the
+source of truth: browse it, `grep` it, git-version it, or open it in **Obsidian**.
+
+A disposable **SQLite index** under `<vault>/.relay/` mirrors the files for fast
+list/search/tag/TTL queries; it is rebuilt from the files on startup, so deleting
+it is harmless. A live filesystem watcher picks up edits made *outside* relay
+(e.g. in Obsidian) — re-indexing them and pushing them to subscribers in real time.
+`title` is required (it names the file); `id` in front-matter is authoritative and
+preserved across renames.
 
 ## Quick start
 
@@ -66,7 +80,7 @@ Exposes the full feed API as MCP tools so Claude — or any MCP-capable agent �
 
 | Tool | Description |
 |------|-------------|
-| `publish_post` | Publish a post (content, title, tags, format, source, expires_at) |
+| `publish_post` | Publish a post (title, content, tags, source, expires_at) |
 | `update_post` | Partially update an existing post by ID — only provided fields change |
 | `get_post` | Get a single post by ID (use `id=0` for the master document) |
 | `list_posts` | List posts with optional tag/search/limit/offset filters |
@@ -132,7 +146,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/posts` | Publish a post |
-| GET | `/posts` | List posts (`tag`, `format`, `limit`, `offset`) |
+| GET | `/posts` | List posts (`tag`, `search`, `limit`, `offset`) |
 | GET | `/posts/{id}` | Get a single post |
 | PATCH | `/posts/{id}` | Update fields (partial — omitted fields unchanged) |
 | DELETE | `/posts/{id}` | Delete a post |
@@ -151,7 +165,6 @@ curl -X POST http://localhost:8000/posts \
   -d '{
     "title": "Morning Digest",
     "content": "# Top Stories\n- Story A\n- Story B",
-    "format": "markdown",
     "tags": ["news", "ai"],
     "source": "news-agent"
   }'
@@ -205,7 +218,8 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `API_KEY` | **required** | Bearer token for all endpoints |
 | `DEFAULT_TTL_HOURS` | `0` | Global post expiry window; `0` disables expiry (per-tag TTLs still apply) |
 | `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are removed |
-| `DATABASE_PATH` | `/data/relay.db` | SQLite file path |
+| `RELAY_VAULT_PATH` | `/data/vault` | Markdown vault directory; the index lives in `<vault>/.relay/` |
+| `RELAY_WATCH_ENABLED` | `true` | Live-reindex + SSE on edits made outside relay; set `false` to disable |
 | `RELAY_BASE_URL` | `http://localhost:8000` | Base URL used by the stdio MCP proxy |
 | `SECURE_COOKIES` | `true` | `Secure` flag on the browser-UI session cookie; set `false` to use the UI over plain HTTP |
 | `RELAY_PALETTE` | `default` | TUI colour theme |
@@ -213,7 +227,9 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 
 ## Stack
 
-- **Python 3.13** + **FastAPI** + **aiosqlite** (SQLite)
+- **Python 3.13** + **FastAPI**
+- **Markdown vault** (files = source of truth) with a disposable **aiosqlite** index
+- **watchdog** for live external-edit pickup; **PyYAML** for front-matter
 - **SSE** via [sse-starlette](https://github.com/sysid/sse-starlette)
 - **Textual** for the terminal UI
 - **MCP** (Streamable HTTP at `/mcp` + stdio proxy) for agent integration

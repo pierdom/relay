@@ -5,118 +5,85 @@ import logging
 
 import aiosqlite
 
+from . import vault
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
 
+async def _ids_where(db: aiosqlite.Connection, clause: str, params: list) -> set[int]:
+    async with db.execute(f"SELECT id FROM posts WHERE {clause}", params) as cur:
+        return {row[0] for row in await cur.fetchall()}
+
+
 async def _delete_expired(db: aiosqlite.Connection) -> int:
+    """Collect every expired post id, unlink its file, then drop the index rows.
+
+    Files are canonical, so expiry deletes the file too (the watcher ignores it
+    via self-delete suppression).
+    """
     async with db.execute("SELECT tag, ttl_hours, expires_at FROM tag_config") as cur:
         tag_configs = {
             row["tag"]: {"ttl_hours": row["ttl_hours"], "expires_at": row["expires_at"]}
             for row in await cur.fetchall()
         }
 
-    deleted = 0
+    now = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+    to_delete: set[int] = set()
 
-    # Explicit per-post expiry (overrides tag/global TTL)
-    await db.execute(
-        """
-        DELETE FROM posts
-        WHERE id != 0
-          AND expires_at IS NOT NULL
-          AND expires_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        """
+    # Explicit per-post expiry (overrides tag/global TTL).
+    to_delete |= await _ids_where(
+        db, f"id != 0 AND expires_at IS NOT NULL AND expires_at < {now}", []
     )
-    async with db.execute("SELECT changes()") as cur:
-        row = await cur.fetchone()
-        deleted += row[0]
 
-    if tag_configs:
-        # Posts with no per-tag config → global TTL (skipped when default_ttl_hours=0)
-        # Only exclude tags that actually have a config (ttl_hours > 0 or expires_at set)
-        configured_tags = [
-            tag for tag, cfg in tag_configs.items()
-            if cfg["ttl_hours"] or cfg["expires_at"]
-        ]
-        tag_likes = [f"%,{tag},%" for tag in configured_tags]
-        if settings.default_ttl_hours:
-            ttl_modifier = f"-{settings.default_ttl_hours} hours"
-            if tag_likes:
-                exclusion = " OR ".join(["tags LIKE ?"] * len(tag_likes))
-                await db.execute(
-                    f"""
-                    DELETE FROM posts
-                    WHERE id != 0
-                      AND expires_at IS NULL
-                      AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
-                      AND id NOT IN (
-                          SELECT id FROM posts WHERE {exclusion}
-                      )
-                    """,
-                    [ttl_modifier] + tag_likes,
-                )
-            else:
-                await db.execute(
-                    """
-                    DELETE FROM posts
-                    WHERE id != 0
-                      AND expires_at IS NULL
-                      AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
-                    """,
-                    (ttl_modifier,),
-                )
-    elif settings.default_ttl_hours:
-        await db.execute(
-            """
-            DELETE FROM posts
-            WHERE id != 0
-              AND expires_at IS NULL
-              AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
-            """,
-            (f"-{settings.default_ttl_hours} hours",),
-        )
+    # Global TTL for posts without their own expires_at and without a configured tag.
+    if settings.default_ttl_hours:
+        ttl_modifier = f"-{settings.default_ttl_hours} hours"
+        configured = [t for t, c in tag_configs.items() if c["ttl_hours"] or c["expires_at"]]
+        if configured:
+            likes = " OR ".join(["tags LIKE ?"] * len(configured))
+            clause = (
+                f"id != 0 AND expires_at IS NULL AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?) "
+                f"AND id NOT IN (SELECT id FROM posts WHERE {likes})"
+            )
+            params = [ttl_modifier] + [f"%,{t},%" for t in configured]
+        else:
+            clause = "id != 0 AND expires_at IS NULL AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
+            params = [ttl_modifier]
+        to_delete |= await _ids_where(db, clause, params)
 
-    async with db.execute("SELECT changes()") as cur:
-        row = await cur.fetchone()
-        deleted += row[0]
-
+    # Per-tag expiry (only posts without their own expires_at).
     for tag, cfg in tag_configs.items():
-        ttl_hours = cfg["ttl_hours"]
-        tag_expires_at = cfg["expires_at"]
-
-        if tag_expires_at:
-            await db.execute(
-                """
-                DELETE FROM posts
-                WHERE id != 0
-                  AND expires_at IS NULL
-                  AND tags LIKE ?
-                  AND ? < strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-                """,
-                (f"%,{tag},%", tag_expires_at),
+        if cfg["expires_at"]:
+            to_delete |= await _ids_where(
+                db,
+                f"id != 0 AND expires_at IS NULL AND tags LIKE ? AND ? < {now}",
+                [f"%,{tag},%", cfg["expires_at"]],
             )
-            async with db.execute("SELECT changes()") as cur:
-                row = await cur.fetchone()
-                deleted += row[0]
-
-        if ttl_hours:
-            await db.execute(
-                """
-                DELETE FROM posts
-                WHERE id != 0
-                  AND expires_at IS NULL
-                  AND tags LIKE ?
-                  AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
-                """,
-                (f"%,{tag},%", f"-{ttl_hours} hours"),
+        if cfg["ttl_hours"]:
+            to_delete |= await _ids_where(
+                db,
+                "id != 0 AND expires_at IS NULL AND tags LIKE ? "
+                "AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+                [f"%,{tag},%", f"-{cfg['ttl_hours']} hours"],
             )
-            async with db.execute("SELECT changes()") as cur:
-                row = await cur.fetchone()
-                deleted += row[0]
 
+    if not to_delete:
+        return 0
+
+    # Unlink the canonical files, then drop the index rows.
+    async with db.execute(
+        f"SELECT path FROM posts WHERE id IN ({','.join('?' * len(to_delete))})",
+        list(to_delete),
+    ) as cur:
+        paths = [row["path"] for row in await cur.fetchall()]
+    for rel in paths:
+        vault.delete_file(vault.abspath(rel))
+    await db.execute(
+        f"DELETE FROM posts WHERE id IN ({','.join('?' * len(to_delete))})", list(to_delete)
+    )
     await db.commit()
-    return deleted
+    return len(to_delete)
 
 
 async def cleanup_loop() -> None:

@@ -61,19 +61,14 @@ async def list_tools() -> list[types.Tool]:
             description="Publish a post to the relay feed. The dashboard will display it in real time.",
             inputSchema={
                 "type": "object",
-                "required": ["content"],
+                "required": ["title", "content"],
                 "properties": {
-                    "content": {"type": "string", "description": "Post body (markdown by default)"},
-                    "title": {"type": "string", "description": "Optional title"},
+                    "title": {"type": "string", "description": "Title — becomes the Markdown filename"},
+                    "content": {"type": "string", "description": "Post body (Markdown)"},
                     "tags": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Optional tags, e.g. ['news', 'ai']",
-                    },
-                    "format": {
-                        "type": "string",
-                        "enum": ["markdown", "text", "html", "json"],
-                        "description": "Content format (default: markdown)",
                     },
                     "source": {"type": "string", "description": "Optional source URL or label"},
                     "expires_at": {
@@ -134,17 +129,12 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["id"],
                 "properties": {
                     "id": {"type": "integer", "description": "ID of the post to update"},
-                    "title": {"type": "string", "description": "New title"},
+                    "title": {"type": "string", "description": "New title (renames the file)"},
                     "content": {"type": "string", "description": "New post body"},
                     "tags": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Replacement tag list (empty array clears all tags)",
-                    },
-                    "format": {
-                        "type": "string",
-                        "enum": ["markdown", "text", "html", "json"],
-                        "description": "Content format",
                     },
                     "source": {"type": "string", "description": "Source URL or label"},
                     "expires_at": {

@@ -1,38 +1,44 @@
 from __future__ import annotations
 
-from typing import Literal
+import re
 
 from pydantic import BaseModel, Field, field_validator
 
-FormatEnum = Literal["markdown", "text", "html", "json"]
+
+def _clean_tag_list(v: list[str]) -> list[str]:
+    cleaned = []
+    for t in v:
+        t = re.sub(r"[^a-z0-9_-]", "", t.strip().lower())
+        if t:
+            cleaned.append(t)
+    return cleaned
 
 
 class PostCreate(BaseModel):
-    title: str | None = None
+    title: str = Field(min_length=1)
     content: str
-    format: FormatEnum = "markdown"
     tags: list[str] = Field(default_factory=list)
     source: str | None = None
     expires_at: str | None = None
 
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("title must not be empty")
+        return v
+
     @field_validator("tags")
     @classmethod
     def clean_tags(cls, v: list[str]) -> list[str]:
-        import re
-        cleaned = []
-        for t in v:
-            t = t.strip().lower()
-            t = re.sub(r"[^a-z0-9_-]", "", t)
-            if t:
-                cleaned.append(t)
-        return cleaned
+        return _clean_tag_list(v)
 
 
 class PostResponse(BaseModel):
     id: int
-    title: str | None
+    title: str
     content: str
-    format: FormatEnum
     tags: list[str]
     source: str | None
     created_at: str
@@ -46,7 +52,6 @@ class PostResponse(BaseModel):
             id=row["id"],
             title=row["title"],
             content=row["content"],
-            format=row["format"],
             tags=[t for t in row["tags"].split(",") if t],
             source=row["source"],
             created_at=row["created_at"],
@@ -65,24 +70,24 @@ class PostListResponse(BaseModel):
 class PostUpdate(BaseModel):
     title: str | None = None
     content: str | None = None
-    format: FormatEnum | None = None
     tags: list[str] | None = None
     source: str | None = None
     expires_at: str | None = None
 
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("title must not be empty")
+        return v
+
     @field_validator("tags")
     @classmethod
     def clean_tags(cls, v: list[str] | None) -> list[str] | None:
-        if v is None:
-            return None
-        import re
-        cleaned = []
-        for t in v:
-            t = t.strip().lower()
-            t = re.sub(r"[^a-z0-9_-]", "", t)
-            if t:
-                cleaned.append(t)
-        return cleaned
+        return None if v is None else _clean_tag_list(v)
 
 
 class TagRename(BaseModel):
@@ -91,7 +96,6 @@ class TagRename(BaseModel):
     @field_validator("new_name")
     @classmethod
     def clean(cls, v: str) -> str:
-        import re
         v = re.sub(r"[^a-z0-9_-]", "", v.strip().lower())
         if not v:
             raise ValueError("new_name must not be empty")

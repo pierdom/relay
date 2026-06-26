@@ -12,6 +12,8 @@ dependencies = [
     "mcp>=1.27.1",
     "textual>=8.2.5",
     "requests>=2.33.1",
+    "pyyaml>=6.0.3",
+    "watchdog>=6.0.0",
 ]
 
 [project.scripts]

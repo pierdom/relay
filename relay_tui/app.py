@@ -292,9 +292,8 @@ class RelayTuiApp(App):
         try:
             post = api.create_post(
                 content=data["content"],
-                title=data.get("title") or None,
+                title=data["title"],
                 tags=data.get("tags", []),
-                fmt=data.get("format", "markdown"),
                 source=data.get("source"),
                 expires_at=data.get("expires_at"),
             )
@@ -327,7 +326,6 @@ class RelayTuiApp(App):
                 content=data.get("content"),
                 title=data.get("title"),
                 tags=data.get("tags"),
-                fmt=data.get("format"),
                 source=data.get("source"),
                 expires_at=data["expires_at"],
             )

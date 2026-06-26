@@ -217,12 +217,6 @@
     .post-source { font-size: 10px; color: var(--muted); }
 
     .post-body { color: #b8bfcc; line-height: 1.72; font-size: 13px; }
-    .post-body.format-text { white-space: pre-wrap; font-size: 12px; }
-    .post-body.format-json {
-      white-space: pre-wrap; font-size: 11px;
-      background: var(--bg); padding: 10px 12px;
-      border-radius: 4px; border: 1px solid var(--border);
-    }
     .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 14px 0 6px; font-weight: 600; }
     .post-body h1 { font-size: 14px; }
     .post-body h2 { font-size: 13px; }
@@ -585,16 +579,7 @@
     <div class="compose-panel" id="composePanel">
       <div class="post">
         <div class="edit-form">
-          <div><label>Title</label><input type="text" id="cpTitle" placeholder="(optional)"></div>
-          <div>
-            <label>Format</label>
-            <select id="cpFormat">
-              <option value="markdown">markdown</option>
-              <option value="text">text</option>
-              <option value="html">html</option>
-              <option value="json">json</option>
-            </select>
-          </div>
+          <div><label>Title</label><input type="text" id="cpTitle" placeholder="(required — becomes the filename)"></div>
           <div><label>Content</label><textarea id="cpContent" placeholder="Write something…"></textarea></div>
           <div><label>Tags</label><input type="text" id="cpTags" placeholder="comma-separated"></div>
           <div><label>Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
@@ -754,10 +739,11 @@ document.getElementById('cpCancel').addEventListener('click', closeCompose);
 document.getElementById('cpPublish').addEventListener('click', async () => {
   const content = document.getElementById('cpContent').value.trim();
   if (!content) return;
+  const title = document.getElementById('cpTitle').value.trim();
+  if (!title) { alert('Title is required'); return; }
   const body = {
-    title:  document.getElementById('cpTitle').value.trim() || null,
+    title,
     content,
-    format: document.getElementById('cpFormat').value,
     tags:   document.getElementById('cpTags').value.split(',').map(s => s.trim()).filter(Boolean),
     source: document.getElementById('cpSource').value.trim() || null,
     expires_at: toUtcIso(document.getElementById('cpExpires').value) || null,
@@ -772,7 +758,6 @@ document.getElementById('cpPublish').addEventListener('click', async () => {
 function closeCompose() {
   composePanel.classList.remove('open');
   ['cpTitle', 'cpContent', 'cpTags', 'cpSource'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('cpFormat').value = 'markdown';
   document.getElementById('cpExpires').value = '';
 }
 
@@ -1010,7 +995,7 @@ function renderPost(post) {
 
   let contentToRender = post.content;
   let extractedUpdated = null;
-  if (post.format === 'markdown' && post.title) {
+  if (post.title) {
     contentToRender = contentToRender.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '');
     const m = contentToRender.match(/^\s*Last updated:\s*([^\n]+)\n?/i);
     if (m) {
@@ -1019,18 +1004,7 @@ function renderPost(post) {
     }
   }
 
-  let bodyHtml;
-  if (post.format === 'markdown') {
-    bodyHtml = `<div class="post-body">${DOMPurify.sanitize(marked.parse(contentToRender))}</div>`;
-  } else if (post.format === 'html') {
-    bodyHtml = `<div class="post-body">${DOMPurify.sanitize(post.content)}</div>`;
-  } else if (post.format === 'json') {
-    let pretty = post.content;
-    try { pretty = JSON.stringify(JSON.parse(post.content), null, 2); } catch {}
-    bodyHtml = `<div class="post-body format-json">${escHtml(pretty)}</div>`;
-  } else {
-    bodyHtml = `<div class="post-body format-text">${escHtml(post.content)}</div>`;
-  }
+  const bodyHtml = `<div class="post-body">${DOMPurify.sanitize(marked.parse(contentToRender))}</div>`;
 
   el.innerHTML = `
     ${masterBadge}
@@ -1073,14 +1047,6 @@ function enterEditMode(el, post) {
   el.innerHTML = `
     <div class="edit-form">
       <div><label>Title</label><input class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
-      <div><label>Format</label>
-        <select class="ef-format">
-          <option value="markdown"${post.format==='markdown'?' selected':''}>markdown</option>
-          <option value="text"${post.format==='text'?' selected':''}>text</option>
-          <option value="html"${post.format==='html'?' selected':''}>html</option>
-          <option value="json"${post.format==='json'?' selected':''}>json</option>
-        </select>
-      </div>
       <div><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea></div>
       <div><label>Tags</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
       <div><label>Source</label><input class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
@@ -1093,10 +1059,11 @@ function enterEditMode(el, post) {
 
   el.querySelector('.btn-cancel').addEventListener('click', () => { el.classList.remove('editing'); el.innerHTML = savedHtml; rewirePost(el, post); });
   el.querySelector('.btn-save').addEventListener('click', async () => {
+    const newTitle = el.querySelector('.ef-title').value.trim();
+    if (!newTitle) { alert('Title is required'); return; }
     const body = {
-      title:      el.querySelector('.ef-title').value.trim() || null,
+      title:      newTitle,
       content:    el.querySelector('.ef-content').value,
-      format:     el.querySelector('.ef-format').value,
       tags:       el.querySelector('.ef-tags').value.split(',').map(s => s.trim()).filter(Boolean),
       source:     el.querySelector('.ef-source').value.trim() || null,
       expires_at: toUtcIso(el.querySelector('.ef-expires').value) || null,
@@ -1198,20 +1165,10 @@ function openPostModal(post) {
     pill.addEventListener('click', e => { e.stopPropagation(); closePostModal(); selectTag(pill.dataset.tag); })
   );
 
-  const pmContent = (post.format === 'markdown' && post.title)
+  const pmContent = post.title
     ? post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '')
     : post.content;
-  if (post.format === 'markdown') {
-    pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(marked.parse(pmContent))}</div>`;
-  } else if (post.format === 'html') {
-    pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(post.content)}</div>`;
-  } else if (post.format === 'json') {
-    let pretty = post.content;
-    try { pretty = JSON.stringify(JSON.parse(post.content), null, 2); } catch {}
-    pmBody.innerHTML = `<div class="post-body format-json">${escHtml(pretty)}</div>`;
-  } else {
-    pmBody.innerHTML = `<div class="post-body format-text">${escHtml(post.content)}</div>`;
-  }
+  pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(marked.parse(pmContent))}</div>`;
 
   postModal.classList.add('open');
   document.body.style.overflow = 'hidden';

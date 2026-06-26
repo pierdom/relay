@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse
 
+from . import watcher
 from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
 from .config import settings
@@ -27,11 +28,14 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     await init_db()
     task = asyncio.create_task(cleanup_loop())
+    # Live vault watcher: external edits (e.g. from Obsidian) re-index + push SSE.
+    watcher.start(asyncio.get_running_loop())
     # The Streamable HTTP MCP app needs its session manager running for the
     # lifetime of the server; mounted sub-apps don't get their lifespan run
     # automatically, so we drive it from here.
     async with mcp.session_manager.run():
         yield
+    watcher.stop()
     task.cancel()
     try:
         await task

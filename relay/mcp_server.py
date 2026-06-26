@@ -17,7 +17,7 @@ from starlette.responses import JSONResponse
 
 from . import service
 from .config import settings
-from .models import FormatEnum, PostCreate, PostUpdate, TagConfigCreate
+from .models import PostCreate, PostUpdate, TagConfigCreate
 
 INSTRUCTIONS = (
     "Relay is a personal content feed. AI agents publish posts; clients subscribe in "
@@ -59,19 +59,17 @@ async def master_document() -> str:
 
 @mcp.tool(description="Publish a post to the relay feed. Subscribers receive it in real time.")
 async def publish_post(
+    title: str,
     content: str,
-    title: str | None = None,
     tags: list[str] | None = None,
-    format: FormatEnum = "markdown",
     source: str | None = None,
     expires_at: str | None = None,
 ) -> dict:
-    """`expires_at`: optional ISO 8601 datetime; overrides tag/global TTL."""
+    """`title` becomes the Markdown filename. `expires_at`: optional ISO 8601 datetime; overrides tag/global TTL."""
     body = PostCreate(
         content=content,
         title=title,
         tags=tags or [],
-        format=format,
         source=source,
         expires_at=expires_at,
     )
@@ -113,7 +111,6 @@ async def update_post(
     title: str | None = None,
     content: str | None = None,
     tags: list[str] | None = None,
-    format: FormatEnum | None = None,
     source: str | None = None,
     expires_at: str | None = None,
 ) -> dict:
@@ -121,7 +118,6 @@ async def update_post(
         "title": title,
         "content": content,
         "tags": tags,
-        "format": format,
         "source": source,
         "expires_at": expires_at,
     }

@@ -34,12 +34,11 @@ async def list_posts(
     tag: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    format: str | None = Query(default=None),
     search: str | None = Query(default=None),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostListResponse:
     return await service.list_posts(
-        db, tag=tag, limit=limit, offset=offset, format=format, search=search
+        db, tag=tag, limit=limit, offset=offset, search=search
     )
 
 

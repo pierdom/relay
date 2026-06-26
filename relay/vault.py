@@ -1,0 +1,335 @@
+"""Canonical filesystem layer: posts are Markdown files in an Obsidian vault.
+
+Files are the source of truth; the SQLite index (``relay.database``) is a
+disposable mirror rebuilt from these files. Every write goes file-first, then
+mirrors into the index. ``id`` lives in front-matter; the title is the filename.
+"""
+from __future__ import annotations
+
+import asyncio
+import datetime as _dt
+import hashlib
+import logging
+import os
+import tempfile
+from pathlib import Path
+
+import aiosqlite
+
+from . import frontmatter
+from .config import settings
+
+logger = logging.getLogger(__name__)
+
+# Serializes id allocation + file write + index upsert for create/update.
+write_lock = asyncio.Lock()
+
+MASTER_ID = 0
+MASTER_TITLE = "Master Document"
+MASTER_CONTENT = (
+    "# Master Document\n\n"
+    "Index, naming conventions, and instructions for AI agents interacting with this relay.\n"
+)
+
+# Self-write suppression so the watcher ignores changes relay itself made.
+_written: dict[str, str] = {}   # abspath -> sha256 of the text we last wrote
+_deleted: set[str] = set()      # abspaths we just unlinked
+
+
+def utcnow_iso() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def vault_dir() -> Path:
+    return Path(settings.vault_path)
+
+
+def relpath(path: Path) -> str:
+    return str(Path(path).resolve().relative_to(vault_dir().resolve()))
+
+
+def abspath(relpath: str) -> Path:
+    return (vault_dir() / relpath).resolve()
+
+
+def _tags_to_sentinel(tags: list[str]) -> str:
+    return "," + ",".join(tags) + "," if tags else ""
+
+
+# ── self-write suppression (used by the watcher) ────────────────────────────
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def note_write(path: Path, text: str) -> None:
+    _written[str(path.resolve())] = _sha(text)
+
+
+def note_delete(path: Path) -> None:
+    _deleted.add(str(path.resolve()))
+
+
+def was_self_write(path: Path, current_text: str) -> bool:
+    return _written.get(str(path.resolve())) == _sha(current_text)
+
+
+def was_self_delete(path: Path) -> bool:
+    """True if relay just unlinked this path (consumes the suppression)."""
+    key = str(path.resolve())
+    if key in _deleted:
+        _deleted.discard(key)
+        return True
+    return False
+
+
+# ── file I/O ────────────────────────────────────────────────────────────────
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def write_file(
+    *,
+    id: int,
+    title: str,
+    content: str,
+    tags: list[str],
+    source: str | None,
+    created_at: str,
+    updated_at: str | None,
+    expires_at: str | None,
+    old_path: Path | None = None,
+) -> Path:
+    """Write a post to disk; rename from ``old_path`` if the title changed.
+
+    Returns the (possibly new) path. Records the write for watcher suppression.
+    """
+    stem = frontmatter.sanitize_title(title)
+    new_path = frontmatter.unique_path(vault_dir(), stem, exclude=old_path)
+    meta = {
+        "id": id,
+        "tags": tags,
+        "source": source,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "expires_at": expires_at,
+    }
+    text = frontmatter.serialize(meta, content)
+    _atomic_write(new_path, text)
+    note_write(new_path, text)
+    if old_path is not None and old_path.resolve() != new_path.resolve():
+        try:
+            os.unlink(old_path)
+            note_delete(old_path)
+        except OSError:
+            pass
+    return new_path
+
+
+def delete_file(path: Path) -> None:
+    try:
+        os.unlink(path)
+        note_delete(path)
+    except FileNotFoundError:
+        pass
+
+
+def read_file(path: Path) -> tuple[dict, str]:
+    return frontmatter.parse(Path(path).read_text(encoding="utf-8"))
+
+
+# ── index mirror ─────────────────────────────────────────────────────────────
+
+
+async def allocate_id(db: aiosqlite.Connection) -> int:
+    async with db.execute("SELECT COALESCE(MAX(id), 0) FROM posts") as cur:
+        row = await cur.fetchone()
+    return int(row[0]) + 1
+
+
+async def path_for_id(db: aiosqlite.Connection, post_id: int) -> Path | None:
+    async with db.execute("SELECT path FROM posts WHERE id = ?", (post_id,)) as cur:
+        row = await cur.fetchone()
+    return abspath(row[0]) if row is not None else None
+
+
+async def index_upsert(
+    db: aiosqlite.Connection,
+    *,
+    id: int,
+    title: str,
+    path: Path,
+    content: str,
+    tags: list[str],
+    source: str | None,
+    created_at: str,
+    updated_at: str | None,
+    expires_at: str | None,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            title=excluded.title, path=excluded.path, content=excluded.content,
+            tags=excluded.tags, source=excluded.source, created_at=excluded.created_at,
+            updated_at=excluded.updated_at, expires_at=excluded.expires_at
+        """,
+        (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
+         created_at, updated_at, expires_at),
+    )
+
+
+async def index_delete(db: aiosqlite.Connection, post_id: int) -> None:
+    await db.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+
+
+# ── startup rebuild ───────────────────────────────────────────────────────────
+
+
+def _ensure_master_file() -> None:
+    """Create Master Document.md (id=0) if no file already claims id=0."""
+    for path in vault_dir().glob("*.md"):
+        try:
+            meta, _ = read_file(path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        if meta.get("id") == MASTER_ID:
+            return
+    write_file(
+        id=MASTER_ID,
+        title=MASTER_TITLE,
+        content=MASTER_CONTENT,
+        tags=[],
+        source=None,
+        created_at=utcnow_iso(),
+        updated_at=None,
+        expires_at=None,
+    )
+
+
+async def rebuild_index(db: aiosqlite.Connection) -> int:
+    """Wipe and repopulate the index from the vault. Stamps ids into id-less files.
+
+    Returns the number of posts indexed.
+    """
+    vault_dir().mkdir(parents=True, exist_ok=True)
+    Path(settings.relay_dir).mkdir(parents=True, exist_ok=True)
+    _ensure_master_file()
+
+    files = sorted(
+        (p for p in vault_dir().glob("*.md")),
+        key=lambda p: (p.stat().st_mtime, p.name),
+    )
+
+    parsed: list[tuple[Path, dict, str]] = []
+    seen_ids: set[int] = set()
+    max_id = 0
+    needs_id: list[tuple[Path, dict, str]] = []
+
+    for path in files:
+        try:
+            meta, body = read_file(path)
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning("Skipping unreadable note %s: %s", path.name, exc)
+            continue
+        pid = meta.get("id")
+        if pid is None or pid in seen_ids:
+            needs_id.append((path, meta, body))
+            continue
+        seen_ids.add(pid)
+        max_id = max(max_id, pid)
+        parsed.append((path, meta, body))
+
+    # Stamp ids into hand-created / colliding notes, rewriting their front-matter.
+    for path, meta, body in needs_id:
+        max_id += 1
+        meta["id"] = max_id
+        seen_ids.add(max_id)
+        new_path = write_file(
+            id=max_id,
+            title=path.stem,
+            content=body,
+            tags=meta.get("tags") or [],
+            source=meta.get("source"),
+            created_at=meta.get("created_at") or utcnow_iso(),
+            updated_at=meta.get("updated_at"),
+            expires_at=meta.get("expires_at"),
+            old_path=path,
+        )
+        parsed.append((new_path, meta, body))
+
+    await db.execute("DELETE FROM posts")
+    for path, meta, body in parsed:
+        await index_upsert(
+            db,
+            id=meta["id"],
+            title=path.stem,
+            path=path,
+            content=body,
+            tags=meta.get("tags") or [],
+            source=meta.get("source"),
+            created_at=meta.get("created_at") or utcnow_iso(),
+            updated_at=meta.get("updated_at"),
+            expires_at=meta.get("expires_at"),
+        )
+    await _load_tag_config(db)
+    await db.commit()
+    logger.info("Index rebuilt from %s — %d post(s)", vault_dir(), len(parsed))
+    return len(parsed)
+
+
+# ── tag config (.relay/tags.yml is canonical, mirrored to the index) ──────────
+
+
+async def _load_tag_config(db: aiosqlite.Connection) -> None:
+    import yaml
+
+    await db.execute("DELETE FROM tag_config")
+    cfg_path = Path(settings.tags_config_path)
+    if not cfg_path.exists():
+        return
+    try:
+        data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("Could not read %s: %s", cfg_path, exc)
+        return
+    for tag, cfg in (data.items() if isinstance(data, dict) else []):
+        cfg = cfg or {}
+        await db.execute(
+            "INSERT OR REPLACE INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)",
+            (tag, int(cfg.get("ttl_hours") or 0), cfg.get("expires_at")),
+        )
+
+
+async def write_tag_config(db: aiosqlite.Connection) -> None:
+    """Dump the index's tag_config back out to .relay/tags.yml (canonical)."""
+    import yaml
+
+    async with db.execute("SELECT tag, ttl_hours, expires_at FROM tag_config ORDER BY tag") as cur:
+        rows = await cur.fetchall()
+    data: dict = {}
+    for row in rows:
+        entry: dict = {}
+        if row["ttl_hours"]:
+            entry["ttl_hours"] = row["ttl_hours"]
+        if row["expires_at"]:
+            entry["expires_at"] = row["expires_at"]
+        data[row["tag"]] = entry
+    Path(settings.relay_dir).mkdir(parents=True, exist_ok=True)
+    text = yaml.safe_dump(data, sort_keys=True, allow_unicode=True, default_flow_style=False)
+    _atomic_write(Path(settings.tags_config_path), text)

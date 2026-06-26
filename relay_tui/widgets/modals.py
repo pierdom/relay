@@ -10,7 +10,6 @@ from textual.widgets import (
     Input,
     Label,
     Markdown,
-    Select,
     Static,
     TextArea,
 )
@@ -19,24 +18,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from .. import api
 from ..theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG
 from .post_panel import _time_ago, _time_until
-
-
-# Map a post format to a TextArea syntax-highlighting language (None = plain).
-_FORMAT_LANGUAGE = {
-    "markdown": "markdown",
-    "html": "html",
-    "json": "json",
-    "text": None,
-}
-
-
-def _apply_format_language(text_area: TextArea, fmt: object) -> None:
-    """Set the TextArea language for *fmt*, tolerating unavailable grammars."""
-    language = _FORMAT_LANGUAGE.get(str(fmt))
-    try:
-        text_area.language = language
-    except Exception:
-        text_area.language = None
 
 
 # ── PostDetailModal ───────────────────────────────────────────────────────────
@@ -132,10 +113,7 @@ class PostDetailModal(ModalScreen[None]):
             )
             yield Static("", classes="detail-rule")
             with VerticalScroll():
-                if post.format == "markdown":
-                    yield Markdown(post.content, classes="detail-content")
-                else:
-                    yield Static(post.content, classes="detail-content")
+                yield Markdown(post.content, classes="detail-content")
             with Horizontal(classes="detail-actions"):
                 yield Button("Close", id="close-btn", variant="default")
 
@@ -198,19 +176,9 @@ class ComposeModal(ModalScreen[dict | None]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("New Post", classes="modal-title")
-            yield Input(placeholder="Title (optional)", id="title-input")
+            yield Input(placeholder="Title (required — becomes the filename)", id="title-input")
             yield Input(placeholder="Tags (comma-separated)", id="tags-input")
             yield Input(placeholder="Source (optional)", id="source-input")
-            yield Select(
-                options=[
-                    ("Markdown", "markdown"),
-                    ("Plain text", "text"),
-                    ("HTML", "html"),
-                    ("JSON", "json"),
-                ],
-                value="markdown",
-                id="fmt-select",
-            )
             yield TextArea(id="content-input", language="markdown")
             yield Input(placeholder="Expires at (ISO, optional)", id="expires-input")
             with Horizontal(classes="modal-actions"):
@@ -221,11 +189,12 @@ class ComposeModal(ModalScreen[dict | None]):
         self.dismiss(None)
 
     def action_submit(self) -> None:
-        title = self.query_one("#title-input", Input).value.strip() or None
+        title = self.query_one("#title-input", Input).value.strip()
+        if not title:
+            self.app.notify("Title is required", severity="warning")
+            return
         tags_raw = self.query_one("#tags-input", Input).value.strip()
         tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
-        fmt_select = self.query_one("#fmt-select", Select)
-        fmt = str(fmt_select.value) if fmt_select.value is not Select.BLANK else "markdown"
         content = self.query_one("#content-input", TextArea).text
         if not content.strip():
             self.app.notify("Content cannot be empty", severity="warning")
@@ -236,7 +205,6 @@ class ComposeModal(ModalScreen[dict | None]):
             {
                 "title": title,
                 "tags": tags,
-                "format": fmt,
                 "content": content,
                 "expires_at": expires_val,
                 "source": source,
@@ -248,10 +216,6 @@ class ComposeModal(ModalScreen[dict | None]):
             self.action_cancel()
         elif event.button.id == "submit-btn":
             self.action_submit()
-
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "fmt-select":
-            _apply_format_language(self.query_one("#content-input", TextArea), event.value)
 
 
 # ── EditModal ─────────────────────────────────────────────────────────────────
@@ -316,7 +280,7 @@ class EditModal(ModalScreen[dict | None]):
             yield Label(f"Edit Post #{post.id}", classes="modal-title")
             yield Input(
                 value=post.title or "",
-                placeholder="Title (optional)",
+                placeholder="Title (required — becomes the filename)",
                 id="title-input",
             )
             yield Input(
@@ -329,17 +293,7 @@ class EditModal(ModalScreen[dict | None]):
                 placeholder="Source (optional)",
                 id="source-input",
             )
-            yield Select(
-                options=[
-                    ("Markdown", "markdown"),
-                    ("Plain text", "text"),
-                    ("HTML", "html"),
-                    ("JSON", "json"),
-                ],
-                value=post.format,
-                id="fmt-select",
-            )
-            yield TextArea(post.content, id="content-input")
+            yield TextArea(post.content, id="content-input", language="markdown")
             yield Input(
                 value=post.expires_at or "",
                 placeholder="Expires at (ISO, optional)",
@@ -349,24 +303,16 @@ class EditModal(ModalScreen[dict | None]):
                 yield Button("Cancel", id="cancel-btn", variant="default")
                 yield Button("Save", id="submit-btn", variant="primary")
 
-    def on_mount(self) -> None:
-        _apply_format_language(
-            self.query_one("#content-input", TextArea), self._post.format
-        )
-
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "fmt-select":
-            _apply_format_language(self.query_one("#content-input", TextArea), event.value)
-
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def action_submit(self) -> None:
-        title = self.query_one("#title-input", Input).value.strip() or None
+        title = self.query_one("#title-input", Input).value.strip()
+        if not title:
+            self.app.notify("Title is required", severity="warning")
+            return
         tags_raw = self.query_one("#tags-input", Input).value.strip()
         tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
-        fmt_select = self.query_one("#fmt-select", Select)
-        fmt = str(fmt_select.value) if fmt_select.value is not Select.BLANK else self._post.format
         content = self.query_one("#content-input", TextArea).text
         if not content.strip():
             self.app.notify("Content cannot be empty", severity="warning")
@@ -377,7 +323,6 @@ class EditModal(ModalScreen[dict | None]):
             {
                 "title": title,
                 "tags": tags,
-                "format": fmt,
                 "content": content,
                 "expires_at": expires_val,
                 "source": source,

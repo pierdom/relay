@@ -2,6 +2,8 @@
 
 Personal HTTP content feed. AI agents POST structured content (news digests, etc.); clients subscribe via SSE and receive it in real time. Posts are tagged, paginated, and expire via configurable TTL.
 
+**Storage is an Obsidian-style Markdown vault** (`RELAY_VAULT_PATH`): one `.md` file per post, the title *is* the filename, metadata in YAML front-matter (`id`, `tags`, `source`, timestamps, `expires_at` — **no `title`**, that's the filename). Files are canonical. A disposable **SQLite index** under `<vault>/.relay/index.db` mirrors them for fast queries and is rebuilt from the files at startup. A `watchdog` watcher live-reindexes external edits (e.g. Obsidian) and pushes them via SSE. `title` is required; `format` no longer exists (everything is Markdown); `id` in front-matter is authoritative and survives renames.
+
 ## Running locally
 
 ```bash
@@ -28,9 +30,9 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | /posts | Publish a post |
-| GET | /posts | List posts (`tag`, `limit`, `offset`, `format`, `search` filters) |
+| GET | /posts | List posts (`tag`, `limit`, `offset`, `search` filters) |
 | GET | /posts/{id} | Get single post |
-| PATCH | /posts/{id} | Update post fields (title, content, format, tags, source, expires_at) |
+| PATCH | /posts/{id} | Update post fields (title, content, tags, source, expires_at) |
 | DELETE | /posts/{id} | Delete post |
 | GET | /tags | List tags with post counts (includes 0-count tags from tag_config) |
 | POST | /tags/{tag}/config | Set per-tag expiry (`ttl_hours`, `expires_at`, or both) |
@@ -58,22 +60,26 @@ Events have type `post`; a `keepalive` ping fires every 30 s to hold the connect
 | `RELAY_BASE_URL` | `http://localhost:8000` | Relay base URL used by the stdio MCP proxy |
 | `DEFAULT_TTL_HOURS` | 0 | Global post expiry window; `0` disables expiry (per-tag TTLs still apply) |
 | `CLEANUP_INTERVAL_MINUTES` | 60 | How often the cleanup loop runs |
-| `DATABASE_PATH` | /data/relay.db | SQLite file path |
+| `RELAY_VAULT_PATH` | /data/vault | Markdown vault dir; disposable index at `<vault>/.relay/index.db` |
+| `RELAY_WATCH_ENABLED` | true | Live-reindex + SSE on edits made outside relay; `false` disables the watcher |
 | `SECURE_COOKIES` | true | `Secure` flag on the browser-UI session cookie; set `false` to use the UI over plain HTTP |
 
 ## Project layout
 
 ```
 relay/
-├── main.py        # FastAPI app + lifespan (init DB, cleanup loop, MCP session); mounts /mcp
-├── config.py      # pydantic-settings Settings (reads .env)
-├── database.py    # aiosqlite connection, schema, get_db dependency
-├── models.py      # Pydantic request/response models
+├── main.py        # FastAPI app + lifespan (init index, cleanup loop, vault watcher, MCP session); mounts /mcp
+├── config.py      # pydantic-settings Settings (reads .env); vault_path + derived index/tags paths
+├── frontmatter.py # YAML front-matter parse/serialize + Obsidian filename rules (sanitize, collision suffix)
+├── vault.py       # Canonical file layer: write/read/delete/rename, id allocation, startup index rebuild, tags.yml
+├── watcher.py     # watchdog observer — external edits → re-index + SSE (self-write suppressed)
+├── database.py    # aiosqlite *index* (disposable mirror), schema, get_db dependency
+├── models.py      # Pydantic request/response models (title required, no format)
 ├── auth.py        # require_api_key dependency (all endpoints)
-├── service.py     # Shared post/tag logic — used by both routes and the in-process MCP server
+├── service.py     # Shared post/tag logic — writes go file-first via vault, then mirror to the index
 ├── mcp_server.py  # In-process FastMCP server (Streamable HTTP at /mcp), bearer-gated
 ├── events.py      # In-memory SSE broadcast hub
-├── cleanup.py     # Background TTL cleanup loop (asyncio)
+├── cleanup.py     # Background TTL cleanup loop (asyncio) — unlinks files + index rows
 └── routes/
     ├── posts.py   # POST/GET/DELETE /posts (thin — delegate to service)
     ├── tags.py    # GET /tags, POST /tags/{tag}/config (thin — delegate to service)
@@ -107,18 +113,19 @@ relay/static/
 
 ## Tags
 
-Tags are stored with sentinel commas (`,news,ai,`) for unambiguous `LIKE '%,tag,%'` matching. Stripped transparently in responses.
+In post files, tags are a YAML front-matter list (`tags: [news, ai]`). In the SQLite **index** they're stored with sentinel commas (`,news,ai,`) for unambiguous `LIKE '%,tag,%'` matching, stripped transparently in responses. Per-tag TTL config is canonical in `<vault>/.relay/tags.yml` and mirrored into the index's `tag_config` table.
 
 `GET /tags` returns tags derived from posts plus any tags registered in `tag_config` (shown with count 0 until posts carry them). `PATCH /tags/{tag}` uses SQL `REPLACE()` to rewrite the tag string across all matching posts atomically.
 
 ## Master document (id=0)
 
-Post `id=0` is a reserved, permanent document seeded at startup. It is intended as an index and instruction set for AI agents: naming conventions, tag taxonomy, content guidelines, etc.
+Post `id=0` is a reserved, permanent document, stored as `Master Document.md` (front-matter `id: 0`) and seeded at startup if absent. It is intended as an index and instruction set for AI agents: naming conventions, tag taxonomy, content guidelines, etc.
 
 - `GET /posts/0` — read the master document
-- `PATCH /posts/0` — update it (title, content, tags, format, source all work normally)
+- `PATCH /posts/0` — update it (title, content, tags, source all work normally)
 - `DELETE /posts/0` — **blocked** (returns `403 Forbidden`)
 - TTL cleanup **never** touches id=0 regardless of tag config
+- Deleting the file externally is reversed by the watcher (it recreates `Master Document.md` from the index)
 
 Update it via MCP: `update_post(id=0, content="...")`.
 
@@ -141,7 +148,7 @@ differ internally.
 
 | Tool | Description |
 |------|-------------|
-| `publish_post` | Publish a post (content, title, tags, format, source, expires_at) |
+| `publish_post` | Publish a post (title, content, tags, source, expires_at) |
 | `update_post` | Partially update an existing post by ID (only provided fields change, including expires_at) |
 | `list_posts` | List posts (tag/search/limit/offset; the stdio proxy omits search) |
 | `get_post` | Get a single post by ID (use `id=0` for the master document) |

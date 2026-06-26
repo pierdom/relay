@@ -1,9 +1,10 @@
 """Shared business logic for posts and tags.
 
 Both the REST routes (``relay.routes.*``) and the in-process MCP server
-(``relay.mcp_server``) call into this layer so the two interfaces never drift.
-Every function takes an open ``aiosqlite`` connection with
-``row_factory = aiosqlite.Row`` and does its own commit.
+(``relay.mcp_server``) call into this layer. Writes go file-first through
+``relay.vault`` (canonical), then mirror into the SQLite index; reads are served
+straight from the index. Every function takes an open ``aiosqlite`` connection
+with ``row_factory = aiosqlite.Row``.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from collections import Counter
 
 import aiosqlite
 
-from . import events
+from . import events, vault
 from .models import (
     PostCreate,
     PostListResponse,
@@ -33,22 +34,39 @@ class ProtectedPost(Exception):
     """Raised when an operation is not allowed on a reserved post (e.g. id=0)."""
 
 
-def _tags_to_str(tags: list[str]) -> str:
-    return "," + ",".join(tags) + "," if tags else ""
+async def _fetch(db: aiosqlite.Connection, post_id: int) -> aiosqlite.Row | None:
+    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
+        return await cur.fetchone()
+
+
+def _tags_from_sentinel(s: str) -> list[str]:
+    return [t for t in s.split(",") if t]
 
 
 # ── Posts ─────────────────────────────────────────────────────────────────────
 
 
 async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostResponse:
-    cursor = await db.execute(
-        "INSERT INTO posts (title, content, format, tags, source, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (body.title, body.content, body.format, _tags_to_str(body.tags), body.source, body.expires_at),
-    )
-    await db.commit()
-    async with db.execute("SELECT * FROM posts WHERE id = ?", (cursor.lastrowid,)) as cur:
-        row = await cur.fetchone()
-    post = PostResponse.from_row(row)
+    async with vault.write_lock:
+        post_id = await vault.allocate_id(db)
+        now = vault.utcnow_iso()
+        path = vault.write_file(
+            id=post_id,
+            title=body.title,
+            content=body.content,
+            tags=body.tags,
+            source=body.source,
+            created_at=now,
+            updated_at=None,
+            expires_at=body.expires_at,
+        )
+        await vault.index_upsert(
+            db, id=post_id, title=path.stem, path=path, content=body.content,
+            tags=body.tags, source=body.source, created_at=now,
+            updated_at=None, expires_at=body.expires_at,
+        )
+        await db.commit()
+    post = PostResponse.from_row(await _fetch(db, post_id))
     await events.publish(post.model_dump())
     return post
 
@@ -59,7 +77,6 @@ async def list_posts(
     tag: str | None = None,
     limit: int = 20,
     offset: int = 0,
-    format: str | None = None,
     search: str | None = None,
 ) -> PostListResponse:
     conditions: list[str] = []
@@ -68,9 +85,6 @@ async def list_posts(
     if tag:
         conditions.append("tags LIKE ?")
         params.append(f"%,{tag.strip().lower()},%")
-    if format:
-        conditions.append("format = ?")
-        params.append(format)
     if search:
         q = f"%{search}%"
         conditions.append("(title LIKE ? OR content LIKE ? OR source LIKE ?)")
@@ -82,7 +96,7 @@ async def list_posts(
         count_row = await cur.fetchone()
 
     async with db.execute(
-        f"SELECT * FROM posts {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        f"SELECT * FROM posts {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
         params + [limit, offset],
     ) as cur:
         rows = await cur.fetchall()
@@ -96,52 +110,49 @@ async def list_posts(
 
 
 async def get_post(db: aiosqlite.Connection, post_id: int) -> PostResponse | None:
-    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
-        row = await cur.fetchone()
+    row = await _fetch(db, post_id)
     return PostResponse.from_row(row) if row is not None else None
 
 
 async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) -> PostResponse:
-    async with db.execute("SELECT id FROM posts WHERE id = ?", (post_id,)) as cur:
-        if await cur.fetchone() is None:
-            raise PostNotFound
+    row = await _fetch(db, post_id)
+    if row is None:
+        raise PostNotFound
 
-    updates: dict[str, object] = {}
-    if "title" in body.model_fields_set:
-        updates["title"] = body.title
-    if "content" in body.model_fields_set:
-        updates["content"] = body.content
-    if "format" in body.model_fields_set:
-        updates["format"] = body.format
-    if "tags" in body.model_fields_set:
-        updates["tags"] = _tags_to_str(body.tags or [])
-    if "source" in body.model_fields_set:
-        updates["source"] = body.source
-    if "expires_at" in body.model_fields_set:
-        updates["expires_at"] = body.expires_at
+    fields = body.model_fields_set
+    title = body.title if "title" in fields else row["title"]
+    content = body.content if "content" in fields else row["content"]
+    tags = body.tags if "tags" in fields else _tags_from_sentinel(row["tags"])
+    source = body.source if "source" in fields else row["source"]
+    expires_at = body.expires_at if "expires_at" in fields else row["expires_at"]
+    now = vault.utcnow_iso()
+    old_path = vault.abspath(row["path"])
 
-    if updates:
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        set_clause += ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
-        await db.execute(
-            f"UPDATE posts SET {set_clause} WHERE id = ?",
-            list(updates.values()) + [post_id],
+    async with vault.write_lock:
+        new_path = vault.write_file(
+            id=post_id, title=title, content=content, tags=tags or [], source=source,
+            created_at=row["created_at"], updated_at=now, expires_at=expires_at,
+            old_path=old_path,
+        )
+        await vault.index_upsert(
+            db, id=post_id, title=new_path.stem, path=new_path, content=content,
+            tags=tags or [], source=source, created_at=row["created_at"],
+            updated_at=now, expires_at=expires_at,
         )
         await db.commit()
-
-    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
-        row = await cur.fetchone()
-    return PostResponse.from_row(row)
+    return PostResponse.from_row(await _fetch(db, post_id))
 
 
 async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
     if post_id == 0:
         raise ProtectedPost
-    async with db.execute("SELECT id FROM posts WHERE id = ?", (post_id,)) as cur:
-        if await cur.fetchone() is None:
-            raise PostNotFound
-    await db.execute("DELETE FROM posts WHERE id = ?", (post_id,))
-    await db.commit()
+    path = await vault.path_for_id(db, post_id)
+    if path is None:
+        raise PostNotFound
+    async with vault.write_lock:
+        vault.delete_file(path)
+        await vault.index_delete(db, post_id)
+        await db.commit()
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
@@ -152,9 +163,8 @@ async def list_tags(db: aiosqlite.Connection) -> TagListResponse:
         rows = await cur.fetchall()
     counter: Counter[str] = Counter()
     for row in rows:
-        for t in row["tags"].split(","):
-            if t:
-                counter[t] += 1
+        for t in _tags_from_sentinel(row["tags"]):
+            counter[t] += 1
     async with db.execute("SELECT tag FROM tag_config") as cur:
         for row in await cur.fetchall():
             if row["tag"] not in counter:
@@ -166,12 +176,34 @@ async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagLi
     old = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
     if old == new_name:
         return await list_tags(db)
-    await db.execute(
-        "UPDATE posts SET tags = REPLACE(tags, ?, ?) WHERE tags LIKE ?",
-        (f",{old},", f",{new_name},", f"%,{old},%"),
-    )
-    await db.execute("UPDATE tag_config SET tag = ? WHERE tag = ?", (new_name, old))
-    await db.commit()
+
+    async with db.execute(
+        "SELECT * FROM posts WHERE tags LIKE ?", (f"%,{old},%",)
+    ) as cur:
+        affected = await cur.fetchall()
+
+    async with vault.write_lock:
+        for row in affected:
+            tags = _tags_from_sentinel(row["tags"])
+            renamed: list[str] = []
+            for t in tags:
+                t = new_name if t == old else t
+                if t not in renamed:
+                    renamed.append(t)
+            new_path = vault.write_file(
+                id=row["id"], title=row["title"], content=row["content"], tags=renamed,
+                source=row["source"], created_at=row["created_at"],
+                updated_at=row["updated_at"], expires_at=row["expires_at"],
+                old_path=vault.abspath(row["path"]),
+            )
+            await vault.index_upsert(
+                db, id=row["id"], title=new_path.stem, path=new_path, content=row["content"],
+                tags=renamed, source=row["source"], created_at=row["created_at"],
+                updated_at=row["updated_at"], expires_at=row["expires_at"],
+            )
+        await db.execute("UPDATE tag_config SET tag = ? WHERE tag = ?", (new_name, old))
+        await vault.write_tag_config(db)
+        await db.commit()
     return await list_tags(db)
 
 
@@ -182,5 +214,6 @@ async def set_tag_config(db: aiosqlite.Connection, tag: str, body: TagConfigCrea
         " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours, expires_at = excluded.expires_at",
         (clean_tag, body.ttl_hours or 0, body.expires_at),
     )
+    await vault.write_tag_config(db)
     await db.commit()
     return TagConfigResponse(tag=clean_tag, ttl_hours=body.ttl_hours, expires_at=body.expires_at)
