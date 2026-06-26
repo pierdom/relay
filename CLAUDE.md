@@ -52,9 +52,10 @@ Last-Event-ID: 42        ← omit on first connect
 
 Events have type `post` (new **or edited** — the vault watcher streams external edits too) or `delete` (`data: {"id": N}`, emitted on API and external/Obsidian deletes so clients drop the post live). A `keepalive` ping fires every 30 s to hold the connection through proxies. `delete` events deliberately carry no SSE `id:` field so a delete of an old post can't rewind the client's `Last-Event-ID` cursor. Clients treat a `post` event for an id they already show as an in-place update.
 
-### Known limitations (future work)
+The SSE `id:` field only moves forward — a streamed *edit* of an older post is sent without an `id:` so it can't rewind the client's `Last-Event-ID` (no reconnect replay storm). Clients also update an open post in place: editing a post that's shown in the detail modal refreshes it, and an inline edit-in-progress on a card is never clobbered by an incoming stream event.
 
-- **Last-Event-ID can regress on edits.** A streamed *edit* carries the post's original (possibly low) id, so a client's `Last-Event-ID` may move backward, causing redundant replay on reconnect. Clients dedup/update-in-place so there's no visible corruption — just extra traffic.
+### Known limitation (future work)
+
 - **Offline edits/deletes aren't replayed.** Catch-up replays only `id > Last-Event-ID` (append-only assumption). Edits or deletes to already-seen posts made while a client was offline won't propagate on reconnect until a manual refresh.
 
 ## Configuration (.env)

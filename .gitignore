@@ -7,3 +7,6 @@
 __pycache__/
 .venv/
 dist/
+
+# Local dev vault (pulled sample data)
+vault/

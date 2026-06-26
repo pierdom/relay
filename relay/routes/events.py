@@ -48,28 +48,36 @@ async def stream_events(
     last_event_id = request.headers.get("last-event-id")
 
     async def generator():
+        # High-water mark of emitted ids. The SSE id: field must only ever move
+        # forward — a streamed *edit* carries the post's original (possibly low)
+        # id, and emitting it would rewind the client's Last-Event-ID, triggering
+        # a full replay storm on the next reconnect.
+        high_water = 0
+        try:
+            high_water = int(last_event_id) if last_event_id else 0
+        except ValueError:
+            high_water = 0
+
         # Catch-up: replay posts published since the client was last connected
-        if last_event_id:
-            try:
-                last_id = int(last_event_id)
-                conditions = ["id > ?"]
-                params: list = [last_id]
-                if tag:
-                    conditions.append("tags LIKE ?")
-                    params.append(f"%,{tag.strip().lower()},%")
-                where = "WHERE " + " AND ".join(conditions)
-                async with aiosqlite.connect(settings.database_path) as db:
-                    db.row_factory = aiosqlite.Row
-                    async with db.execute(
-                        f"SELECT * FROM posts {where} ORDER BY created_at ASC",
-                        params,
-                    ) as cur:
-                        missed = await cur.fetchall()
-                for row in missed:
-                    post = PostResponse.from_row(row)
-                    yield {"event": "post", "id": str(post.id), "data": post.model_dump_json()}
-            except ValueError:
-                pass
+        if last_event_id and high_water:
+            last_id = high_water
+            conditions = ["id > ?"]
+            params: list = [last_id]
+            if tag:
+                conditions.append("tags LIKE ?")
+                params.append(f"%,{tag.strip().lower()},%")
+            where = "WHERE " + " AND ".join(conditions)
+            async with aiosqlite.connect(settings.database_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    f"SELECT * FROM posts {where} ORDER BY created_at ASC",
+                    params,
+                ) as cur:
+                    missed = await cur.fetchall()
+            for row in missed:
+                post = PostResponse.from_row(row)
+                high_water = max(high_water, post.id)
+                yield {"event": "post", "id": str(post.id), "data": post.model_dump_json()}
 
         # Live subscription
         q = subscribe(tag)
@@ -85,7 +93,13 @@ async def stream_events(
                         yield {"event": "delete", "data": json.dumps(event["data"])}
                     else:
                         post = PostResponse(**event["data"])
-                        yield {"event": "post", "id": str(post.id), "data": post.model_dump_json()}
+                        frame = {"event": "post", "data": post.model_dump_json()}
+                        # Only advance the cursor for genuinely newer posts; an
+                        # edit to an older post streams without an id: field.
+                        if post.id > high_water:
+                            high_water = post.id
+                            frame["id"] = str(post.id)
+                        yield frame
                 except asyncio.TimeoutError:
                     yield {"event": "keepalive", "data": ""}
         finally:

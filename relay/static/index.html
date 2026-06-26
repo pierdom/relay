@@ -812,6 +812,11 @@ async function loadTags() {
   try { const data = await apiFetch('/tags'); renderTags(data.tags); } catch {}
 }
 
+// Debounced loadTags — a burst of SSE events (e.g. reconnect replay) must not
+// trigger a storm of /tags fetches + sidebar rebuilds.
+let _tagsTimer = null;
+function scheduleLoadTags() { clearTimeout(_tagsTimer); _tagsTimer = setTimeout(loadTags, 250); }
+
 function renderTags(tags) {
   tagList.innerHTML = '';
   tagList.appendChild(makeTagItem('all', null, tags.reduce((s, t) => s + t.count, 0)));
@@ -1106,7 +1111,11 @@ function connectSSE() {
     const post = JSON.parse(e.data);
     // A 'post' event is either a brand-new post or an edit streamed in from
     // outside relay (e.g. an Obsidian save picked up by the vault watcher).
+    // If this post is open in the detail modal, refresh it in place.
+    if (_modalPost && _modalPost.id === post.id) openPostModal(post);
     const existing = feed.querySelector(`[data-id="${post.id}"]`);
+    // Don't clobber an inline edit the user has open on this card.
+    if (existing && existing.classList.contains('editing')) { scheduleLoadTags(); return; }
     const el = renderPost(post);
     el.classList.add('new');
     if (existing) {
@@ -1117,7 +1126,7 @@ function connectSSE() {
       feed.prepend(el);
       total++;
     }
-    loadTags();
+    scheduleLoadTags();
   });
 
   es.addEventListener('delete', e => {
@@ -1127,7 +1136,7 @@ function connectSSE() {
     card.remove();
     total = Math.max(0, total - 1);
     if (_modalPost && _modalPost.id === id) closePostModal();
-    loadTags();
+    scheduleLoadTags();
   });
 
   es.onopen = () => {
