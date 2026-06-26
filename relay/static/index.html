@@ -1104,13 +1104,19 @@ function connectSSE() {
 
   es.addEventListener('post', e => {
     const post = JSON.parse(e.data);
-    if (feed.querySelector(`[data-id="${post.id}"]`)) return;
-    const empty = feed.querySelector('.empty');
-    if (empty) empty.remove();
+    // A 'post' event is either a brand-new post or an edit streamed in from
+    // outside relay (e.g. an Obsidian save picked up by the vault watcher).
+    const existing = feed.querySelector(`[data-id="${post.id}"]`);
     const el = renderPost(post);
     el.classList.add('new');
-    feed.prepend(el);
-    total++;
+    if (existing) {
+      existing.replaceWith(el);   // edit: update in place (don't bump total)
+    } else {
+      const empty = feed.querySelector('.empty');
+      if (empty) empty.remove();
+      feed.prepend(el);
+      total++;
+    }
     loadTags();
   });
 

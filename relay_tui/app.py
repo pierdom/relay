@@ -189,8 +189,14 @@ class RelayTuiApp(App):
 
     def _prepend_post(self, post: api.Post) -> None:
         try:
-            if self._active_tag is None or self._active_tag in post.tags:
-                self.query_one(PostPanel).prepend_post(post)
+            panel = self.query_one(PostPanel)
+            # A 'post' event is either new or an edit streamed in from outside
+            # relay (e.g. an Obsidian save). If we already show it, update in
+            # place; otherwise prepend it (respecting the active-tag filter).
+            if panel.has_post(post.id):
+                panel.update_post(post, flash=True)
+            elif self._active_tag is None or self._active_tag in post.tags:
+                panel.prepend_post(post)
             # A streamed post may carry a brand-new tag or bump a count, so
             # refresh the sidebar regardless of the active-tag filter.
             self._refresh_tags()

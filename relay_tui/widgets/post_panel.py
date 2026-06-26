@@ -223,7 +223,13 @@ class PostPanel(Widget):
                 break
         self._apply_visibility()
 
-    def update_post(self, post: api.Post) -> None:
+    def has_post(self, post_id: int) -> bool:
+        return any(
+            isinstance(c, PostItem) and c.post.id == post_id
+            for c in self.query_one(ListView).children
+        )
+
+    def update_post(self, post: api.Post, *, flash: bool = False) -> None:
         lv = self.query_one(ListView)
         children = list(lv.children)
         for i, item in enumerate(children):
@@ -235,6 +241,9 @@ class PostPanel(Widget):
                     lv.mount(new_item, before=current_children[i])
                 else:
                     lv.mount(new_item)
+                if flash:
+                    new_item.add_class("flash")
+                    self.set_timer(1.2, lambda: new_item.remove_class("flash"))
                 break
 
     def focus(self, scroll_visible: bool = True) -> "PostPanel":

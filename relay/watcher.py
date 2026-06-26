@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 _DEBOUNCE_SECONDS = 0.3
 
+# Only content-changing events matter. Crucially we must ignore "opened"/"closed"
+# (and "closed_no_write"): reconciling *reads* the .md file, which itself emits
+# open/close events — reacting to those would feed back into an infinite loop.
+_CHANGE_EVENTS = {"created", "modified", "moved", "deleted"}
+
 
 class _Handler(FileSystemEventHandler):
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -37,7 +42,7 @@ class _Handler(FileSystemEventHandler):
         return not str(Path(path).resolve()).startswith(self._relay_dir)
 
     def on_any_event(self, event) -> None:
-        if event.is_directory:
+        if event.is_directory or event.event_type not in _CHANGE_EVENTS:
             return
         candidates = [event.src_path, getattr(event, "dest_path", None)]
         with self._lock:
