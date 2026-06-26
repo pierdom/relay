@@ -195,6 +195,16 @@ curl -N "http://localhost:8000/events?tag=news" \
 ```
 
 A `keepalive` event fires every 30 s to hold the connection through proxies.
+Event types: `post` (a new **or edited** post — the vault watcher streams edits
+made outside relay, e.g. in Obsidian) and `delete` (`{"id": N}`, so clients drop
+a post the moment it's deleted via the API or removed from the vault). A client
+that receives a `post` event for an id it already shows updates it in place.
+
+**Known limitations (future work):** streamed *edits* carry the post's original
+id, so a client's `Last-Event-ID` can move backward and trigger redundant replay
+on reconnect (clients dedup, so no visible corruption). And catch-up replay is
+append-only (`id > Last-Event-ID`), so edits/deletes to already-seen posts made
+while a client was offline aren't replayed until a manual refresh.
 
 ### Per-tag TTL
 

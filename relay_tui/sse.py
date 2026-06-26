@@ -14,6 +14,7 @@ class SSESubscriber:
     """Background thread that subscribes to the relay SSE event stream.
 
     Calls *on_post* with the parsed JSON dict for each ``post`` event.
+    Calls *on_delete* with the deleted post id for each ``delete`` event.
     Calls *on_connect* (no args) when the HTTP connection is established.
     Calls *on_disconnect* (no args) when the connection is lost or fails.
 
@@ -25,8 +26,10 @@ class SSESubscriber:
         on_post: Callable[[dict], None],
         on_connect: Callable[[], None] | None = None,
         on_disconnect: Callable[[], None] | None = None,
+        on_delete: Callable[[int], None] | None = None,
     ) -> None:
         self._on_post = on_post
+        self._on_delete = on_delete
         self._on_connect = on_connect
         self._on_disconnect = on_disconnect
         self._stop_event = threading.Event()
@@ -104,11 +107,14 @@ class SSESubscriber:
 
                 if line == "":
                     # Blank line: dispatch accumulated event
-                    if data_lines and event_type == "post":
+                    if data_lines and event_type in ("post", "delete"):
                         raw_data = "\n".join(data_lines)
                         try:
                             parsed = json.loads(raw_data)
-                            self._on_post(parsed)
+                            if event_type == "post":
+                                self._on_post(parsed)
+                            elif self._on_delete is not None:
+                                self._on_delete(parsed["id"])
                         except Exception:
                             pass
                     if event_id is not None:

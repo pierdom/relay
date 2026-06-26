@@ -1120,6 +1120,16 @@ function connectSSE() {
     loadTags();
   });
 
+  es.addEventListener('delete', e => {
+    const { id } = JSON.parse(e.data);
+    const card = feed.querySelector(`[data-id="${id}"]`);
+    if (!card) return;            // idempotent: already gone (e.g. we deleted it)
+    card.remove();
+    total = Math.max(0, total - 1);
+    if (_modalPost && _modalPost.id === id) closePostModal();
+    loadTags();
+  });
+
   es.onopen = () => {
     if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
     setDot('connected');

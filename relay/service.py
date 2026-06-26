@@ -146,13 +146,14 @@ async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) 
 async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
     if post_id == 0:
         raise ProtectedPost
-    path = await vault.path_for_id(db, post_id)
-    if path is None:
+    row = await _fetch(db, post_id)
+    if row is None:
         raise PostNotFound
     async with vault.write_lock:
-        vault.delete_file(path)
+        vault.delete_file(vault.abspath(row["path"]))
         await vault.index_delete(db, post_id)
         await db.commit()
+    await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]))
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────

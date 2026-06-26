@@ -161,6 +161,7 @@ class RelayTuiApp(App):
             on_post=self._on_sse_post,
             on_connect=self._on_sse_connect,
             on_disconnect=self._on_sse_disconnect,
+            on_delete=self._on_sse_delete,
         )
         self._sse.start()
         self._reload()
@@ -184,6 +185,17 @@ class RelayTuiApp(App):
             post = api.Post.from_dict(post_data)
             self._sse.set_last_id(post.id)
             self.call_from_thread(self._prepend_post, post)
+        except Exception:
+            pass
+
+    def _on_sse_delete(self, post_id: int) -> None:
+        # External delete (e.g. a note removed in Obsidian) — drop it live.
+        self.call_from_thread(self._remove_post_live, post_id)
+
+    def _remove_post_live(self, post_id: int) -> None:
+        try:
+            self.query_one(PostPanel).remove_post(post_id)
+            self._refresh_tags()
         except Exception:
             pass
 

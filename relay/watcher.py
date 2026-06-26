@@ -133,6 +133,7 @@ async def _reconcile_delete(db: aiosqlite.Connection, path: Path) -> None:
         return
     await db.execute("DELETE FROM posts WHERE id = ?", (row["id"],))
     await db.commit()
+    await events.publish_delete(row["id"], [t for t in row["tags"].split(",") if t])
     logger.info("Removed externally deleted note: %s (id=%s)", path.name, row["id"])
 
 

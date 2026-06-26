@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 
 import aiosqlite
@@ -78,8 +79,13 @@ async def stream_events(
                     break
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=_KEEPALIVE_SECONDS)
-                    post = PostResponse(**event)
-                    yield {"event": "post", "id": str(post.id), "data": post.model_dump_json()}
+                    if event.get("type") == "delete":
+                        # No SSE id: a delete carries the post's (possibly old) id
+                        # and must not rewind the client's Last-Event-ID cursor.
+                        yield {"event": "delete", "data": json.dumps(event["data"])}
+                    else:
+                        post = PostResponse(**event["data"])
+                        yield {"event": "post", "id": str(post.id), "data": post.model_dump_json()}
                 except asyncio.TimeoutError:
                     yield {"event": "keepalive", "data": ""}
         finally:
