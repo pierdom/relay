@@ -13,9 +13,11 @@ from textual.widgets import (
     Input,
     Label,
     Markdown,
+    OptionList,
     Static,
     TextArea,
 )
+from textual.widgets.option_list import Option
 from textual.containers import Horizontal, Vertical, VerticalScroll
 
 from .. import api
@@ -57,6 +59,31 @@ def _linkify_markdown(content: str, index: dict[str, int]) -> str:
     )
 
 
+def _outbound_link_ids(content: str, index: dict[str, int]) -> list[int]:
+    """Resolved link targets in ``content``, in document order, de-duplicated.
+
+    Covers ``[[Title]]`` and ``#NNN``; skips code and unresolved links.
+    """
+    ids = set(index.values())
+    ordered: list[int] = []
+    for i, part in enumerate(_CODE_SPLIT.split(content)):
+        if i % 2:
+            continue
+        hits: list[tuple[int, int]] = []
+        for m in _WIKI_RE.finditer(part):
+            pid = index.get(m.group(1).strip().lower())
+            if pid is not None:
+                hits.append((m.start(), pid))
+        for m in _IDREF_RE.finditer(part):
+            n = int(m.group(1))
+            if n in ids:
+                hits.append((m.start(), n))
+        hits.sort()
+        ordered.extend(pid for _, pid in hits)
+    seen: set[int] = set()
+    return [p for p in ordered if not (p in seen or seen.add(p))]
+
+
 # ── PostDetailModal ───────────────────────────────────────────────────────────
 
 
@@ -65,6 +92,7 @@ class PostDetailModal(ModalScreen[None]):
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
+        Binding("f", "follow_link", "Follow link"),
     ]
 
     DEFAULT_CSS = f"""
@@ -112,10 +140,17 @@ class PostDetailModal(ModalScreen[None]):
     }}
     """
 
-    def __init__(self, post: api.Post, link_index: dict[str, int] | None = None) -> None:
+    def __init__(
+        self,
+        post: api.Post,
+        link_index: dict[str, int] | None = None,
+        link_titles: dict[int, str] | None = None,
+    ) -> None:
         super().__init__()
         self._post = post
         self._link_index = link_index or {}
+        self._link_titles = link_titles or {}
+        self._backlinks: list[tuple[int, str]] = []
 
     def compose(self) -> ComposeResult:
         post = self._post
@@ -171,12 +206,35 @@ class PostDetailModal(ModalScreen[None]):
             items = api.get_backlinks(self._post.id)
         except Exception:
             return
+        self._backlinks = items
         if not items:
             return
-        md = "\n---\n\n**Linked mentions**\n\n" + "\n".join(
+        md = "\n---\n\n**Linked mentions**  ([b]f[/b] to follow)\n\n" + "\n".join(
             f"- [#{i} {t}](relay:{i})" for i, t in items
         )
         self.app.call_from_thread(self.query_one("#backlinks", Markdown).update, md)
+
+    def action_follow_link(self) -> None:
+        """Open a keyboard-driven picker of every link in the post (out + back)."""
+        items: list[tuple[int, str, str]] = []
+        seen: set[int] = set()
+        for pid in _outbound_link_ids(self._post.content, self._link_index):
+            seen.add(pid)
+            items.append((pid, self._link_titles.get(pid, ""), "→"))
+        for pid, title in self._backlinks:
+            if pid in seen:
+                continue
+            seen.add(pid)
+            items.append((pid, title, "←"))
+        if not items:
+            self.app.notify("No links in this post", severity="warning")
+            return
+
+        def _on_pick(pid: int | None) -> None:
+            if pid is not None:
+                self.app.open_post(pid)
+
+        self.app.push_screen(LinkPickerModal(items), _on_pick)
 
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
         event.stop()
@@ -193,6 +251,84 @@ class PostDetailModal(ModalScreen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close-btn":
             self.dismiss()
+
+
+# ── LinkPickerModal ───────────────────────────────────────────────────────────
+
+
+class LinkPickerModal(ModalScreen[int | None]):
+    """Keyboard link chooser: type to filter, ↑↓ to move, Enter to follow."""
+
+    BINDINGS = [Binding("escape", "dismiss", "Cancel")]
+
+    DEFAULT_CSS = f"""
+    LinkPickerModal {{ align: center middle; background: {SCREEN_BG}; }}
+    LinkPickerModal > Vertical {{
+        width: 64; max-width: 90%; height: auto; max-height: 80%;
+        background: {SCREEN_BG}; border: solid {ACCENT}; padding: 1 2;
+    }}
+    LinkPickerModal .picker-title {{ text-style: bold; color: {ACCENT}; width: 1fr; }}
+    LinkPickerModal Input {{ margin: 1 0; }}
+    LinkPickerModal OptionList {{
+        height: auto; max-height: 16; background: transparent; border: none;
+    }}
+    """
+
+    def __init__(self, items: list[tuple[int, str, str]]) -> None:
+        super().__init__()
+        self._items = items  # (id, title, arrow)
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(
+                f"Follow link  ·  {len(self._items)} in this post",
+                classes="picker-title",
+            )
+            yield Input(placeholder="filter by title or #id…", id="pick-filter")
+            yield OptionList(id="pick-list")
+
+    def on_mount(self) -> None:
+        self._populate("")
+        self.query_one("#pick-filter", Input).focus()
+
+    def _populate(self, query: str) -> None:
+        q = query.strip().lower()
+        ol = self.query_one("#pick-list", OptionList)
+        ol.clear_options()
+        for pid, title, arrow in self._items:
+            label = f"{arrow} #{pid}  {title}".rstrip()
+            if not q or q in label.lower() or q in str(pid):
+                ol.add_option(Option(label, id=str(pid)))
+        if ol.option_count:
+            ol.highlighted = 0
+
+    def _follow(self, index: int | None) -> None:
+        ol = self.query_one("#pick-list", OptionList)
+        if index is None or not ol.option_count:
+            return
+        opt = ol.get_option_at_index(index)
+        if opt.id is not None:
+            self.dismiss(int(opt.id))
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._populate(event.value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._follow(self.query_one("#pick-list", OptionList).highlighted)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option.id is not None:
+            self.dismiss(int(event.option.id))
+
+    def on_key(self, event) -> None:
+        if event.key in ("up", "down"):
+            ol = self.query_one("#pick-list", OptionList)
+            if ol.option_count:
+                cur = ol.highlighted or 0
+                ol.highlighted = max(
+                    0, min(ol.option_count - 1, cur + (1 if event.key == "down" else -1))
+                )
+            event.stop()
 
 
 # ── ComposeModal ──────────────────────────────────────────────────────────────

@@ -234,6 +234,7 @@ Set `RELAY_TRANSPARENT=1` to let the terminal's own background (transparency / b
 | `R` | Rename selected tag (TOPICS panel) |
 | `r` | Refresh |
 | `Enter` | View full post |
+| `f` | (in a post's detail view) Follow a link — opens a filterable picker of the post's `[[wikilinks]]` / `#NNN` refs + backlinks; ↑↓/type to select, Enter to jump |
 | `Tab` | Switch between TOPICS / FEED panels |
 | `q` | Quit |
 

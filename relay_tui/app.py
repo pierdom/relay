@@ -153,7 +153,8 @@ class RelayTuiApp(App):
 
         self._active_tag: str | None = None
         self._search: str | None = None
-        self._link_index: dict[str, int] = {}
+        self._link_index: dict[str, int] = {}   # normalised title -> id
+        self._link_titles: dict[int, str] = {}   # id -> title
         self._page_size = 50
         self._offset = 0
         self._total = 0
@@ -224,7 +225,9 @@ class RelayTuiApp(App):
             )
             tags = api.list_tags()
             try:
-                self._link_index = api.link_index()
+                targets = api.link_targets()
+                self._link_index = {t.strip().lower(): i for i, t in targets}
+                self._link_titles = {i: t for i, t in targets}
             except Exception:
                 pass
             if posts:
@@ -290,7 +293,7 @@ class RelayTuiApp(App):
             pass
 
     def on_post_panel_view_post(self, event: PostPanel.ViewPost) -> None:
-        self.push_screen(PostDetailModal(event.post, self._link_index))
+        self.push_screen(PostDetailModal(event.post, self._link_index, self._link_titles))
 
     def open_post(self, post_id: int) -> None:
         """Open a post by id (from a clicked wikilink) in a stacked detail modal."""
@@ -303,7 +306,9 @@ class RelayTuiApp(App):
         except Exception as e:
             self.call_from_thread(self.notify, f"Open failed: {e}", severity="error")
             return
-        self.call_from_thread(self.push_screen, PostDetailModal(post, self._link_index))
+        self.call_from_thread(
+            self.push_screen, PostDetailModal(post, self._link_index, self._link_titles)
+        )
 
     async def action_reload(self) -> None:
         self._reload()

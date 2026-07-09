@@ -140,11 +140,11 @@ def get_post(post_id: int) -> Post:
     return Post.from_dict(resp.json())
 
 
-def link_index() -> dict[str, int]:
-    """Map of normalised title -> id, for resolving ``[[Title]]`` wikilinks."""
+def link_targets() -> list[tuple[int, str]]:
+    """(id, title) for every post — for resolving wikilinks and the link picker."""
     resp = requests.get(f"{_base()}/links", headers=_headers(), timeout=10)
     resp.raise_for_status()
-    return {i["title"].strip().lower(): i["id"] for i in resp.json().get("items", [])}
+    return [(i["id"], i["title"]) for i in resp.json().get("items", [])]
 
 
 def get_backlinks(post_id: int) -> list[tuple[int, str]]:
