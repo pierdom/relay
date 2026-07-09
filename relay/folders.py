@@ -25,8 +25,9 @@ FALLBACK = {
     "news-digest": "digests",
     "digest": "digests",
     "news": "digests",
-    "meta": "meta",
-    "index": "meta",
+    # `meta`/`index` (short-lived notes: to-do lists, scratch) live in Inbox.
+    "meta": "inbox",
+    "index": "inbox",
 }
 
 INBOX = "Inbox"
@@ -34,7 +35,7 @@ INBOX = "Inbox"
 # tag/pseudo-domain -> on-disk folder name
 _FOLDER = {d: d.capitalize() for d in DOMAINS}
 _FOLDER["digests"] = "Digests"
-_FOLDER["meta"] = "Meta"
+_FOLDER["inbox"] = INBOX
 
 _DOMSET = set(DOMAINS)
 
