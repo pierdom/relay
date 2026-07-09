@@ -88,7 +88,7 @@ async def test_update_nonexistent_id_returns_404(client):
 @pytest.mark.asyncio
 async def test_create_writes_markdown_file_with_frontmatter(client, vault_dir):
     post = await _create_post(client, title="My News", content="# Hello\n\nbody")
-    f = vault_dir / "My News.md"
+    f = vault_dir / "Inbox" / "My News.md"  # tags a/b are non-domain -> Inbox
     assert f.exists()
     meta, body = frontmatter.parse(f.read_text(encoding="utf-8"))
     assert meta["id"] == post["id"]
@@ -106,18 +106,18 @@ async def test_title_is_required(client):
 @pytest.mark.asyncio
 async def test_title_change_renames_file(client, vault_dir):
     post = await _create_post(client, title="Old Name")
-    assert (vault_dir / "Old Name.md").exists()
+    assert (vault_dir / "Inbox" / "Old Name.md").exists()
     r = await client.patch(f"/posts/{post['id']}", json={"title": "New Name"}, headers=AUTH)
     assert r.status_code == 200
     assert r.json()["title"] == "New Name"
-    assert (vault_dir / "New Name.md").exists()
-    assert not (vault_dir / "Old Name.md").exists()
+    assert (vault_dir / "Inbox" / "New Name.md").exists()
+    assert not (vault_dir / "Inbox" / "Old Name.md").exists()
 
 
 @pytest.mark.asyncio
 async def test_delete_unlinks_file(client, vault_dir):
     post = await _create_post(client, title="To Delete")
-    f = vault_dir / "To Delete.md"
+    f = vault_dir / "Inbox" / "To Delete.md"
     assert f.exists()
     r = await client.delete(f"/posts/{post['id']}", headers=AUTH)
     assert r.status_code == 204
@@ -129,14 +129,14 @@ async def test_title_collision_gets_suffix(client, vault_dir):
     p1 = await _create_post(client, title="Same Title")
     p2 = await _create_post(client, title="Same Title")
     assert p1["id"] != p2["id"]
-    assert (vault_dir / "Same Title.md").exists()
-    assert (vault_dir / "Same Title 2.md").exists()
+    assert (vault_dir / "Inbox" / "Same Title.md").exists()
+    assert (vault_dir / "Inbox" / "Same Title 2.md").exists()
 
 
 @pytest.mark.asyncio
 async def test_illegal_chars_sanitized_in_filename(client, vault_dir):
     await _create_post(client, title="AI/ML: news?")
-    assert (vault_dir / "AI ML news.md").exists()
+    assert (vault_dir / "Inbox" / "AI ML news.md").exists()
 
 
 @pytest.mark.asyncio
@@ -159,6 +159,74 @@ async def test_rebuild_adopts_idless_handmade_note(vault_dir):
     assert row is not None and row["id"] > 0
     meta, _ = frontmatter.parse((vault_dir / "Hand Made.md").read_text(encoding="utf-8"))
     assert meta["id"] == row["id"]  # id stamped back into the file
+
+
+# ── folder placement (derive from primary tag; never auto-move) ──────────────
+
+
+@pytest.mark.asyncio
+async def test_create_files_post_by_primary_domain_tag(client, vault_dir):
+    await _create_post(client, title="QTH", tags=["radio", "reference"])
+    assert (vault_dir / "Radio" / "QTH.md").exists()
+    assert not (vault_dir / "QTH.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_first_domain_tag_wins_over_leading_type_tag(client, vault_dir):
+    # non-domain tags are skipped; the first *domain* tag decides the folder
+    await _create_post(client, title="Corellia Gaming", tags=["reference", "corellia", "gaming"])
+    assert (vault_dir / "Gaming" / "Corellia Gaming.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_edit_never_moves_folder_even_when_tags_change(client, vault_dir):
+    post = await _create_post(client, title="Note", tags=["radio", "reference"])
+    assert (vault_dir / "Radio" / "Note.md").exists()
+    r = await client.patch(f"/posts/{post['id']}", json={"tags": ["dev"]}, headers=AUTH)
+    assert r.status_code == 200
+    # folder is human-owned after creation: stays in Radio, not moved to Dev
+    assert (vault_dir / "Radio" / "Note.md").exists()
+    assert not (vault_dir / "Dev" / "Note.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_master_document_stays_at_root(client, vault_dir):
+    assert (vault_dir / "Master Document.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_rebuild_indexes_nested_note(vault_dir):
+    nested = vault_dir / "Radio" / "Nested.md"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text(
+        "---\nid: 500\ntags: [radio, reference]\ncreated_at: '2026-01-01T00:00:00Z'\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vault.rebuild_index(db)
+        async with db.execute("SELECT path FROM posts WHERE id = 500") as cur:
+            row = await cur.fetchone()
+    assert row is not None
+    assert row["path"] == os.path.join("Radio", "Nested.md")
+
+
+@pytest.mark.asyncio
+async def test_idless_note_in_subfolder_gets_id_in_place(vault_dir):
+    hand = vault_dir / "Homelab" / "Hand.md"
+    hand.parent.mkdir(parents=True, exist_ok=True)
+    hand.write_text("just text, no id\n", encoding="utf-8")
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vault.rebuild_index(db)
+        async with db.execute("SELECT id, path FROM posts WHERE title = 'Hand'") as cur:
+            row = await cur.fetchone()
+    assert row is not None and row["id"] > 0
+    # id stamped in place; file not yanked to root
+    assert row["path"] == os.path.join("Homelab", "Hand.md")
+    assert hand.exists()
+    meta, _ = frontmatter.parse(hand.read_text(encoding="utf-8"))
+    assert meta["id"] == row["id"]
 
 
 @pytest.mark.asyncio

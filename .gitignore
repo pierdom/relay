@@ -10,3 +10,4 @@ dist/
 
 # Local dev vault (pulled sample data)
 vault/
+vault.bak*/

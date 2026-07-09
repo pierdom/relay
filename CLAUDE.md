@@ -4,6 +4,8 @@ Personal HTTP content feed. AI agents POST structured content (news digests, etc
 
 **Storage is an Obsidian-style Markdown vault** (`RELAY_VAULT_PATH`): one `.md` file per post, the title *is* the filename, metadata in YAML front-matter (`id`, `tags`, `source`, timestamps, `expires_at` — **no `title`**, that's the filename). Files are canonical. A disposable **SQLite index** under `<vault>/.relay/index.db` mirrors them for fast queries and is rebuilt from the files at startup. A `watchdog` watcher live-reindexes external edits (e.g. Obsidian) and pushes them via SSE. `title` is required; `format` no longer exists (everything is Markdown); `id` in front-matter is authoritative and survives renames.
 
+**First-level folders** (see `relay/folders.py`): the vault is organised into one folder per domain (`Homelab/`, `Radio/`, `Finance/`, `Reading/`, … plus `Meta/`, `Digests/`, `Inbox/`); the master document (#0) stays at the root. Folders are a browse aid — **tags remain primary for navigation**. A new post is filed by its **first domain tag** (placement is *derived* from tags, not stored). The folder is set once at creation and never auto-moved on retag; move a file yourself in Obsidian and relay preserves the new location (`id` is authoritative). Scans are recursive; nesting is one level only.
+
 ## Running locally
 
 ```bash
@@ -77,6 +79,7 @@ relay/
 ├── main.py        # FastAPI app + lifespan (init index, cleanup loop, vault watcher, MCP session); mounts /mcp
 ├── config.py      # pydantic-settings Settings (reads .env); vault_path + derived index/tags paths
 ├── frontmatter.py # YAML front-matter parse/serialize + Obsidian filename rules (sanitize, collision suffix)
+├── folders.py     # Folder placement policy — maps a post's primary domain tag to its first-level folder
 ├── vault.py       # Canonical file layer: write/read/delete/rename, id allocation, startup index rebuild, tags.yml
 ├── watcher.py     # watchdog observer — external edits → re-index + SSE (self-write suppressed)
 ├── database.py    # aiosqlite *index* (disposable mirror), schema, get_db dependency

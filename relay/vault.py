@@ -16,7 +16,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from . import frontmatter
+from . import folders, frontmatter
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -116,10 +116,18 @@ def write_file(
 ) -> Path:
     """Write a post to disk; rename from ``old_path`` if the title changed.
 
+    Folder placement: a file edited in place stays in its current directory
+    (``old_path``'s parent) — relay never relocates a post on retag. A brand-new
+    file (no ``old_path``) is filed by ``folders.folder_for`` from its tags.
+
     Returns the (possibly new) path. Records the write for watcher suppression.
     """
     stem = frontmatter.sanitize_title(title)
-    new_path = frontmatter.unique_path(vault_dir(), stem, exclude=old_path)
+    if old_path is not None:
+        target_dir = old_path.parent
+    else:
+        target_dir = vault_dir() / folders.folder_for(id, tags)
+    new_path = frontmatter.unique_path(target_dir, stem, exclude=old_path)
     meta = {
         "id": id,
         "tags": tags,
@@ -201,9 +209,18 @@ async def index_delete(db: aiosqlite.Connection, post_id: int) -> None:
 # ── startup rebuild ───────────────────────────────────────────────────────────
 
 
+def _iter_notes() -> list[Path]:
+    """All ``.md`` notes in the vault, recursively, excluding the ``.relay`` dir."""
+    relay_dir = str(Path(settings.relay_dir).resolve())
+    return [
+        p for p in vault_dir().rglob("*.md")
+        if not str(p.resolve()).startswith(relay_dir)
+    ]
+
+
 def _ensure_master_file() -> None:
     """Create Master Document.md (id=0) if no file already claims id=0."""
-    for path in vault_dir().glob("*.md"):
+    for path in _iter_notes():
         try:
             meta, _ = read_file(path)
         except (OSError, UnicodeDecodeError):
@@ -232,7 +249,7 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
     _ensure_master_file()
 
     files = sorted(
-        (p for p in vault_dir().glob("*.md")),
+        _iter_notes(),
         key=lambda p: (p.stat().st_mtime, p.name),
     )
 

@@ -41,6 +41,14 @@ it is harmless. A live filesystem watcher picks up edits made *outside* relay
 `title` is required (it names the file); `id` in front-matter is authoritative and
 preserved across renames.
 
+The vault is organised into **first-level folders** — one per domain (`Homelab/`,
+`Radio/`, `Finance/`, `Reading/`, …, plus `Meta/`, `Digests/`, `Inbox/`), with the
+master document at the root. Folders are a browse aid; **tags stay primary for
+navigation**. A new post is filed automatically by its first domain tag (placement
+is derived from tags, not stored). The folder is chosen once at creation and never
+moved on retag — reorganise freely in Obsidian and relay preserves it, since `id`
+is authoritative.
+
 ## Quick start
 
 ```bash
