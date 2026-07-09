@@ -78,7 +78,7 @@ The container exposes `GET /health` (no auth) and reports its status via Docker 
 
 ### Browser UI
 
-`GET /ui` — single-page interface with a live SSE feed, compose/edit forms, tag sidebar, and mobile drawer.
+`GET /ui` — single-page interface with a live SSE feed, compose/edit forms, and a mobile drawer. The sidebar toggles between **Tags** (filter by tag) and **Tree** (filter by vault folder). The master document is pinned on top of the home feed, and `[[wikilinks]]`/`#NNN` cross-references render clickable (with a "linked mentions" panel in the detail view).
 
 ### Terminal UI
 
@@ -86,7 +86,7 @@ The container exposes `GET /health` (no auth) and reports its status via Docker 
 uv run relay-tui
 ```
 
-Two-panel split: TOPICS sidebar + FEED list. Keyboard shortcuts: `n` new, `e` edit, `d` delete, `r` refresh, `Enter` view full post, `Tab` switch panels, `q` quit. Set `RELAY_PALETTE=<name>` to pick a colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`). Set `RELAY_TRANSPARENT=1` to let the terminal's own background show through the base canvas (Screen, header, footer, scrollbars, single-post detail); editing modals stay opaque.
+Two-panel split: TOPICS sidebar + FEED list. Keyboard shortcuts: `n` new, `e` edit, `d` delete, `r` refresh, `Enter` view full post, `t` toggle TOPICS between Tags and Tree (folders), `Tab` switch panels, `q` quit. In a post's detail view, `f` opens a filterable picker to follow its `[[wikilinks]]`/`#NNN` links and backlinks. The master document is pinned on top of the feed. Set `RELAY_PALETTE=<name>` to pick a colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`). Set `RELAY_TRANSPARENT=1` to let the terminal's own background show through the base canvas (Screen, header, footer, scrollbars, single-post detail); editing modals stay opaque.
 
 ### MCP server (Claude Desktop / agents)
 
@@ -160,10 +160,13 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/posts` | Publish a post |
-| GET | `/posts` | List posts (`tag`, `search`, `limit`, `offset`) |
+| GET | `/posts` | List posts (`tag`, `folder`, `search`, `limit`, `offset`; master doc returned as `pinned` on the home feed) |
 | GET | `/posts/{id}` | Get a single post |
+| GET | `/posts/{id}/backlinks` | Posts that link to this one (`[[title]]` or `#id`) |
 | PATCH | `/posts/{id}` | Update fields (partial — omitted fields unchanged) |
 | DELETE | `/posts/{id}` | Delete a post |
+| GET | `/links` | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
+| GET | `/folders` | First-level vault folders with post counts |
 | GET | `/tags` | List tags with post counts |
 | POST | `/tags/{tag}/config` | Set per-tag TTL override |
 | PATCH | `/tags/{tag}` | Rename a tag across all posts |
