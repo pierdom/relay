@@ -1111,8 +1111,12 @@ function connectSSE() {
     const post = JSON.parse(e.data);
     // A 'post' event is either a brand-new post or an edit streamed in from
     // outside relay (e.g. an Obsidian save picked up by the vault watcher).
-    // If this post is open in the detail modal, refresh it in place.
-    if (_modalPost && _modalPost.id === post.id) openPostModal(post);
+    // If this post is *currently* open in the detail modal, refresh it in place.
+    // Guard on the modal actually being open (not just _modalPost) so a late or
+    // duplicate edit event that lands right after the user hits × can never
+    // resurrect a modal they just closed.
+    if (_modalPost && _modalPost.id === post.id && postModal.classList.contains('open'))
+      openPostModal(post);
     const existing = feed.querySelector(`[data-id="${post.id}"]`);
     // Don't clobber an inline edit the user has open on this card.
     if (existing && existing.classList.contains('editing')) { scheduleLoadTags(); return; }
