@@ -7,7 +7,7 @@ import aiosqlite
 from .. import service
 from ..auth import require_api_key
 from ..database import get_db
-from ..models import PostCreate, PostListResponse, PostResponse, PostUpdate
+from ..models import BacklinksResponse, PostCreate, PostListResponse, PostResponse, PostUpdate
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
@@ -55,6 +55,21 @@ async def get_post(
     if post is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
     return post
+
+
+@router.get(
+    "/{post_id}/backlinks",
+    response_model=BacklinksResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_backlinks(
+    post_id: int,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> BacklinksResponse:
+    try:
+        return await service.get_backlinks(db, post_id)
+    except service.PostNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
 
 @router.patch(

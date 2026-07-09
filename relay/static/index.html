@@ -226,6 +226,14 @@
     .post-body li        { margin: 3px 0; }
     .post-body a         { color: var(--accent); text-decoration: none; }
     .post-body a:hover   { text-decoration: underline; }
+    .post-body a.wikilink { color: var(--accent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); cursor: pointer; }
+    .post-body a.wikilink:hover { text-decoration: none; border-bottom-color: var(--accent); }
+    .post-body .wikilink.broken { color: var(--muted); border-bottom: 1px dashed var(--muted); cursor: help; }
+    .pm-backlinks { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .pm-backlinks h4 { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
+    .pm-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+    .pm-backlinks a { color: var(--accent); cursor: pointer; font-size: 12px; }
+    .pm-backlinks .bl-id { color: var(--muted); margin-right: 6px; }
     .post-body code      { background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 11px; border: 1px solid var(--border); }
     .post-body pre       { background: var(--bg); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; border: 1px solid var(--border); }
     .post-body pre code  { background: none; padding: 0; border: none; font-size: 11px; }
@@ -718,9 +726,65 @@ async function init() {
   newPostBtn.style.display = '';
   newTagBtn.style.display = '';
   searchBar.style.display = '';
-  await Promise.all([loadTags(), loadPosts(true)]);
+  await Promise.all([loadTags(), loadPosts(true), loadLinkIndex()]);
   setDot('connected');
   connectSSE();
+}
+
+// ── Wikilinks: [[Title]] / [[Title|alias]] and #NNN cross-references ──────────
+let linkIndex = new Map();   // normalised title -> id
+let linkIds = new Set();     // existing post ids
+
+async function loadLinkIndex() {
+  try {
+    const d = await apiFetch('/links');
+    linkIndex = new Map(d.items.map(i => [i.title.trim().toLowerCase(), i.id]));
+    linkIds = new Set(d.items.map(i => i.id));
+  } catch {}
+}
+
+// Convert wikilinks / id-refs to anchors, leaving fenced + inline code untouched.
+function preprocessLinks(md) {
+  return md.split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((seg, i) => (i % 2 === 1) ? seg : linkifySegment(seg)).join('');
+}
+
+function linkifySegment(text) {
+  text = text.replace(/\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (m, target, heading, alias) => {
+    const label = escHtml((alias || target).trim());
+    const id = linkIndex.get(target.trim().toLowerCase());
+    return (id === undefined)
+      ? `<span class="wikilink broken" title="unresolved link">${label}</span>`
+      : `<a class="wikilink" data-post-id="${id}">${label}</a>`;
+  });
+  text = text.replace(/(^|[^\w#])#(\d{1,5})\b/g, (m, pre, n) =>
+    linkIds.has(Number(n)) ? `${pre}<a class="wikilink" data-post-id="${n}">#${n}</a>` : m);
+  return text;
+}
+
+async function openPostById(id) {
+  try { openPostModal(await apiFetch(`/posts/${id}`)); } catch {}
+}
+
+// Delegated: any rendered wikilink opens its target post.
+document.addEventListener('click', e => {
+  const a = e.target.closest('a.wikilink[data-post-id]');
+  if (!a) return;
+  e.preventDefault(); e.stopPropagation();
+  openPostById(Number(a.dataset.postId));
+});
+
+async function renderBacklinks(id) {
+  const el = document.getElementById('pmBacklinks');
+  if (!el) return;
+  try {
+    const d = await apiFetch(`/posts/${id}/backlinks`);
+    el.innerHTML = d.items.length
+      ? `<h4>Linked mentions (${d.items.length})</h4><ul>${d.items.map(i =>
+          `<li><a class="wikilink" data-post-id="${i.id}"><span class="bl-id">#${i.id}</span>${escHtml(i.title)}</a></li>`
+        ).join('')}</ul>`
+      : '';
+  } catch { el.innerHTML = ''; }
 }
 
 /* ── Compose ──────────────────────────────────────────────── */
@@ -751,7 +815,7 @@ document.getElementById('cpPublish').addEventListener('click', async () => {
   try {
     await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
     closeCompose();
-    await loadTags();
+    await Promise.all([loadTags(), loadLinkIndex()]);
   } catch (e) { alert(`Publish failed: ${e.message}`); }
 });
 
@@ -1009,7 +1073,7 @@ function renderPost(post) {
     }
   }
 
-  const bodyHtml = `<div class="post-body">${DOMPurify.sanitize(marked.parse(contentToRender))}</div>`;
+  const bodyHtml = `<div class="post-body">${DOMPurify.sanitize(marked.parse(preprocessLinks(contentToRender)))}</div>`;
 
   el.innerHTML = `
     ${masterBadge}
@@ -1197,7 +1261,8 @@ function openPostModal(post) {
   const pmContent = post.title
     ? post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '')
     : post.content;
-  pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(marked.parse(pmContent))}</div>`;
+  pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(marked.parse(preprocessLinks(pmContent)))}</div><div class="pm-backlinks" id="pmBacklinks"></div>`;
+  renderBacklinks(post.id);
 
   postModal.classList.add('open');
   document.body.style.overflow = 'hidden';

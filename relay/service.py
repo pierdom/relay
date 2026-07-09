@@ -13,8 +13,11 @@ from collections import Counter
 
 import aiosqlite
 
-from . import events, vault
+from . import events, links, vault
 from .models import (
+    BacklinksResponse,
+    LinkIndexResponse,
+    LinkTarget,
     PostCreate,
     PostListResponse,
     PostResponse,
@@ -139,8 +142,62 @@ async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) 
             tags=tags or [], source=source, created_at=row["created_at"],
             updated_at=now, expires_at=expires_at,
         )
+        if new_path.stem != row["title"]:
+            await _rewrite_inbound_wikilinks(db, old_title=row["title"], new_title=new_path.stem)
         await db.commit()
     return PostResponse.from_row(await _fetch(db, post_id))
+
+
+async def _rewrite_inbound_wikilinks(
+    db: aiosqlite.Connection, *, old_title: str, new_title: str
+) -> None:
+    """Point every ``[[old_title]]`` across the vault at ``new_title`` (rename).
+
+    Mirrors Obsidian's rename behaviour. ``#NNN`` id-refs need no rewrite — the id
+    is stable. Runs inside the caller's ``write_lock``; commit is the caller's.
+    """
+    async with db.execute("SELECT * FROM posts WHERE content LIKE '%[[%'") as cur:
+        rows = await cur.fetchall()
+    for row in rows:
+        new_content, changed = links.rewrite_wikilink_targets(row["content"], old_title, new_title)
+        if not changed:
+            continue
+        row_tags = _tags_from_sentinel(row["tags"])
+        new_path = vault.write_file(
+            id=row["id"], title=row["title"], content=new_content, tags=row_tags,
+            source=row["source"], created_at=row["created_at"],
+            updated_at=row["updated_at"], expires_at=row["expires_at"],
+            old_path=vault.abspath(row["path"]),
+        )
+        await vault.index_upsert(
+            db, id=row["id"], title=new_path.stem, path=new_path, content=new_content,
+            tags=row_tags, source=row["source"], created_at=row["created_at"],
+            updated_at=row["updated_at"], expires_at=row["expires_at"],
+        )
+
+
+async def link_index(db: aiosqlite.Connection) -> LinkIndexResponse:
+    """All (id, title) pairs — clients build a title→id map to resolve wikilinks."""
+    async with db.execute("SELECT id, title FROM posts ORDER BY id") as cur:
+        rows = await cur.fetchall()
+    return LinkIndexResponse(items=[LinkTarget(id=r["id"], title=r["title"]) for r in rows])
+
+
+async def get_backlinks(db: aiosqlite.Connection, post_id: int) -> BacklinksResponse:
+    """Posts that link to ``post_id`` via ``[[title]]`` or ``#id`` (linked mentions)."""
+    if await _fetch(db, post_id) is None:
+        raise PostNotFound
+    async with db.execute("SELECT id, title, content FROM posts") as cur:
+        rows = await cur.fetchall()
+    title_to_id = {links.norm_title(r["title"]): r["id"] for r in rows}
+    ids = {r["id"] for r in rows}
+    items = [
+        LinkTarget(id=r["id"], title=r["title"])
+        for r in rows
+        if r["id"] != post_id and post_id in links.target_ids(r["content"], title_to_id, ids)
+    ]
+    items.sort(key=lambda t: t.id)
+    return BacklinksResponse(items=items)
 
 
 async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:

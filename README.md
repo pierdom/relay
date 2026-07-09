@@ -49,6 +49,12 @@ is derived from tags, not stored). The folder is chosen once at creation and nev
 moved on retag — reorganise freely in Obsidian and relay preserves it, since `id`
 is authoritative.
 
+**Cross-links.** Posts link to each other with Obsidian **`[[Title]]`** / `[[Title|alias]]`
+wikilinks (resolved by title) or by id with **`#NNN`** (stable across renames). Both
+render clickable in the browser UI and TUI; `[[…]]` also works natively in Obsidian.
+Renaming a post rewrites inbound `[[…]]` links across the vault, and each post's detail
+view lists its **backlinks** ("linked mentions").
+
 ## Quick start
 
 ```bash

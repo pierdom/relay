@@ -34,8 +34,10 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | POST | /posts | Publish a post |
 | GET | /posts | List posts (`tag`, `limit`, `offset`, `search` filters) |
 | GET | /posts/{id} | Get single post |
+| GET | /posts/{id}/backlinks | Posts that link to this one (via `[[title]]` or `#id`) |
 | PATCH | /posts/{id} | Update post fields (title, content, tags, source, expires_at) |
 | DELETE | /posts/{id} | Delete post |
+| GET | /links | (id, title) index of all posts — clients resolve `[[Title]]` wikilinks with this |
 | GET | /tags | List tags with post counts (includes 0-count tags from tag_config) |
 | POST | /tags/{tag}/config | Set per-tag expiry (`ttl_hours`, `expires_at`, or both) |
 | PATCH | /tags/{tag} | Rename a tag across all posts and tag_config |
@@ -60,6 +62,15 @@ The SSE `id:` field only moves forward — a streamed *edit* of an older post is
 
 - **Offline edits/deletes aren't replayed.** Catch-up replays only `id > Last-Event-ID` (append-only assumption). Edits or deletes to already-seen posts made while a client was offline won't propagate on reconnect until a manual refresh.
 
+## Cross-links (wikilinks)
+
+Posts link to each other two ways, both rendered clickable in the browser UI and TUI:
+
+- **`[[Title]]` / `[[Title|alias]]`** — Obsidian wikilinks, resolved by title (filename), case-insensitive. Work natively in Obsidian/neovim. Renaming a post rewrites inbound `[[…]]` across the vault (`service.update_post` → `links.rewrite_wikilink_targets`). Unresolved links render dimmed/broken.
+- **`#NNN`** — link by post id; stable across renames. (In Obsidian these render as tags, not links — prefer `[[Title]]` there.)
+
+Files store links verbatim; relay resolves them at **display time** and never rewrites the stored form (except the rename case). Resolution is client-side: the UI/TUI fetch `GET /links` (id↔title) once and cache it. Post detail views show **Linked mentions** via `GET /posts/{id}/backlinks`. Code spans/blocks are skipped by the renderers.
+
 ## Configuration (.env)
 
 | Variable | Default | Description |
@@ -80,6 +91,7 @@ relay/
 ├── config.py      # pydantic-settings Settings (reads .env); vault_path + derived index/tags paths
 ├── frontmatter.py # YAML front-matter parse/serialize + Obsidian filename rules (sanitize, collision suffix)
 ├── folders.py     # Folder placement policy — maps a post's primary domain tag to its first-level folder
+├── links.py       # Wikilink resolver: [[Title]]/[[Title|alias]] + #NNN → post ids; rename rewrite
 ├── vault.py       # Canonical file layer: write/read/delete/rename, id allocation, startup index rebuild, tags.yml
 ├── watcher.py     # watchdog observer — external edits → re-index + SSE (self-write suppressed)
 ├── database.py    # aiosqlite *index* (disposable mirror), schema, get_db dependency

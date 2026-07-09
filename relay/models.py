@@ -90,6 +90,19 @@ class PostUpdate(BaseModel):
         return None if v is None else _clean_tag_list(v)
 
 
+class LinkTarget(BaseModel):
+    id: int
+    title: str
+
+
+class LinkIndexResponse(BaseModel):
+    items: list[LinkTarget]
+
+
+class BacklinksResponse(BaseModel):
+    items: list[LinkTarget]
+
+
 class TagRename(BaseModel):
     new_name: str
 

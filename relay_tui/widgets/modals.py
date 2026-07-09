@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
+
 from rich.markup import escape
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.message import Message
@@ -18,6 +21,40 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from .. import api
 from ..theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG
 from .post_panel import _time_ago, _time_until
+
+
+# ── Wikilink preprocessing ────────────────────────────────────────────────────
+
+_WIKI_RE = re.compile(r"\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]")
+_IDREF_RE = re.compile(r"(?<![\w#])#(\d{1,5})\b")
+_CODE_SPLIT = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
+
+
+def _linkify_markdown(content: str, index: dict[str, int]) -> str:
+    """Turn ``[[Title]]`` / ``#NNN`` into ``[label](relay:ID)`` links.
+
+    Resolution is by title (case-insensitive). Broken wikilinks degrade to plain
+    text; unknown ``#NNN`` are left untouched. Code spans/blocks are skipped.
+    """
+    ids = set(index.values())
+
+    def convert(text: str) -> str:
+        def wiki(m: re.Match) -> str:
+            target = m.group(1).strip()
+            alias = (m.group(3) or target).strip()
+            pid = index.get(target.lower())
+            return f"[{alias}](relay:{pid})" if pid is not None else alias
+
+        def idref(m: re.Match) -> str:
+            n = m.group(1)
+            return f"[#{n}](relay:{n})" if int(n) in ids else m.group(0)
+
+        return _IDREF_RE.sub(idref, _WIKI_RE.sub(wiki, text))
+
+    return "".join(
+        part if i % 2 else convert(part)
+        for i, part in enumerate(_CODE_SPLIT.split(content))
+    )
 
 
 # ── PostDetailModal ───────────────────────────────────────────────────────────
@@ -75,9 +112,10 @@ class PostDetailModal(ModalScreen[None]):
     }}
     """
 
-    def __init__(self, post: api.Post) -> None:
+    def __init__(self, post: api.Post, link_index: dict[str, int] | None = None) -> None:
         super().__init__()
         self._post = post
+        self._link_index = link_index or {}
 
     def compose(self) -> ComposeResult:
         post = self._post
@@ -113,9 +151,37 @@ class PostDetailModal(ModalScreen[None]):
             )
             yield Static("", classes="detail-rule")
             with VerticalScroll():
-                yield Markdown(post.content, classes="detail-content")
+                yield Markdown(
+                    _linkify_markdown(post.content, self._link_index),
+                    classes="detail-content",
+                )
+                yield Markdown("", id="backlinks", classes="detail-content")
             with Horizontal(classes="detail-actions"):
                 yield Button("Close", id="close-btn", variant="default")
+
+    def on_mount(self) -> None:
+        self._load_backlinks()
+
+    @work(thread=True)
+    def _load_backlinks(self) -> None:
+        try:
+            items = api.get_backlinks(self._post.id)
+        except Exception:
+            return
+        if not items:
+            return
+        md = "\n---\n\n**Linked mentions**\n\n" + "\n".join(
+            f"- [#{i} {t}](relay:{i})" for i, t in items
+        )
+        self.app.call_from_thread(self.query_one("#backlinks", Markdown).update, md)
+
+    def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
+        if event.href.startswith("relay:"):
+            event.stop()
+            try:
+                self.app.open_post(int(event.href.split(":", 1)[1]))
+            except (ValueError, AttributeError):
+                pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close-btn":

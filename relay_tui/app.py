@@ -153,6 +153,7 @@ class RelayTuiApp(App):
 
         self._active_tag: str | None = None
         self._search: str | None = None
+        self._link_index: dict[str, int] = {}
         self._page_size = 50
         self._offset = 0
         self._total = 0
@@ -222,6 +223,10 @@ class RelayTuiApp(App):
                 tag=self._active_tag, search=self._search, limit=self._page_size
             )
             tags = api.list_tags()
+            try:
+                self._link_index = api.link_index()
+            except Exception:
+                pass
             if posts:
                 self._sse.set_last_id(posts[0].id)
             self.call_from_thread(self._update_data, posts, total, tags)
@@ -285,7 +290,20 @@ class RelayTuiApp(App):
             pass
 
     def on_post_panel_view_post(self, event: PostPanel.ViewPost) -> None:
-        self.push_screen(PostDetailModal(event.post))
+        self.push_screen(PostDetailModal(event.post, self._link_index))
+
+    def open_post(self, post_id: int) -> None:
+        """Open a post by id (from a clicked wikilink) in a stacked detail modal."""
+        self._open_post_worker(post_id)
+
+    @work(thread=True)
+    def _open_post_worker(self, post_id: int) -> None:
+        try:
+            post = api.get_post(post_id)
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Open failed: {e}", severity="error")
+            return
+        self.call_from_thread(self.push_screen, PostDetailModal(post, self._link_index))
 
     async def action_reload(self) -> None:
         self._reload()

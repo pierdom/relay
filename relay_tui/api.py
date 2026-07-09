@@ -134,6 +134,26 @@ def update_post(
     return Post.from_dict(resp.json())
 
 
+def get_post(post_id: int) -> Post:
+    resp = requests.get(f"{_base()}/posts/{post_id}", headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    return Post.from_dict(resp.json())
+
+
+def link_index() -> dict[str, int]:
+    """Map of normalised title -> id, for resolving ``[[Title]]`` wikilinks."""
+    resp = requests.get(f"{_base()}/links", headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    return {i["title"].strip().lower(): i["id"] for i in resp.json().get("items", [])}
+
+
+def get_backlinks(post_id: int) -> list[tuple[int, str]]:
+    """Posts that link to ``post_id`` — list of (id, title)."""
+    resp = requests.get(f"{_base()}/posts/{post_id}/backlinks", headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    return [(i["id"], i["title"]) for i in resp.json().get("items", [])]
+
+
 def delete_post(post_id: int) -> None:
     resp = requests.delete(
         f"{_base()}/posts/{post_id}",
