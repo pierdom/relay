@@ -151,11 +151,14 @@ class PostDetailModal(ModalScreen[None]):
             )
             yield Static("", classes="detail-rule")
             with VerticalScroll():
+                # open_links=False: we route clicks ourselves (relay: internally,
+                # real URLs to the browser) so the widget never auto-opens relay:N.
                 yield Markdown(
                     _linkify_markdown(post.content, self._link_index),
                     classes="detail-content",
+                    open_links=False,
                 )
-                yield Markdown("", id="backlinks", classes="detail-content")
+                yield Markdown("", id="backlinks", classes="detail-content", open_links=False)
             with Horizontal(classes="detail-actions"):
                 yield Button("Close", id="close-btn", variant="default")
 
@@ -176,12 +179,16 @@ class PostDetailModal(ModalScreen[None]):
         self.app.call_from_thread(self.query_one("#backlinks", Markdown).update, md)
 
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
-        if event.href.startswith("relay:"):
-            event.stop()
+        event.stop()
+        href = event.href
+        if href.startswith("relay:"):
             try:
-                self.app.open_post(int(event.href.split(":", 1)[1]))
+                self.app.open_post(int(href.split(":", 1)[1]))
             except (ValueError, AttributeError):
                 pass
+        else:
+            # real external URL — hand off to the OS browser
+            self.app.open_url(href)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close-btn":
