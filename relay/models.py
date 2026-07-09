@@ -91,6 +91,15 @@ class PostUpdate(BaseModel):
         return None if v is None else _clean_tag_list(v)
 
 
+class FolderCount(BaseModel):
+    folder: str
+    count: int
+
+
+class FolderListResponse(BaseModel):
+    folders: list[FolderCount]
+
+
 class LinkTarget(BaseModel):
     id: int
     title: str

@@ -246,6 +246,20 @@ async def test_filtered_and_paged_feeds_do_not_pin(client):
 
 
 @pytest.mark.asyncio
+async def test_folders_listing_and_filter(client):
+    await _create_post(client, title="R1", tags=["radio"])
+    await _create_post(client, title="H1", tags=["homelab"])
+    fmap = {
+        f["folder"]: f["count"]
+        for f in (await client.get("/folders", headers=AUTH)).json()["folders"]
+    }
+    assert fmap.get("Radio") == 1 and fmap.get("Homelab") == 1
+    r = (await client.get("/posts?folder=Radio", headers=AUTH)).json()
+    assert [i["title"] for i in r["items"]] == ["R1"]
+    assert r["pinned"] is None  # folder filter → no master pin
+
+
+@pytest.mark.asyncio
 async def test_set_tag_config_writes_yaml(client):
     r = await client.post("/tags/news/config", json={"ttl_hours": 48}, headers=AUTH)
     assert r.status_code == 200

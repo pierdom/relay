@@ -32,12 +32,13 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | /posts | Publish a post |
-| GET | /posts | List posts (`tag`, `limit`, `offset`, `search` filters) |
+| GET | /posts | List posts (`tag`, `folder`, `limit`, `offset`, `search` filters; `pinned` master on home feed) |
 | GET | /posts/{id} | Get single post |
 | GET | /posts/{id}/backlinks | Posts that link to this one (via `[[title]]` or `#id`) |
 | PATCH | /posts/{id} | Update post fields (title, content, tags, source, expires_at) |
 | DELETE | /posts/{id} | Delete post |
 | GET | /links | (id, title) index of all posts — clients resolve `[[Title]]` wikilinks with this |
+| GET | /folders | First-level vault folders with post counts (sidebar tree view) |
 | GET | /tags | List tags with post counts (includes 0-count tags from tag_config) |
 | POST | /tags/{tag}/config | Set per-tag expiry (`ttl_hours`, `expires_at`, or both) |
 | PATCH | /tags/{tag} | Rename a tag across all posts and tag_config |
@@ -128,7 +129,7 @@ relay/static/
 
 - **Posts**: create (compose panel), edit inline, delete with confirmation; `expires_at` datetime picker in both compose and edit forms; posts with an expiry show "expires in X" in the footer
 - **Search**: search bar above the feed (visible after connect); 300 ms debounce; filters by title, content, or source; combinable with tag filter; `×` button or Escape to clear
-- **Tags**: filter feed by tag; create a new tag (registers it in `tag_config`); rename inline; ⚙ button per tag opens an inline form to set `ttl_hours` and/or `expires_at`
+- **Sidebar Tags ⇄ Tree toggle**: two tabs at the top of the sidebar. **Tags** filters the feed by tag (create a new tag, rename inline, ⚙ per-tag expiry form). **Tree** lists the first-level vault folders (`GET /folders`) with counts; clicking one filters the feed to that folder (`GET /posts?folder=`). Tag and folder filters are mutually exclusive.
 - **Live feed**: SSE connection with amber dot + "live/offline/error" label; new posts flash and prepend automatically
 - **Responsive**: sidebar collapses to a slide-in drawer on mobile (≤ 768 px) with hamburger toggle; post action buttons always visible on touch devices
 
@@ -230,7 +231,8 @@ Set `RELAY_TRANSPARENT=1` to let the terminal's own background (transparency / b
 | `e` | Edit selected post |
 | `d` | Delete selected post (with confirmation) |
 | `/` | Search posts (by title, content, source) |
-| `c` | Configure expiry for selected tag (TOPICS panel) |
+| `t` | Toggle the TOPICS panel between Tags and Tree (folders) |
+| `c` | Configure expiry for selected tag (TOPICS panel, tags mode) |
 | `R` | Rename selected tag (TOPICS panel) |
 | `r` | Refresh |
 | `Enter` | View full post |

@@ -114,6 +114,15 @@
       text-transform: uppercase; letter-spacing: 0.18em;
       display: flex; align-items: center; justify-content: space-between;
     }
+    .sidebar-tabs { display: flex; gap: 3px; }
+    .sb-tab {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      font: inherit; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 4px;
+    }
+    .sb-tab.active { color: var(--accent); background: var(--tag-active); }
+    .sb-tab:hover:not(.active) { color: var(--text); }
+    .folder-item .folder-ico { color: var(--accent); margin-right: 4px; }
     .sidebar-add-btn {
       background: none; border: 1px solid var(--border); color: var(--muted);
       cursor: pointer; font-size: 14px; line-height: 1; padding: 1px 6px;
@@ -578,7 +587,10 @@
 <div class="layout">
   <aside id="sidebarEl">
     <div class="sidebar-header">
-      Tags
+      <div class="sidebar-tabs">
+        <button class="sb-tab active" id="tabTags">Tags</button>
+        <button class="sb-tab" id="tabTree">Tree</button>
+      </div>
       <button class="sidebar-add-btn" id="newTagBtn" title="New tag" style="display:none">+</button>
     </div>
     <div class="tag-new" id="tagNew" style="display:none">
@@ -639,6 +651,8 @@
 const LIMIT = 20;
 let apiKey = '';
 let activeTag = null;
+let activeFolder = null;
+let sidebarMode = 'tags';   // 'tags' | 'tree'
 let activeSearch = null;
 let searchDebounce = null;
 let offset = 0;
@@ -911,6 +925,51 @@ function makeTagItem(label, value, count) {
   return el;
 }
 
+/* ── Sidebar: Tags ⇄ Tree toggle ───────────────────────────── */
+function setSidebarMode(mode) {
+  sidebarMode = mode;
+  document.getElementById('tabTags').classList.toggle('active', mode === 'tags');
+  document.getElementById('tabTree').classList.toggle('active', mode === 'tree');
+  newTagBtn.style.display = mode === 'tags' ? '' : 'none';
+  document.getElementById('tagNew').style.display = 'none';
+  if (mode === 'tags') loadTags(); else loadFolders();
+}
+document.getElementById('tabTags').addEventListener('click', () => setSidebarMode('tags'));
+document.getElementById('tabTree').addEventListener('click', () => setSidebarMode('tree'));
+
+async function loadFolders() {
+  if (!apiKey) return;
+  try { renderFolders((await apiFetch('/folders')).folders); } catch {}
+}
+
+function renderFolders(folders) {
+  tagList.innerHTML = '';
+  const total = folders.reduce((s, f) => s + f.count, 0);
+  tagList.appendChild(makeFolderItem('all', null, total));
+  folders.forEach(f => tagList.appendChild(makeFolderItem(f.folder, f.folder, f.count)));
+}
+
+function makeFolderItem(label, value, count) {
+  const el = document.createElement('div');
+  el.className = 'tag-item folder-item' + (activeFolder === value ? ' active' : '');
+  el.dataset.folder = value === null ? '__all__' : value;
+  const ico = value === null ? '' : '<span class="folder-ico">▸</span>';
+  el.innerHTML = `<span class="tag-name">${ico}${escHtml(label)}</span><span class="tag-count">${count}</span>`;
+  el.addEventListener('click', () => selectFolder(value));
+  return el;
+}
+
+async function selectFolder(folder) {
+  closeSidebar();
+  activeFolder = folder; activeTag = null; offset = 0; total = 0;
+  feed.innerHTML = '';
+  loadMoreWrap.style.display = 'none';
+  const key = folder === null ? '__all__' : folder;
+  tagList.querySelectorAll('.folder-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.folder === key));
+  await loadPosts(true);
+}
+
 function startTagRename(el, oldName) {
   const nameSpan = el.querySelector('.tag-name');
   const input = document.createElement('input');
@@ -997,7 +1056,7 @@ function startTagConfig(el, tagName) {
 
 async function selectTag(tag) {
   closeSidebar();
-  activeTag = tag; offset = 0; total = 0;
+  activeTag = tag; activeFolder = null; offset = 0; total = 0;
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
   tagList.querySelectorAll('.tag-item').forEach(el => {
@@ -1015,6 +1074,7 @@ async function loadPosts(replace = false) {
   try {
     const params = new URLSearchParams({ limit: LIMIT, offset });
     if (activeTag) params.set('tag', activeTag);
+    if (activeFolder) params.set('folder', activeFolder);
     if (activeSearch) params.set('search', activeSearch);
     const data = await apiFetch(`/posts?${params}`);
     total = data.total;

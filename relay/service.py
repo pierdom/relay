@@ -16,6 +16,8 @@ import aiosqlite
 from . import events, links, vault
 from .models import (
     BacklinksResponse,
+    FolderCount,
+    FolderListResponse,
     LinkIndexResponse,
     LinkTarget,
     PostCreate,
@@ -78,6 +80,7 @@ async def list_posts(
     db: aiosqlite.Connection,
     *,
     tag: str | None = None,
+    folder: str | None = None,
     limit: int = 20,
     offset: int = 0,
     search: str | None = None,
@@ -88,6 +91,9 @@ async def list_posts(
     if tag:
         conditions.append("tags LIKE ?")
         params.append(f"%,{tag.strip().lower()},%")
+    if folder:
+        conditions.append("path LIKE ?")
+        params.append(f"{folder}/%")
     if search:
         q = f"%{search}%"
         conditions.append("(title LIKE ? OR content LIKE ? OR source LIKE ?)")
@@ -95,7 +101,7 @@ async def list_posts(
 
     # On the unfiltered home feed, pin the master document (id=0) on top and keep
     # it out of the dated stream so pagination stays consistent across pages.
-    pin_master = tag is None and search is None
+    pin_master = tag is None and search is None and folder is None
     if pin_master:
         conditions.append("id != 0")
 
@@ -227,6 +233,20 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
+
+
+async def list_folders(db: aiosqlite.Connection) -> FolderListResponse:
+    """First-level vault folders with post counts (for the sidebar tree view)."""
+    async with db.execute("SELECT path FROM posts") as cur:
+        rows = await cur.fetchall()
+    counter: Counter[str] = Counter()
+    for row in rows:
+        path = row["path"]
+        if "/" in path:  # root files (e.g. the master doc) are not a folder
+            counter[path.split("/", 1)[0]] += 1
+    return FolderListResponse(
+        folders=[FolderCount(folder=f, count=c) for f, c in sorted(counter.items())]
+    )
 
 
 async def list_tags(db: aiosqlite.Connection) -> TagListResponse:

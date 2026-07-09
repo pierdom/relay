@@ -152,6 +152,8 @@ class RelayTuiApp(App):
         self.sub_title = palette_name()
 
         self._active_tag: str | None = None
+        self._active_folder: str | None = None
+        self._topics_mode = "tags"   # "tags" | "tree"
         self._search: str | None = None
         self._link_index: dict[str, int] = {}   # normalised title -> id
         self._link_titles: dict[int, str] = {}   # id -> title
@@ -221,7 +223,8 @@ class RelayTuiApp(App):
     def _reload(self) -> None:
         try:
             posts, total, pinned = api.list_posts(
-                tag=self._active_tag, search=self._search, limit=self._page_size
+                tag=self._active_tag, folder=self._active_folder,
+                search=self._search, limit=self._page_size,
             )
             tags = api.list_tags()
             try:
@@ -242,10 +245,13 @@ class RelayTuiApp(App):
         self, posts: list[api.Post], total: int, tags: list[api.Tag]
     ) -> None:
         self._total = total
-        self._offset = len(posts)
+        # the pinned master (#0) isn't part of the dated stream — don't count it
+        # toward the offset or the next page skips a real post
+        self._offset = sum(1 for p in posts if p.id != 0)
         self._loading_more = False
         self.query_one(PostPanel).set_posts(posts, search=self._search)
-        self.query_one(TagPanel).set_tags(tags, active=self._active_tag)
+        if self._topics_mode == "tags":
+            self.query_one(TagPanel).set_tags(tags, active=self._active_tag)
 
     def on_post_panel_load_more(self, event: PostPanel.LoadMore) -> None:
         if self._loading_more or self._offset >= self._total:
@@ -258,6 +264,7 @@ class RelayTuiApp(App):
         try:
             posts, total, _ = api.list_posts(
                 tag=self._active_tag,
+                folder=self._active_folder,
                 search=self._search,
                 limit=self._page_size,
                 offset=offset,
@@ -278,6 +285,8 @@ class RelayTuiApp(App):
 
     @work(thread=True)
     def _refresh_tags(self) -> None:
+        if self._topics_mode != "tags":
+            return
         try:
             tags = api.list_tags()
             self.call_from_thread(
@@ -288,11 +297,40 @@ class RelayTuiApp(App):
 
     def on_tag_panel_tag_selected(self, event: TagPanel.TagSelected) -> None:
         self._active_tag = event.tag
+        self._active_folder = None
         self._reload()
         try:
             self.query_one(PostPanel).focus()
         except Exception:
             pass
+
+    def on_tag_panel_folder_selected(self, event: TagPanel.FolderSelected) -> None:
+        self._active_folder = event.folder
+        self._active_tag = None
+        self._reload()
+        try:
+            self.query_one(PostPanel).focus()
+        except Exception:
+            pass
+
+    def on_tag_panel_toggle_view(self, event: TagPanel.ToggleView) -> None:
+        self._topics_mode = "tree" if self._topics_mode == "tags" else "tags"
+        self._load_topics()
+
+    @work(thread=True)
+    def _load_topics(self) -> None:
+        panel = self.query_one(TagPanel)
+        try:
+            if self._topics_mode == "tree":
+                folders = api.list_folders()
+                self.call_from_thread(panel.set_folders, folders, self._active_folder)
+            else:
+                tags = api.list_tags()
+                self.call_from_thread(panel.set_tags, tags, self._active_tag)
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Topics failed: {e}", severity="error")
+            return
+        self.call_from_thread(panel.focus)
 
     def on_post_panel_view_post(self, event: PostPanel.ViewPost) -> None:
         self.push_screen(PostDetailModal(event.post, self._link_index, self._link_titles))

@@ -15,6 +15,7 @@ from .config import settings
 from .database import init_db
 from .mcp_server import mcp, mcp_asgi_app
 from .routes.events import router as events_router
+from .routes.folders import router as folders_router
 from .routes.links import router as links_router
 from .routes.posts import router as posts_router
 from .routes.tags import router as tags_router
@@ -101,6 +102,7 @@ app.include_router(posts_router)
 app.include_router(tags_router)
 app.include_router(events_router)
 app.include_router(links_router)
+app.include_router(folders_router)
 
 # Remote MCP endpoint (Streamable HTTP). Any MCP client can connect to /mcp
 # with the relay bearer key; shares relay.service with the REST routes. The

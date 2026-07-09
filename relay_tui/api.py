@@ -58,6 +58,7 @@ def _base() -> str:
 
 def list_posts(
     tag: str | None = None,
+    folder: str | None = None,
     limit: int = 50,
     offset: int = 0,
     search: str | None = None,
@@ -65,6 +66,8 @@ def list_posts(
     params: dict[str, object] = {"limit": limit, "offset": offset}
     if tag is not None:
         params["tag"] = tag
+    if folder is not None:
+        params["folder"] = folder
     if search is not None:
         params["search"] = search
     resp = requests.get(
@@ -173,6 +176,13 @@ def list_tags() -> list[Tag]:
     resp.raise_for_status()
     data = resp.json()
     return [Tag(name=item["tag"], count=item["count"]) for item in data.get("tags", [])]
+
+
+def list_folders() -> list[tuple[str, int]]:
+    """First-level vault folders with counts, for the sidebar tree view."""
+    resp = requests.get(f"{_base()}/folders", headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    return [(f["folder"], f["count"]) for f in resp.json().get("folders", [])]
 
 
 def rename_tag(old: str, new: str) -> list[Tag]:
