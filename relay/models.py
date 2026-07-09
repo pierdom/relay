@@ -65,6 +65,7 @@ class PostListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pinned: PostResponse | None = None  # master doc, on the home feed's first page
 
 
 class PostUpdate(BaseModel):

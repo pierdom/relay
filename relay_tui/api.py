@@ -61,7 +61,7 @@ def list_posts(
     limit: int = 50,
     offset: int = 0,
     search: str | None = None,
-) -> tuple[list[Post], int]:
+) -> tuple[list[Post], int, Post | None]:
     params: dict[str, object] = {"limit": limit, "offset": offset}
     if tag is not None:
         params["tag"] = tag
@@ -77,7 +77,8 @@ def list_posts(
     data = resp.json()
     posts = [Post.from_dict(item) for item in data.get("items", [])]
     total = data.get("total", len(posts))
-    return posts, total
+    pinned = Post.from_dict(data["pinned"]) if data.get("pinned") else None
+    return posts, total, pinned
 
 
 def create_post(

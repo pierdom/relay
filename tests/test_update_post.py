@@ -230,6 +230,22 @@ async def test_idless_note_in_subfolder_gets_id_in_place(vault_dir):
 
 
 @pytest.mark.asyncio
+async def test_home_feed_pins_master_on_top(client):
+    await _create_post(client, title="Regular Post")
+    data = (await client.get("/posts", headers=AUTH)).json()
+    assert data["pinned"] is not None and data["pinned"]["id"] == 0
+    assert all(i["id"] != 0 for i in data["items"])  # not duplicated in the stream
+
+
+@pytest.mark.asyncio
+async def test_filtered_and_paged_feeds_do_not_pin(client):
+    await _create_post(client, title="Tagged", tags=["x"])
+    assert (await client.get("/posts?tag=x", headers=AUTH)).json()["pinned"] is None
+    assert (await client.get("/posts?search=Tagged", headers=AUTH)).json()["pinned"] is None
+    assert (await client.get("/posts?offset=10", headers=AUTH)).json()["pinned"] is None
+
+
+@pytest.mark.asyncio
 async def test_set_tag_config_writes_yaml(client):
     r = await client.post("/tags/news/config", json={"ttl_hours": 48}, headers=AUTH)
     assert r.status_code == 200

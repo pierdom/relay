@@ -196,8 +196,13 @@ class PostPanel(Widget):
         self._count += 1
         self._apply_visibility()
         item = PostItem(post)
-        if lv.children:
-            lv.mount(item, before=lv.children[0])
+        children = list(lv.children)
+        before = children[0] if children else None
+        # keep the pinned master document (#0) on top
+        if before is not None and isinstance(before, PostItem) and before.post.id == 0:
+            before = children[1] if len(children) > 1 else None
+        if before is not None:
+            lv.mount(item, before=before)
         else:
             lv.mount(item)
         # Briefly highlight live arrivals so the eye catches new posts.

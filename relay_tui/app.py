@@ -220,7 +220,7 @@ class RelayTuiApp(App):
     @work(thread=True)
     def _reload(self) -> None:
         try:
-            posts, total = api.list_posts(
+            posts, total, pinned = api.list_posts(
                 tag=self._active_tag, search=self._search, limit=self._page_size
             )
             tags = api.list_tags()
@@ -231,7 +231,9 @@ class RelayTuiApp(App):
             except Exception:
                 pass
             if posts:
-                self._sse.set_last_id(posts[0].id)
+                self._sse.set_last_id(posts[0].id)  # newest real post (before pin)
+            if pinned is not None:
+                posts = [pinned, *posts]  # master document pinned on top
             self.call_from_thread(self._update_data, posts, total, tags)
         except Exception as e:
             self.call_from_thread(self.notify, f"Reload failed: {e}", severity="error")
@@ -254,7 +256,7 @@ class RelayTuiApp(App):
     @work(thread=True)
     def _load_more(self, offset: int) -> None:
         try:
-            posts, total = api.list_posts(
+            posts, total, _ = api.list_posts(
                 tag=self._active_tag,
                 search=self._search,
                 limit=self._page_size,

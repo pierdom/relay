@@ -431,6 +431,10 @@
       border-color: var(--accent);
       box-shadow: 0 4px 28px rgba(245,158,11,0.12);
     }
+    .post.pinned {
+      border-color: var(--accent);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
     .master-badge {
       display: inline-flex; align-items: center; gap: 5px;
       font-size: 9px; font-weight: 600; color: var(--accent);
@@ -1018,7 +1022,13 @@ async function loadPosts(replace = false) {
 
     if (replace) feed.innerHTML = '';
 
-    if (data.items.length === 0 && offset === 0) {
+    if (replace && data.pinned) {
+      const pin = renderPost(data.pinned);
+      pin.classList.add('pinned');
+      feed.appendChild(pin);
+    }
+
+    if (data.items.length === 0 && offset === 0 && !data.pinned) {
       feed.innerHTML = `
         <div class="empty">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1187,11 +1197,13 @@ function connectSSE() {
     const el = renderPost(post);
     el.classList.add('new');
     if (existing) {
+      if (existing.classList.contains('pinned')) el.classList.add('pinned');
       existing.replaceWith(el);   // edit: update in place (don't bump total)
     } else {
       const empty = feed.querySelector('.empty');
       if (empty) empty.remove();
-      feed.prepend(el);
+      const pinnedEl = feed.querySelector('.post.pinned');
+      if (pinnedEl) pinnedEl.after(el); else feed.prepend(el);  // keep master on top
       total++;
     }
     scheduleLoadTags();

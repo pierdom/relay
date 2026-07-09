@@ -93,6 +93,12 @@ async def list_posts(
         conditions.append("(title LIKE ? OR content LIKE ? OR source LIKE ?)")
         params.extend([q, q, q])
 
+    # On the unfiltered home feed, pin the master document (id=0) on top and keep
+    # it out of the dated stream so pagination stays consistent across pages.
+    pin_master = tag is None and search is None
+    if pin_master:
+        conditions.append("id != 0")
+
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     async with db.execute(f"SELECT COUNT(*) FROM posts {where}", params) as cur:
@@ -104,11 +110,18 @@ async def list_posts(
     ) as cur:
         rows = await cur.fetchall()
 
+    pinned = None
+    if pin_master and offset == 0:
+        master = await _fetch(db, 0)
+        if master is not None:
+            pinned = PostResponse.from_row(master)
+
     return PostListResponse(
         items=[PostResponse.from_row(r) for r in rows],
         total=count_row[0],
         limit=limit,
         offset=offset,
+        pinned=pinned,
     )
 
 
