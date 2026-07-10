@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 from . import watcher
 from .auth import create_session, revoke_session
@@ -55,9 +55,14 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/ui", include_in_schema=False)
-async def ui() -> FileResponse:
+@app.get("/", include_in_schema=False)
+async def root() -> FileResponse:
     return FileResponse(_UI_PATH, media_type="text/html")
+
+
+@app.get("/ui", include_in_schema=False)
+async def ui() -> RedirectResponse:
+    return RedirectResponse("/", status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 
 @app.post("/session", include_in_schema=False)
