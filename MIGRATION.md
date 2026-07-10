@@ -61,8 +61,10 @@ docker run --rm -v relay_data:/data -v "$PWD":/src alpine \
 ```
 
 Confirm `.env` on bespin: `RELAY_VAULT_PATH=/data/vault` (default), `API_KEY`
-unchanged, `SECURE_COOKIES=true`, and `RELAY_WATCH_ENABLED` per the sync-topology
-decision below.
+unchanged, `SECURE_COOKIES=true`, and **`RELAY_WATCH_ENABLED=false`** — this
+cutover is **standalone** (relay is the only writer; no external editor/Syncthing
+on bespin yet), so the watchdog observer isn't needed. Flip it to `true` if/when
+Syncthing sync is added later.
 
 ## 3 — Cut over
 
@@ -89,14 +91,17 @@ Resume the scheduled `financial-analyst` + digest tasks. New posts allocate id
 the backed-up volume (`tar xzf relay_data.<date>.tgz` into a fresh `relay_data`),
 then `docker compose up -d`. Old SQLite backend + data return.
 
-## Open decisions (settle before cutover)
+## Decisions (settled)
 
-- **Sync topology.** Standalone (relay is the only writer via API/MCP) — or
-  **Syncthing-synced** (bespin ↔ local/ananas) with `RELAY_WATCH_ENABLED=true`, so
-  Obsidian/nvim edits reindex live on prod? Determines how local edits/attachments
-  reach production.
-- **Known UI-freeze bug** (`HANDOFF.md`): the browser UI can freeze for a few
-  seconds when a `.md` is edited *externally while open in the UI*. Edge case,
-  non-fatal, only under external edits. Ship-blocker or accept as a known issue?
+- **Sync topology: standalone.** relay is the only writer via API/MCP;
+  `RELAY_WATCH_ENABLED=false`. Syncthing (bespin ↔ local/ananas) + live watcher is
+  a deferred follow-up, not part of this cutover.
+- **Known UI-freeze bug (`HANDOFF.md`): ship as a known issue.** The browser UI can
+  stall a few seconds when a `.md` is edited *externally while open in the UI* —
+  edge case, non-fatal, doesn't affect MCP/API/TUI. Not a cutover blocker; revisit
+  after prod is stable.
+
+## Still verify at cutover
+
 - **bespin RAM.** It's memory-pressured (~3.8 GiB, many services). The file-backed
-  relay + `watchdog` observer is light, but confirm headroom before/after.
+  relay + (disabled) watcher is light, but confirm headroom after `up -d`.
