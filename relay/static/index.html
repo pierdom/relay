@@ -187,7 +187,7 @@
     .compose-panel .post { border-style: dashed; border-color: rgba(245,158,11,0.4); }
 
     .feed {
-      flex: 1; overflow-y: auto;
+      flex: 1; overflow-y: auto; overflow-x: hidden;
       padding: 16px 20px; display: flex; flex-direction: column; gap: 10px;
     }
     .feed::-webkit-scrollbar { width: 4px; }
@@ -197,7 +197,7 @@
     /* ── Post card ───────────────────────────────────────── */
     .post {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 6px; padding: 16px;
+      border-radius: 6px; padding: 16px; min-width: 0;
       transition: border-color 0.2s, box-shadow 0.2s;
       animation: cardIn 0.3s ease both;
     }
@@ -225,7 +225,7 @@
     .tag-pill:hover { background: var(--tag-active); }
     .post-source { font-size: 10px; color: var(--muted); }
 
-    .post-body { color: #b8bfcc; line-height: 1.72; font-size: 13px; }
+    .post-body { color: #b8bfcc; line-height: 1.72; font-size: 13px; overflow-wrap: anywhere; }
     .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 14px 0 6px; font-weight: 600; }
     .post-body h1 { font-size: 14px; }
     .post-body h2 { font-size: 13px; }
@@ -517,7 +517,7 @@
       display: flex; align-items: flex-start; gap: 12px;
       padding: 20px 20px 0; flex-shrink: 0;
     }
-    .pm-title { flex: 1; font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.4; }
+    .pm-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.4; overflow-wrap: anywhere; }
     .pm-back {
       display: none; background: none; border: none;
       color: var(--muted); cursor: pointer; font-family: inherit;
@@ -534,7 +534,7 @@
     .pm-meta { padding: 10px 20px 0; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
     .pm-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
     .pm-body {
-      flex: 1; overflow-y: auto; padding: 16px 20px;
+      flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px 20px;
       scrollbar-width: thin; scrollbar-color: var(--border) transparent;
     }
     .pm-body::-webkit-scrollbar { width: 4px; }
