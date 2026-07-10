@@ -174,8 +174,8 @@ async def test_create_files_post_by_primary_domain_tag(client, vault_dir):
 @pytest.mark.asyncio
 async def test_first_domain_tag_wins_over_leading_type_tag(client, vault_dir):
     # non-domain tags are skipped; the first *domain* tag decides the folder
-    await _create_post(client, title="Corellia Gaming", tags=["reference", "corellia", "gaming"])
-    assert (vault_dir / "Gaming" / "Corellia Gaming.md").exists()
+    await _create_post(client, title="My Game Setup", tags=["reference", "gear", "gaming"])
+    assert (vault_dir / "Gaming" / "My Game Setup.md").exists()
 
 
 @pytest.mark.asyncio

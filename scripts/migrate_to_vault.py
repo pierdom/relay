@@ -1,11 +1,11 @@
 """Migrate a running relay (SQLite-backed) into an Obsidian-style Markdown vault.
 
-Pulls every post over the REST API (works against a remote instance such as
-relay.geon.im) and writes one Markdown file per post — front-matter for
+Pulls every post over the REST API (works against a remote instance) and writes
+one Markdown file per post — front-matter for
 ``id/tags/source/created_at/updated_at/expires_at``, the title as the filename —
 then builds the disposable SQLite index.
 
-    uv run python scripts/migrate_to_vault.py --source https://relay.geon.im --vault ./vault
+    uv run python scripts/migrate_to_vault.py --source https://your-relay.example.com --vault ./vault
 
 Note: per-tag TTL config is NOT migrated — the REST API has no read endpoint for
 it. Re-apply tag expiries via set_tag_config after migrating.

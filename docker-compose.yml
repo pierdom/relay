@@ -10,8 +10,8 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      # Host vault dir -> container. Set RELAY_VAULT_DIR in .env (bespin:
-      # /home/pierdom/homelab-data/relay/notes); defaults to ./vault for local dev.
+      # Host vault dir -> container. In production set RELAY_VAULT_DIR in .env to
+      # an absolute host path; defaults to ./vault for local dev.
       - ${RELAY_VAULT_DIR:-./vault}:/data/vault
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

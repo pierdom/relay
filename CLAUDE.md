@@ -183,7 +183,7 @@ main app; tools call `relay.service` directly. Any MCP client connects with the
 bearer key, no checkout:
 
 ```bash
-claude mcp add --transport http relay https://relay.geon.im/mcp \
+claude mcp add --transport http relay https://your-relay.example.com/mcp \
   --header "Authorization: Bearer <your-api-key>"
 ```
 
@@ -200,7 +200,7 @@ to `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "args": ["run", "--project", "/path/to/relay", "relay-mcp"],
       "env": {
         "API_KEY": "<your-api-key>",
-        "RELAY_BASE_URL": "https://relay.geon.im"
+        "RELAY_BASE_URL": "https://your-relay.example.com"
       }
     }
   }
