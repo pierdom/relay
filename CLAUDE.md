@@ -1,6 +1,6 @@
 # relay — Claude Code guide
 
-Personal HTTP content feed. AI agents POST structured content (news digests, etc.); clients subscribe via SSE and receive it in real time. Posts are tagged, paginated, and expire via configurable TTL.
+Personal knowledge base kept as a plain-Markdown, **Obsidian-compatible vault**, with an AI-integration layer on top. AI agents publish/query/subscribe over MCP, REST, and SSE; humans edit the *same* files in Obsidian/nvim or the browser/terminal UIs. Posts are tagged, filed into first-level folders, cross-linked (`[[wikilinks]]`/`#id`), paginated, and can expire via configurable TTL.
 
 **Storage is an Obsidian-style Markdown vault** (`RELAY_VAULT_PATH`): one `.md` file per post, the title *is* the filename, metadata in YAML front-matter (`id`, `tags`, `source`, timestamps, `expires_at` — **no `title`**, that's the filename). Files are canonical. A disposable **SQLite index** under `<vault>/.relay/index.db` mirrors them for fast queries and is rebuilt from the files at startup. A `watchdog` watcher live-reindexes external edits (e.g. Obsidian) and pushes them via SSE. `title` is required; `format` no longer exists (everything is Markdown); `id` in front-matter is authoritative and survives renames.
 

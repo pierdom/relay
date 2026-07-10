@@ -2,13 +2,17 @@
 
 [![Build](https://github.com/pierdom/relay/actions/workflows/docker.yml/badge.svg)](https://github.com/pierdom/relay/actions/workflows/docker.yml)
 
-A lightweight personal content feed and knowledge base for AI agents. Agents publish structured content (digests, research notes, alerts, memory); other agents and human clients subscribe in real time via SSE, query the archive, and edit posts in place — without ever losing the post ID that cross-references them.
+**An AI-integration layer over a plain-Markdown, Obsidian-compatible vault.**
+
+Your knowledge base lives as ordinary `.md` files on disk — a first-class **Obsidian / filesystem vault** you can browse, `grep`, git-version, and edit in Obsidian, neovim, or any tool. relay wraps that *same* vault with the machine surface AI systems need: an **MCP server**, a **REST API**, a real-time **SSE** stream, and **browser + terminal UIs**. Agents publish structured content (digests, research notes, alerts, memory), query the archive, cross-reference posts by a stable `id` that survives renames, and subscribe live — all against files you can equally well open by hand.
+
+The vault is the source of truth; relay is the integration surface on top. That split is deliberate: a filesystem-based knowledge base and your AI tooling share **one** store, not two — no separate database to sync, export, or lock you in.
 
 ## Use cases
 
 - **Knowledge base**: one agent writes a research note; another reads it back later to inform its next action
 - **Live digest**: a scheduled agent publishes a daily news digest; a browser tab or terminal shows it the moment it arrives
-- **Agent memory**: agents store and update working notes as tags posts, then retrieve them by tag — a lightweight alternative to a vector store for short-horizon memory
+- **Agent memory**: agents store and update working notes as tagged posts, then retrieve them by tag or folder — a lightweight alternative to a vector store for short-horizon memory
 - **Audit log**: every agent action that matters gets POSTed as a structured JSON post; human reviews the feed at leisure
 
 ## How it works
@@ -32,7 +36,8 @@ agent D  ──GET /posts?tag=notes──►  relay         (query archive by ta
 Posts are stored as **plain Markdown files** in a vault directory (`RELAY_VAULT_PATH`),
 one file per post — the title *is* the filename, and metadata lives in YAML
 front-matter (`id`, `tags`, `source`, timestamps, `expires_at`). The vault is the
-source of truth: browse it, `grep` it, git-version it, or open it in **Obsidian**.
+source of truth: browse it, `grep` it, git-version it, or open it in **Obsidian**
+(or any other filesystem-based notes / knowledge-management tool — nvim, VS Code, etc.).
 
 A disposable **SQLite index** under `<vault>/.relay/` mirrors the files for fast
 list/search/tag/TTL queries; it is rebuilt from the files on startup, so deleting
@@ -42,7 +47,7 @@ it is harmless. A live filesystem watcher picks up edits made *outside* relay
 preserved across renames.
 
 The vault is organised into **first-level folders** — one per domain (`Homelab/`,
-`Radio/`, `Finance/`, `Reading/`, …, plus `Meta/`, `Digests/`, `Inbox/`), with the
+`Radio/`, `Finance/`, `Reading/`, …, plus `Digests/` and `Inbox/`), with the
 master document at the root. Folders are a browse aid; **tags stay primary for
 navigation**. A new post is filed automatically by its first domain tag (placement
 is derived from tags, not stored). The folder is chosen once at creation and never
