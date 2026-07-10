@@ -43,28 +43,26 @@ CI (`.github/workflows/docker.yml`) builds + pushes `ghcr.io/pierdom/relay:lates
 (the new file-backed image). Optionally tag a release (`git tag vX.Y.Z && git push
 --tags`) for a pinned, roll-back-able image.
 
-## 2 — Stage the vault on bespin
+## 2 — Stage the vault on bespin (host bind-mount)
 
-Bundle the canonical vault (exclude the disposable index and the local Obsidian
-workspace config — the index rebuilds, and `.obsidian/` is machine-specific):
+The vault lives as a **host directory** on bespin (done: `~/homelab-data/relay/notes`
+— which is also covered by the rclone→B2 backup, see #184). `docker-compose.yml`
+bind-mounts `$RELAY_VAULT_DIR` → `/data/vault`. To refresh it if the local vault
+changed, rsync the `.md` + attachments (skip the disposable index / Obsidian config):
 ```
-tar czf relay-vault.tgz -C ~/Workspace/relay/vault --exclude=.relay --exclude=.obsidian .
-scp relay-vault.tgz bespin:            # or over Tailscale
-```
-(If the prod vault will be Syncthing-synced with your Obsidian — see decisions —
-keep `.obsidian/` instead so settings stay consistent.)
-On bespin, load it into the volume at `/data/vault` **with the container down**:
-```
-docker compose down
-docker run --rm -v relay_data:/data -v "$PWD":/src alpine \
-  sh -c 'rm -rf /data/vault && mkdir -p /data/vault && tar xzf /src/relay-vault.tgz -C /data/vault'
+rsync -a --delete --exclude='.relay' --exclude='.obsidian' \
+  ~/Workspace/relay/vault/ bespin:homelab-data/relay/notes/
 ```
 
-Confirm `.env` on bespin: `RELAY_VAULT_PATH=/data/vault` (default), `API_KEY`
-unchanged, `SECURE_COOKIES=true`, and **`RELAY_WATCH_ENABLED=false`** — this
-cutover is **standalone** (relay is the only writer; no external editor/Syncthing
-on bespin yet), so the watchdog observer isn't needed. Flip it to `true` if/when
-Syncthing sync is added later.
+Set on bespin `.env`:
+```
+RELAY_VAULT_DIR=/home/pierdom/homelab-data/relay/notes   # host path (docker mount)
+RELAY_VAULT_PATH=/data/vault                             # path inside container
+RELAY_WATCH_ENABLED=false                                # standalone: relay is the only writer
+RELAY_UID=1000
+RELAY_GID=1000
+# API_KEY / SECURE_COOKIES=true unchanged from the old deployment
+```
 
 ## 3 — Cut over
 

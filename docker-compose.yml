@@ -2,12 +2,17 @@ services:
   relay:
     container_name: relay
     image: ghcr.io/pierdom/relay:latest
+    # Run as your host user so files relay writes into the bind-mounted vault
+    # (renames, index.db) stay user-owned — good for backup/Syncthing/Obsidian.
+    user: "${RELAY_UID:-1000}:${RELAY_GID:-1000}"
     env_file:
       - .env
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - relay_data:/data
+      # Host vault dir -> container. Set RELAY_VAULT_DIR in .env (bespin:
+      # /home/pierdom/homelab-data/relay/notes); defaults to ./vault for local dev.
+      - ${RELAY_VAULT_DIR:-./vault}:/data/vault
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
@@ -15,6 +20,3 @@ services:
       start_period: 10s
       retries: 3
     restart: unless-stopped
-
-volumes:
-  relay_data:
