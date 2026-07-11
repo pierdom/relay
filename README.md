@@ -104,6 +104,8 @@ Exposes the full feed API as MCP tools so Claude — or any MCP-capable agent �
 | `get_post` | Get a single post by ID (use `id=0` for the master document) |
 | `list_posts` | List posts with optional tag/search/limit/offset filters |
 | `delete_post` | Delete a post by ID |
+| `add_attachment` | Store a base64 file in a folder's `assets/`; with `post_id` appends the `![[file]]` embed to that post |
+| `get_attachment` | Retrieve an attachment by filename; images return as inline image content |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours`, `expires_at`) |
 
@@ -172,6 +174,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | DELETE | `/posts/{id}` | Delete a post |
 | GET | `/links` | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
 | GET | `/folders` | First-level vault folders with post counts |
+| POST | `/attachments` | Store a base64 attachment; with `post_id`, append its `![[file]]` embed to that post |
 | GET | `/attachments/{path}` | Serve a vault attachment (image/PDF/…) embedded via `![[file]]` |
 | GET | `/tags` | List tags with post counts |
 | POST | `/tags/{tag}/config` | Set per-tag TTL override |
@@ -257,6 +260,7 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `RELAY_WATCH_ENABLED` | `true` | Live-reindex + SSE on edits made outside relay; set `false` to disable |
 | `RELAY_BASE_URL` | `http://localhost:8000` | Base URL used by the stdio MCP proxy |
 | `SECURE_COOKIES` | `true` | `Secure` flag on the browser-UI session cookie; set `false` to use the UI over plain HTTP |
+| `ATTACHMENT_MAX_MB` | `25` | Max size of a single uploaded attachment (base64-decoded); larger uploads are rejected with 413 |
 | `RELAY_PALETTE` | `default` | TUI colour theme |
 | `RELAY_TRANSPARENT` | `0` | TUI: show terminal background through the canvas |
 

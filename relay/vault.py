@@ -190,12 +190,54 @@ def resolve_attachment(name: str) -> Path | None:
         return _ok(vault / name)
     # Bare filename: look for an exact match under any ``assets/`` folder. Join the
     # literal name (never glob it — a name like ``*.png`` must not act as a pattern).
-    for assets in vault.rglob("assets"):
+    for assets in vault.rglob(ATTACHMENTS_DIRNAME):
         if assets.is_dir():
             hit = _ok(assets / name)
             if hit is not None:
                 return hit
     return None
+
+
+ATTACHMENTS_DIRNAME = "assets"
+
+
+def attachment_dir_for(folder: str) -> Path:
+    """The ``assets/`` directory for a first-level folder (``Inbox`` when blank)."""
+    safe = Path(folder or folders.INBOX).name or folders.INBOX  # no separators/traversal
+    return vault_dir() / safe / ATTACHMENTS_DIRNAME
+
+
+def write_attachment(folder: str, filename: str, data: bytes) -> Path:
+    """Write ``data`` into ``<folder>/assets/`` under a sanitized, collision-free
+    name. Attachments aren't `.md`, so the index/watcher ignore them — no
+    self-write suppression needed. Returns the written path."""
+    target_dir = attachment_dir_for(folder)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    name = frontmatter.sanitize_attachment_name(filename)
+    path = frontmatter.unique_attachment_path(target_dir, name)
+    fd, tmp = tempfile.mkstemp(dir=str(target_dir), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return path
+
+
+def read_attachment(name: str) -> tuple[Path, bytes, str] | None:
+    """Resolve and read an attachment. Returns ``(path, bytes, mime)`` or ``None``."""
+    import mimetypes
+
+    path = resolve_attachment(name)
+    if path is None:
+        return None
+    mime, _ = mimetypes.guess_type(str(path))
+    return path, path.read_bytes(), mime or "application/octet-stream"
 
 
 # ── index mirror ─────────────────────────────────────────────────────────────

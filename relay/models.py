@@ -113,6 +113,28 @@ class BacklinksResponse(BaseModel):
     items: list[LinkTarget]
 
 
+class AttachmentCreate(BaseModel):
+    filename: str = Field(min_length=1)
+    data: str = Field(description="Base64-encoded file bytes")
+    post_id: int | None = None  # attach to this post (append ![[file]] to its body)
+    folder: str | None = None   # first-level folder for a standalone attachment
+
+    @field_validator("filename")
+    @classmethod
+    def filename_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("filename must not be empty")
+        return v
+
+
+class AttachmentResponse(BaseModel):
+    filename: str            # final on-disk name (may be collision-suffixed)
+    ref: str                 # Obsidian embed to drop into a post, e.g. ![[file.png]]
+    folder: str              # first-level folder the assets/ dir lives under
+    post_id: int | None = None  # set when the embed was appended to a post
+
+
 class TagRename(BaseModel):
     new_name: str
 

@@ -91,6 +91,35 @@ def sanitize_title(title: str) -> str:
     return stem or "Untitled"
 
 
+def sanitize_attachment_name(name: str) -> str:
+    """Turn a user-supplied attachment filename into a safe basename (keeps the
+    extension). Strips any path, replaces illegal chars, never traverses."""
+    base = Path(name or "").name  # drop any directory component
+    base = _ILLEGAL.sub("_", base)
+    base = re.sub(r"\s+", " ", base).strip().strip(". ")
+    if len(base) > _MAX_STEM:
+        stem, dot, ext = base.rpartition(".")
+        base = (stem[: _MAX_STEM - len(ext) - 1] + dot + ext) if dot else base[:_MAX_STEM]
+    return base or "attachment"
+
+
+def unique_attachment_path(target_dir: Path, name: str) -> Path:
+    """First free ``<name>`` in ``target_dir``, Obsidian-style ` 1`, ` 2` suffixing
+    inserted before the extension (``photo.png`` → ``photo 1.png``)."""
+    candidate = target_dir / name
+    if not candidate.exists():
+        return candidate
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    n = 1
+    while True:
+        candidate = target_dir / (f"{stem} {n}.{ext}" if ext else f"{stem} {n}")
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
 def unique_path(vault_dir: Path, stem: str, *, exclude: Path | None = None) -> Path:
     """First free ``<stem>.md`` in ``vault_dir``, Obsidian-style ` 2`, ` 3` suffixing.
 

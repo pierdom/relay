@@ -13,8 +13,10 @@ from collections import Counter
 
 import aiosqlite
 
-from . import events, links, vault
+from . import events, folders, links, vault
+from .config import settings
 from .models import (
+    AttachmentResponse,
     BacklinksResponse,
     FolderCount,
     FolderListResponse,
@@ -37,6 +39,10 @@ class PostNotFound(Exception):
 
 class ProtectedPost(Exception):
     """Raised when an operation is not allowed on a reserved post (e.g. id=0)."""
+
+
+class AttachmentError(Exception):
+    """Raised when an attachment can't be stored (e.g. too large)."""
 
 
 async def _fetch(db: aiosqlite.Connection, post_id: int) -> aiosqlite.Row | None:
@@ -230,6 +236,52 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
         await vault.index_delete(db, post_id)
         await db.commit()
     await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]))
+
+
+# ── Attachments ───────────────────────────────────────────────────────────────
+
+
+async def add_attachment(
+    db: aiosqlite.Connection,
+    *,
+    filename: str,
+    data: bytes,
+    post_id: int | None = None,
+    folder: str | None = None,
+) -> AttachmentResponse:
+    """Store an attachment in a folder's ``assets/`` dir and return its embed ref.
+
+    With ``post_id``: the file is filed under that post's folder and its
+    ``![[file]]`` embed is appended to the post's body (streamed via SSE).
+    Without it: filed under ``folder`` (or ``Inbox``); the caller places the ref.
+    """
+    if not data:
+        raise AttachmentError("attachment is empty")
+    if len(data) > settings.attachment_max_bytes:
+        raise AttachmentError(f"attachment exceeds the {settings.attachment_max_mb} MB limit")
+
+    row = None
+    if post_id is not None:
+        row = await _fetch(db, post_id)
+        if row is None:
+            raise PostNotFound
+        path_str = row["path"]
+        target_folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
+    else:
+        target_folder = folder or folders.INBOX
+
+    written = vault.write_attachment(target_folder, filename, data)
+    ref = f"![[{written.name}]]"
+
+    result_post_id = None
+    if row is not None:
+        new_content = row["content"].rstrip() + f"\n\n{ref}\n"
+        await update_post(db, post_id, PostUpdate(content=new_content))
+        result_post_id = post_id
+
+    return AttachmentResponse(
+        filename=written.name, ref=ref, folder=target_folder, post_id=result_post_id
+    )
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────

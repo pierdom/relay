@@ -116,3 +116,86 @@ async def test_get_attachment_missing_404(client):
 async def test_get_attachment_traversal_404(client):
     r = await client.get("/attachments/../../secret.txt", headers=AUTH)
     assert r.status_code in (400, 404)
+
+
+# ── upload (POST /attachments) ────────────────────────────────────────────────
+
+import base64  # noqa: E402
+
+PNG = base64.b64encode(b"\x89PNG\r\n\x1a\nhello").decode()
+
+
+async def _create(client, title, content="body", tags=None):
+    r = await client.post(
+        "/posts", json={"title": title, "content": content, "tags": tags or ["homelab"]}, headers=AUTH
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+@pytest.mark.asyncio
+async def test_add_attachment_standalone_goes_to_inbox(client):
+    r = await client.post("/attachments", json={"filename": "chart.png", "data": PNG}, headers=AUTH)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["ref"] == "![[chart.png]]"
+    assert body["folder"] == "Inbox"
+    assert body["post_id"] is None
+    # served back
+    assert (await client.get("/attachments/chart.png", headers=AUTH)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_add_attachment_to_post_appends_embed_and_uses_post_folder(client):
+    post = await _create(client, "Rack Notes", content="Initial.", tags=["homelab"])
+    r = await client.post(
+        "/attachments", json={"filename": "rack.png", "data": PNG, "post_id": post["id"]}, headers=AUTH
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["folder"] == "Homelab"
+    assert body["post_id"] == post["id"]
+    # embed appended to the post body
+    updated = (await client.get(f"/posts/{post['id']}", headers=AUTH)).json()
+    assert "![[rack.png]]" in updated["content"]
+    assert updated["content"].startswith("Initial.")
+    # filed under the post's folder assets
+    assert (await client.get("/attachments/Homelab/assets/rack.png", headers=AUTH)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_add_attachment_collision_suffix(client):
+    a = await client.post("/attachments", json={"filename": "dup.png", "data": PNG}, headers=AUTH)
+    b = await client.post("/attachments", json={"filename": "dup.png", "data": PNG}, headers=AUTH)
+    assert a.json()["filename"] == "dup.png"
+    assert b.json()["filename"] == "dup 1.png"  # extension preserved, suffix before it
+
+
+@pytest.mark.asyncio
+async def test_add_attachment_invalid_base64(client):
+    r = await client.post("/attachments", json={"filename": "x.png", "data": "!!!not64!!!"}, headers=AUTH)
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_add_attachment_post_not_found(client):
+    r = await client.post(
+        "/attachments", json={"filename": "x.png", "data": PNG, "post_id": 9999}, headers=AUTH
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_attachment_too_large(client, monkeypatch):
+    monkeypatch.setattr(settings, "attachment_max_mb", 0)  # 0 bytes → always too big
+    r = await client.post("/attachments", json={"filename": "big.png", "data": PNG}, headers=AUTH)
+    assert r.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_add_attachment_traversal_filename_is_sanitized(client):
+    r = await client.post(
+        "/attachments", json={"filename": "../../evil.png", "data": PNG}, headers=AUTH
+    )
+    assert r.status_code == 201
+    assert "/" not in r.json()["filename"] and ".." not in r.json()["filename"]
