@@ -117,6 +117,20 @@ async def test_session_cookie_authorizes_protected_route(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_session_endpoint_rejects_wrong_key():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        bad = await c.post("/session", json={"key": "not-the-key"})
+        assert bad.status_code == 401
+        empty = await c.post("/session", json={})
+        assert empty.status_code == 401
+        ok = await c.post("/session", json={"key": "test-key"})
+    assert ok.status_code == 200
+    # the response set a valid, verifiable session cookie
+    token = ok.cookies.get("relay_session")
+    assert token and auth.verify_session(token) is not None
+
+
+@pytest.mark.asyncio
 async def test_mcp_metadata_gated(monkeypatch):
     monkeypatch.setattr(settings, "mcp_oauth_enabled", False)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
