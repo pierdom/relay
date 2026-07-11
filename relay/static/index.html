@@ -329,6 +329,30 @@
     .ef-attach-size { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
     .ef-attach-del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; }
     .ef-attach-del:hover { color: #e5534b; }
+
+    /* ── Attachment gallery ─────────────────────────────── */
+    .attachments-view { padding: 4px 2px 40px; }
+    .att-folder-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 18px 2px 8px; }
+    .att-folder-head:first-child { margin-top: 4px; }
+    .att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+    .att-card { position: relative; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 4%, transparent); }
+    .att-thumb { height: 110px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(0,0,0,0.15); cursor: pointer; }
+    .att-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .att-thumb .att-ext { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+    .att-thumb .att-ext::before { content: "📄"; display: block; font-size: 26px; margin-bottom: 4px; }
+    .att-meta { padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+    .att-name { font-size: 12px; overflow-wrap: anywhere; color: var(--text); }
+    .att-sub { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; }
+    .att-del { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border: none; border-radius: 4px;
+      background: rgba(0,0,0,0.55); color: #eee; cursor: pointer; font-size: 15px; line-height: 1; opacity: 0; transition: opacity 0.15s; }
+    .att-card:hover .att-del { opacity: 1; }
+    .att-del:hover { background: var(--red, #e5534b); color: #fff; }
+    .att-empty { color: var(--muted); font-size: 13px; padding: 20px 2px; }
+
+    .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .lightbox-inner { max-width: 92vw; max-height: 92vh; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .lightbox img { max-width: 92vw; max-height: 82vh; object-fit: contain; border-radius: 4px; }
+    .lightbox-cap { color: #ddd; font-size: 12px; }
     .edit-form textarea.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 
     /* ── Search bar ─────────────────────────────────────── */
@@ -613,6 +637,7 @@
       <div class="sidebar-tabs">
         <button class="sb-tab active" id="tabTags">Tags</button>
         <button class="sb-tab" id="tabTree">Tree</button>
+        <button class="sb-tab" id="tabFiles">Files</button>
       </div>
       <button class="sidebar-add-btn" id="newTagBtn" title="New tag" style="display:none">+</button>
     </div>
@@ -656,7 +681,16 @@
     <div class="load-more" id="loadMore" style="display:none">
       <button id="loadMoreBtn">Load more</button>
     </div>
+
+    <div class="attachments-view" id="attachmentsView" style="display:none"></div>
   </main>
+
+  <div class="lightbox" id="lightbox" style="display:none">
+    <div class="lightbox-inner">
+      <img id="lightboxImg" alt="">
+      <div class="lightbox-cap" id="lightboxCap"></div>
+    </div>
+  </div>
 </div>
 
 <div class="post-modal" id="postModal">
@@ -681,7 +715,9 @@ const LIMIT = 20;
 let apiKey = '';
 let activeTag = null;
 let activeFolder = null;
-let sidebarMode = 'tags';   // 'tags' | 'tree'
+let sidebarMode = 'tags';   // 'tags' | 'tree' | 'files'
+let attachCache = [];       // last-fetched attachment list (for the gallery)
+let attachFolder = null;    // active gallery folder filter (null = all)
 let activeSearch = null;
 let searchDebounce = null;
 let offset = 0;
@@ -708,6 +744,8 @@ const menuBtn         = document.getElementById('menuBtn');
 const sidebarEl       = document.getElementById('sidebarEl');
 const sidebarOverlay  = document.getElementById('sidebarOverlay');
 const searchBar       = document.getElementById('searchBar');
+const attachmentsView = document.getElementById('attachmentsView');
+const lightbox        = document.getElementById('lightbox');
 const searchInput     = document.getElementById('searchInput');
 const searchClear     = document.getElementById('searchClear');
 
@@ -1104,12 +1142,23 @@ function setSidebarMode(mode) {
   sidebarMode = mode;
   document.getElementById('tabTags').classList.toggle('active', mode === 'tags');
   document.getElementById('tabTree').classList.toggle('active', mode === 'tree');
+  document.getElementById('tabFiles').classList.toggle('active', mode === 'files');
   newTagBtn.style.display = mode === 'tags' ? '' : 'none';
   document.getElementById('tagNew').style.display = 'none';
-  if (mode === 'tags') loadTags(); else loadFolders();
+  const files = mode === 'files';
+  // Files mode swaps the post feed for the attachment gallery.
+  feed.style.display = files ? 'none' : '';
+  attachmentsView.style.display = files ? '' : 'none';
+  newPostBtn.style.display = files ? 'none' : '';
+  if (files) loadMoreWrap.style.display = 'none';
+  else if (offset < total) loadMoreWrap.style.display = 'block';
+  if (mode === 'tags') loadTags();
+  else if (mode === 'tree') loadFolders();
+  else loadAttachments();
 }
 document.getElementById('tabTags').addEventListener('click', () => setSidebarMode('tags'));
 document.getElementById('tabTree').addEventListener('click', () => setSidebarMode('tree'));
+document.getElementById('tabFiles').addEventListener('click', () => setSidebarMode('files'));
 
 async function loadFolders() {
   if (!apiKey) return;
@@ -1143,6 +1192,89 @@ async function selectFolder(folder) {
     el.classList.toggle('active', el.dataset.folder === key));
   await loadPosts(true);
 }
+
+/* ── Attachment gallery (Files tab) ─────────────────────────── */
+const GALLERY_IMG_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+const attPath = (a) => '/attachments/' + [a.folder, 'assets', a.filename].map(encodeURIComponent).join('/');
+
+async function loadAttachments() {
+  if (!apiKey) return;
+  try { attachCache = (await apiFetch('/attachments')).items; } catch { attachCache = []; }
+  renderAttachSidebar();
+  renderAttachGallery();
+}
+
+function selectAttachFolder(folder) {
+  attachFolder = folder;
+  renderAttachSidebar();
+  renderAttachGallery();
+  closeSidebar();
+}
+
+function renderAttachSidebar() {
+  const counts = new Map();
+  attachCache.forEach(a => counts.set(a.folder, (counts.get(a.folder) || 0) + 1));
+  tagList.innerHTML = '';
+  const all = document.createElement('div');
+  all.className = 'tag-item folder-item' + (attachFolder === null ? ' active' : '');
+  all.innerHTML = `<span class="tag-name">All files</span><span class="tag-count">${attachCache.length}</span>`;
+  all.addEventListener('click', () => selectAttachFolder(null));
+  tagList.appendChild(all);
+  [...counts.keys()].sort().forEach(folder => {
+    const el = document.createElement('div');
+    el.className = 'tag-item folder-item' + (attachFolder === folder ? ' active' : '');
+    el.innerHTML = `<span class="tag-name"><span class="folder-ico">▸</span>${escHtml(folder)}</span><span class="tag-count">${counts.get(folder)}</span>`;
+    el.addEventListener('click', () => selectAttachFolder(folder));
+    tagList.appendChild(el);
+  });
+}
+
+function renderAttachGallery() {
+  const items = attachFolder === null ? attachCache : attachCache.filter(a => a.folder === attachFolder);
+  if (!items.length) { attachmentsView.innerHTML = '<div class="att-empty">No attachments yet.</div>'; return; }
+  const groups = new Map();
+  items.forEach(a => { if (!groups.has(a.folder)) groups.set(a.folder, []); groups.get(a.folder).push(a); });
+  let html = '';
+  [...groups.keys()].sort().forEach(folder => {
+    html += `<div class="att-folder-head">${escHtml(folder)}/assets</div><div class="att-grid">`;
+    groups.get(folder).forEach(a => {
+      const p = attPath(a);
+      const thumb = GALLERY_IMG_RE.test(a.filename)
+        ? `<div class="att-thumb" data-src="${p}" data-name="${escHtml(a.filename)}"><img src="${p}" alt="${escHtml(a.filename)}" loading="lazy"></div>`
+        : `<a class="att-thumb" href="${p}" target="_blank" rel="noopener noreferrer"><span class="att-ext">${escHtml(a.filename.split('.').pop() || 'file')}</span></a>`;
+      html += `<div class="att-card" data-name="${escHtml(a.filename)}">${thumb}
+        <div class="att-meta"><span class="att-name">${escHtml(a.filename)}</span>
+          <span class="att-sub"><span>${fmtBytes(a.bytes)}</span></span></div>
+        <button class="att-del" title="Delete file from vault">×</button></div>`;
+    });
+    html += '</div>';
+  });
+  attachmentsView.innerHTML = html;
+}
+
+attachmentsView.addEventListener('click', async e => {
+  const thumb = e.target.closest('.att-thumb[data-src]');
+  if (thumb) { openLightbox(thumb.dataset.src, thumb.dataset.name); return; }
+  const del = e.target.closest('.att-del');
+  if (!del) return;
+  const name = del.closest('.att-card').dataset.name;
+  if (!confirm(`Delete "${name}" from the vault? This removes the file itself.`)) return;
+  try {
+    const r = await apiFetch(`/attachments/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (r.referenced_by?.length)
+      alert(`Deleted. Still referenced by ${r.referenced_by.map(i => '#' + i).join(', ')} — those embeds are now broken.`);
+    await loadAttachments();
+  } catch (err) { alert(`Delete failed: ${err.message}`); }
+});
+
+function openLightbox(src, name) {
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightboxCap').textContent = name || '';
+  lightbox.style.display = 'flex';
+}
+function closeLightbox() { lightbox.style.display = 'none'; document.getElementById('lightboxImg').src = ''; }
+lightbox.addEventListener('click', closeLightbox);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && lightbox.style.display === 'flex') closeLightbox(); });
 
 function startTagRename(el, oldName) {
   const nameSpan = el.querySelector('.tag-name');

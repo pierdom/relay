@@ -83,7 +83,7 @@ The container exposes `GET /health` (no auth) and reports its status via Docker 
 
 ### Browser UI
 
-`GET /ui` — single-page interface with a live SSE feed, compose/edit forms, and a mobile drawer. The sidebar toggles between **Tags** (filter by tag) and **Tree** (filter by vault folder). The master document is pinned on top of the home feed, and `[[wikilinks]]`/`#NNN` cross-references render clickable (with a "linked mentions" panel in the detail view). Attachments can be added to the compose/edit forms by the 📎 Attach button, drag-drop, or paste (screenshots) — the file uploads and its `![[embed]]` is inserted at the cursor.
+`GET /ui` — single-page interface with a live SSE feed, compose/edit forms, and a mobile drawer. The sidebar toggles between **Tags** (filter by tag), **Tree** (filter by vault folder), and **Files** (an attachment gallery with thumbnails, folder filter, click-to-enlarge lightbox, and delete). The master document is pinned on top of the home feed, and `[[wikilinks]]`/`#NNN` cross-references render clickable (with a "linked mentions" panel in the detail view). Attachments can be added to the compose/edit forms by the 📎 Attach button, drag-drop, or paste (screenshots) — the file uploads and its `![[embed]]` is inserted at the cursor.
 
 ### Terminal UI
 
@@ -91,7 +91,7 @@ The container exposes `GET /health` (no auth) and reports its status via Docker 
 uv run relay-tui
 ```
 
-Two-panel split: TOPICS sidebar + FEED list. Keyboard shortcuts: `n` new, `e` edit, `d` delete, `r` refresh, `Enter` view full post, `t` toggle TOPICS between Tags and Tree (folders), `Tab` switch panels, `q` quit. In a post's detail view, `f` opens a filterable picker to follow its `[[wikilinks]]`/`#NNN` links and backlinks. The master document is pinned on top of the feed. Set `RELAY_PALETTE=<name>` to pick a colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`). Set `RELAY_TRANSPARENT=1` to let the terminal's own background show through the base canvas (Screen, header, footer, scrollbars, single-post detail); editing modals stay opaque.
+Two-panel split: TOPICS sidebar + FEED list. Keyboard shortcuts: `n` new, `e` edit, `d` delete, `r` refresh, `Enter` view full post, `a` browse attachments (open externally / delete), `t` toggle TOPICS between Tags and Tree (folders), `Tab` switch panels, `q` quit. In a post's detail view, `f` opens a filterable picker to follow its `[[wikilinks]]`/`#NNN` links and backlinks. The master document is pinned on top of the feed. Set `RELAY_PALETTE=<name>` to pick a colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`). Set `RELAY_TRANSPARENT=1` to let the terminal's own background show through the base canvas (Screen, header, footer, scrollbars, single-post detail); editing modals stay opaque.
 
 ### MCP server (Claude Desktop / agents)
 
