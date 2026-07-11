@@ -139,6 +139,29 @@ async def test_illegal_chars_sanitized_in_filename(client, vault_dir):
     assert (vault_dir / "Inbox" / "AI ML news.md").exists()
 
 
+# ── SSE propagation of edits (backlog #198 item 3) ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_publishes_sse_post_event(client):
+    from relay import events
+
+    post = await _create_post(client)
+    q = events.subscribe(None)
+    while not q.empty():  # drain the create event
+        q.get_nowait()
+
+    r = await client.patch(f"/posts/{post['id']}", json={"content": "edited"}, headers=AUTH)
+    assert r.status_code == 200
+
+    assert not q.empty(), "update_post should broadcast an SSE event"
+    envelope = q.get_nowait()
+    events.unsubscribe(q, None)
+    assert envelope["type"] == "post"
+    assert envelope["id"] == post["id"]
+    assert envelope["data"]["content"] == "edited"
+
+
 @pytest.mark.asyncio
 async def test_master_document_seeded_and_protected(client):
     r = await client.get("/posts/0", headers=AUTH)

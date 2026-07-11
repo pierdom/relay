@@ -233,10 +233,12 @@ curl -N "http://localhost:8000/events?tag=news" \
 ```
 
 A `keepalive` event fires every 30 s to hold the connection through proxies.
-Event types: `post` (a new **or edited** post — the vault watcher streams edits
-made outside relay, e.g. in Obsidian) and `delete` (`{"id": N}`, so clients drop
-a post the moment it's deleted via the API or removed from the vault). A client
-that receives a `post` event for an id it already shows updates it in place.
+Event types: `post` (a new **or edited** post — both API/MCP edits and edits made
+outside relay via the vault watcher, e.g. in Obsidian, stream live) and `delete`
+(`{"id": N}`, so clients drop a post the moment it's deleted via the API or
+removed from the vault). A client that receives a `post` event for an id it
+already shows updates it in place (and refreshes the active sidebar counts, so an
+Inbox→domain move reflows the Tree without a manual refresh).
 
 The SSE `id:` field only ever moves forward (streamed edits to older posts are
 sent without an `id:`), so an edit can't rewind a client's `Last-Event-ID` or
