@@ -117,8 +117,14 @@ class AttachmentCreate(BaseModel):
     filename: str = Field(min_length=1)
     data: str = Field(description="Base64-encoded file bytes")
     post_id: int | None = None  # attach to this post (file under its folder)
-    folder: str | None = None   # first-level folder for a standalone attachment
+    folder: str | None = None   # explicit first-level folder for a standalone attachment
+    tags: list[str] = Field(default_factory=list)  # derive the folder from these (compose)
     embed: bool = True          # with post_id, also append ![[file]] to its body
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, v: list[str]) -> list[str]:
+        return _clean_tag_list(v)
 
     @field_validator("filename")
     @classmethod

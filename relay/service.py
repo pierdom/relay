@@ -265,14 +265,18 @@ async def add_attachment(
     data: bytes,
     post_id: int | None = None,
     folder: str | None = None,
+    tags: list[str] | None = None,
     embed: bool = True,
 ) -> AttachmentResponse:
     """Store an attachment in a folder's ``assets/`` dir and return its embed ref.
 
-    With ``post_id``: the file is filed under that post's folder; if ``embed`` is
-    true its ``![[file]]`` embed is also appended to the post's body (streamed via
-    SSE). With ``embed`` false (e.g. the UI, which inserts the ref itself) the post
-    is left untouched. Without ``post_id``: filed under ``folder`` (or ``Inbox``).
+    Folder precedence: ``post_id`` (the post's own folder) → explicit ``folder`` →
+    ``tags`` (same placement policy as a post via ``folders.folder_for``, so a
+    compose-time upload lands beside where the note will file) → ``Inbox``.
+
+    With ``post_id`` and ``embed`` true, the ``![[file]]`` embed is also appended to
+    the post's body (streamed via SSE). With ``embed`` false (e.g. the UI, which
+    inserts the ref itself) the post is left untouched.
     """
     if not data:
         raise AttachmentError("attachment is empty")
@@ -286,8 +290,12 @@ async def add_attachment(
             raise PostNotFound
         path_str = row["path"]
         target_folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
+    elif folder:
+        target_folder = folder
+    elif tags:
+        target_folder = folders.folder_for(1, tags) or folders.INBOX
     else:
-        target_folder = folder or folders.INBOX
+        target_folder = folders.INBOX
 
     # Serialize name-allocation + write against other writers so two concurrent
     # uploads of the same filename can't resolve to the same path and clobber.

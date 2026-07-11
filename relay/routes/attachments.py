@@ -48,7 +48,7 @@ async def create_attachment(
     try:
         return await service.add_attachment(
             db, filename=body.filename, data=data, post_id=body.post_id,
-            folder=body.folder, embed=body.embed,
+            folder=body.folder, tags=body.tags, embed=body.embed,
         )
     except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{body.post_id} not found")

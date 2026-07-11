@@ -929,31 +929,32 @@ function insertAtCursor(ta, text) {
   ta.selectionStart = ta.selectionEnd = s + text.length;
   ta.focus();
 }
-// Upload one file, then insert its ![[ref]] at the cursor. embed=false: the server
-// just stores it (in the post's folder when postId is set) and we place the ref.
-async function uploadOne(file, postId, ta, statusEl) {
+// Upload one file, then insert its ![[ref]] at the cursor. `getExtra` supplies the
+// placement fields: an existing post ({post_id, embed:false} — server files it in
+// the post's folder, UI places the ref) or a new note ({tags} — server derives the
+// folder the note will use, so the image lands beside it instead of in Inbox).
+async function uploadOne(file, ta, statusEl, getExtra) {
   const name = file.name || `pasted-${Date.now()}.png`;
   statusEl.classList.remove('error');
   statusEl.textContent = `Uploading ${name}…`;
   try {
     const data = await fileToBase64(file);
-    const body = { filename: name, data };
-    if (postId != null) { body.post_id = postId; body.embed = false; }
+    const body = { filename: name, data, ...getExtra() };
     const res = await apiFetch('/attachments', { method: 'POST', body: JSON.stringify(body) });
     insertAtCursor(ta, `\n${IMG_NAME_RE.test(res.filename) ? '!' : ''}[[${res.filename}]]\n`);
-    statusEl.textContent = `Attached ${res.filename}`;
+    statusEl.textContent = `Attached ${res.filename} → ${res.folder}/assets`;
   } catch (e) {
     statusEl.classList.add('error');
     statusEl.textContent = `Upload failed: ${e.message}`;
   }
 }
-async function uploadMany(files, postId, ta, statusEl) {
-  for (const f of files) await uploadOne(f, postId, ta, statusEl);
+async function uploadMany(files, ta, statusEl, getExtra) {
+  for (const f of files) await uploadOne(f, ta, statusEl, getExtra);
 }
-function wireAttachments(ta, fileInput, attachBtn, statusEl, getPostId) {
+function wireAttachments(ta, fileInput, attachBtn, statusEl, getExtra) {
   attachBtn.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', async () => {
-    await uploadMany([...fileInput.files], getPostId(), ta, statusEl);
+    await uploadMany([...fileInput.files], ta, statusEl, getExtra);
     fileInput.value = '';
   });
   ta.addEventListener('dragover', e => { e.preventDefault(); ta.classList.add('drag-over'); });
@@ -961,21 +962,23 @@ function wireAttachments(ta, fileInput, attachBtn, statusEl, getPostId) {
   ta.addEventListener('drop', async e => {
     if (!e.dataTransfer?.files?.length) return;
     e.preventDefault(); ta.classList.remove('drag-over');
-    await uploadMany([...e.dataTransfer.files], getPostId(), ta, statusEl);
+    await uploadMany([...e.dataTransfer.files], ta, statusEl, getExtra);
   });
   ta.addEventListener('paste', async e => {
     const files = [...(e.clipboardData?.items || [])]
       .filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
     if (!files.length) return;   // let normal text paste through
     e.preventDefault();
-    await uploadMany(files, getPostId(), ta, statusEl);
+    await uploadMany(files, ta, statusEl, getExtra);
   });
 }
+
+const parseTagsField = (v) => v.split(',').map(s => s.trim()).filter(Boolean);
 
 wireAttachments(
   document.getElementById('cpContent'), document.getElementById('cpFile'),
   document.getElementById('cpAttach'), document.getElementById('cpAttachStatus'),
-  () => null,
+  () => ({ tags: parseTagsField(document.getElementById('cpTags').value) }),
 );
 
 /* ── Search ───────────────────────────────────────────────── */
@@ -1340,7 +1343,7 @@ function enterEditMode(el, post) {
   wireAttachments(
     el.querySelector('.ef-content'), el.querySelector('.ef-file'),
     el.querySelector('.ef-attach'), el.querySelector('.ef-attach-status'),
-    () => post.id,
+    () => ({ post_id: post.id, embed: false }),
   );
 
   el.querySelector('.btn-cancel').addEventListener('click', () => { el.classList.remove('editing'); el.innerHTML = savedHtml; rewirePost(el, post); });

@@ -184,6 +184,18 @@ async def test_add_attachment_embed_false_files_in_post_folder_without_appending
 
 
 @pytest.mark.asyncio
+async def test_add_attachment_tags_derive_folder(client):
+    # compose flow: no post yet, but tags decide the folder the note will use
+    r = await client.post("/attachments", json={"filename": "wave.png", "data": PNG, "tags": ["audio"]}, headers=AUTH)
+    assert r.status_code == 201, r.text
+    assert r.json()["folder"] == "Audio"
+    assert (await client.get("/attachments/Audio/assets/wave.png", headers=AUTH)).status_code == 200
+    # no domain tag → Inbox
+    r2 = await client.post("/attachments", json={"filename": "misc.png", "data": PNG, "tags": ["random"]}, headers=AUTH)
+    assert r2.json()["folder"] == "Inbox"
+
+
+@pytest.mark.asyncio
 async def test_add_attachment_collision_suffix(client):
     a = await client.post("/attachments", json={"filename": "dup.png", "data": PNG}, headers=AUTH)
     b = await client.post("/attachments", json={"filename": "dup.png", "data": PNG}, headers=AUTH)
