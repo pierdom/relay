@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     relay_palette: str = "default"
     relay_transparent: bool = False
     secure_cookies: bool = True
+    attachment_max_mb: int = 25  # reject uploads larger than this (base64-decoded)
+
+    @property
+    def attachment_max_bytes(self) -> int:
+        return self.attachment_max_mb * 1024 * 1024
 
     @property
     def relay_dir(self) -> str:

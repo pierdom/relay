@@ -8,7 +8,6 @@ from textual.widget import Widget
 from textual.widgets import Label, ListView, ListItem
 
 from .. import api
-from ..theme import ACCENT, BORDER
 
 
 class TagItem(ListItem):

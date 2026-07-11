@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import requests
 
@@ -40,6 +40,14 @@ class Post:
 class Tag:
     name: str
     count: int
+
+
+@dataclass
+class Attachment:
+    filename: str
+    folder: str
+    bytes: int
+    ref: str
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -183,6 +191,34 @@ def list_folders() -> list[tuple[str, int]]:
     resp = requests.get(f"{_base()}/folders", headers=_headers(), timeout=10)
     resp.raise_for_status()
     return [(f["folder"], f["count"]) for f in resp.json().get("folders", [])]
+
+
+def list_attachments(folder: str | None = None, post_id: int | None = None) -> list[Attachment]:
+    params: dict[str, object] = {}
+    if folder is not None:
+        params["folder"] = folder
+    if post_id is not None:
+        params["post_id"] = post_id
+    resp = requests.get(f"{_base()}/attachments", params=params, headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    return [
+        Attachment(filename=i["filename"], folder=i["folder"], bytes=i["bytes"], ref=i["ref"])
+        for i in resp.json().get("items", [])
+    ]
+
+
+def delete_attachment(name: str) -> dict:
+    from urllib.parse import quote
+
+    resp = requests.delete(f"{_base()}/attachments/{quote(name)}", headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def attachment_url(folder: str, filename: str) -> str:
+    from urllib.parse import quote
+
+    return f"{_base()}/attachments/{quote(folder)}/assets/{quote(filename)}"
 
 
 def rename_tag(old: str, new: str) -> list[Tag]:

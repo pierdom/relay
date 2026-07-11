@@ -33,3 +33,53 @@ def test_outbound_ids_order_dedup_and_skips():
 
 def test_outbound_ids_empty_when_no_links():
     assert _outbound_link_ids("plain text, no links", INDEX) == []
+
+
+# ── attachment / embed handling ───────────────────────────────────────────────
+
+
+def test_embed_image_becomes_attachment_link():
+    out = _linkify_markdown("![[diagram.png]]", INDEX)
+    assert "](http" in out and "/attachments/diagram.png)" in out
+    assert out.startswith("[\U0001F4CE diagram.png]")
+
+
+def test_embed_image_size_spec_is_not_used_as_label():
+    out = _linkify_markdown("![[diagram.png|300]]", INDEX)
+    # |300 is an Obsidian size, not a label — filename stays the label.
+    assert "[\U0001F4CE diagram.png]" in out
+    assert "300" not in out.split("](")[0]
+
+
+def test_embed_pdf_becomes_attachment_link():
+    out = _linkify_markdown("![[notes.pdf]]", INDEX)
+    assert "/attachments/notes.pdf)" in out
+
+
+def test_embed_note_transclusion_links_to_note():
+    out = _linkify_markdown("![[QTH]]", INDEX)
+    assert out == "[QTH](relay:155)"  # resolved note, not a bogus attachment link
+
+
+def test_embed_unresolved_note_degrades_to_text():
+    out = _linkify_markdown("![[No Such Note]]", INDEX)
+    assert out == "No Such Note"
+
+
+def test_bare_file_wikilink_becomes_attachment_link():
+    out = _linkify_markdown("see [[report.pdf]]", INDEX)
+    assert "/attachments/report.pdf)" in out
+
+
+def test_embed_of_uncommon_type_still_links():
+    # ![[…]] is always a file embed → any extension links, even uncommon ones.
+    out = _linkify_markdown("![[config.toml]] and ![[script.py]]", INDEX)
+    assert "/attachments/config.toml)" in out
+    assert "/attachments/script.py)" in out
+
+
+def test_dotted_note_title_is_not_an_attachment():
+    # [[Section 2.1]] is a broken note link, not a ".1" attachment.
+    out = _linkify_markdown("[[Section 2.1]]", INDEX)
+    assert out == "Section 2.1"
+    assert "/attachments/" not in out

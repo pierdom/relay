@@ -11,8 +11,9 @@ from textual import work
 
 from . import api
 from .sse import SSESubscriber
-from .theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG, TRANSPARENT, build_textual_theme, palette_name
+from .theme import ACCENT, BORDER, SCREEN_BG, TRANSPARENT, build_textual_theme, palette_name
 from .widgets.modals import (
+    AttachmentsModal,
     ComposeModal,
     ConfirmModal,
     EditModal,
@@ -103,6 +104,7 @@ class RelayTuiApp(App):
         Binding("e", "edit_post", "Edit"),
         Binding("d", "delete_post", "Delete"),
         Binding("slash", "search", "Search"),
+        Binding("a", "attachments", "Attachments"),
         Binding("r", "reload", "Refresh"),
         Binding("tab", "focus_next_panel", "Switch panel", show=False),
         Binding("shift+tab", "focus_prev_panel", "Switch panel", show=False),
@@ -361,6 +363,9 @@ class RelayTuiApp(App):
             self._search = query or None
             self._reload()
         self.push_screen(SearchModal(current=self._search or ""), callback=_on_result)
+
+    def action_attachments(self) -> None:
+        self.push_screen(AttachmentsModal())
 
     def action_compose_post(self) -> None:
         def _on_result(result: dict | None) -> None:

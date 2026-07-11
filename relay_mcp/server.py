@@ -145,6 +145,68 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="add_attachment",
+            description=(
+                "Attach a file (image, PDF, …) to the vault. 'data' is the file's bytes, "
+                "base64-encoded. With 'post_id', the file is filed under that post's folder and "
+                "its ![[file]] embed is appended to the post body. Without it, the file goes to "
+                "'folder' (or Inbox) and you place the returned ref in a post yourself."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["filename", "data"],
+                "properties": {
+                    "filename": {"type": "string", "description": "Attachment filename, e.g. 'diagram.png'"},
+                    "data": {"type": "string", "description": "Base64-encoded file bytes"},
+                    "post_id": {"type": "integer", "description": "Post to attach to (appends ![[file]] to its body)"},
+                    "folder": {"type": "string", "description": "First-level folder for a standalone attachment (default Inbox)"},
+                },
+            },
+        ),
+        types.Tool(
+            name="delete_attachment",
+            description=(
+                "Delete an attachment from the vault by its filename. Reports any post ids that "
+                "still embed/link it (now dangling)."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "description": "Attachment filename, e.g. 'diagram.png'"},
+                },
+            },
+        ),
+        types.Tool(
+            name="list_attachments",
+            description=(
+                "List attachments stored in the vault (filename, folder, size, and the ![[…]] "
+                "embed ref). Scope with 'post_id' (that post's folder) or 'folder'; omit both to "
+                "list every attachment. Use the returned filename with get_attachment."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "post_id": {"type": "integer", "description": "List attachments in this post's folder"},
+                    "folder": {"type": "string", "description": "List attachments in this first-level folder"},
+                },
+            },
+        ),
+        types.Tool(
+            name="get_attachment",
+            description=(
+                "Retrieve an attachment from the vault by its filename (as used in ![[file]]). "
+                "Images are returned so they can be viewed inline."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "description": "Attachment filename, e.g. 'diagram.png'"},
+                },
+            },
+        ),
+        types.Tool(
             name="set_tag_config",
             description=(
                 "Set expiry configuration for a tag. "
@@ -173,7 +235,91 @@ async def list_tools() -> list[types.Tool]:
 
 
 @server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+async def call_tool(
+    name: str, arguments: dict
+) -> list[types.TextContent | types.ImageContent]:
+    if name == "add_attachment":
+        payload = {k: v for k, v in arguments.items() if v is not None}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{RELAY_BASE_URL}/attachments",
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            if response.status_code == 404:
+                return [types.TextContent(type="text", text=f"Post #{arguments.get('post_id')} not found.")]
+            if response.status_code == 400:
+                return [types.TextContent(type="text", text="Attachment 'data' is not valid base64.")]
+            if response.status_code == 413:
+                return [types.TextContent(type="text", text=response.json().get("detail", "Attachment too large."))]
+            response.raise_for_status()
+            a = response.json()
+        where = f" appended to post #{a['post_id']}" if a.get("post_id") is not None else ""
+        return [types.TextContent(
+            type="text",
+            text=f"Stored attachment '{a['filename']}' in {a['folder']}/assets{where}.\nEmbed: {a['ref']}",
+        )]
+
+    if name == "delete_attachment":
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{RELAY_BASE_URL}/attachments/{arguments['name']}",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 404:
+                return [types.TextContent(type="text", text=f"Attachment '{arguments['name']}' not found.")]
+            response.raise_for_status()
+            d = response.json()
+        warn = (f"  Still referenced by posts: {', '.join('#' + str(i) for i in d['referenced_by'])} — "
+                "remove the dangling embeds." if d["referenced_by"] else "")
+        return [types.TextContent(type="text", text=f"Deleted attachment '{d['filename']}'.{warn}")]
+
+    if name == "list_attachments":
+        params = {k: v for k, v in arguments.items() if k in ("post_id", "folder") and v is not None}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/attachments",
+                params=params,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 404:
+                return [types.TextContent(type="text", text=f"Post #{arguments.get('post_id')} not found.")]
+            response.raise_for_status()
+            items = response.json()["items"]
+        if not items:
+            return [types.TextContent(type="text", text="No attachments found.")]
+        lines = [f"{a['ref']}  —  {a['folder']}/assets ({a['bytes']} bytes)" for a in items]
+        return [types.TextContent(type="text", text="\n".join(lines))]
+
+    if name == "get_attachment":
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/attachments/{arguments['name']}",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            if response.status_code == 404:
+                return [types.TextContent(type="text", text=f"Attachment '{arguments['name']}' not found.")]
+            response.raise_for_status()
+            mime = response.headers.get("content-type", "application/octet-stream").split(";")[0]
+            raw = response.content
+        max_bytes = settings.attachment_max_mb * 1024 * 1024
+        if len(raw) > max_bytes:
+            return [types.TextContent(
+                type="text",
+                text=f"Attachment '{arguments['name']}' is {len(raw)} bytes — too large to return inline.",
+            )]
+        if mime.startswith("image/"):
+            import base64 as _b64
+            return [types.ImageContent(type="image", data=_b64.b64encode(raw).decode(), mimeType=mime)]
+        return [types.TextContent(
+            type="text",
+            text=f"Retrieved '{arguments['name']}' ({mime}, {len(raw)} bytes) — not an image, can't show inline.",
+        )]
+
     if name == "list_tags":
         async with httpx.AsyncClient() as client:
             response = await client.get(

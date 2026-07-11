@@ -4,7 +4,10 @@ Folders are a *projection of the primary tag at creation time* — a human brows
 tree layered on top of tags, which stay the query layer. A post is filed once,
 on create, by its first domain tag; thereafter its folder is human-owned and
 relay never auto-moves it on retag (see ``vault.write_file``, which preserves the
-existing directory whenever it edits a file in place).
+existing directory whenever it edits a file in place). The one exception is
+``Inbox`` — the "unfiled" bucket for tag-less notes: when a note there gains its
+first domain tag, ``service.update_post`` moves it (and its own attachments) into
+that domain folder. Moves only ever go *out of* Inbox, never between real folders.
 """
 from __future__ import annotations
 

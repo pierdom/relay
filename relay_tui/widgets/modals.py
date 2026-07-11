@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -27,13 +27,30 @@ from .post_panel import _time_ago, _time_until
 
 # ── Wikilink preprocessing ────────────────────────────────────────────────────
 
+_EMBED_RE = re.compile(r"!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]")
 _WIKI_RE = re.compile(r"\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]")
 _IDREF_RE = re.compile(r"(?<![\w#])#(\d{1,5})\b")
+# Any extension — used only on the ![[…]] embed path (always a file in Obsidian).
+_ANY_EXT_RE = re.compile(r"\.[a-z0-9]{1,12}$", re.IGNORECASE)
+# Curated attachment types for the plain [[…]] link path — not a generic ``\.xxx$``
+# — so dotted note titles (e.g. ``[[Section 2.1]]``) aren't mistaken for files.
+_FILE_EXT_RE = re.compile(
+    r"\.(png|jpe?g|gif|webp|svg|avif|bmp|pdf|canvas|docx?|xlsx?|pptx?|csv|txt"
+    r"|rtf|odt|ods|zip|epub|mp3|m4a|wav|flac|ogg|aac|opus|mp4|mov|webm|mkv|avi)$",
+    re.IGNORECASE,
+)
 _CODE_SPLIT = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
 
 
+def _attachment_link(name: str, label: str) -> str:
+    """A markdown link to the attachment endpoint — terminals can't inline images,
+    so both ``![[img]]`` embeds and ``[[file.pdf]]`` render as an external link."""
+    return f"[\U0001F4CE {label}]({api._base()}/attachments/{quote(name)})"
+
+
 def _linkify_markdown(content: str, index: dict[str, int]) -> str:
-    """Turn ``[[Title]]`` / ``#NNN`` into ``[label](relay:ID)`` links.
+    """Turn ``[[Title]]`` / ``#NNN`` into ``[label](relay:ID)`` links and Obsidian
+    attachment embeds into external links.
 
     Resolution is by title (case-insensitive). Broken wikilinks degrade to plain
     text; unknown ``#NNN`` are left untouched. Code spans/blocks are skipped.
@@ -41,17 +58,30 @@ def _linkify_markdown(content: str, index: dict[str, int]) -> str:
     ids = set(index.values())
 
     def convert(text: str) -> str:
+        def embed(m: re.Match) -> str:
+            name = m.group(1).strip()
+            opt = (m.group(2) or "").strip()
+            if _ANY_EXT_RE.search(name):  # embed of any file → external link
+                label = name if (not opt or re.fullmatch(r"\d+(x\d+)?", opt)) else opt
+                return _attachment_link(name, label)
+            # No extension → note transclusion; link to the note or degrade to text.
+            pid = index.get(name.lower())
+            return f"[{opt or name}](relay:{pid})" if pid is not None else (opt or name)
+
         def wiki(m: re.Match) -> str:
             target = m.group(1).strip()
             alias = (m.group(3) or target).strip()
             pid = index.get(target.lower())
-            return f"[{alias}](relay:{pid})" if pid is not None else alias
+            if pid is not None:
+                return f"[{alias}](relay:{pid})"
+            # Unresolved but file-like (e.g. [[doc.pdf]]) → attachment link.
+            return _attachment_link(target, alias) if _FILE_EXT_RE.search(target) else alias
 
         def idref(m: re.Match) -> str:
             n = m.group(1)
             return f"[#{n}](relay:{n})" if int(n) in ids else m.group(0)
 
-        return _IDREF_RE.sub(idref, _WIKI_RE.sub(wiki, text))
+        return _IDREF_RE.sub(idref, _WIKI_RE.sub(wiki, _EMBED_RE.sub(embed, text)))
 
     return "".join(
         part if i % 2 else convert(part)
@@ -818,3 +848,128 @@ class SearchModal(ModalScreen[str | None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value.strip() or "")
+
+
+# ── AttachmentsModal ──────────────────────────────────────────────────────────
+
+
+def _fmt_bytes(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.0f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
+
+
+class AttachmentsModal(ModalScreen[None]):
+    """Browse vault attachments: open externally (images can't render in a terminal)
+    or delete. Enter/o opens the file in the browser; d deletes the selected one."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("o", "open_external", "Open"),
+        Binding("d", "delete", "Delete"),
+        Binding("r", "reload", "Refresh"),
+    ]
+
+    DEFAULT_CSS = f"""
+    AttachmentsModal {{
+        align: center middle;
+    }}
+    AttachmentsModal > Vertical {{
+        width: 80%;
+        height: 80%;
+        background: {HEADER_BG};
+        border: solid {ACCENT};
+        padding: 1 2;
+    }}
+    AttachmentsModal .att-title {{
+        text-style: bold;
+        color: {ACCENT};
+        margin-bottom: 1;
+    }}
+    AttachmentsModal OptionList {{
+        height: 1fr;
+        background: {HEADER_BG};
+    }}
+    AttachmentsModal .att-hint {{
+        color: #888888;
+        margin-top: 1;
+    }}
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._items: list[api.Attachment] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Attachments", classes="att-title")
+            yield OptionList(id="att-list")
+            yield Label("enter/o open · d delete · r refresh · esc close", classes="att-hint")
+
+    def on_mount(self) -> None:
+        self._load()
+
+    @work(thread=True)
+    def _load(self) -> None:
+        try:
+            items = api.list_attachments()
+        except Exception:
+            items = []
+        self._items = items
+        self.app.call_from_thread(self._populate)
+
+    def _populate(self) -> None:
+        ol = self.query_one("#att-list", OptionList)
+        ol.clear_options()
+        if not self._items:
+            ol.add_option(Option("(no attachments)"))
+            return
+        for a in self._items:
+            ol.add_option(Option(f"{a.folder}/assets/{a.filename}  ({_fmt_bytes(a.bytes)})"))
+        ol.highlighted = 0
+        ol.focus()
+
+    def _selected(self) -> "api.Attachment | None":
+        ol = self.query_one("#att-list", OptionList)
+        idx = ol.highlighted
+        if idx is None or not self._items or idx >= len(self._items):
+            return None
+        return self._items[idx]
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.action_open_external()
+
+    def action_open_external(self) -> None:
+        a = self._selected()
+        if a is not None:
+            self.app.open_url(api.attachment_url(a.folder, a.filename))
+
+    def action_reload(self) -> None:
+        self._load()
+
+    def action_delete(self) -> None:
+        a = self._selected()
+        if a is None:
+            return
+
+        def _cb(ok: bool | None) -> None:
+            if ok:
+                self._do_delete(a)
+
+        self.app.push_screen(ConfirmModal(f"Delete {a.filename} from the vault?"), _cb)
+
+    @work(thread=True)
+    def _do_delete(self, a: "api.Attachment") -> None:
+        try:
+            res = api.delete_attachment(a.filename)
+        except Exception as exc:
+            self.app.call_from_thread(self.app.notify, f"Delete failed: {exc}", severity="error")
+            return
+        refs = res.get("referenced_by") or []
+        msg = f"Deleted {a.filename}"
+        if refs:
+            msg += " — still ref'd by " + ", ".join(f"#{i}" for i in refs)
+        self.app.call_from_thread(self.app.notify, msg)
+        self.app.call_from_thread(self._load)

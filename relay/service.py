@@ -8,13 +8,20 @@ with ``row_factory = aiosqlite.Row``.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from collections import Counter
 
 import aiosqlite
 
-from . import events, links, vault
+from . import events, folders, links, vault
+from .config import settings
 from .models import (
+    AttachmentDeleteResponse,
+    AttachmentInfo,
+    AttachmentListResponse,
+    AttachmentResponse,
     BacklinksResponse,
     FolderCount,
     FolderListResponse,
@@ -37,6 +44,10 @@ class PostNotFound(Exception):
 
 class ProtectedPost(Exception):
     """Raised when an operation is not allowed on a reserved post (e.g. id=0)."""
+
+
+class AttachmentError(Exception):
+    """Raised when an attachment can't be stored (e.g. too large)."""
 
 
 async def _fetch(db: aiosqlite.Connection, post_id: int) -> aiosqlite.Row | None:
@@ -150,11 +161,22 @@ async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) 
     now = vault.utcnow_iso()
     old_path = vault.abspath(row["path"])
 
+    # Auto-file out of Inbox: a note created without a domain tag lands in Inbox;
+    # when its first domain tag arrives, move it (and its own attachments) to that
+    # folder. Only ever *out of* Inbox — other folders stay human-owned.
+    rel = vault.relpath(old_path)
+    old_folder = rel.split("/", 1)[0] if "/" in rel else ""
+    move_to = None
+    if "tags" in fields and old_folder == folders.INBOX:
+        desired = folders.folder_for(post_id, tags or [])
+        if desired and desired != folders.INBOX:
+            move_to = desired
+
     async with vault.write_lock:
         new_path = vault.write_file(
             id=post_id, title=title, content=content, tags=tags or [], source=source,
             created_at=row["created_at"], updated_at=now, expires_at=expires_at,
-            old_path=old_path,
+            old_path=old_path, move_to_folder=move_to,
         )
         await vault.index_upsert(
             db, id=post_id, title=new_path.stem, path=new_path, content=content,
@@ -163,8 +185,29 @@ async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) 
         )
         if new_path.stem != row["title"]:
             await _rewrite_inbound_wikilinks(db, old_title=row["title"], new_title=new_path.stem)
+        if move_to:
+            await _relocate_note_attachments(db, content, old_folder, move_to, post_id)
         await db.commit()
     return PostResponse.from_row(await _fetch(db, post_id))
+
+
+async def _relocate_note_attachments(
+    db: aiosqlite.Connection, content: str, from_folder: str, to_folder: str, post_id: int
+) -> None:
+    """Move the note's own attachments from ``from_folder`` to ``to_folder`` when the
+    note is relocated. Only files this note references and no *other* post does are
+    moved — shared assets stay put (refs still resolve by global-unique name)."""
+    wanted = referenced_attachment_names(content)
+    if not wanted:
+        return
+    async with db.execute("SELECT content FROM posts WHERE id != ?", (post_id,)) as cur:
+        rows = await cur.fetchall()
+    used_elsewhere: set[str] = set()
+    for r in rows:
+        used_elsewhere |= referenced_attachment_names(r["content"])
+    for name, _folder, _size in vault.list_attachments(from_folder):
+        if name.lower() in wanted and name.lower() not in used_elsewhere:
+            vault.move_attachment(from_folder, to_folder, name)
 
 
 async def _rewrite_inbound_wikilinks(
@@ -219,17 +262,156 @@ async def get_backlinks(db: aiosqlite.Connection, post_id: int) -> BacklinksResp
     return BacklinksResponse(items=items)
 
 
+# Matches ![[file]] embeds and [[file]] links (Obsidian), capturing the target.
+_EMBED_OR_LINK_RE = re.compile(r"!?\[\[([^\]|#]+?)(?:\|[^\]]*)?\]\]")
+
+
+def referenced_attachment_names(content: str) -> set[str]:
+    """Lower-cased filenames a post's content embeds/links (``![[x]]`` / ``[[x.ext]]``).
+
+    A target is treated as an attachment only when its last path segment has an
+    extension — bare ``[[Note Title]]`` wikilinks are ignored.
+    """
+    names: set[str] = set()
+    for m in _EMBED_OR_LINK_RE.finditer(content or ""):
+        target = m.group(1).strip()
+        if "." in target.rsplit("/", 1)[-1]:
+            names.add(target.rsplit("/", 1)[-1].lower())
+    return names
+
+
+async def _all_referenced_attachments(db: aiosqlite.Connection) -> set[str]:
+    async with db.execute("SELECT content FROM posts") as cur:
+        rows = await cur.fetchall()
+    referenced: set[str] = set()
+    for row in rows:
+        referenced |= referenced_attachment_names(row["content"])
+    return referenced
+
+
 async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
     if post_id == 0:
         raise ProtectedPost
     row = await _fetch(db, post_id)
     if row is None:
         raise PostNotFound
+    path_str = row["path"]
+    folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
     async with vault.write_lock:
-        vault.delete_file(vault.abspath(row["path"]))
+        vault.delete_file(vault.abspath(path_str))
         await vault.index_delete(db, post_id)
         await db.commit()
     await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]))
+    # Orphan cleanup: drop attachments in the deleted post's folder that no
+    # remaining post references. Shared assets (still referenced elsewhere) stay.
+    referenced = await _all_referenced_attachments(db)
+    for name, _f, _s in vault.list_attachments(folder):
+        if name.lower() not in referenced:
+            vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
+
+
+# ── Attachments ───────────────────────────────────────────────────────────────
+
+_DATA_URI_RE = re.compile(r"^data:[^;,]*;base64,", re.IGNORECASE)
+
+
+def decode_attachment_b64(data: str) -> bytes:
+    """Decode a client-supplied base64 string, tolerating a ``data:...;base64,``
+    prefix and internal whitespace/newlines. Raises ``ValueError`` on bad input."""
+    s = _DATA_URI_RE.sub("", (data or "").strip())
+    s = re.sub(r"\s+", "", s)
+    try:
+        return base64.b64decode(s, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("data is not valid base64") from exc
+
+
+async def add_attachment(
+    db: aiosqlite.Connection,
+    *,
+    filename: str,
+    data: bytes,
+    post_id: int | None = None,
+    folder: str | None = None,
+    tags: list[str] | None = None,
+    embed: bool = True,
+) -> AttachmentResponse:
+    """Store an attachment in a folder's ``assets/`` dir and return its embed ref.
+
+    Folder precedence: ``post_id`` (the post's own folder) → explicit ``folder`` →
+    ``tags`` (same placement policy as a post via ``folders.folder_for``, so a
+    compose-time upload lands beside where the note will file) → ``Inbox``.
+
+    With ``post_id`` and ``embed`` true, the ``![[file]]`` embed is also appended to
+    the post's body (streamed via SSE). With ``embed`` false (e.g. the UI, which
+    inserts the ref itself) the post is left untouched.
+    """
+    if not data:
+        raise AttachmentError("attachment is empty")
+    if len(data) > settings.attachment_max_bytes:
+        raise AttachmentError(f"attachment exceeds the {settings.attachment_max_mb} MB limit")
+
+    row = None
+    if post_id is not None:
+        row = await _fetch(db, post_id)
+        if row is None:
+            raise PostNotFound
+        path_str = row["path"]
+        target_folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
+    elif folder:
+        target_folder = folder
+    elif tags:
+        target_folder = folders.folder_for(1, tags) or folders.INBOX
+    else:
+        target_folder = folders.INBOX
+
+    # Serialize name-allocation + write against other writers so two concurrent
+    # uploads of the same filename can't resolve to the same path and clobber.
+    async with vault.write_lock:
+        written = vault.write_attachment(target_folder, filename, data)
+    ref = f"![[{written.name}]]"
+
+    result_post_id = None
+    if row is not None and embed:  # append outside the lock — update_post takes it itself
+        new_content = row["content"].rstrip() + f"\n\n{ref}\n"
+        await update_post(db, post_id, PostUpdate(content=new_content))
+        result_post_id = post_id
+
+    return AttachmentResponse(
+        filename=written.name, ref=ref, folder=target_folder, post_id=result_post_id
+    )
+
+
+async def list_attachments(
+    db: aiosqlite.Connection, *, post_id: int | None = None, folder: str | None = None
+) -> AttachmentListResponse:
+    """List attachment files under ``assets/`` dirs. ``post_id`` scopes to that
+    post's folder; ``folder`` scopes to a named folder; neither scans the vault."""
+    if post_id is not None:
+        row = await _fetch(db, post_id)
+        if row is None:
+            raise PostNotFound
+        path_str = row["path"]
+        folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
+    items = [
+        AttachmentInfo(filename=n, folder=f, bytes=s, ref=f"![[{n}]]")
+        for (n, f, s) in vault.list_attachments(folder)
+    ]
+    return AttachmentListResponse(items=items)
+
+
+async def delete_attachment(db: aiosqlite.Connection, name: str) -> AttachmentDeleteResponse | None:
+    """Delete an attachment file. Returns the removed name plus any post ids that
+    still embed/link it (now dangling), or ``None`` if it didn't resolve."""
+    async with vault.write_lock:
+        removed = vault.delete_attachment(name)
+    if removed is None:
+        return None
+    fname = removed.name.lower()
+    async with db.execute("SELECT id, content FROM posts") as cur:
+        rows = await cur.fetchall()
+    referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
+    return AttachmentDeleteResponse(filename=removed.name, referenced_by=sorted(referenced_by))
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────

@@ -50,15 +50,23 @@ The vault is organised into **first-level folders** — one per domain (`Homelab
 `Radio/`, `Finance/`, `Reading/`, …, plus `Digests/` and `Inbox/`), with the
 master document at the root. Folders are a browse aid; **tags stay primary for
 navigation**. A new post is filed automatically by its first domain tag (placement
-is derived from tags, not stored). The folder is chosen once at creation and never
-moved on retag — reorganise freely in Obsidian and relay preserves it, since `id`
-is authoritative.
+is derived from tags, not stored). The folder is chosen once at creation and, apart
+from one case, never moved on retag — a tag-less note filed in `Inbox` moves to its
+domain folder (with its attachments) when it gains its first domain tag. Otherwise
+reorganise freely in Obsidian and relay preserves it, since `id` is authoritative.
 
 **Cross-links.** Posts link to each other with Obsidian **`[[Title]]`** / `[[Title|alias]]`
 wikilinks (resolved by title) or by id with **`#NNN`** (stable across renames). Both
 render clickable in the browser UI and TUI; `[[…]]` also works natively in Obsidian.
 Renaming a post rewrites inbound `[[…]]` links across the vault, and each post's detail
 view lists its **backlinks** ("linked mentions").
+
+**Attachments.** Images, PDFs and other files live in a per-folder `<Folder>/assets/`
+subdirectory, embedded Obsidian-style with `![[file.png]]` (images render inline; other
+files as a link). Add them from the browser UI (📎 button, drag-drop, or paste a
+screenshot) or over MCP/REST; filenames are made vault-globally unique so a bare
+`![[name]]` never resolves ambiguously. Deleting a post also cleans up attachments in
+its folder that no other post still references.
 
 ## Quick start
 
@@ -83,7 +91,7 @@ The container exposes `GET /health` (no auth) and reports its status via Docker 
 
 ### Browser UI
 
-`GET /ui` — single-page interface with a live SSE feed, compose/edit forms, and a mobile drawer. The sidebar toggles between **Tags** (filter by tag) and **Tree** (filter by vault folder). The master document is pinned on top of the home feed, and `[[wikilinks]]`/`#NNN` cross-references render clickable (with a "linked mentions" panel in the detail view).
+`GET /ui` — single-page interface with a live SSE feed, compose/edit forms, and a mobile drawer. The sidebar toggles between **Tags** (filter by tag), **Tree** (filter by vault folder), and **Files** (an attachment gallery with thumbnails, folder filter, click-to-enlarge lightbox, and delete). The master document is pinned on top of the home feed, and `[[wikilinks]]`/`#NNN` cross-references render clickable (with a "linked mentions" panel in the detail view). Attachments can be added to the compose/edit forms by the 📎 Attach button, drag-drop, or paste (screenshots) — the file uploads and its `![[embed]]` is inserted at the cursor.
 
 ### Terminal UI
 
@@ -91,7 +99,7 @@ The container exposes `GET /health` (no auth) and reports its status via Docker 
 uv run relay-tui
 ```
 
-Two-panel split: TOPICS sidebar + FEED list. Keyboard shortcuts: `n` new, `e` edit, `d` delete, `r` refresh, `Enter` view full post, `t` toggle TOPICS between Tags and Tree (folders), `Tab` switch panels, `q` quit. In a post's detail view, `f` opens a filterable picker to follow its `[[wikilinks]]`/`#NNN` links and backlinks. The master document is pinned on top of the feed. Set `RELAY_PALETTE=<name>` to pick a colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`). Set `RELAY_TRANSPARENT=1` to let the terminal's own background show through the base canvas (Screen, header, footer, scrollbars, single-post detail); editing modals stay opaque.
+Two-panel split: TOPICS sidebar + FEED list. Keyboard shortcuts: `n` new, `e` edit, `d` delete, `r` refresh, `Enter` view full post, `a` browse attachments (open externally / delete), `t` toggle TOPICS between Tags and Tree (folders), `Tab` switch panels, `q` quit. In a post's detail view, `f` opens a filterable picker to follow its `[[wikilinks]]`/`#NNN` links and backlinks. The master document is pinned on top of the feed. Set `RELAY_PALETTE=<name>` to pick a colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`). Set `RELAY_TRANSPARENT=1` to let the terminal's own background show through the base canvas (Screen, header, footer, scrollbars, single-post detail); editing modals stay opaque.
 
 ### MCP server (Claude Desktop / agents)
 
@@ -104,6 +112,10 @@ Exposes the full feed API as MCP tools so Claude — or any MCP-capable agent �
 | `get_post` | Get a single post by ID (use `id=0` for the master document) |
 | `list_posts` | List posts with optional tag/search/limit/offset filters |
 | `delete_post` | Delete a post by ID |
+| `add_attachment` | Store a base64 file in a folder's `assets/`; with `post_id` appends the `![[file]]` embed to that post |
+| `get_attachment` | Retrieve an attachment by filename; images return as inline image content |
+| `list_attachments` | List attachments (filename, folder, size, ref); scope by `post_id` or `folder` |
+| `delete_attachment` | Delete an attachment by filename; reports post ids that still reference it |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours`, `expires_at`) |
 
@@ -172,6 +184,10 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | DELETE | `/posts/{id}` | Delete a post |
 | GET | `/links` | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
 | GET | `/folders` | First-level vault folders with post counts |
+| POST | `/attachments` | Store a base64 attachment; with `post_id`, append its `![[file]]` embed to that post |
+| GET | `/attachments` | List attachments (`folder`/`post_id` scope) — filename, folder, size, ref |
+| DELETE | `/attachments/{path}` | Delete an attachment file; reports posts still referencing it |
+| GET | `/attachments/{path}` | Serve a vault attachment (image/PDF/…) embedded via `![[file]]` |
 | GET | `/tags` | List tags with post counts |
 | POST | `/tags/{tag}/config` | Set per-tag TTL override |
 | PATCH | `/tags/{tag}` | Rename a tag across all posts |
@@ -256,6 +272,7 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `RELAY_WATCH_ENABLED` | `true` | Live-reindex + SSE on edits made outside relay; set `false` to disable |
 | `RELAY_BASE_URL` | `http://localhost:8000` | Base URL used by the stdio MCP proxy |
 | `SECURE_COOKIES` | `true` | `Secure` flag on the browser-UI session cookie; set `false` to use the UI over plain HTTP |
+| `ATTACHMENT_MAX_MB` | `25` | Max size of a single uploaded attachment (base64-decoded); larger uploads are rejected with 413 |
 | `RELAY_PALETTE` | `default` | TUI colour theme |
 | `RELAY_TRANSPARENT` | `0` | TUI: show terminal background through the canvas |
 

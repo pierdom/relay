@@ -113,17 +113,21 @@ def write_file(
     updated_at: str | None,
     expires_at: str | None,
     old_path: Path | None = None,
+    move_to_folder: str | None = None,
 ) -> Path:
     """Write a post to disk; rename from ``old_path`` if the title changed.
 
     Folder placement: a file edited in place stays in its current directory
-    (``old_path``'s parent) — relay never relocates a post on retag. A brand-new
-    file (no ``old_path``) is filed by ``folders.folder_for`` from its tags.
+    (``old_path``'s parent) — relay never relocates a post on retag, *except* when
+    ``move_to_folder`` is given (used only for the Inbox→domain move on first tag).
+    A brand-new file (no ``old_path``) is filed by ``folders.folder_for``.
 
     Returns the (possibly new) path. Records the write for watcher suppression.
     """
     stem = frontmatter.sanitize_title(title)
-    if old_path is not None:
+    if move_to_folder is not None:
+        target_dir = vault_dir() / move_to_folder
+    elif old_path is not None:
         target_dir = old_path.parent
     else:
         target_dir = vault_dir() / folders.folder_for(id, tags)
@@ -158,6 +162,171 @@ def delete_file(path: Path) -> None:
 
 def read_file(path: Path) -> tuple[dict, str]:
     return frontmatter.parse(Path(path).read_text(encoding="utf-8"))
+
+
+def resolve_attachment(name: str) -> Path | None:
+    """Resolve an attachment reference to a real file inside the vault.
+
+    ``name`` comes from an Obsidian embed (``![[file]]`` / ``[[file.pdf]]``) or a
+    vault-relative path. A bare filename is located by scanning ``*/assets/``
+    dirs (the convention for attachments); a path with separators is resolved
+    directly. Returns an existing file **inside the vault and outside ``.relay``**,
+    or ``None`` — the security boundary against path traversal.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    vault = vault_dir().resolve()
+    relay = Path(settings.relay_dir).resolve()
+
+    def _ok(candidate: Path) -> Path | None:
+        try:
+            rp = candidate.resolve()
+        except OSError:
+            return None
+        if not rp.is_file() or not rp.is_relative_to(vault):
+            return None
+        if rp == relay or relay in rp.parents:
+            return None
+        return rp
+
+    if "/" in name or "\\" in name:
+        return _ok(vault / name)
+    # Bare filename: look for an exact match under any ``assets/`` folder. Join the
+    # literal name (never glob it — a name like ``*.png`` must not act as a pattern).
+    for assets in vault.rglob(ATTACHMENTS_DIRNAME):
+        if assets.is_dir():
+            hit = _ok(assets / name)
+            if hit is not None:
+                return hit
+    return None
+
+
+ATTACHMENTS_DIRNAME = "assets"
+
+
+def attachment_dir_for(folder: str) -> Path:
+    """The ``assets/`` directory for a first-level folder (``Inbox`` when blank)."""
+    safe = Path(folder or folders.INBOX).name or folders.INBOX  # no separators/traversal
+    return vault_dir() / safe / ATTACHMENTS_DIRNAME
+
+
+def _unique_attachment_name(name: str) -> str:
+    """A filename free across *every* ``assets/`` dir, Obsidian-style ` N` suffixed
+    before the extension. Vault-global (not per-folder) so a bare ``![[name]]``
+    resolves to exactly one file — two folders can't both hold ``chart.png``."""
+    taken = {n.lower() for (n, _folder, _size) in list_attachments()}
+    if name.lower() not in taken:
+        return name
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    n = 1
+    while True:
+        candidate = f"{stem} {n}.{ext}" if ext else f"{stem} {n}"
+        if candidate.lower() not in taken:
+            return candidate
+        n += 1
+
+
+def write_attachment(folder: str, filename: str, data: bytes) -> Path:
+    """Write ``data`` into ``<folder>/assets/`` under a sanitized, vault-globally
+    unique name. Attachments aren't `.md`, so the index/watcher ignore them — no
+    self-write suppression needed. Returns the written path."""
+    target_dir = attachment_dir_for(folder)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    name = _unique_attachment_name(frontmatter.sanitize_attachment_name(filename))
+    path = target_dir / name
+    fd, tmp = tempfile.mkstemp(dir=str(target_dir), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return path
+
+
+# Extensions mimetypes often can't guess but that relay treats as images.
+_IMAGE_MIME_FALLBACK = {
+    ".avif": "image/avif", ".bmp": "image/bmp", ".svg": "image/svg+xml", ".webp": "image/webp",
+}
+
+
+def attachment_mime(path: Path) -> str:
+    import mimetypes
+
+    mime, _ = mimetypes.guess_type(str(path))
+    return mime or _IMAGE_MIME_FALLBACK.get(path.suffix.lower(), "application/octet-stream")
+
+
+def list_attachments(folder: str | None = None) -> list[tuple[str, str, int]]:
+    """``(filename, folder, size)`` for files under ``assets/`` dirs. ``folder``
+    limits the scan to that first-level folder; ``None`` scans the whole vault."""
+    root = vault_dir().resolve()
+    dirs = [attachment_dir_for(folder)] if folder else [
+        p for p in root.rglob(ATTACHMENTS_DIRNAME) if p.is_dir()
+    ]
+    results: list[tuple[str, str, int]] = []
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        try:
+            rel = d.resolve().relative_to(root)
+        except ValueError:
+            continue
+        folder_name = rel.parts[0] if rel.parts else ""
+        for f in sorted(d.iterdir()):
+            # skip transient .tmp write artifacts (left only by a crashed write)
+            if f.is_file() and f.suffix != ".tmp":
+                results.append((f.name, folder_name, f.stat().st_size))
+    return results
+
+
+def move_attachment(from_folder: str, to_folder: str, name: str) -> bool:
+    """Move ``name`` from ``from_folder/assets`` to ``to_folder/assets``. No-op
+    (returns False) if the source is missing or the destination already exists."""
+    src = attachment_dir_for(from_folder) / name
+    if not src.is_file():
+        return False
+    dst_dir = attachment_dir_for(to_folder)
+    dst = dst_dir / name
+    if dst.exists():
+        return False
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    os.replace(src, dst)
+    return True
+
+
+def delete_attachment(name: str) -> Path | None:
+    """Resolve and unlink an attachment (bare name or vault-relative path). Returns
+    the removed path, or ``None`` if it didn't resolve inside the vault."""
+    path = resolve_attachment(name)
+    if path is None:
+        return None
+    try:
+        path.unlink()
+    except OSError:
+        return None
+    return path
+
+
+def read_attachment(name: str, *, max_bytes: int | None = None) -> tuple[Path, bytes, str] | None:
+    """Resolve and read an attachment. Returns ``(path, bytes, mime)`` or ``None``.
+
+    Stats the file before reading; raises ``ValueError`` if it exceeds ``max_bytes``
+    so a huge file is never slurped into memory / an LLM context.
+    """
+    path = resolve_attachment(name)
+    if path is None:
+        return None
+    if max_bytes is not None and path.stat().st_size > max_bytes:
+        raise ValueError(f"attachment is larger than {max_bytes} bytes")
+    return path, path.read_bytes(), attachment_mime(path)
 
 
 # ── index mirror ─────────────────────────────────────────────────────────────

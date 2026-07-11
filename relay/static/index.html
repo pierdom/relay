@@ -238,6 +238,10 @@
     .post-body a.wikilink { color: var(--accent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); cursor: pointer; }
     .post-body a.wikilink:hover { text-decoration: none; border-bottom-color: var(--accent); }
     .post-body .wikilink.broken { color: var(--muted); border-bottom: 1px dashed var(--muted); cursor: help; }
+    .post-body img.attachment { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 0.5rem 0; }
+    .post-body a.attachment-link { color: var(--accent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+    .post-body a.attachment-link::before { content: "📎 "; }
+    .post-body a.attachment-link.broken { color: var(--muted); border-bottom-color: var(--muted); }
     .pm-backlinks { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
     .pm-backlinks h4 { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
     .pm-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -307,6 +311,49 @@
       transition: border-color 0.15s, color 0.15s;
     }
     .btn-cancel:hover { border-color: var(--text); color: var(--text); }
+
+    .attach-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+    .btn-attach {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      padding: 4px 10px; border-radius: 3px; cursor: pointer;
+      font-family: inherit; font-size: 11px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-attach:hover { border-color: var(--accent); color: var(--accent); }
+    .attach-status { font-size: 11px; color: var(--muted); }
+    .attach-status.error { color: #e5534b; }
+    .ef-attachments { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+    .ef-attach-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 2px; }
+    .ef-attach-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .ef-attach-name { color: var(--text); overflow-wrap: anywhere; }
+    .ef-attach-size { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
+    .ef-attach-del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; }
+    .ef-attach-del:hover { color: #e5534b; }
+
+    /* ── Attachment gallery ─────────────────────────────── */
+    .attachments-view { padding: 4px 2px 40px; }
+    .att-folder-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 18px 2px 8px; }
+    .att-folder-head:first-child { margin-top: 4px; }
+    .att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+    .att-card { position: relative; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 4%, transparent); }
+    .att-thumb { height: 110px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(0,0,0,0.15); cursor: pointer; }
+    .att-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .att-thumb .att-ext { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+    .att-thumb .att-ext::before { content: "📄"; display: block; font-size: 26px; margin-bottom: 4px; }
+    .att-meta { padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+    .att-name { font-size: 12px; overflow-wrap: anywhere; color: var(--text); }
+    .att-sub { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; }
+    .att-del { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border: none; border-radius: 4px;
+      background: rgba(0,0,0,0.55); color: #eee; cursor: pointer; font-size: 15px; line-height: 1; opacity: 0; transition: opacity 0.15s; }
+    .att-card:hover .att-del { opacity: 1; }
+    .att-del:hover { background: var(--red, #e5534b); color: #fff; }
+    .att-empty { color: var(--muted); font-size: 13px; padding: 20px 2px; }
+
+    .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .lightbox-inner { max-width: 92vw; max-height: 92vh; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .lightbox img { max-width: 92vw; max-height: 82vh; object-fit: contain; border-radius: 4px; }
+    .lightbox-cap { color: #ddd; font-size: 12px; }
+    .edit-form textarea.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 
     /* ── Search bar ─────────────────────────────────────── */
     .search-bar {
@@ -590,6 +637,7 @@
       <div class="sidebar-tabs">
         <button class="sb-tab active" id="tabTags">Tags</button>
         <button class="sb-tab" id="tabTree">Tree</button>
+        <button class="sb-tab" id="tabFiles">Files</button>
       </div>
       <button class="sidebar-add-btn" id="newTagBtn" title="New tag" style="display:none">+</button>
     </div>
@@ -604,7 +652,13 @@
       <div class="post">
         <div class="edit-form">
           <div><label>Title</label><input type="text" id="cpTitle" placeholder="(required — becomes the filename)"></div>
-          <div><label>Content</label><textarea id="cpContent" placeholder="Write something…"></textarea></div>
+          <div><label>Content</label><textarea id="cpContent" placeholder="Write something… (drop, paste, or attach a file)"></textarea>
+            <div class="attach-row">
+              <input type="file" id="cpFile" multiple style="display:none">
+              <button type="button" class="btn-attach" id="cpAttach">📎 Attach</button>
+              <span class="attach-status" id="cpAttachStatus"></span>
+            </div>
+          </div>
           <div><label>Tags</label><input type="text" id="cpTags" placeholder="comma-separated"></div>
           <div><label>Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
           <div><label>Expires</label><input type="datetime-local" id="cpExpires"></div>
@@ -627,7 +681,16 @@
     <div class="load-more" id="loadMore" style="display:none">
       <button id="loadMoreBtn">Load more</button>
     </div>
+
+    <div class="attachments-view" id="attachmentsView" style="display:none"></div>
   </main>
+
+  <div class="lightbox" id="lightbox" style="display:none">
+    <div class="lightbox-inner">
+      <img id="lightboxImg" alt="">
+      <div class="lightbox-cap" id="lightboxCap"></div>
+    </div>
+  </div>
 </div>
 
 <div class="post-modal" id="postModal">
@@ -652,7 +715,9 @@ const LIMIT = 20;
 let apiKey = '';
 let activeTag = null;
 let activeFolder = null;
-let sidebarMode = 'tags';   // 'tags' | 'tree'
+let sidebarMode = 'tags';   // 'tags' | 'tree' | 'files'
+let attachCache = [];       // last-fetched attachment list (for the gallery)
+let attachFolder = null;    // active gallery folder filter (null = all)
 let activeSearch = null;
 let searchDebounce = null;
 let offset = 0;
@@ -679,6 +744,8 @@ const menuBtn         = document.getElementById('menuBtn');
 const sidebarEl       = document.getElementById('sidebarEl');
 const sidebarOverlay  = document.getElementById('sidebarOverlay');
 const searchBar       = document.getElementById('searchBar');
+const attachmentsView = document.getElementById('attachmentsView');
+const lightbox        = document.getElementById('lightbox');
 const searchInput     = document.getElementById('searchInput');
 const searchClear     = document.getElementById('searchClear');
 
@@ -738,6 +805,12 @@ async function apiFetch(path, opts = {}) {
 async function init() {
   offset = 0; total = 0;
   feed.innerHTML = '';
+  // Reset to the default Tags + feed view (in case we reconnect from Files/Tree mode).
+  sidebarMode = 'tags'; attachFolder = null;
+  document.getElementById('tabTags').classList.add('active');
+  document.getElementById('tabTree').classList.remove('active');
+  document.getElementById('tabFiles').classList.remove('active');
+  feed.style.display = ''; attachmentsView.style.display = 'none';
   loadMoreWrap.style.display = 'none';
   document.querySelector('.key-wrap').style.display = 'none';
   connectedBar.style.display = '';
@@ -761,19 +834,55 @@ async function loadLinkIndex() {
   } catch {}
 }
 
+// DOMPurify config: keep the attrs our attachment embeds/links add (img loading,
+// link target/rel). marked + preprocessLinks output is sanitized through this.
+const SANITIZE_OPTS = { ADD_ATTR: ['target', 'rel', 'loading'] };
+const renderBody = (md) => DOMPurify.sanitize(marked.parse(preprocessLinks(md)), SANITIZE_OPTS);
+
 // Convert wikilinks / id-refs to anchors, leaving fenced + inline code untouched.
 function preprocessLinks(md) {
   return md.split(/(```[\s\S]*?```|`[^`\n]*`)/g)
     .map((seg, i) => (i % 2 === 1) ? seg : linkifySegment(seg)).join('');
 }
 
+const IMAGE_EXT_RE  = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+// Any file extension. Only used on the ![[…]] embed path, which is *always* a file
+// in Obsidian — so a bare note title (no `!`) can never be mistaken for a file.
+const HAS_EXT_RE    = /\.[a-z0-9]{1,12}$/i;
+// Curated types for the plain [[…]] link path, where a dotted note title like
+// [[Section 2.1]] must NOT be treated as a file.
+const ATTACH_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|pdf|canvas|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|zip|epub|mp3|m4a|wav|flac|ogg|aac|opus|mp4|mov|webm|mkv|avi)$/i;
+
+// /attachments/ URL, encoding each path segment (bare filenames stay bare).
+const attUrl = (name) => '/attachments/' + name.split('/').map(encodeURIComponent).join('/');
+const attLink = (name, label) =>
+  `<a class="attachment-link" href="${attUrl(name)}" target="_blank" rel="noopener noreferrer">${escHtml(label)}</a>`;
+
 function linkifySegment(text) {
+  // Obsidian embeds: ![[target(|opts)]] — image, other-file link, or note transclusion.
+  text = text.replace(/!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]/g, (m, target, opts) => {
+    const name = target.trim(), o = (opts || '').trim();
+    if (IMAGE_EXT_RE.test(name)) {
+      const dim = o.match(/^(\d+)(?:x(\d+))?$/);   // Obsidian sizing: |W or |WxH
+      const size = dim ? ` width="${dim[1]}"${dim[2] ? ` height="${dim[2]}"` : ''}` : '';
+      const alt = dim || !o ? name : o;
+      return `<img class="attachment" src="${attUrl(name)}" alt="${escHtml(alt)}" loading="lazy"${size}>`;
+    }
+    if (HAS_EXT_RE.test(name)) return attLink(name, o || name);   // any file (pdf/zip/…) → link
+    // No extension → note transclusion; relay doesn't transclude, so link to the note.
+    const id = linkIndex.get(name.toLowerCase());
+    return (id !== undefined)
+      ? `<a class="wikilink" data-post-id="${id}">${escHtml(o || name)}</a>`
+      : `<span class="wikilink broken" title="unresolved embed">${escHtml(o || name)}</span>`;
+  });
   text = text.replace(/\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (m, target, heading, alias) => {
     const label = escHtml((alias || target).trim());
-    const id = linkIndex.get(target.trim().toLowerCase());
-    return (id === undefined)
-      ? `<span class="wikilink broken" title="unresolved link">${label}</span>`
-      : `<a class="wikilink" data-post-id="${id}">${label}</a>`;
+    const t = target.trim();
+    const id = linkIndex.get(t.toLowerCase());
+    if (id !== undefined) return `<a class="wikilink" data-post-id="${id}">${label}</a>`;
+    // Unresolved but a known attachment type (e.g. [[doc.pdf]]) → attachment link, not broken.
+    if (ATTACH_EXT_RE.test(t)) return attLink(t, (alias || target).trim());
+    return `<span class="wikilink broken" title="unresolved link">${label}</span>`;
   });
   text = text.replace(/(^|[^\w#])#(\d{1,5})\b/g, (m, pre, n) =>
     linkIds.has(Number(n)) ? `${pre}<a class="wikilink" data-post-id="${n}">#${n}</a>` : m);
@@ -791,6 +900,18 @@ document.addEventListener('click', e => {
   e.preventDefault(); e.stopPropagation();
   openPostById(Number(a.dataset.postId));
 });
+
+// A missing/unauthorised attachment image degrades to a labelled link (built as a
+// DOM node, not innerHTML, so it bypasses the sanitiser). error doesn't bubble → capture.
+document.addEventListener('error', e => {
+  const img = e.target;
+  if (img.tagName !== 'IMG' || !img.classList.contains('attachment')) return;
+  const a = document.createElement('a');
+  a.className = 'attachment-link broken';
+  a.href = img.getAttribute('src'); a.target = '_blank'; a.rel = 'noopener noreferrer';
+  a.textContent = img.getAttribute('alt') || 'attachment';
+  img.replaceWith(a);
+}, true);
 
 async function renderBacklinks(id) {
   const el = document.getElementById('pmBacklinks');
@@ -841,7 +962,110 @@ function closeCompose() {
   composePanel.classList.remove('open');
   ['cpTitle', 'cpContent', 'cpTags', 'cpSource'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('cpExpires').value = '';
+  const st = document.getElementById('cpAttachStatus');
+  if (st) { st.textContent = ''; st.classList.remove('error'); }
 }
+
+/* ── Attachment upload ─────────────────────────────────────── */
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',', 2)[1] || '');
+    r.onerror = () => reject(new Error('could not read file'));
+    r.readAsDataURL(file);
+  });
+}
+function insertAtCursor(ta, text) {
+  const s = ta.selectionStart ?? ta.value.length, e = ta.selectionEnd ?? ta.value.length;
+  ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
+  ta.selectionStart = ta.selectionEnd = s + text.length;
+  ta.focus();
+}
+// Upload one file, then insert its ![[ref]] at the cursor. `getExtra` supplies the
+// placement fields: an existing post ({post_id, embed:false} — server files it in
+// the post's folder, UI places the ref) or a new note ({tags} — server derives the
+// folder the note will use, so the image lands beside it instead of in Inbox).
+async function uploadOne(file, ta, statusEl, getExtra) {
+  const name = file.name || `pasted-${Date.now()}.png`;
+  statusEl.classList.remove('error');
+  statusEl.textContent = `Uploading ${name}…`;
+  try {
+    const data = await fileToBase64(file);
+    const body = { filename: name, data, ...getExtra() };
+    const res = await apiFetch('/attachments', { method: 'POST', body: JSON.stringify(body) });
+    // ![[…]] embed for everything: images render inline, other files as a 📎 link.
+    insertAtCursor(ta, `\n![[${res.filename}]]\n`);
+    statusEl.textContent = `Attached ${res.filename} → ${res.folder}/assets`;
+  } catch (e) {
+    statusEl.classList.add('error');
+    statusEl.textContent = `Upload failed: ${e.message}`;
+  }
+}
+async function uploadMany(files, ta, statusEl, getExtra) {
+  for (const f of files) await uploadOne(f, ta, statusEl, getExtra);
+}
+function wireAttachments(ta, fileInput, attachBtn, statusEl, getExtra) {
+  attachBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    await uploadMany([...fileInput.files], ta, statusEl, getExtra);
+    fileInput.value = '';
+  });
+  ta.addEventListener('dragover', e => { e.preventDefault(); ta.classList.add('drag-over'); });
+  ta.addEventListener('dragleave', () => ta.classList.remove('drag-over'));
+  ta.addEventListener('drop', async e => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault(); ta.classList.remove('drag-over');
+    await uploadMany([...e.dataTransfer.files], ta, statusEl, getExtra);
+  });
+  ta.addEventListener('paste', async e => {
+    const files = [...(e.clipboardData?.items || [])]
+      .filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
+    if (!files.length) return;   // let normal text paste through
+    e.preventDefault();
+    await uploadMany(files, ta, statusEl, getExtra);
+  });
+}
+
+const parseTagsField = (v) => v.split(',').map(s => s.trim()).filter(Boolean);
+const fmtBytes = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+
+// Confirm + DELETE an attachment; alerts if posts still reference it. Returns
+// true when the file was removed (callers refresh their own view).
+async function confirmDeleteAttachment(name) {
+  if (!confirm(`Delete "${name}" from the vault? This removes the file itself.`)) return false;
+  try {
+    const r = await apiFetch(`/attachments/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (r.referenced_by?.length)
+      alert(`Deleted. Still referenced by ${r.referenced_by.map(i => '#' + i).join(', ')} — those embeds are now broken.`);
+    return true;
+  } catch (e) { alert(`Delete failed: ${e.message}`); return false; }
+}
+
+// Edit-form list of the post-folder's attachments, each with a delete (×) button.
+async function renderEditAttachments(el, postId) {
+  const box = el.querySelector('.ef-attachments');
+  if (!box) return;
+  let d;
+  try { d = await apiFetch(`/attachments?post_id=${postId}`); } catch { box.innerHTML = ''; return; }
+  if (!d.items.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="ef-attach-head">Files in ${escHtml(d.items[0].folder)}/assets</div>` +
+    d.items.map(a => `<div class="ef-attach-item" data-name="${escHtml(a.filename)}">
+      <span class="ef-attach-name">${escHtml(a.filename)}</span>
+      <span class="ef-attach-size">${fmtBytes(a.bytes)}</span>
+      <button type="button" class="ef-attach-del" title="Delete file from vault">×</button></div>`).join('');
+  box.querySelectorAll('.ef-attach-del').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const name = btn.closest('.ef-attach-item').dataset.name;
+      if (await confirmDeleteAttachment(name)) await renderEditAttachments(el, postId);
+    }));
+}
+
+wireAttachments(
+  document.getElementById('cpContent'), document.getElementById('cpFile'),
+  document.getElementById('cpAttach'), document.getElementById('cpAttachStatus'),
+  () => ({ tags: parseTagsField(document.getElementById('cpTags').value) }),
+);
 
 /* ── Search ───────────────────────────────────────────────── */
 searchInput.addEventListener('input', () => {
@@ -930,12 +1154,23 @@ function setSidebarMode(mode) {
   sidebarMode = mode;
   document.getElementById('tabTags').classList.toggle('active', mode === 'tags');
   document.getElementById('tabTree').classList.toggle('active', mode === 'tree');
+  document.getElementById('tabFiles').classList.toggle('active', mode === 'files');
   newTagBtn.style.display = mode === 'tags' ? '' : 'none';
   document.getElementById('tagNew').style.display = 'none';
-  if (mode === 'tags') loadTags(); else loadFolders();
+  const files = mode === 'files';
+  // Files mode swaps the post feed for the attachment gallery.
+  feed.style.display = files ? 'none' : '';
+  attachmentsView.style.display = files ? '' : 'none';
+  newPostBtn.style.display = files ? 'none' : '';
+  if (files) loadMoreWrap.style.display = 'none';
+  else if (offset < total) loadMoreWrap.style.display = 'block';
+  if (mode === 'tags') loadTags();
+  else if (mode === 'tree') loadFolders();
+  else loadAttachments();
 }
 document.getElementById('tabTags').addEventListener('click', () => setSidebarMode('tags'));
 document.getElementById('tabTree').addEventListener('click', () => setSidebarMode('tree'));
+document.getElementById('tabFiles').addEventListener('click', () => setSidebarMode('files'));
 
 async function loadFolders() {
   if (!apiKey) return;
@@ -969,6 +1204,82 @@ async function selectFolder(folder) {
     el.classList.toggle('active', el.dataset.folder === key));
   await loadPosts(true);
 }
+
+/* ── Attachment gallery (Files tab) ─────────────────────────── */
+const attPath = (a) => '/attachments/' + [a.folder, 'assets', a.filename].map(encodeURIComponent).join('/');
+
+async function loadAttachments() {
+  if (!apiKey) return;
+  try { attachCache = (await apiFetch('/attachments')).items; } catch { attachCache = []; }
+  renderAttachSidebar();
+  renderAttachGallery();
+}
+
+function selectAttachFolder(folder) {
+  attachFolder = folder;
+  renderAttachSidebar();
+  renderAttachGallery();
+  closeSidebar();
+}
+
+function renderAttachSidebar() {
+  const counts = new Map();
+  attachCache.forEach(a => counts.set(a.folder, (counts.get(a.folder) || 0) + 1));
+  tagList.innerHTML = '';
+  const all = document.createElement('div');
+  all.className = 'tag-item folder-item' + (attachFolder === null ? ' active' : '');
+  all.innerHTML = `<span class="tag-name">All files</span><span class="tag-count">${attachCache.length}</span>`;
+  all.addEventListener('click', () => selectAttachFolder(null));
+  tagList.appendChild(all);
+  [...counts.keys()].sort().forEach(folder => {
+    const el = document.createElement('div');
+    el.className = 'tag-item folder-item' + (attachFolder === folder ? ' active' : '');
+    el.innerHTML = `<span class="tag-name"><span class="folder-ico">▸</span>${escHtml(folder)}</span><span class="tag-count">${counts.get(folder)}</span>`;
+    el.addEventListener('click', () => selectAttachFolder(folder));
+    tagList.appendChild(el);
+  });
+}
+
+function renderAttachGallery() {
+  const items = attachFolder === null ? attachCache : attachCache.filter(a => a.folder === attachFolder);
+  if (!items.length) { attachmentsView.innerHTML = '<div class="att-empty">No attachments yet.</div>'; return; }
+  const groups = new Map();
+  items.forEach(a => { if (!groups.has(a.folder)) groups.set(a.folder, []); groups.get(a.folder).push(a); });
+  let html = '';
+  [...groups.keys()].sort().forEach(folder => {
+    html += `<div class="att-folder-head">${escHtml(folder)}/assets</div><div class="att-grid">`;
+    groups.get(folder).forEach(a => {
+      const p = attPath(a);
+      const thumb = IMAGE_EXT_RE.test(a.filename)
+        ? `<div class="att-thumb" data-src="${p}" data-name="${escHtml(a.filename)}"><img src="${p}" alt="${escHtml(a.filename)}" loading="lazy"></div>`
+        : `<a class="att-thumb" href="${p}" target="_blank" rel="noopener noreferrer"><span class="att-ext">${escHtml(a.filename.split('.').pop() || 'file')}</span></a>`;
+      html += `<div class="att-card" data-name="${escHtml(a.filename)}">${thumb}
+        <div class="att-meta"><span class="att-name">${escHtml(a.filename)}</span>
+          <span class="att-sub"><span>${fmtBytes(a.bytes)}</span></span></div>
+        <button class="att-del" title="Delete file from vault">×</button></div>`;
+    });
+    html += '</div>';
+  });
+  attachmentsView.innerHTML = html;
+}
+
+attachmentsView.addEventListener('click', async e => {
+  const thumb = e.target.closest('.att-thumb[data-src]');
+  if (thumb) { openLightbox(thumb.dataset.src, thumb.dataset.name); return; }
+  const del = e.target.closest('.att-del');
+  if (!del) return;
+  const name = del.closest('.att-card').dataset.name;
+  if (await confirmDeleteAttachment(name)) await loadAttachments();
+});
+
+function openLightbox(src, name) {
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightboxCap').textContent = name || '';
+  lightbox.style.display = 'flex';
+}
+function closeLightbox() { lightbox.style.display = 'none'; document.getElementById('lightboxImg').src = ''; }
+lightbox.addEventListener('click', closeLightbox);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && lightbox.style.display === 'flex') closeLightbox(); });
 
 function startTagRename(el, oldName) {
   const nameSpan = el.querySelector('.tag-name');
@@ -1143,7 +1454,7 @@ function renderPost(post) {
     }
   }
 
-  const bodyHtml = `<div class="post-body">${DOMPurify.sanitize(marked.parse(preprocessLinks(contentToRender)))}</div>`;
+  const bodyHtml = `<div class="post-body">${renderBody(contentToRender)}</div>`;
 
   el.innerHTML = `
     ${masterBadge}
@@ -1186,7 +1497,14 @@ function enterEditMode(el, post) {
   el.innerHTML = `
     <div class="edit-form">
       <div><label>Title</label><input class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
-      <div><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea></div>
+      <div><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea>
+        <div class="attach-row">
+          <input type="file" class="ef-file" multiple style="display:none">
+          <button type="button" class="btn-attach ef-attach">📎 Attach</button>
+          <span class="attach-status ef-attach-status"></span>
+        </div>
+        <div class="ef-attachments"></div>
+      </div>
       <div><label>Tags</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
       <div><label>Source</label><input class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
       <div><label>Expires</label><input class="ef-expires" type="datetime-local" value="${toDatetimeLocal(post.expires_at || '')}"></div>
@@ -1195,6 +1513,13 @@ function enterEditMode(el, post) {
         <button class="btn-save">Save</button>
       </div>
     </div>`;
+
+  wireAttachments(
+    el.querySelector('.ef-content'), el.querySelector('.ef-file'),
+    el.querySelector('.ef-attach'), el.querySelector('.ef-attach-status'),
+    () => ({ post_id: post.id, embed: false }),
+  );
+  renderEditAttachments(el, post.id);
 
   el.querySelector('.btn-cancel').addEventListener('click', () => { el.classList.remove('editing'); el.innerHTML = savedHtml; rewirePost(el, post); });
   el.querySelector('.btn-save').addEventListener('click', async () => {
@@ -1333,7 +1658,7 @@ function openPostModal(post) {
   const pmContent = post.title
     ? post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '')
     : post.content;
-  pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(marked.parse(preprocessLinks(pmContent)))}</div><div class="pm-backlinks" id="pmBacklinks"></div>`;
+  pmBody.innerHTML = `<div class="post-body">${renderBody(pmContent)}</div><div class="pm-backlinks" id="pmBacklinks"></div>`;
   renderBacklinks(post.id);
 
   postModal.classList.add('open');

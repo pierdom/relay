@@ -12,10 +12,10 @@ import hmac
 from contextlib import asynccontextmanager
 
 import aiosqlite
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 from starlette.responses import JSONResponse
 
-from . import service
+from . import service, vault
 from .config import settings
 from .models import PostCreate, PostUpdate, TagConfigCreate
 
@@ -140,6 +140,92 @@ async def delete_post(id: int) -> dict:
         except service.PostNotFound:
             return {"error": f"Post #{id} not found."}
     return {"ok": True, "deleted": id}
+
+
+@mcp.tool(
+    description=(
+        "Attach a file (image, PDF, …) to the vault. `data` is the file's bytes, "
+        "base64-encoded. With `post_id`, the file is filed under that post's folder and "
+        "its ![[file]] embed is appended to the post body. Without it, the file goes to "
+        "`folder` (or Inbox) and you place the returned `ref` in a post yourself."
+    )
+)
+async def add_attachment(
+    filename: str,
+    data: str,
+    post_id: int | None = None,
+    folder: str | None = None,
+) -> dict:
+    """Returns {filename, ref, folder, post_id}. `ref` is the ![[…]] embed to drop into a post."""
+    try:
+        raw = service.decode_attachment_b64(data)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    async with _db() as db:
+        try:
+            result = await service.add_attachment(
+                db, filename=filename, data=raw, post_id=post_id, folder=folder
+            )
+        except service.PostNotFound:
+            return {"error": f"Post #{post_id} not found."}
+        except service.AttachmentError as exc:
+            return {"error": str(exc)}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Retrieve an attachment from the vault by its filename (as used in ![[file]]). "
+        "Images are returned so they can be viewed inline; other files return a note with "
+        "the vault path."
+    )
+)
+async def get_attachment(name: str):
+    """Returns image content for images, else a dict describing the file."""
+    try:
+        result = vault.read_attachment(name, max_bytes=settings.attachment_max_bytes)
+    except ValueError:
+        return {"error": f"Attachment '{name}' is too large to return inline "
+                         f"(over {settings.attachment_max_mb} MB)."}
+    if result is None:
+        return {"error": f"Attachment '{name}' not found."}
+    path, raw, mime = result
+    if mime.startswith("image/"):
+        # Derive format from the mime (image/jpeg → 'jpeg') so Image doesn't emit
+        # a non-standard type like image/jpg from the '.jpg' suffix.
+        return Image(data=raw, format=mime.split("/", 1)[1])
+    return {"filename": path.name, "mime": mime, "bytes": len(raw),
+            "note": "Non-image attachment; not shown inline."}
+
+
+@mcp.tool(
+    description=(
+        "Delete an attachment from the vault by its filename. Returns the removed name and "
+        "any post ids that still embed/link it (now dangling) so you can fix them."
+    )
+)
+async def delete_attachment(name: str) -> dict:
+    async with _db() as db:
+        result = await service.delete_attachment(db, name)
+    if result is None:
+        return {"error": f"Attachment '{name}' not found."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "List attachments stored in the vault (filename, folder, size, and the ![[…]] "
+        "embed ref). Scope with `post_id` (that post's folder) or `folder`; omit both to "
+        "list every attachment. Use the returned filename with get_attachment."
+    )
+)
+async def list_attachments(post_id: int | None = None, folder: str | None = None) -> dict:
+    async with _db() as db:
+        try:
+            result = await service.list_attachments(db, post_id=post_id, folder=folder)
+        except service.PostNotFound:
+            return {"error": f"Post #{post_id} not found."}
+    return result.model_dump()
 
 
 @mcp.tool(description="List all tags in the relay feed with their post counts.")

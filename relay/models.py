@@ -113,6 +113,51 @@ class BacklinksResponse(BaseModel):
     items: list[LinkTarget]
 
 
+class AttachmentCreate(BaseModel):
+    filename: str = Field(min_length=1)
+    data: str = Field(description="Base64-encoded file bytes")
+    post_id: int | None = None  # attach to this post (file under its folder)
+    folder: str | None = None   # explicit first-level folder for a standalone attachment
+    tags: list[str] = Field(default_factory=list)  # derive the folder from these (compose)
+    embed: bool = True          # with post_id, also append ![[file]] to its body
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, v: list[str]) -> list[str]:
+        return _clean_tag_list(v)
+
+    @field_validator("filename")
+    @classmethod
+    def filename_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("filename must not be empty")
+        return v
+
+
+class AttachmentResponse(BaseModel):
+    filename: str            # final on-disk name (may be collision-suffixed)
+    ref: str                 # Obsidian embed to drop into a post, e.g. ![[file.png]]
+    folder: str              # first-level folder the assets/ dir lives under
+    post_id: int | None = None  # set when the embed was appended to a post
+
+
+class AttachmentInfo(BaseModel):
+    filename: str
+    folder: str
+    bytes: int
+    ref: str  # ![[filename]]
+
+
+class AttachmentDeleteResponse(BaseModel):
+    filename: str
+    referenced_by: list[int]  # post ids that still embed/link this file (now dangling)
+
+
+class AttachmentListResponse(BaseModel):
+    items: list[AttachmentInfo]
+
+
 class TagRename(BaseModel):
     new_name: str
 
