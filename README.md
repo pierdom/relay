@@ -50,15 +50,23 @@ The vault is organised into **first-level folders** — one per domain (`Homelab
 `Radio/`, `Finance/`, `Reading/`, …, plus `Digests/` and `Inbox/`), with the
 master document at the root. Folders are a browse aid; **tags stay primary for
 navigation**. A new post is filed automatically by its first domain tag (placement
-is derived from tags, not stored). The folder is chosen once at creation and never
-moved on retag — reorganise freely in Obsidian and relay preserves it, since `id`
-is authoritative.
+is derived from tags, not stored). The folder is chosen once at creation and, apart
+from one case, never moved on retag — a tag-less note filed in `Inbox` moves to its
+domain folder (with its attachments) when it gains its first domain tag. Otherwise
+reorganise freely in Obsidian and relay preserves it, since `id` is authoritative.
 
 **Cross-links.** Posts link to each other with Obsidian **`[[Title]]`** / `[[Title|alias]]`
 wikilinks (resolved by title) or by id with **`#NNN`** (stable across renames). Both
 render clickable in the browser UI and TUI; `[[…]]` also works natively in Obsidian.
 Renaming a post rewrites inbound `[[…]]` links across the vault, and each post's detail
 view lists its **backlinks** ("linked mentions").
+
+**Attachments.** Images, PDFs and other files live in a per-folder `<Folder>/assets/`
+subdirectory, embedded Obsidian-style with `![[file.png]]` (images render inline; other
+files as a link). Add them from the browser UI (📎 button, drag-drop, or paste a
+screenshot) or over MCP/REST; filenames are made vault-globally unique so a bare
+`![[name]]` never resolves ambiguously. Deleting a post also cleans up attachments in
+its folder that no other post still references.
 
 ## Quick start
 

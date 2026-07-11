@@ -7,7 +7,6 @@ from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,

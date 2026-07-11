@@ -805,6 +805,12 @@ async function apiFetch(path, opts = {}) {
 async function init() {
   offset = 0; total = 0;
   feed.innerHTML = '';
+  // Reset to the default Tags + feed view (in case we reconnect from Files/Tree mode).
+  sidebarMode = 'tags'; attachFolder = null;
+  document.getElementById('tabTags').classList.add('active');
+  document.getElementById('tabTree').classList.remove('active');
+  document.getElementById('tabFiles').classList.remove('active');
+  feed.style.display = ''; attachmentsView.style.display = 'none';
   loadMoreWrap.style.display = 'none';
   document.querySelector('.key-wrap').style.display = 'none';
   connectedBar.style.display = '';
@@ -1024,6 +1030,18 @@ function wireAttachments(ta, fileInput, attachBtn, statusEl, getExtra) {
 const parseTagsField = (v) => v.split(',').map(s => s.trim()).filter(Boolean);
 const fmtBytes = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 
+// Confirm + DELETE an attachment; alerts if posts still reference it. Returns
+// true when the file was removed (callers refresh their own view).
+async function confirmDeleteAttachment(name) {
+  if (!confirm(`Delete "${name}" from the vault? This removes the file itself.`)) return false;
+  try {
+    const r = await apiFetch(`/attachments/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (r.referenced_by?.length)
+      alert(`Deleted. Still referenced by ${r.referenced_by.map(i => '#' + i).join(', ')} — those embeds are now broken.`);
+    return true;
+  } catch (e) { alert(`Delete failed: ${e.message}`); return false; }
+}
+
 // Edit-form list of the post-folder's attachments, each with a delete (×) button.
 async function renderEditAttachments(el, postId) {
   const box = el.querySelector('.ef-attachments');
@@ -1039,13 +1057,7 @@ async function renderEditAttachments(el, postId) {
   box.querySelectorAll('.ef-attach-del').forEach(btn =>
     btn.addEventListener('click', async () => {
       const name = btn.closest('.ef-attach-item').dataset.name;
-      if (!confirm(`Delete "${name}" from the vault? This removes the file itself.`)) return;
-      try {
-        const r = await apiFetch(`/attachments/${encodeURIComponent(name)}`, { method: 'DELETE' });
-        if (r.referenced_by?.length)
-          alert(`Deleted. Still referenced by ${r.referenced_by.map(i => '#' + i).join(', ')} — those embeds are now broken.`);
-        await renderEditAttachments(el, postId);
-      } catch (e) { alert(`Delete failed: ${e.message}`); }
+      if (await confirmDeleteAttachment(name)) await renderEditAttachments(el, postId);
     }));
 }
 
@@ -1194,7 +1206,6 @@ async function selectFolder(folder) {
 }
 
 /* ── Attachment gallery (Files tab) ─────────────────────────── */
-const GALLERY_IMG_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
 const attPath = (a) => '/attachments/' + [a.folder, 'assets', a.filename].map(encodeURIComponent).join('/');
 
 async function loadAttachments() {
@@ -1239,7 +1250,7 @@ function renderAttachGallery() {
     html += `<div class="att-folder-head">${escHtml(folder)}/assets</div><div class="att-grid">`;
     groups.get(folder).forEach(a => {
       const p = attPath(a);
-      const thumb = GALLERY_IMG_RE.test(a.filename)
+      const thumb = IMAGE_EXT_RE.test(a.filename)
         ? `<div class="att-thumb" data-src="${p}" data-name="${escHtml(a.filename)}"><img src="${p}" alt="${escHtml(a.filename)}" loading="lazy"></div>`
         : `<a class="att-thumb" href="${p}" target="_blank" rel="noopener noreferrer"><span class="att-ext">${escHtml(a.filename.split('.').pop() || 'file')}</span></a>`;
       html += `<div class="att-card" data-name="${escHtml(a.filename)}">${thumb}
@@ -1258,13 +1269,7 @@ attachmentsView.addEventListener('click', async e => {
   const del = e.target.closest('.att-del');
   if (!del) return;
   const name = del.closest('.att-card').dataset.name;
-  if (!confirm(`Delete "${name}" from the vault? This removes the file itself.`)) return;
-  try {
-    const r = await apiFetch(`/attachments/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    if (r.referenced_by?.length)
-      alert(`Deleted. Still referenced by ${r.referenced_by.map(i => '#' + i).join(', ')} — those embeds are now broken.`);
-    await loadAttachments();
-  } catch (err) { alert(`Delete failed: ${err.message}`); }
+  if (await confirmDeleteAttachment(name)) await loadAttachments();
 });
 
 function openLightbox(src, name) {

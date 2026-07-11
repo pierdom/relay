@@ -11,7 +11,7 @@ from textual import work
 
 from . import api
 from .sse import SSESubscriber
-from .theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG, TRANSPARENT, build_textual_theme, palette_name
+from .theme import ACCENT, BORDER, SCREEN_BG, TRANSPARENT, build_textual_theme, palette_name
 from .widgets.modals import (
     AttachmentsModal,
     ComposeModal,
