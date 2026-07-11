@@ -113,17 +113,21 @@ def write_file(
     updated_at: str | None,
     expires_at: str | None,
     old_path: Path | None = None,
+    move_to_folder: str | None = None,
 ) -> Path:
     """Write a post to disk; rename from ``old_path`` if the title changed.
 
     Folder placement: a file edited in place stays in its current directory
-    (``old_path``'s parent) — relay never relocates a post on retag. A brand-new
-    file (no ``old_path``) is filed by ``folders.folder_for`` from its tags.
+    (``old_path``'s parent) — relay never relocates a post on retag, *except* when
+    ``move_to_folder`` is given (used only for the Inbox→domain move on first tag).
+    A brand-new file (no ``old_path``) is filed by ``folders.folder_for``.
 
     Returns the (possibly new) path. Records the write for watcher suppression.
     """
     stem = frontmatter.sanitize_title(title)
-    if old_path is not None:
+    if move_to_folder is not None:
+        target_dir = vault_dir() / move_to_folder
+    elif old_path is not None:
         target_dir = old_path.parent
     else:
         target_dir = vault_dir() / folders.folder_for(id, tags)
@@ -281,6 +285,21 @@ def list_attachments(folder: str | None = None) -> list[tuple[str, str, int]]:
             if f.is_file() and f.suffix != ".tmp":
                 results.append((f.name, folder_name, f.stat().st_size))
     return results
+
+
+def move_attachment(from_folder: str, to_folder: str, name: str) -> bool:
+    """Move ``name`` from ``from_folder/assets`` to ``to_folder/assets``. No-op
+    (returns False) if the source is missing or the destination already exists."""
+    src = attachment_dir_for(from_folder) / name
+    if not src.is_file():
+        return False
+    dst_dir = attachment_dir_for(to_folder)
+    dst = dst_dir / name
+    if dst.exists():
+        return False
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    os.replace(src, dst)
+    return True
 
 
 def delete_attachment(name: str) -> Path | None:

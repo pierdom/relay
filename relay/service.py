@@ -161,11 +161,22 @@ async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) 
     now = vault.utcnow_iso()
     old_path = vault.abspath(row["path"])
 
+    # Auto-file out of Inbox: a note created without a domain tag lands in Inbox;
+    # when its first domain tag arrives, move it (and its own attachments) to that
+    # folder. Only ever *out of* Inbox — other folders stay human-owned.
+    rel = vault.relpath(old_path)
+    old_folder = rel.split("/", 1)[0] if "/" in rel else ""
+    move_to = None
+    if "tags" in fields and old_folder == folders.INBOX:
+        desired = folders.folder_for(post_id, tags or [])
+        if desired and desired != folders.INBOX:
+            move_to = desired
+
     async with vault.write_lock:
         new_path = vault.write_file(
             id=post_id, title=title, content=content, tags=tags or [], source=source,
             created_at=row["created_at"], updated_at=now, expires_at=expires_at,
-            old_path=old_path,
+            old_path=old_path, move_to_folder=move_to,
         )
         await vault.index_upsert(
             db, id=post_id, title=new_path.stem, path=new_path, content=content,
@@ -174,8 +185,29 @@ async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) 
         )
         if new_path.stem != row["title"]:
             await _rewrite_inbound_wikilinks(db, old_title=row["title"], new_title=new_path.stem)
+        if move_to:
+            await _relocate_note_attachments(db, content, old_folder, move_to, post_id)
         await db.commit()
     return PostResponse.from_row(await _fetch(db, post_id))
+
+
+async def _relocate_note_attachments(
+    db: aiosqlite.Connection, content: str, from_folder: str, to_folder: str, post_id: int
+) -> None:
+    """Move the note's own attachments from ``from_folder`` to ``to_folder`` when the
+    note is relocated. Only files this note references and no *other* post does are
+    moved — shared assets stay put (refs still resolve by global-unique name)."""
+    wanted = referenced_attachment_names(content)
+    if not wanted:
+        return
+    async with db.execute("SELECT content FROM posts WHERE id != ?", (post_id,)) as cur:
+        rows = await cur.fetchall()
+    used_elsewhere: set[str] = set()
+    for r in rows:
+        used_elsewhere |= referenced_attachment_names(r["content"])
+    for name, _folder, _size in vault.list_attachments(from_folder):
+        if name.lower() in wanted and name.lower() not in used_elsewhere:
+            vault.move_attachment(from_folder, to_folder, name)
 
 
 async def _rewrite_inbound_wikilinks(

@@ -276,6 +276,63 @@ async def test_list_attachments_post_not_found(client):
     assert r.status_code == 404
 
 
+# ── Inbox → domain auto-move on first tag ─────────────────────────────────────
+
+
+async def _ids_in_folder(client, folder):
+    r = await client.get(f"/posts?folder={folder}", headers=AUTH)
+    return {p["id"] for p in r.json()["items"]}
+
+
+@pytest.mark.asyncio
+async def test_untagged_note_moves_out_of_inbox_on_first_domain_tag(client):
+    r = await client.post("/posts", json={"title": "Quick Note", "content": "jot", "tags": []}, headers=AUTH)
+    pid = r.json()["id"]
+    assert pid in await _ids_in_folder(client, "Inbox")
+    await client.patch(f"/posts/{pid}", json={"tags": ["audio"]}, headers=AUTH)
+    assert pid in await _ids_in_folder(client, "Audio")
+    assert pid not in await _ids_in_folder(client, "Inbox")
+
+
+@pytest.mark.asyncio
+async def test_move_carries_exclusive_attachments(client):
+    r = await client.post("/posts", json={"title": "Shot", "content": "x", "tags": []}, headers=AUTH)
+    pid = r.json()["id"]
+    await client.post("/attachments", json={"filename": "shot.png", "data": PNG, "post_id": pid}, headers=AUTH)
+    assert (await client.get("/attachments/Inbox/assets/shot.png", headers=AUTH)).status_code == 200
+    await client.patch(f"/posts/{pid}", json={"tags": ["audio"]}, headers=AUTH)
+    assert (await client.get("/attachments/Audio/assets/shot.png", headers=AUTH)).status_code == 200
+    assert (await client.get("/attachments/Inbox/assets/shot.png", headers=AUTH)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_move_keeps_shared_attachments_in_place(client):
+    r = await client.post("/posts", json={"title": "Owner", "content": "x", "tags": []}, headers=AUTH)
+    pid = r.json()["id"]
+    await client.post("/attachments", json={"filename": "common.png", "data": PNG, "post_id": pid}, headers=AUTH)
+    await client.post("/posts", json={"title": "Sharer", "content": "also ![[common.png]]", "tags": []}, headers=AUTH)
+    await client.patch(f"/posts/{pid}", json={"tags": ["audio"]}, headers=AUTH)
+    # shared with another Inbox note → not moved
+    assert (await client.get("/attachments/Inbox/assets/common.png", headers=AUTH)).status_code == 200
+    assert (await client.get("/attachments/Audio/assets/common.png", headers=AUTH)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_note_already_in_domain_folder_not_moved_on_retag(client):
+    r = await client.post("/posts", json={"title": "HL", "content": "x", "tags": ["homelab"]}, headers=AUTH)
+    pid = r.json()["id"]
+    await client.patch(f"/posts/{pid}", json={"tags": ["homelab", "audio"]}, headers=AUTH)
+    assert pid in await _ids_in_folder(client, "Homelab")  # human-owned, stays put
+
+
+@pytest.mark.asyncio
+async def test_inbox_note_stays_on_nondomain_tag(client):
+    r = await client.post("/posts", json={"title": "N", "content": "x", "tags": []}, headers=AUTH)
+    pid = r.json()["id"]
+    await client.patch(f"/posts/{pid}", json={"tags": ["scratch"]}, headers=AUTH)  # no domain
+    assert pid in await _ids_in_folder(client, "Inbox")
+
+
 # ── delete + orphan cleanup ───────────────────────────────────────────────────
 
 
