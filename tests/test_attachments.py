@@ -204,6 +204,20 @@ async def test_add_attachment_collision_suffix(client):
 
 
 @pytest.mark.asyncio
+async def test_add_attachment_names_are_vault_global_unique(client):
+    # same filename to two different folders → the second is suffixed, so a bare
+    # ![[chart.png]] can never resolve ambiguously across folders.
+    a = await client.post("/attachments", json={"filename": "chart.png", "data": PNG, "folder": "Audio"}, headers=AUTH)
+    b = await client.post("/attachments", json={"filename": "chart.png", "data": PNG, "folder": "Homelab"}, headers=AUTH)
+    assert a.json()["filename"] == "chart.png"
+    assert b.json()["filename"] == "chart 1.png"
+    assert a.json()["folder"] == "Audio" and b.json()["folder"] == "Homelab"
+    # both resolvable and distinct
+    assert (await client.get("/attachments/Audio/assets/chart.png", headers=AUTH)).status_code == 200
+    assert (await client.get("/attachments/Homelab/assets/chart 1.png", headers=AUTH)).status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_add_attachment_invalid_base64(client):
     r = await client.post("/attachments", json={"filename": "x.png", "data": "!!!not64!!!"}, headers=AUTH)
     assert r.status_code == 400

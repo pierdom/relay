@@ -207,14 +207,32 @@ def attachment_dir_for(folder: str) -> Path:
     return vault_dir() / safe / ATTACHMENTS_DIRNAME
 
 
+def _unique_attachment_name(name: str) -> str:
+    """A filename free across *every* ``assets/`` dir, Obsidian-style ` N` suffixed
+    before the extension. Vault-global (not per-folder) so a bare ``![[name]]``
+    resolves to exactly one file — two folders can't both hold ``chart.png``."""
+    taken = {n.lower() for (n, _folder, _size) in list_attachments()}
+    if name.lower() not in taken:
+        return name
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    n = 1
+    while True:
+        candidate = f"{stem} {n}.{ext}" if ext else f"{stem} {n}"
+        if candidate.lower() not in taken:
+            return candidate
+        n += 1
+
+
 def write_attachment(folder: str, filename: str, data: bytes) -> Path:
-    """Write ``data`` into ``<folder>/assets/`` under a sanitized, collision-free
-    name. Attachments aren't `.md`, so the index/watcher ignore them — no
+    """Write ``data`` into ``<folder>/assets/`` under a sanitized, vault-globally
+    unique name. Attachments aren't `.md`, so the index/watcher ignore them — no
     self-write suppression needed. Returns the written path."""
     target_dir = attachment_dir_for(folder)
     target_dir.mkdir(parents=True, exist_ok=True)
-    name = frontmatter.sanitize_attachment_name(filename)
-    path = frontmatter.unique_attachment_path(target_dir, name)
+    name = _unique_attachment_name(frontmatter.sanitize_attachment_name(filename))
+    path = target_dir / name
     fd, tmp = tempfile.mkstemp(dir=str(target_dir), suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as fh:
@@ -259,7 +277,8 @@ def list_attachments(folder: str | None = None) -> list[tuple[str, str, int]]:
             continue
         folder_name = rel.parts[0] if rel.parts else ""
         for f in sorted(d.iterdir()):
-            if f.is_file():
+            # skip transient .tmp write artifacts (left only by a crashed write)
+            if f.is_file() and f.suffix != ".tmp":
                 results.append((f.name, folder_name, f.stat().st_size))
     return results
 
