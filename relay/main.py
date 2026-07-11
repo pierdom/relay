@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from . import watcher
 from .auth import create_session, revoke_session
@@ -15,6 +17,7 @@ from .config import settings
 from .database import init_db
 from .mcp_server import mcp, mcp_asgi_app
 from .routes.attachments import router as attachments_router
+from .routes.auth import router as auth_router
 from .routes.events import router as events_router
 from .routes.folders import router as folders_router
 from .routes.links import router as links_router
@@ -48,6 +51,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="relay", version="0.1.0", lifespan=lifespan)
 
+# Holds transient OAuth state (state/nonce/PKCE verifier) between /auth/login and
+# /auth/callback. SameSite=lax so it survives the top-level redirect back from
+# PocketID; short-lived. Signed with the session key. Only written during login.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_signing_key,
+    https_only=settings.secure_cookies,
+    same_site="lax",
+    max_age=600,
+    session_cookie="relay_oauth",
+)
+
 _UI_PATH = Path(__file__).parent / "static" / "index.html"
 
 
@@ -64,6 +79,31 @@ async def root() -> FileResponse:
 @app.get("/ui", include_in_schema=False)
 async def ui() -> RedirectResponse:
     return RedirectResponse("/", status_code=status.HTTP_301_MOVED_PERMANENTLY)
+
+
+@app.get("/.well-known/oauth-protected-resource/mcp", include_in_schema=False)
+async def mcp_protected_resource_metadata() -> Response:
+    """RFC 9728 protected-resource metadata for the MCP endpoint.
+
+    Phase-2 scaffold: advertises relay itself as the authorization server so a
+    remote MCP client (Claude Desktop / claude.ai) can discover the auth surface.
+    Gated behind MCP_OAUTH_ENABLED (default off) — the OAuth Authorization Server
+    broker is not yet implemented, so /mcp still enforces the static bearer key.
+    """
+    if not settings.mcp_oauth_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    base = settings.relay_base_url.rstrip("/")
+    return Response(
+        content=json.dumps(
+            {
+                "resource": f"{base}/mcp",
+                "authorization_servers": [base],
+                "scopes_supported": settings.mcp_scopes,
+                "bearer_methods_supported": ["header"],
+            }
+        ),
+        media_type="application/json",
+    )
 
 
 @app.post("/session", include_in_schema=False)
@@ -104,6 +144,7 @@ async def session_delete(
     return {"ok": True}
 
 
+app.include_router(auth_router)
 app.include_router(posts_router)
 app.include_router(tags_router)
 app.include_router(events_router)
