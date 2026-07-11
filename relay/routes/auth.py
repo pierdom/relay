@@ -44,6 +44,24 @@ def _redirect_uri() -> str:
     return f"{settings.relay_base_url.rstrip('/')}/auth/callback"
 
 
+def _authorized(sub: str, email: str, email_verified: bool) -> bool:
+    """Whether this identity may obtain a relay session.
+
+    Prefer the immutable `sub`; email matching requires a *verified* email so a
+    user who can edit their own profile email on the IdP can't spoof their way
+    onto the allowlist. No allowlist configured => any authenticated user.
+    """
+    subs = settings.allowed_subs
+    emails = settings.allowed_emails
+    if not subs and not emails:
+        return True
+    if subs and sub in subs:
+        return True
+    if emails and email_verified and email in emails:
+        return True
+    return False
+
+
 def _set_session_cookie(resp: RedirectResponse, sub: str, email: str) -> None:
     resp.set_cookie(
         key=SESSION_COOKIE,
@@ -76,14 +94,14 @@ async def auth_callback(request: Request):
 
     claims = token.get("userinfo") or {}
     email = (claims.get("email") or "").lower()
+    email_verified = claims.get("email_verified") is True
     sub = claims.get("sub") or ""
     if not sub:
         logger.warning("OIDC callback: token had no subject")
         return RedirectResponse("/?auth_error=1", status_code=status.HTTP_303_SEE_OTHER)
 
-    allowed = settings.allowed_emails
-    if allowed and email not in allowed:
-        logger.warning("OIDC login denied for %s (not in allowlist)", email or sub)
+    if not _authorized(sub, email, email_verified):
+        logger.warning("OIDC login denied for sub=%s email=%s (not in allowlist)", sub, email)
         return RedirectResponse("/?auth_error=forbidden", status_code=status.HTTP_303_SEE_OTHER)
 
     resp = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)

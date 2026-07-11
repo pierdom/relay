@@ -45,6 +45,36 @@ def test_allowed_emails_parsing(monkeypatch):
     assert settings.allowed_emails == set()
 
 
+def test_authorized_no_allowlist_allows_any(monkeypatch):
+    from relay.routes.auth import _authorized
+
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+    assert _authorized("anyone", "x@y.com", False) is True
+
+
+def test_authorized_by_sub(monkeypatch):
+    from relay.routes.auth import _authorized
+
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "good-sub")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+    assert _authorized("good-sub", "", False) is True
+    assert _authorized("bad-sub", "", False) is False
+
+
+def test_authorized_email_requires_verified(monkeypatch):
+    from relay.routes.auth import _authorized
+
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "me@x.com")
+    # Correct email but unverified -> denied (the spoofing bypass we're closing).
+    assert _authorized("s", "me@x.com", False) is False
+    # Verified allowlisted email -> allowed.
+    assert _authorized("s", "me@x.com", True) is True
+    # Verified but not on the list -> denied.
+    assert _authorized("s", "other@x.com", True) is False
+
+
 def test_oidc_enabled_flag(monkeypatch):
     monkeypatch.setattr(settings, "oidc_issuer", "")
     assert settings.oidc_enabled is False

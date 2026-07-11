@@ -37,8 +37,11 @@ class Settings(BaseSettings):
     # still carry identity/expiry even without a dedicated secret.
     session_secret: str = ""
     session_max_age_hours: int = 24 * 30  # signed-cookie lifetime
-    # Comma-separated allowlist of emails permitted to log in via OIDC. Empty =>
-    # any user PocketID authenticates is allowed.
+    # Allowlists of who may log in via OIDC (comma-separated). Prefer subs: the
+    # OIDC `sub` is the IdP's immutable user id, so it can't be spoofed by a user
+    # editing their own profile. Email matching additionally requires a verified
+    # email. Both empty => any user PocketID authenticates is allowed.
+    oidc_allowed_subs: str = ""
     oidc_allowed_emails: str = ""
 
     # --- Phase 2 scaffold: remote MCP OAuth (relay as AS brokering to PocketID).
@@ -62,6 +65,10 @@ class Settings(BaseSettings):
     @property
     def allowed_emails(self) -> set[str]:
         return {e.strip().lower() for e in self.oidc_allowed_emails.split(",") if e.strip()}
+
+    @property
+    def allowed_subs(self) -> set[str]:
+        return {s.strip() for s in self.oidc_allowed_subs.split(",") if s.strip()}
 
     @property
     def mcp_scopes(self) -> list[str]:

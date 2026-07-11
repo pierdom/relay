@@ -76,7 +76,8 @@ Links are stored verbatim and resolved at **display time** (never rewritten exce
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | "" | Confidential OIDC client registered in PocketID (redirect URI `<RELAY_BASE_URL>/auth/callback`) |
 | `SESSION_SECRET` | "" | Signs the session cookie; falls back to `API_KEY` if unset |
 | `SESSION_MAX_AGE_HOURS` | 720 | Signed session-cookie lifetime (default 30d) |
-| `OIDC_ALLOWED_EMAILS` | "" | Comma-separated email allowlist; empty = any PocketID user |
+| `OIDC_ALLOWED_SUBS` | "" | Comma-separated allowlist of OIDC `sub`s (immutable user id — preferred) |
+| `OIDC_ALLOWED_EMAILS` | "" | Comma-separated allowlist; matches **verified** emails only. Both allowlists empty = any PocketID user |
 | `MCP_OAUTH_ENABLED` | false | *(Phase-2 scaffold)* advertise `/.well-known/oauth-protected-resource/mcp`; AS broker not built yet |
 | `MCP_REQUIRED_SCOPES` | "" | *(Phase-2 scaffold)* scopes listed in the MCP resource metadata |
 
@@ -87,7 +88,7 @@ Two credential channels, both checked by the shared `require_api_key` dependency
 - **Bearer `API_KEY`** — machine-to-machine (REST, MCP, agents). Unchanged.
 - **`relay_session` cookie** — human web-UI sessions. A **signed, expiring** token (`itsdangerous`) carrying `{sub, email}`; verified by signature + `SESSION_MAX_AGE_HOURS`.
 
-The cookie is minted two ways: **OIDC login** via PocketID (`GET /auth/login` → PocketID authorize with PKCE/S256 → `GET /auth/callback` validates the ID token, enforces `OIDC_ALLOWED_EMAILS`, sets the cookie), or the **API-key paste** break-glass (`POST /session`, synthetic `sub=apikey`). `GET /auth/me` reports session state + whether OIDC is configured (drives the UI login control); `GET /auth/logout` / `DELETE /session` clear it. Transient OAuth state (state/nonce/PKCE verifier) rides a short-lived `relay_oauth` cookie via Starlette `SessionMiddleware`.
+The cookie is minted two ways: **OIDC login** via PocketID (`GET /auth/login` → PocketID authorize with PKCE/S256 → `GET /auth/callback` validates the ID token, enforces the allowlist — immutable `OIDC_ALLOWED_SUBS`, or `OIDC_ALLOWED_EMAILS` on **verified** emails only — sets the cookie), or the **API-key paste** break-glass (`POST /session`, synthetic `sub=apikey`). `GET /auth/me` reports session state + whether OIDC is configured (drives the UI login control); `GET /auth/logout` / `DELETE /session` clear it. Transient OAuth state (state/nonce/PKCE verifier) rides a short-lived `relay_oauth` cookie via Starlette `SessionMiddleware`.
 
 **Remote MCP OAuth is scaffold-only.** PocketID lacks Dynamic Client Registration and Claude's remote connector requires it, so relay must eventually act as its own OAuth Authorization Server brokering to PocketID (`mcp==1.27.x` ships the stack). For now only the RFC 9728 resource-metadata endpoint exists (gated by `MCP_OAUTH_ENABLED`); `/mcp` still enforces the static bearer.
 

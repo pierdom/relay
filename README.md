@@ -279,7 +279,8 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | `""` | Confidential OIDC client; register redirect URI `<RELAY_BASE_URL>/auth/callback` at the provider |
 | `SESSION_SECRET` | `""` | Signs the session cookie; falls back to `API_KEY` if unset |
 | `SESSION_MAX_AGE_HOURS` | `720` | Signed session-cookie lifetime (default 30 days) |
-| `OIDC_ALLOWED_EMAILS` | `""` | Comma-separated allowlist of emails permitted to log in; empty = any authenticated user |
+| `OIDC_ALLOWED_SUBS` | `""` | Comma-separated allowlist of OIDC `sub`s (immutable IdP user ids — preferred over email) |
+| `OIDC_ALLOWED_EMAILS` | `""` | Comma-separated allowlist; matches **verified** emails only. Both allowlists empty = any authenticated user |
 | `RELAY_PALETTE` | `default` | TUI colour theme |
 | `RELAY_TRANSPARENT` | `0` | TUI: show terminal background through the canvas |
 
