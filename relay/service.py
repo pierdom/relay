@@ -188,7 +188,13 @@ async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) 
         if move_to:
             await _relocate_note_attachments(db, content, old_folder, move_to, post_id)
         await db.commit()
-    return PostResponse.from_row(await _fetch(db, post_id))
+    post = PostResponse.from_row(await _fetch(db, post_id))
+    # Stream the edit so other live clients update in place. The SSE layer emits a
+    # `post` event without an `id:` field for a known id, so it can't rewind the
+    # reconnect cursor. Self-write suppression already covers the vault write, so
+    # this is the only path that propagates API/MCP edits (incl. Inbox→domain moves).
+    await events.publish(post.model_dump())
+    return post
 
 
 async def _relocate_note_attachments(

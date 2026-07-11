@@ -1118,10 +1118,20 @@ async function loadTags() {
   try { const data = await apiFetch('/tags'); renderTags(data.tags); } catch {}
 }
 
-// Debounced loadTags — a burst of SSE events (e.g. reconnect replay) must not
-// trigger a storm of /tags fetches + sidebar rebuilds.
+// Debounced sidebar-count refresh — a burst of SSE events (e.g. reconnect replay
+// or an edit that retags/moves a post) must not trigger a storm of fetches +
+// rebuilds. Refreshes only the *active* count view (Tags and Tree share the same
+// sidebar element, so refreshing the inactive one would clobber what's shown):
+// tag counts, or the Tree's folder counts (which go stale on an Inbox→domain move
+// now streamed via a post edit). Files mode has no post-driven counts to refresh.
 let _tagsTimer = null;
-function scheduleLoadTags() { clearTimeout(_tagsTimer); _tagsTimer = setTimeout(loadTags, 250); }
+function scheduleLoadTags() {
+  clearTimeout(_tagsTimer);
+  _tagsTimer = setTimeout(() => {
+    if (sidebarMode === 'tags') loadTags();
+    else if (sidebarMode === 'tree') loadFolders();
+  }, 250);
+}
 
 function renderTags(tags) {
   tagList.innerHTML = '';

@@ -287,13 +287,17 @@ class RelayTuiApp(App):
 
     @work(thread=True)
     def _refresh_tags(self) -> None:
-        if self._topics_mode != "tags":
-            return
+        # Refresh whichever TOPICS view is active. A streamed edit can retag a post
+        # (tag counts) or move it Inbox→domain (folder counts), so the Tree view
+        # needs re-fetching too — not just Tags.
         try:
-            tags = api.list_tags()
-            self.call_from_thread(
-                self.query_one(TagPanel).set_tags, tags, self._active_tag
-            )
+            panel = self.query_one(TagPanel)
+            if self._topics_mode == "tree":
+                folders = api.list_folders()
+                self.call_from_thread(panel.set_folders, folders, self._active_folder)
+            else:
+                tags = api.list_tags()
+                self.call_from_thread(panel.set_tags, tags, self._active_tag)
         except Exception:
             pass
 

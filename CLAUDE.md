@@ -51,7 +51,7 @@ Non-`.md` files (images, PDFs, …) live in a per-folder `<Folder>/assets/` subd
 
 Event types: `post` (new **or edited** — the watcher streams external edits) and `delete` (`data: {"id": N}`). A `keepalive` fires every 30s. Both edits and deletes are sent **without** an SSE `id:` so they can't rewind the client's cursor (no replay storm). Clients treat a `post` for a known id as an in-place update and never clobber an inline edit-in-progress.
 
-**Known limitations:** (1) offline edits/deletes to already-seen posts aren't replayed on reconnect (catch-up is append-only). (2) `create_post` publishes SSE but `update_post` does not yet — API/MCP edits don't propagate live (see backlog #198).
+Both `create_post` and `update_post` publish SSE, so API/MCP edits (incl. Inbox→domain moves) propagate live; clients refresh the active sidebar counts (Tags or Tree) on any streamed change. **Known limitation:** offline edits/deletes to already-seen posts aren't replayed on reconnect (catch-up is append-only).
 
 ## Cross-links
 
