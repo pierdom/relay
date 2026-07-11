@@ -241,6 +241,7 @@
     .post-body img.attachment { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 0.5rem 0; }
     .post-body a.attachment-link { color: var(--accent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
     .post-body a.attachment-link::before { content: "📎 "; }
+    .post-body a.attachment-link.broken { color: var(--muted); border-bottom-color: var(--muted); }
     .pm-backlinks { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
     .pm-backlinks h4 { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
     .pm-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -778,14 +779,27 @@ function preprocessLinks(md) {
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
 const FILE_EXT_RE  = /\.[a-z0-9]{1,8}$/i;
 
+// /attachments/ URL, encoding each path segment (bare filenames stay bare).
+const attUrl = (name) => '/attachments/' + name.split('/').map(encodeURIComponent).join('/');
+const attLink = (name, label) =>
+  `<a class="attachment-link" href="${attUrl(name)}" target="_blank" rel="noopener noreferrer">${escHtml(label)}</a>`;
+
 function linkifySegment(text) {
-  // Attachment embeds: ![[file.ext]] → <img> (images) or a labelled link.
-  text = text.replace(/!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]/g, (m, file, alias) => {
-    const name = file.trim();
-    const src = `/attachments/${encodeURI(name)}`;
-    return IMAGE_EXT_RE.test(name)
-      ? `<img class="attachment" src="${src}" alt="${escHtml(alias || name)}" loading="lazy">`
-      : `<a class="attachment-link" href="${src}" target="_blank" rel="noopener noreferrer">${escHtml(alias || name)}</a>`;
+  // Obsidian embeds: ![[target(|opts)]] — image, other-file link, or note transclusion.
+  text = text.replace(/!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]/g, (m, target, opts) => {
+    const name = target.trim(), o = (opts || '').trim();
+    if (IMAGE_EXT_RE.test(name)) {
+      const dim = o.match(/^(\d+)(?:x(\d+))?$/);   // Obsidian sizing: |W or |WxH
+      const size = dim ? ` width="${dim[1]}"${dim[2] ? ` height="${dim[2]}"` : ''}` : '';
+      const alt = dim || !o ? name : o;
+      return `<img class="attachment" src="${attUrl(name)}" alt="${escHtml(alt)}" loading="lazy"${size}>`;
+    }
+    if (FILE_EXT_RE.test(name)) return attLink(name, o || name);   // pdf/canvas/… → link
+    // No extension → note transclusion; relay doesn't transclude, so link to the note.
+    const id = linkIndex.get(name.toLowerCase());
+    return (id !== undefined)
+      ? `<a class="wikilink" data-post-id="${id}">${escHtml(o || name)}</a>`
+      : `<span class="wikilink broken" title="unresolved embed">${escHtml(o || name)}</span>`;
   });
   text = text.replace(/\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (m, target, heading, alias) => {
     const label = escHtml((alias || target).trim());
@@ -793,8 +807,7 @@ function linkifySegment(text) {
     const id = linkIndex.get(t.toLowerCase());
     if (id !== undefined) return `<a class="wikilink" data-post-id="${id}">${label}</a>`;
     // Unresolved but looks like a file (e.g. [[doc.pdf]]) → attachment link, not broken.
-    if (FILE_EXT_RE.test(t))
-      return `<a class="attachment-link" href="/attachments/${encodeURI(t)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    if (FILE_EXT_RE.test(t)) return attLink(t, (alias || target).trim());
     return `<span class="wikilink broken" title="unresolved link">${label}</span>`;
   });
   text = text.replace(/(^|[^\w#])#(\d{1,5})\b/g, (m, pre, n) =>
@@ -813,6 +826,18 @@ document.addEventListener('click', e => {
   e.preventDefault(); e.stopPropagation();
   openPostById(Number(a.dataset.postId));
 });
+
+// A missing/unauthorised attachment image degrades to a labelled link (built as a
+// DOM node, not innerHTML, so it bypasses the sanitiser). error doesn't bubble → capture.
+document.addEventListener('error', e => {
+  const img = e.target;
+  if (img.tagName !== 'IMG' || !img.classList.contains('attachment')) return;
+  const a = document.createElement('a');
+  a.className = 'attachment-link broken';
+  a.href = img.getAttribute('src'); a.target = '_blank'; a.rel = 'noopener noreferrer';
+  a.textContent = img.getAttribute('alt') || 'attachment';
+  img.replaceWith(a);
+}, true);
 
 async function renderBacklinks(id) {
   const el = document.getElementById('pmBacklinks');

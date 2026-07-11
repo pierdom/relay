@@ -53,7 +53,13 @@ def _linkify_markdown(content: str, index: dict[str, int]) -> str:
     def convert(text: str) -> str:
         def embed(m: re.Match) -> str:
             name = m.group(1).strip()
-            return _attachment_link(name, (m.group(2) or name).strip())
+            opt = (m.group(2) or "").strip()
+            if _FILE_EXT_RE.search(name):  # image or other file → external link
+                label = name if (not opt or re.fullmatch(r"\d+(x\d+)?", opt)) else opt
+                return _attachment_link(name, label)
+            # No extension → note transclusion; link to the note or degrade to text.
+            pid = index.get(name.lower())
+            return f"[{opt or name}](relay:{pid})" if pid is not None else (opt or name)
 
         def wiki(m: re.Match) -> str:
             target = m.group(1).strip()
