@@ -164,6 +164,20 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="delete_attachment",
+            description=(
+                "Delete an attachment from the vault by its filename. Reports any post ids that "
+                "still embed/link it (now dangling)."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "description": "Attachment filename, e.g. 'diagram.png'"},
+                },
+            },
+        ),
+        types.Tool(
             name="list_attachments",
             description=(
                 "List attachments stored in the vault (filename, folder, size, and the ![[…]] "
@@ -246,6 +260,21 @@ async def call_tool(
             type="text",
             text=f"Stored attachment '{a['filename']}' in {a['folder']}/assets{where}.\nEmbed: {a['ref']}",
         )]
+
+    if name == "delete_attachment":
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{RELAY_BASE_URL}/attachments/{arguments['name']}",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 404:
+                return [types.TextContent(type="text", text=f"Attachment '{arguments['name']}' not found.")]
+            response.raise_for_status()
+            d = response.json()
+        warn = (f"  Still referenced by posts: {', '.join('#' + str(i) for i in d['referenced_by'])} — "
+                "remove the dangling embeds." if d["referenced_by"] else "")
+        return [types.TextContent(type="text", text=f"Deleted attachment '{d['filename']}'.{warn}")]
 
     if name == "list_attachments":
         params = {k: v for k, v in arguments.items() if k in ("post_id", "folder") and v is not None}

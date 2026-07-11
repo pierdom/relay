@@ -7,7 +7,12 @@ from fastapi.responses import FileResponse
 from .. import service, vault
 from ..auth import require_api_key
 from ..database import get_db
-from ..models import AttachmentCreate, AttachmentListResponse, AttachmentResponse
+from ..models import (
+    AttachmentCreate,
+    AttachmentDeleteResponse,
+    AttachmentListResponse,
+    AttachmentResponse,
+)
 
 router = APIRouter(tags=["attachments"])
 
@@ -72,3 +77,19 @@ async def get_attachment(name: str) -> FileResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     # nosniff: don't let the browser MIME-sniff (e.g. a .txt) into executable HTML.
     return FileResponse(path, headers={"X-Content-Type-Options": "nosniff"})
+
+
+@router.delete(
+    "/attachments/{name:path}",
+    response_model=AttachmentDeleteResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def delete_attachment(
+    name: str,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> AttachmentDeleteResponse:
+    """Delete an attachment file; reports any posts that still reference it."""
+    result = await service.delete_attachment(db, name)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    return result

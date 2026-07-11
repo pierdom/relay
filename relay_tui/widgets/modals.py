@@ -31,8 +31,10 @@ from .post_panel import _time_ago, _time_until
 _EMBED_RE = re.compile(r"!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]")
 _WIKI_RE = re.compile(r"\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]")
 _IDREF_RE = re.compile(r"(?<![\w#])#(\d{1,5})\b")
-# Curated attachment types — not a generic ``\.xxx$`` — so dotted note titles
-# (e.g. ``[[Section 2.1]]``) aren't mistaken for files.
+# Any extension — used only on the ![[…]] embed path (always a file in Obsidian).
+_ANY_EXT_RE = re.compile(r"\.[a-z0-9]{1,12}$", re.IGNORECASE)
+# Curated attachment types for the plain [[…]] link path — not a generic ``\.xxx$``
+# — so dotted note titles (e.g. ``[[Section 2.1]]``) aren't mistaken for files.
 _FILE_EXT_RE = re.compile(
     r"\.(png|jpe?g|gif|webp|svg|avif|bmp|pdf|canvas|docx?|xlsx?|pptx?|csv|txt"
     r"|rtf|odt|ods|zip|epub|mp3|m4a|wav|flac|ogg|aac|opus|mp4|mov|webm|mkv|avi)$",
@@ -60,7 +62,7 @@ def _linkify_markdown(content: str, index: dict[str, int]) -> str:
         def embed(m: re.Match) -> str:
             name = m.group(1).strip()
             opt = (m.group(2) or "").strip()
-            if _FILE_EXT_RE.search(name):  # image or other file → external link
+            if _ANY_EXT_RE.search(name):  # embed of any file → external link
                 label = name if (not opt or re.fullmatch(r"\d+(x\d+)?", opt)) else opt
                 return _attachment_link(name, label)
             # No extension → note transclusion; link to the note or degrade to text.

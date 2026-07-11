@@ -41,6 +41,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | GET | /folders | First-level vault folders with post counts (sidebar tree view) |
 | POST | /attachments | Store a base64 attachment in a folder's `assets/`; with `post_id`, append the `![[file]]` embed to that post |
 | GET | /attachments | List attachments (`folder`/`post_id` scope) — filename, folder, size, `![[file]]` ref |
+| DELETE | /attachments/{path} | Delete an attachment file; reports post ids still referencing it |
 | GET | /attachments/{path} | Serve a vault attachment (image/PDF/…) embedded via `![[file]]` (auth-gated; same-origin so the UI session cookie works on `<img>`) |
 | GET | /tags | List tags with post counts (includes 0-count tags from tag_config) |
 | POST | /tags/{tag}/config | Set per-tag expiry (`ttl_hours`, `expires_at`, or both) |
@@ -121,7 +122,7 @@ relay_mcp/
 Two MCP surfaces exist:
 
 - **`relay/mcp_server.py`** — the in-process server, served over Streamable HTTP at `/mcp` by the main app. Tools call `relay.service` directly (no network hop, no schema duplication). This is the remote-capable, recommended path; any MCP client connects with the bearer key. See README for `claude mcp add --transport http`. Also exposes the master document (post 0) as the MCP resource `relay://master-document` (text/markdown) so clients can attach it to context structurally, and ships server `instructions` pointing at it.
-- **`relay_mcp/server.py`** — the legacy stdio proxy. Still useful for clients that can't speak remote MCP (e.g. Claude Desktop); it spawns locally and proxies to the relay's REST API over `RELAY_BASE_URL`. At full parity with the in-process server: same ten tools, the same server `instructions`, and the `relay://master-document` resource (read via REST `GET /posts/0`). Kept for transition; prefer `/mcp`.
+- **`relay_mcp/server.py`** — the legacy stdio proxy. Still useful for clients that can't speak remote MCP (e.g. Claude Desktop); it spawns locally and proxies to the relay's REST API over `RELAY_BASE_URL`. At full parity with the in-process server: same eleven tools, the same server `instructions`, and the `relay://master-document` resource (read via REST `GET /posts/0`). Kept for transition; prefer `/mcp`.
 
 ```
 relay/static/
@@ -133,7 +134,7 @@ relay/static/
 `GET /ui` serves a single-page interface backed by the REST API and SSE.
 
 - **Posts**: create (compose panel), edit inline, delete with confirmation; `expires_at` datetime picker in both compose and edit forms; posts with an expiry show "expires in X" in the footer
-- **Attachments**: compose + edit forms take a file via the 📎 Attach button, drag-drop onto the content box, or paste (e.g. a screenshot). Files upload to `POST /attachments` and the `![[file]]` embed is inserted at the cursor. Edit-mode uploads file under the post's folder (`embed=false` — the UI places the ref); compose uploads pass the form's tags so the file lands in the same folder the note will file under (`folders.folder_for`), e.g. an `audio`-tagged note's image → `Audio/assets/` (falls back to `Inbox/assets/` when no domain tag)
+- **Attachments**: compose + edit forms take a file via the 📎 Attach button, drag-drop onto the content box, or paste (e.g. a screenshot). Files upload to `POST /attachments`, and an `![[file]]` embed is inserted at the cursor (images render inline; other files as a 📎 link). Edit-mode uploads file under the post's folder (`embed=false` — the UI places the ref) and the edit form lists that folder's attachments with a delete (×) button; compose uploads pass the form's tags so the file lands in the same folder the note will file under (`folders.folder_for`), e.g. an `audio`-tagged note's image → `Audio/assets/` (falls back to `Inbox/assets/` when no domain tag). Attachment filenames are **vault-globally unique** so a bare `![[name]]` never resolves ambiguously. Deleting a post also removes any attachment in its folder that no other post references (shared assets are kept)
 - **Search**: search bar above the feed (visible after connect); 300 ms debounce; filters by title, content, or source; combinable with tag filter; `×` button or Escape to clear
 - **Sidebar Tags ⇄ Tree toggle**: two tabs at the top of the sidebar. **Tags** filters the feed by tag (create a new tag, rename inline, ⚙ per-tag expiry form). **Tree** lists the first-level vault folders (`GET /folders`) with counts; clicking one filters the feed to that folder (`GET /posts?folder=`). Tag and folder filters are mutually exclusive.
 - **Live feed**: SSE connection with amber dot + "live/offline/error" label; new posts flash and prepend automatically
@@ -184,6 +185,7 @@ differ internally.
 | `add_attachment` | Store a base64 file in a folder's `assets/`; with `post_id` appends the `![[file]]` embed to that post |
 | `get_attachment` | Retrieve an attachment by filename; images are returned as inline image content |
 | `list_attachments` | List attachments (filename, folder, size, ref); scope by `post_id` or `folder` |
+| `delete_attachment` | Delete an attachment by filename; reports post ids that still reference it |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (ttl_hours, expires_at, or both) |
 

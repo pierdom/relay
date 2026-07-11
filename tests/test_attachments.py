@@ -276,6 +276,53 @@ async def test_list_attachments_post_not_found(client):
     assert r.status_code == 404
 
 
+# ── delete + orphan cleanup ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_delete_attachment(client):
+    await client.post("/attachments", json={"filename": "del.png", "data": PNG}, headers=AUTH)
+    r = await client.delete("/attachments/del.png", headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"filename": "del.png", "referenced_by": []}
+    assert (await client.get("/attachments/del.png", headers=AUTH)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_attachment_missing_404(client):
+    r = await client.delete("/attachments/ghost.png", headers=AUTH)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_attachment_reports_dangling_references(client):
+    post = await _create(client, "Refd", content="see ![[keep.png]]", tags=["homelab"])
+    await client.post("/attachments", json={"filename": "keep.png", "data": PNG, "folder": "Homelab"}, headers=AUTH)
+    r = await client.delete("/attachments/keep.png", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["referenced_by"] == [post["id"]]
+
+
+@pytest.mark.asyncio
+async def test_delete_post_removes_orphan_assets(client):
+    post = await _create(client, "Has Image", content="body", tags=["homelab"])
+    await client.post("/attachments", json={"filename": "orph.png", "data": PNG, "post_id": post["id"]}, headers=AUTH)
+    assert (await client.get("/attachments/orph.png", headers=AUTH)).status_code == 200
+    assert (await client.delete(f"/posts/{post['id']}", headers=AUTH)).status_code == 204
+    # orphan asset cleaned up with its only referencing post
+    assert (await client.get("/attachments/orph.png", headers=AUTH)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_post_keeps_shared_assets(client):
+    p1 = await _create(client, "Owner", content="x", tags=["homelab"])
+    await client.post("/attachments", json={"filename": "shared.png", "data": PNG, "post_id": p1["id"]}, headers=AUTH)
+    await _create(client, "Sharer", content="also ![[shared.png]]", tags=["homelab"])
+    await client.delete(f"/posts/{p1['id']}", headers=AUTH)
+    # still referenced by the other post → kept
+    assert (await client.get("/attachments/shared.png", headers=AUTH)).status_code == 200
+
+
 @pytest.mark.asyncio
 async def test_add_attachment_accepts_data_uri_and_whitespace(client):
     from relay import service

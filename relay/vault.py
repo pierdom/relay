@@ -283,6 +283,19 @@ def list_attachments(folder: str | None = None) -> list[tuple[str, str, int]]:
     return results
 
 
+def delete_attachment(name: str) -> Path | None:
+    """Resolve and unlink an attachment (bare name or vault-relative path). Returns
+    the removed path, or ``None`` if it didn't resolve inside the vault."""
+    path = resolve_attachment(name)
+    if path is None:
+        return None
+    try:
+        path.unlink()
+    except OSError:
+        return None
+    return path
+
+
 def read_attachment(name: str, *, max_bytes: int | None = None) -> tuple[Path, bytes, str] | None:
     """Resolve and read an attachment. Returns ``(path, bytes, mime)`` or ``None``.
 

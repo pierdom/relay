@@ -322,6 +322,13 @@
     .btn-attach:hover { border-color: var(--accent); color: var(--accent); }
     .attach-status { font-size: 11px; color: var(--muted); }
     .attach-status.error { color: #e5534b; }
+    .ef-attachments { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+    .ef-attach-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 2px; }
+    .ef-attach-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .ef-attach-name { color: var(--text); overflow-wrap: anywhere; }
+    .ef-attach-size { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
+    .ef-attach-del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; }
+    .ef-attach-del:hover { color: #e5534b; }
     .edit-form textarea.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 
     /* ── Search bar ─────────────────────────────────────── */
@@ -795,8 +802,11 @@ function preprocessLinks(md) {
 }
 
 const IMAGE_EXT_RE  = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
-// Curated attachment types (superset of images). A curated list — not a generic
-// "\.xxx$" — so dotted note titles like [[Section 2.1]] aren't mistaken for files.
+// Any file extension. Only used on the ![[…]] embed path, which is *always* a file
+// in Obsidian — so a bare note title (no `!`) can never be mistaken for a file.
+const HAS_EXT_RE    = /\.[a-z0-9]{1,12}$/i;
+// Curated types for the plain [[…]] link path, where a dotted note title like
+// [[Section 2.1]] must NOT be treated as a file.
 const ATTACH_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|pdf|canvas|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|zip|epub|mp3|m4a|wav|flac|ogg|aac|opus|mp4|mov|webm|mkv|avi)$/i;
 
 // /attachments/ URL, encoding each path segment (bare filenames stay bare).
@@ -814,7 +824,7 @@ function linkifySegment(text) {
       const alt = dim || !o ? name : o;
       return `<img class="attachment" src="${attUrl(name)}" alt="${escHtml(alt)}" loading="lazy"${size}>`;
     }
-    if (ATTACH_EXT_RE.test(name)) return attLink(name, o || name);   // pdf/canvas/… → link
+    if (HAS_EXT_RE.test(name)) return attLink(name, o || name);   // any file (pdf/zip/…) → link
     // No extension → note transclusion; relay doesn't transclude, so link to the note.
     const id = linkIndex.get(name.toLowerCase());
     return (id !== undefined)
@@ -913,7 +923,6 @@ function closeCompose() {
 }
 
 /* ── Attachment upload ─────────────────────────────────────── */
-const IMG_NAME_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -941,7 +950,8 @@ async function uploadOne(file, ta, statusEl, getExtra) {
     const data = await fileToBase64(file);
     const body = { filename: name, data, ...getExtra() };
     const res = await apiFetch('/attachments', { method: 'POST', body: JSON.stringify(body) });
-    insertAtCursor(ta, `\n${IMG_NAME_RE.test(res.filename) ? '!' : ''}[[${res.filename}]]\n`);
+    // ![[…]] embed for everything: images render inline, other files as a 📎 link.
+    insertAtCursor(ta, `\n![[${res.filename}]]\n`);
     statusEl.textContent = `Attached ${res.filename} → ${res.folder}/assets`;
   } catch (e) {
     statusEl.classList.add('error');
@@ -974,6 +984,32 @@ function wireAttachments(ta, fileInput, attachBtn, statusEl, getExtra) {
 }
 
 const parseTagsField = (v) => v.split(',').map(s => s.trim()).filter(Boolean);
+const fmtBytes = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+
+// Edit-form list of the post-folder's attachments, each with a delete (×) button.
+async function renderEditAttachments(el, postId) {
+  const box = el.querySelector('.ef-attachments');
+  if (!box) return;
+  let d;
+  try { d = await apiFetch(`/attachments?post_id=${postId}`); } catch { box.innerHTML = ''; return; }
+  if (!d.items.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="ef-attach-head">Files in ${escHtml(d.items[0].folder)}/assets</div>` +
+    d.items.map(a => `<div class="ef-attach-item" data-name="${escHtml(a.filename)}">
+      <span class="ef-attach-name">${escHtml(a.filename)}</span>
+      <span class="ef-attach-size">${fmtBytes(a.bytes)}</span>
+      <button type="button" class="ef-attach-del" title="Delete file from vault">×</button></div>`).join('');
+  box.querySelectorAll('.ef-attach-del').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const name = btn.closest('.ef-attach-item').dataset.name;
+      if (!confirm(`Delete "${name}" from the vault? This removes the file itself.`)) return;
+      try {
+        const r = await apiFetch(`/attachments/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        if (r.referenced_by?.length)
+          alert(`Deleted. Still referenced by ${r.referenced_by.map(i => '#' + i).join(', ')} — those embeds are now broken.`);
+        await renderEditAttachments(el, postId);
+      } catch (e) { alert(`Delete failed: ${e.message}`); }
+    }));
+}
 
 wireAttachments(
   document.getElementById('cpContent'), document.getElementById('cpFile'),
@@ -1330,6 +1366,7 @@ function enterEditMode(el, post) {
           <button type="button" class="btn-attach ef-attach">📎 Attach</button>
           <span class="attach-status ef-attach-status"></span>
         </div>
+        <div class="ef-attachments"></div>
       </div>
       <div><label>Tags</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
       <div><label>Source</label><input class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
@@ -1345,6 +1382,7 @@ function enterEditMode(el, post) {
     el.querySelector('.ef-attach'), el.querySelector('.ef-attach-status'),
     () => ({ post_id: post.id, embed: false }),
   );
+  renderEditAttachments(el, post.id);
 
   el.querySelector('.btn-cancel').addEventListener('click', () => { el.classList.remove('editing'); el.innerHTML = savedHtml; rewirePost(el, post); });
   el.querySelector('.btn-save').addEventListener('click', async () => {

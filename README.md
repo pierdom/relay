@@ -107,6 +107,7 @@ Exposes the full feed API as MCP tools so Claude — or any MCP-capable agent �
 | `add_attachment` | Store a base64 file in a folder's `assets/`; with `post_id` appends the `![[file]]` embed to that post |
 | `get_attachment` | Retrieve an attachment by filename; images return as inline image content |
 | `list_attachments` | List attachments (filename, folder, size, ref); scope by `post_id` or `folder` |
+| `delete_attachment` | Delete an attachment by filename; reports post ids that still reference it |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours`, `expires_at`) |
 
@@ -177,6 +178,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | GET | `/folders` | First-level vault folders with post counts |
 | POST | `/attachments` | Store a base64 attachment; with `post_id`, append its `![[file]]` embed to that post |
 | GET | `/attachments` | List attachments (`folder`/`post_id` scope) — filename, folder, size, ref |
+| DELETE | `/attachments/{path}` | Delete an attachment file; reports posts still referencing it |
 | GET | `/attachments/{path}` | Serve a vault attachment (image/PDF/…) embedded via `![[file]]` |
 | GET | `/tags` | List tags with post counts |
 | POST | `/tags/{tag}/config` | Set per-tag TTL override |

@@ -149,6 +149,11 @@ class AttachmentInfo(BaseModel):
     ref: str  # ![[filename]]
 
 
+class AttachmentDeleteResponse(BaseModel):
+    filename: str
+    referenced_by: list[int]  # post ids that still embed/link this file (now dangling)
+
+
 class AttachmentListResponse(BaseModel):
     items: list[AttachmentInfo]
 

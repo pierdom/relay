@@ -200,6 +200,20 @@ async def get_attachment(name: str):
 
 @mcp.tool(
     description=(
+        "Delete an attachment from the vault by its filename. Returns the removed name and "
+        "any post ids that still embed/link it (now dangling) so you can fix them."
+    )
+)
+async def delete_attachment(name: str) -> dict:
+    async with _db() as db:
+        result = await service.delete_attachment(db, name)
+    if result is None:
+        return {"error": f"Attachment '{name}' not found."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
         "List attachments stored in the vault (filename, folder, size, and the ![[…]] "
         "embed ref). Scope with `post_id` (that post's folder) or `folder`; omit both to "
         "list every attachment. Use the returned filename with get_attachment."

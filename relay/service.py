@@ -18,6 +18,7 @@ import aiosqlite
 from . import events, folders, links, vault
 from .config import settings
 from .models import (
+    AttachmentDeleteResponse,
     AttachmentInfo,
     AttachmentListResponse,
     AttachmentResponse,
@@ -229,17 +230,52 @@ async def get_backlinks(db: aiosqlite.Connection, post_id: int) -> BacklinksResp
     return BacklinksResponse(items=items)
 
 
+# Matches ![[file]] embeds and [[file]] links (Obsidian), capturing the target.
+_EMBED_OR_LINK_RE = re.compile(r"!?\[\[([^\]|#]+?)(?:\|[^\]]*)?\]\]")
+
+
+def referenced_attachment_names(content: str) -> set[str]:
+    """Lower-cased filenames a post's content embeds/links (``![[x]]`` / ``[[x.ext]]``).
+
+    A target is treated as an attachment only when its last path segment has an
+    extension — bare ``[[Note Title]]`` wikilinks are ignored.
+    """
+    names: set[str] = set()
+    for m in _EMBED_OR_LINK_RE.finditer(content or ""):
+        target = m.group(1).strip()
+        if "." in target.rsplit("/", 1)[-1]:
+            names.add(target.rsplit("/", 1)[-1].lower())
+    return names
+
+
+async def _all_referenced_attachments(db: aiosqlite.Connection) -> set[str]:
+    async with db.execute("SELECT content FROM posts") as cur:
+        rows = await cur.fetchall()
+    referenced: set[str] = set()
+    for row in rows:
+        referenced |= referenced_attachment_names(row["content"])
+    return referenced
+
+
 async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
     if post_id == 0:
         raise ProtectedPost
     row = await _fetch(db, post_id)
     if row is None:
         raise PostNotFound
+    path_str = row["path"]
+    folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
     async with vault.write_lock:
-        vault.delete_file(vault.abspath(row["path"]))
+        vault.delete_file(vault.abspath(path_str))
         await vault.index_delete(db, post_id)
         await db.commit()
     await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]))
+    # Orphan cleanup: drop attachments in the deleted post's folder that no
+    # remaining post references. Shared assets (still referenced elsewhere) stay.
+    referenced = await _all_referenced_attachments(db)
+    for name, _f, _s in vault.list_attachments(folder):
+        if name.lower() not in referenced:
+            vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
 
 
 # ── Attachments ───────────────────────────────────────────────────────────────
@@ -330,6 +366,20 @@ async def list_attachments(
         for (n, f, s) in vault.list_attachments(folder)
     ]
     return AttachmentListResponse(items=items)
+
+
+async def delete_attachment(db: aiosqlite.Connection, name: str) -> AttachmentDeleteResponse | None:
+    """Delete an attachment file. Returns the removed name plus any post ids that
+    still embed/link it (now dangling), or ``None`` if it didn't resolve."""
+    async with vault.write_lock:
+        removed = vault.delete_attachment(name)
+    if removed is None:
+        return None
+    fname = removed.name.lower()
+    async with db.execute("SELECT id, content FROM posts") as cur:
+        rows = await cur.fetchall()
+    referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
+    return AttachmentDeleteResponse(filename=removed.name, referenced_by=sorted(referenced_by))
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
