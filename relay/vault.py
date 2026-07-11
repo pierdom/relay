@@ -188,10 +188,11 @@ def resolve_attachment(name: str) -> Path | None:
 
     if "/" in name or "\\" in name:
         return _ok(vault / name)
-    # Bare filename: match only files living under an ``assets/`` folder.
-    for candidate in vault.rglob(name):
-        if candidate.parent.name == "assets":
-            hit = _ok(candidate)
+    # Bare filename: look for an exact match under any ``assets/`` folder. Join the
+    # literal name (never glob it — a name like ``*.png`` must not act as a pattern).
+    for assets in vault.rglob("assets"):
+        if assets.is_dir():
+            hit = _ok(assets / name)
             if hit is not None:
                 return hit
     return None

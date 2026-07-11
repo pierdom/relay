@@ -776,8 +776,10 @@ function preprocessLinks(md) {
     .map((seg, i) => (i % 2 === 1) ? seg : linkifySegment(seg)).join('');
 }
 
-const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
-const FILE_EXT_RE  = /\.[a-z0-9]{1,8}$/i;
+const IMAGE_EXT_RE  = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+// Curated attachment types (superset of images). A curated list — not a generic
+// "\.xxx$" — so dotted note titles like [[Section 2.1]] aren't mistaken for files.
+const ATTACH_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|pdf|canvas|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|zip|epub|mp3|m4a|wav|flac|ogg|aac|opus|mp4|mov|webm|mkv|avi)$/i;
 
 // /attachments/ URL, encoding each path segment (bare filenames stay bare).
 const attUrl = (name) => '/attachments/' + name.split('/').map(encodeURIComponent).join('/');
@@ -794,7 +796,7 @@ function linkifySegment(text) {
       const alt = dim || !o ? name : o;
       return `<img class="attachment" src="${attUrl(name)}" alt="${escHtml(alt)}" loading="lazy"${size}>`;
     }
-    if (FILE_EXT_RE.test(name)) return attLink(name, o || name);   // pdf/canvas/… → link
+    if (ATTACH_EXT_RE.test(name)) return attLink(name, o || name);   // pdf/canvas/… → link
     // No extension → note transclusion; relay doesn't transclude, so link to the note.
     const id = linkIndex.get(name.toLowerCase());
     return (id !== undefined)
@@ -806,8 +808,8 @@ function linkifySegment(text) {
     const t = target.trim();
     const id = linkIndex.get(t.toLowerCase());
     if (id !== undefined) return `<a class="wikilink" data-post-id="${id}">${label}</a>`;
-    // Unresolved but looks like a file (e.g. [[doc.pdf]]) → attachment link, not broken.
-    if (FILE_EXT_RE.test(t)) return attLink(t, (alias || target).trim());
+    // Unresolved but a known attachment type (e.g. [[doc.pdf]]) → attachment link, not broken.
+    if (ATTACH_EXT_RE.test(t)) return attLink(t, (alias || target).trim());
     return `<span class="wikilink broken" title="unresolved link">${label}</span>`;
   });
   text = text.replace(/(^|[^\w#])#(\d{1,5})\b/g, (m, pre, n) =>

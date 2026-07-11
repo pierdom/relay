@@ -31,7 +31,13 @@ from .post_panel import _time_ago, _time_until
 _EMBED_RE = re.compile(r"!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]")
 _WIKI_RE = re.compile(r"\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]")
 _IDREF_RE = re.compile(r"(?<![\w#])#(\d{1,5})\b")
-_FILE_EXT_RE = re.compile(r"\.[a-z0-9]{1,8}$", re.IGNORECASE)
+# Curated attachment types — not a generic ``\.xxx$`` — so dotted note titles
+# (e.g. ``[[Section 2.1]]``) aren't mistaken for files.
+_FILE_EXT_RE = re.compile(
+    r"\.(png|jpe?g|gif|webp|svg|avif|bmp|pdf|canvas|docx?|xlsx?|pptx?|csv|txt"
+    r"|rtf|odt|ods|zip|epub|mp3|m4a|wav|flac|ogg|aac|opus|mp4|mov|webm|mkv|avi)$",
+    re.IGNORECASE,
+)
 _CODE_SPLIT = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
 
 

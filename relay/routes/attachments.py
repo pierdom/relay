@@ -23,4 +23,5 @@ async def get_attachment(name: str) -> FileResponse:
     path = vault.resolve_attachment(name)
     if path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    return FileResponse(path)
+    # nosniff: don't let the browser MIME-sniff (e.g. a .txt) into executable HTML.
+    return FileResponse(path, headers={"X-Content-Type-Options": "nosniff"})

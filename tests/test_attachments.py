@@ -71,6 +71,22 @@ def test_resolve_missing_returns_none(tmp_path, monkeypatch):
     assert vault.resolve_attachment("ghost.png") is None
 
 
+def test_resolve_glob_metachar_is_literal(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path))
+    assets = tmp_path / "Homelab" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "a.png").write_bytes(b"x")
+    (assets / "b.png").write_bytes(b"x")
+    # "*.png" must be a literal filename, never a glob pattern → no match.
+    assert vault.resolve_attachment("*.png") is None
+
+
+def test_resolve_absolute_path_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    (tmp_path / "vault").mkdir()
+    assert vault.resolve_attachment("/etc/hostname") is None
+
+
 # ── endpoint ──────────────────────────────────────────────────────────────────
 
 
@@ -79,6 +95,7 @@ async def test_get_attachment_image(client):
     r = await client.get("/attachments/diagram.png", headers=AUTH)
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
+    assert r.headers["x-content-type-options"] == "nosniff"
     assert r.content.startswith(b"\x89PNG")
 
 

@@ -69,3 +69,10 @@ def test_embed_unresolved_note_degrades_to_text():
 def test_bare_file_wikilink_becomes_attachment_link():
     out = _linkify_markdown("see [[report.pdf]]", INDEX)
     assert "/attachments/report.pdf)" in out
+
+
+def test_dotted_note_title_is_not_an_attachment():
+    # [[Section 2.1]] is a broken note link, not a ".1" attachment.
+    out = _linkify_markdown("[[Section 2.1]]", INDEX)
+    assert out == "Section 2.1"
+    assert "/attachments/" not in out
