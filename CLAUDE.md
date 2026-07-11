@@ -40,6 +40,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | GET | /links | (id, title) index of all posts — clients resolve `[[Title]]` wikilinks with this |
 | GET | /folders | First-level vault folders with post counts (sidebar tree view) |
 | POST | /attachments | Store a base64 attachment in a folder's `assets/`; with `post_id`, append the `![[file]]` embed to that post |
+| GET | /attachments | List attachments (`folder`/`post_id` scope) — filename, folder, size, `![[file]]` ref |
 | GET | /attachments/{path} | Serve a vault attachment (image/PDF/…) embedded via `![[file]]` (auth-gated; same-origin so the UI session cookie works on `<img>`) |
 | GET | /tags | List tags with post counts (includes 0-count tags from tag_config) |
 | POST | /tags/{tag}/config | Set per-tag expiry (`ttl_hours`, `expires_at`, or both) |
@@ -120,7 +121,7 @@ relay_mcp/
 Two MCP surfaces exist:
 
 - **`relay/mcp_server.py`** — the in-process server, served over Streamable HTTP at `/mcp` by the main app. Tools call `relay.service` directly (no network hop, no schema duplication). This is the remote-capable, recommended path; any MCP client connects with the bearer key. See README for `claude mcp add --transport http`. Also exposes the master document (post 0) as the MCP resource `relay://master-document` (text/markdown) so clients can attach it to context structurally, and ships server `instructions` pointing at it.
-- **`relay_mcp/server.py`** — the legacy stdio proxy. Still useful for clients that can't speak remote MCP (e.g. Claude Desktop); it spawns locally and proxies to the relay's REST API over `RELAY_BASE_URL`. At full parity with the in-process server: same nine tools, the same server `instructions`, and the `relay://master-document` resource (read via REST `GET /posts/0`). Kept for transition; prefer `/mcp`.
+- **`relay_mcp/server.py`** — the legacy stdio proxy. Still useful for clients that can't speak remote MCP (e.g. Claude Desktop); it spawns locally and proxies to the relay's REST API over `RELAY_BASE_URL`. At full parity with the in-process server: same ten tools, the same server `instructions`, and the `relay://master-document` resource (read via REST `GET /posts/0`). Kept for transition; prefer `/mcp`.
 
 ```
 relay/static/
@@ -181,6 +182,7 @@ differ internally.
 | `delete_post` | Delete a post by ID (id=0 is blocked) |
 | `add_attachment` | Store a base64 file in a folder's `assets/`; with `post_id` appends the `![[file]]` embed to that post |
 | `get_attachment` | Retrieve an attachment by filename; images are returned as inline image content |
+| `list_attachments` | List attachments (filename, folder, size, ref); scope by `post_id` or `folder` |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (ttl_hours, expires_at, or both) |
 

@@ -202,6 +202,35 @@ async def test_add_attachment_traversal_filename_is_sanitized(client):
 
 
 @pytest.mark.asyncio
+async def test_list_attachments_scopes_by_folder_and_post(client):
+    post = await _create(client, "Rack", tags=["homelab"])
+    await client.post("/attachments", json={"filename": "a.png", "data": PNG, "post_id": post["id"]}, headers=AUTH)
+    await client.post("/attachments", json={"filename": "loose.png", "data": PNG}, headers=AUTH)  # Inbox
+
+    # whole vault: the seeded fixture files + both uploads
+    allr = (await client.get("/attachments", headers=AUTH)).json()["items"]
+    names = {i["filename"] for i in allr}
+    assert {"a.png", "loose.png", "diagram.png", "notes.pdf"} <= names
+    assert all(i["ref"] == f"![[{i['filename']}]]" for i in allr)
+
+    # scoped to the post's folder (Homelab)
+    scoped = (await client.get(f"/attachments?post_id={post['id']}", headers=AUTH)).json()["items"]
+    folders = {i["folder"] for i in scoped}
+    assert folders == {"Homelab"}
+    assert "loose.png" not in {i["filename"] for i in scoped}
+
+    # scoped by folder name
+    inbox = (await client.get("/attachments?folder=Inbox", headers=AUTH)).json()["items"]
+    assert {i["filename"] for i in inbox} == {"loose.png"}
+
+
+@pytest.mark.asyncio
+async def test_list_attachments_post_not_found(client):
+    r = await client.get("/attachments?post_id=9999", headers=AUTH)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_add_attachment_accepts_data_uri_and_whitespace(client):
     from relay import service
 

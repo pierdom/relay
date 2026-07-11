@@ -18,6 +18,8 @@ import aiosqlite
 from . import events, folders, links, vault
 from .config import settings
 from .models import (
+    AttachmentInfo,
+    AttachmentListResponse,
     AttachmentResponse,
     BacklinksResponse,
     FolderCount,
@@ -300,6 +302,24 @@ async def add_attachment(
     return AttachmentResponse(
         filename=written.name, ref=ref, folder=target_folder, post_id=result_post_id
     )
+
+
+async def list_attachments(
+    db: aiosqlite.Connection, *, post_id: int | None = None, folder: str | None = None
+) -> AttachmentListResponse:
+    """List attachment files under ``assets/`` dirs. ``post_id`` scopes to that
+    post's folder; ``folder`` scopes to a named folder; neither scans the vault."""
+    if post_id is not None:
+        row = await _fetch(db, post_id)
+        if row is None:
+            raise PostNotFound
+        path_str = row["path"]
+        folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
+    items = [
+        AttachmentInfo(filename=n, folder=f, bytes=s, ref=f"![[{n}]]")
+        for (n, f, s) in vault.list_attachments(folder)
+    ]
+    return AttachmentListResponse(items=items)
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────

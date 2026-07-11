@@ -242,6 +242,28 @@ def attachment_mime(path: Path) -> str:
     return mime or _IMAGE_MIME_FALLBACK.get(path.suffix.lower(), "application/octet-stream")
 
 
+def list_attachments(folder: str | None = None) -> list[tuple[str, str, int]]:
+    """``(filename, folder, size)`` for files under ``assets/`` dirs. ``folder``
+    limits the scan to that first-level folder; ``None`` scans the whole vault."""
+    root = vault_dir().resolve()
+    dirs = [attachment_dir_for(folder)] if folder else [
+        p for p in root.rglob(ATTACHMENTS_DIRNAME) if p.is_dir()
+    ]
+    results: list[tuple[str, str, int]] = []
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        try:
+            rel = d.resolve().relative_to(root)
+        except ValueError:
+            continue
+        folder_name = rel.parts[0] if rel.parts else ""
+        for f in sorted(d.iterdir()):
+            if f.is_file():
+                results.append((f.name, folder_name, f.stat().st_size))
+    return results
+
+
 def read_attachment(name: str, *, max_bytes: int | None = None) -> tuple[Path, bytes, str] | None:
     """Resolve and read an attachment. Returns ``(path, bytes, mime)`` or ``None``.
 

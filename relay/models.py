@@ -135,6 +135,17 @@ class AttachmentResponse(BaseModel):
     post_id: int | None = None  # set when the embed was appended to a post
 
 
+class AttachmentInfo(BaseModel):
+    filename: str
+    folder: str
+    bytes: int
+    ref: str  # ![[filename]]
+
+
+class AttachmentListResponse(BaseModel):
+    items: list[AttachmentInfo]
+
+
 class TagRename(BaseModel):
     new_name: str
 

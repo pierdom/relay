@@ -7,9 +7,26 @@ from fastapi.responses import FileResponse
 from .. import service, vault
 from ..auth import require_api_key
 from ..database import get_db
-from ..models import AttachmentCreate, AttachmentResponse
+from ..models import AttachmentCreate, AttachmentListResponse, AttachmentResponse
 
 router = APIRouter(tags=["attachments"])
+
+
+@router.get(
+    "/attachments",
+    response_model=AttachmentListResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def list_attachments(
+    folder: str | None = None,
+    post_id: int | None = None,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> AttachmentListResponse:
+    """List attachments under ``assets/`` dirs (optionally scoped to a folder or post)."""
+    try:
+        return await service.list_attachments(db, post_id=post_id, folder=folder)
+    except service.PostNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{post_id} not found")
 
 
 @router.post(

@@ -198,6 +198,22 @@ async def get_attachment(name: str):
             "note": "Non-image attachment; not shown inline."}
 
 
+@mcp.tool(
+    description=(
+        "List attachments stored in the vault (filename, folder, size, and the ![[…]] "
+        "embed ref). Scope with `post_id` (that post's folder) or `folder`; omit both to "
+        "list every attachment. Use the returned filename with get_attachment."
+    )
+)
+async def list_attachments(post_id: int | None = None, folder: str | None = None) -> dict:
+    async with _db() as db:
+        try:
+            result = await service.list_attachments(db, post_id=post_id, folder=folder)
+        except service.PostNotFound:
+            return {"error": f"Post #{post_id} not found."}
+    return result.model_dump()
+
+
 @mcp.tool(description="List all tags in the relay feed with their post counts.")
 async def list_tags() -> dict:
     async with _db() as db:

@@ -164,6 +164,21 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="list_attachments",
+            description=(
+                "List attachments stored in the vault (filename, folder, size, and the ![[…]] "
+                "embed ref). Scope with 'post_id' (that post's folder) or 'folder'; omit both to "
+                "list every attachment. Use the returned filename with get_attachment."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "post_id": {"type": "integer", "description": "List attachments in this post's folder"},
+                    "folder": {"type": "string", "description": "List attachments in this first-level folder"},
+                },
+            },
+        ),
+        types.Tool(
             name="get_attachment",
             description=(
                 "Retrieve an attachment from the vault by its filename (as used in ![[file]]). "
@@ -231,6 +246,24 @@ async def call_tool(
             type="text",
             text=f"Stored attachment '{a['filename']}' in {a['folder']}/assets{where}.\nEmbed: {a['ref']}",
         )]
+
+    if name == "list_attachments":
+        params = {k: v for k, v in arguments.items() if k in ("post_id", "folder") and v is not None}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/attachments",
+                params=params,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 404:
+                return [types.TextContent(type="text", text=f"Post #{arguments.get('post_id')} not found.")]
+            response.raise_for_status()
+            items = response.json()["items"]
+        if not items:
+            return [types.TextContent(type="text", text="No attachments found.")]
+        lines = [f"{a['ref']}  —  {a['folder']}/assets ({a['bytes']} bytes)" for a in items]
+        return [types.TextContent(type="text", text="\n".join(lines))]
 
     if name == "get_attachment":
         async with httpx.AsyncClient() as client:
