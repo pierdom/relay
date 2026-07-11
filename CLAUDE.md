@@ -39,6 +39,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | DELETE | /posts/{id} | Delete post |
 | GET | /links | (id, title) index of all posts — clients resolve `[[Title]]` wikilinks with this |
 | GET | /folders | First-level vault folders with post counts (sidebar tree view) |
+| GET | /attachments/{path} | Serve a vault attachment (image/PDF/…) embedded via `![[file]]` (auth-gated; same-origin so the UI session cookie works on `<img>`) |
 | GET | /tags | List tags with post counts (includes 0-count tags from tag_config) |
 | POST | /tags/{tag}/config | Set per-tag expiry (`ttl_hours`, `expires_at`, or both) |
 | PATCH | /tags/{tag} | Rename a tag across all posts and tag_config |
@@ -105,6 +106,7 @@ relay/
 └── routes/
     ├── posts.py   # POST/GET/DELETE /posts (thin — delegate to service)
     ├── tags.py    # GET /tags, POST /tags/{tag}/config (thin — delegate to service)
+    ├── attachments.py # GET /attachments/{path} — serve vault attachments (![[file]])
     └── events.py  # GET /events (SSE)
 ```
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 from rich.markup import escape
 from textual import work
@@ -27,13 +28,22 @@ from .post_panel import _time_ago, _time_until
 
 # ── Wikilink preprocessing ────────────────────────────────────────────────────
 
+_EMBED_RE = re.compile(r"!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]")
 _WIKI_RE = re.compile(r"\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]")
 _IDREF_RE = re.compile(r"(?<![\w#])#(\d{1,5})\b")
+_FILE_EXT_RE = re.compile(r"\.[a-z0-9]{1,8}$", re.IGNORECASE)
 _CODE_SPLIT = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
 
 
+def _attachment_link(name: str, label: str) -> str:
+    """A markdown link to the attachment endpoint — terminals can't inline images,
+    so both ``![[img]]`` embeds and ``[[file.pdf]]`` render as an external link."""
+    return f"[\U0001F4CE {label}]({api._base()}/attachments/{quote(name)})"
+
+
 def _linkify_markdown(content: str, index: dict[str, int]) -> str:
-    """Turn ``[[Title]]`` / ``#NNN`` into ``[label](relay:ID)`` links.
+    """Turn ``[[Title]]`` / ``#NNN`` into ``[label](relay:ID)`` links and Obsidian
+    attachment embeds into external links.
 
     Resolution is by title (case-insensitive). Broken wikilinks degrade to plain
     text; unknown ``#NNN`` are left untouched. Code spans/blocks are skipped.
@@ -41,17 +51,24 @@ def _linkify_markdown(content: str, index: dict[str, int]) -> str:
     ids = set(index.values())
 
     def convert(text: str) -> str:
+        def embed(m: re.Match) -> str:
+            name = m.group(1).strip()
+            return _attachment_link(name, (m.group(2) or name).strip())
+
         def wiki(m: re.Match) -> str:
             target = m.group(1).strip()
             alias = (m.group(3) or target).strip()
             pid = index.get(target.lower())
-            return f"[{alias}](relay:{pid})" if pid is not None else alias
+            if pid is not None:
+                return f"[{alias}](relay:{pid})"
+            # Unresolved but file-like (e.g. [[doc.pdf]]) → attachment link.
+            return _attachment_link(target, alias) if _FILE_EXT_RE.search(target) else alias
 
         def idref(m: re.Match) -> str:
             n = m.group(1)
             return f"[#{n}](relay:{n})" if int(n) in ids else m.group(0)
 
-        return _IDREF_RE.sub(idref, _WIKI_RE.sub(wiki, text))
+        return _IDREF_RE.sub(idref, _WIKI_RE.sub(wiki, _EMBED_RE.sub(embed, text)))
 
     return "".join(
         part if i % 2 else convert(part)

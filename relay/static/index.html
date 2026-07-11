@@ -238,6 +238,9 @@
     .post-body a.wikilink { color: var(--accent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); cursor: pointer; }
     .post-body a.wikilink:hover { text-decoration: none; border-bottom-color: var(--accent); }
     .post-body .wikilink.broken { color: var(--muted); border-bottom: 1px dashed var(--muted); cursor: help; }
+    .post-body img.attachment { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 0.5rem 0; }
+    .post-body a.attachment-link { color: var(--accent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+    .post-body a.attachment-link::before { content: "📎 "; }
     .pm-backlinks { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
     .pm-backlinks h4 { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
     .pm-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -761,19 +764,38 @@ async function loadLinkIndex() {
   } catch {}
 }
 
+// DOMPurify config: keep the attrs our attachment embeds/links add (img loading,
+// link target/rel). marked + preprocessLinks output is sanitized through this.
+const SANITIZE_OPTS = { ADD_ATTR: ['target', 'rel', 'loading'] };
+const renderBody = (md) => DOMPurify.sanitize(marked.parse(preprocessLinks(md)), SANITIZE_OPTS);
+
 // Convert wikilinks / id-refs to anchors, leaving fenced + inline code untouched.
 function preprocessLinks(md) {
   return md.split(/(```[\s\S]*?```|`[^`\n]*`)/g)
     .map((seg, i) => (i % 2 === 1) ? seg : linkifySegment(seg)).join('');
 }
 
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+const FILE_EXT_RE  = /\.[a-z0-9]{1,8}$/i;
+
 function linkifySegment(text) {
+  // Attachment embeds: ![[file.ext]] → <img> (images) or a labelled link.
+  text = text.replace(/!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]/g, (m, file, alias) => {
+    const name = file.trim();
+    const src = `/attachments/${encodeURI(name)}`;
+    return IMAGE_EXT_RE.test(name)
+      ? `<img class="attachment" src="${src}" alt="${escHtml(alias || name)}" loading="lazy">`
+      : `<a class="attachment-link" href="${src}" target="_blank" rel="noopener noreferrer">${escHtml(alias || name)}</a>`;
+  });
   text = text.replace(/\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (m, target, heading, alias) => {
     const label = escHtml((alias || target).trim());
-    const id = linkIndex.get(target.trim().toLowerCase());
-    return (id === undefined)
-      ? `<span class="wikilink broken" title="unresolved link">${label}</span>`
-      : `<a class="wikilink" data-post-id="${id}">${label}</a>`;
+    const t = target.trim();
+    const id = linkIndex.get(t.toLowerCase());
+    if (id !== undefined) return `<a class="wikilink" data-post-id="${id}">${label}</a>`;
+    // Unresolved but looks like a file (e.g. [[doc.pdf]]) → attachment link, not broken.
+    if (FILE_EXT_RE.test(t))
+      return `<a class="attachment-link" href="/attachments/${encodeURI(t)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    return `<span class="wikilink broken" title="unresolved link">${label}</span>`;
   });
   text = text.replace(/(^|[^\w#])#(\d{1,5})\b/g, (m, pre, n) =>
     linkIds.has(Number(n)) ? `${pre}<a class="wikilink" data-post-id="${n}">#${n}</a>` : m);
@@ -1143,7 +1165,7 @@ function renderPost(post) {
     }
   }
 
-  const bodyHtml = `<div class="post-body">${DOMPurify.sanitize(marked.parse(preprocessLinks(contentToRender)))}</div>`;
+  const bodyHtml = `<div class="post-body">${renderBody(contentToRender)}</div>`;
 
   el.innerHTML = `
     ${masterBadge}
@@ -1333,7 +1355,7 @@ function openPostModal(post) {
   const pmContent = post.title
     ? post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '')
     : post.content;
-  pmBody.innerHTML = `<div class="post-body">${DOMPurify.sanitize(marked.parse(preprocessLinks(pmContent)))}</div><div class="pm-backlinks" id="pmBacklinks"></div>`;
+  pmBody.innerHTML = `<div class="post-body">${renderBody(pmContent)}</div><div class="pm-backlinks" id="pmBacklinks"></div>`;
   renderBacklinks(post.id);
 
   postModal.classList.add('open');

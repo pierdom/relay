@@ -172,6 +172,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | DELETE | `/posts/{id}` | Delete a post |
 | GET | `/links` | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
 | GET | `/folders` | First-level vault folders with post counts |
+| GET | `/attachments/{path}` | Serve a vault attachment (image/PDF/…) embedded via `![[file]]` |
 | GET | `/tags` | List tags with post counts |
 | POST | `/tags/{tag}/config` | Set per-tag TTL override |
 | PATCH | `/tags/{tag}` | Rename a tag across all posts |

@@ -160,6 +160,43 @@ def read_file(path: Path) -> tuple[dict, str]:
     return frontmatter.parse(Path(path).read_text(encoding="utf-8"))
 
 
+def resolve_attachment(name: str) -> Path | None:
+    """Resolve an attachment reference to a real file inside the vault.
+
+    ``name`` comes from an Obsidian embed (``![[file]]`` / ``[[file.pdf]]``) or a
+    vault-relative path. A bare filename is located by scanning ``*/assets/``
+    dirs (the convention for attachments); a path with separators is resolved
+    directly. Returns an existing file **inside the vault and outside ``.relay``**,
+    or ``None`` — the security boundary against path traversal.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    vault = vault_dir().resolve()
+    relay = Path(settings.relay_dir).resolve()
+
+    def _ok(candidate: Path) -> Path | None:
+        try:
+            rp = candidate.resolve()
+        except OSError:
+            return None
+        if not rp.is_file() or not rp.is_relative_to(vault):
+            return None
+        if rp == relay or relay in rp.parents:
+            return None
+        return rp
+
+    if "/" in name or "\\" in name:
+        return _ok(vault / name)
+    # Bare filename: match only files living under an ``assets/`` folder.
+    for candidate in vault.rglob(name):
+        if candidate.parent.name == "assets":
+            hit = _ok(candidate)
+            if hit is not None:
+                return hit
+    return None
+
+
 # ── index mirror ─────────────────────────────────────────────────────────────
 
 
