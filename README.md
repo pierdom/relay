@@ -275,6 +275,11 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `RELAY_BASE_URL` | `http://localhost:8000` | Base URL used by the stdio MCP proxy |
 | `SECURE_COOKIES` | `true` | `Secure` flag on the browser-UI session cookie; set `false` to use the UI over plain HTTP |
 | `ATTACHMENT_MAX_MB` | `25` | Max size of a single uploaded attachment (base64-decoded); larger uploads are rejected with 413 |
+| `OIDC_ISSUER` | `""` | OIDC provider (e.g. PocketID) base URL. Set with `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET` to enable **Login with OIDC** for the web UI; blank keeps API-key-paste login |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | `""` | Confidential OIDC client; register redirect URI `<RELAY_BASE_URL>/auth/callback` at the provider |
+| `SESSION_SECRET` | `""` | Signs the session cookie; falls back to `API_KEY` if unset |
+| `SESSION_MAX_AGE_HOURS` | `720` | Signed session-cookie lifetime (default 30 days) |
+| `OIDC_ALLOWED_EMAILS` | `""` | Comma-separated allowlist of emails permitted to log in; empty = any authenticated user |
 | `RELAY_PALETTE` | `default` | TUI colour theme |
 | `RELAY_TRANSPARENT` | `0` | TUI: show terminal background through the canvas |
 

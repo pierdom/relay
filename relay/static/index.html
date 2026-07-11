@@ -80,6 +80,15 @@
     }
     .btn-connect:hover { background: var(--accent-dim); }
 
+    .oidc-login { display: flex; align-items: center; gap: 10px; }
+    .link-btn {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      font-family: inherit; font-size: 11px; letter-spacing: 0.04em;
+      padding: 3px 0; border-bottom: 1px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .link-btn:hover { color: var(--text); border-color: var(--border); }
+
     .connected-bar { display: flex; align-items: center; }
     .disconnect-btn {
       background: none; border: none; color: var(--muted); cursor: pointer;
@@ -617,7 +626,11 @@
   </button>
   <div class="header-right">
     <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
-    <form class="key-wrap" id="connectForm">
+    <div class="oidc-login" id="oidcLogin" style="display:none">
+      <button class="btn-connect" id="oidcLoginBtn" type="button">Login with PocketID</button>
+      <button class="link-btn" id="useKeyBtn" type="button">use API key</button>
+    </div>
+    <form class="key-wrap" id="connectForm" style="display:none">
       <input type="text" id="apiUserInput" autocomplete="username" value="relay"
              aria-hidden="true" tabindex="-1"
              style="position:absolute;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none">
@@ -712,7 +725,8 @@
 
 <script>
 const LIMIT = 20;
-let apiKey = '';
+let apiKey = '';       // set only on the API-key (break-glass) path; empty when logged in via cookie
+let authed = false;    // true once a session exists (cookie or key) — the real "logged in" flag
 let activeTag = null;
 let activeFolder = null;
 let sidebarMode = 'tags';   // 'tags' | 'tree' | 'files'
@@ -733,6 +747,10 @@ const liveDot      = document.getElementById('liveDot');
 const liveLabel    = document.getElementById('liveLabel');
 const apiKeyInput  = document.getElementById('apiKeyInput');
 const connectBtn   = document.getElementById('connectBtn');
+const connectForm  = document.getElementById('connectForm');
+const oidcLogin    = document.getElementById('oidcLogin');
+const oidcLoginBtn = document.getElementById('oidcLoginBtn');
+const useKeyBtn    = document.getElementById('useKeyBtn');
 const newPostBtn   = document.getElementById('newPostBtn');
 const composePanel = document.getElementById('composePanel');
 const newTagBtn    = document.getElementById('newTagBtn');
@@ -767,15 +785,41 @@ document.getElementById('connectForm').addEventListener('submit', async (ev) => 
     });
     if (!res.ok) { alert('Invalid API key'); return; }
     apiKey = val;
+    authed = true;
     init();
   } catch (e) {
     alert('Connection failed: ' + e.message);
   }
 });
 
+oidcLoginBtn.addEventListener('click', () => { window.location.href = '/auth/login'; });
+useKeyBtn.addEventListener('click', () => {
+  oidcLogin.style.display = 'none';
+  connectForm.style.display = '';
+  apiKeyInput.focus();
+});
+
+// On load, ask the server whether a session cookie is already live (OIDC or a
+// prior key-paste). If so, boot straight into the app cookie-only — no re-paste.
+// Otherwise show the right login control based on whether OIDC is configured.
+async function bootstrap() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('auth_error') === 'forbidden') alert('Your account is not authorized for relay.');
+  else if (params.get('auth_error')) alert('Login failed. Please try again.');
+  if (params.has('auth_error')) history.replaceState(null, '', location.pathname);
+
+  let me = { authenticated: false, oidc: false };
+  try { me = await (await fetch('/auth/me', { credentials: 'same-origin' })).json(); } catch {}
+  if (me.authenticated) { authed = true; init(); return; }
+  if (me.oidc) { oidcLogin.style.display = ''; connectForm.style.display = 'none'; }
+  else { connectForm.style.display = ''; oidcLogin.style.display = 'none'; }
+}
+
 disconnectBtn.addEventListener('click', async () => {
   apiKey = '';
-  fetch('/session', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+  authed = false;
+  // Await so the cookie is cleared before bootstrap() re-checks /auth/me below.
+  await fetch('/session', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
   if (es) { es.close(); es = null; }
   if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
   closeSidebar();
@@ -787,19 +831,28 @@ disconnectBtn.addEventListener('click', async () => {
   newTagBtn.style.display = 'none';
   searchBar.style.display = 'none';
   activeSearch = null; searchInput.value = ''; searchBar.classList.remove('active');
-  document.querySelector('.key-wrap').style.display = '';
   connectedBar.style.display = 'none';
   apiKeyInput.value = '';
   setDot('');
+  // Show whichever login control fits the deployment (OIDC button vs key form).
+  bootstrap();
 });
 
 async function apiFetch(path, opts = {}) {
-  const res = await fetch(path, {
-    ...opts,
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...(opts.headers || {}) },
-  });
+  // Cookie carries the session by default; only add the bearer header on the
+  // API-key break-glass path.
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const res = await fetch(path, { credentials: 'same-origin', ...opts, headers });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
+}
+
+// Like apiFetch but returns the raw Response (no JSON parse) — for DELETEs.
+async function apiSend(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  return fetch(path, { credentials: 'same-origin', ...opts, headers });
 }
 
 async function init() {
@@ -812,7 +865,8 @@ async function init() {
   document.getElementById('tabFiles').classList.remove('active');
   feed.style.display = ''; attachmentsView.style.display = 'none';
   loadMoreWrap.style.display = 'none';
-  document.querySelector('.key-wrap').style.display = 'none';
+  connectForm.style.display = 'none';
+  oidcLogin.style.display = 'none';
   connectedBar.style.display = '';
   newPostBtn.style.display = '';
   newTagBtn.style.display = '';
@@ -1183,7 +1237,7 @@ document.getElementById('tabTree').addEventListener('click', () => setSidebarMod
 document.getElementById('tabFiles').addEventListener('click', () => setSidebarMode('files'));
 
 async function loadFolders() {
-  if (!apiKey) return;
+  if (!authed) return;
   try { renderFolders((await apiFetch('/folders')).folders); } catch {}
 }
 
@@ -1219,7 +1273,7 @@ async function selectFolder(folder) {
 const attPath = (a) => '/attachments/' + [a.folder, 'assets', a.filename].map(encodeURIComponent).join('/');
 
 async function loadAttachments() {
-  if (!apiKey) return;
+  if (!authed) return;
   try { attachCache = (await apiFetch('/attachments')).items; } catch { attachCache = []; }
   renderAttachSidebar();
   renderAttachGallery();
@@ -1391,7 +1445,7 @@ async function selectTag(tag) {
 
 /* ── Posts ────────────────────────────────────────────────── */
 async function loadPosts(replace = false) {
-  if (!apiKey) return;
+  if (!authed) return;
   try {
     const params = new URLSearchParams({ limit: LIMIT, offset });
     if (activeTag) params.set('tag', activeTag);
@@ -1490,7 +1544,7 @@ function renderPost(post) {
     e.stopPropagation();
     if (!confirm('Delete this post?')) return;
     try {
-      await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
+      await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
       el.remove(); total--;
       loadMoreWrap.style.display = offset < total ? 'block' : 'none';
       await loadTags();
@@ -1558,7 +1612,7 @@ function rewirePost(el, post) {
     e.stopPropagation();
     if (!confirm('Delete this post?')) return;
     try {
-      await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
+      await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
       el.remove(); total--;
       loadMoreWrap.style.display = offset < total ? 'block' : 'none';
       await loadTags();
@@ -1570,7 +1624,7 @@ function rewirePost(el, post) {
 /* ── SSE ──────────────────────────────────────────────────── */
 function connectSSE() {
   if (es) { es.close(); es = null; }
-  if (!apiKey) return;
+  if (!authed) return;
   const params = new URLSearchParams();
   if (activeTag) params.set('tag', activeTag);
   const qs = params.toString();
@@ -1712,7 +1766,7 @@ pmDelete.addEventListener('click', async () => {
   const post = _modalPost; if (!post) return;
   if (!confirm('Delete this post?')) return;
   try {
-    await fetch(`/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` } });
+    await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
     closePostModal();
     const card = feed.querySelector(`[data-id="${post.id}"]`);
     if (card) { card.remove(); total--; }
@@ -1754,6 +1808,9 @@ function escHtml(str) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+// Kick off: restore an existing session (cookie) or show the login control.
+bootstrap();
 </script>
 </body>
 </html>

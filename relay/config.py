@@ -28,9 +28,44 @@ class Settings(BaseSettings):
     secure_cookies: bool = True
     attachment_max_mb: int = 25  # reject uploads larger than this (base64-decoded)
 
+    # --- Web UI OIDC (PocketID). All optional; absent => OIDC login disabled,
+    # the API-key paste + bearer paths keep working unchanged. ---
+    oidc_issuer: str = ""  # PocketID base URL (OIDC discovery at /.well-known/openid-configuration)
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    # Signs the relay_session cookie. Falls back to api_key if unset, so sessions
+    # still carry identity/expiry even without a dedicated secret.
+    session_secret: str = ""
+    session_max_age_hours: int = 24 * 30  # signed-cookie lifetime
+    # Comma-separated allowlist of emails permitted to log in via OIDC. Empty =>
+    # any user PocketID authenticates is allowed.
+    oidc_allowed_emails: str = ""
+
+    # --- Phase 2 scaffold: remote MCP OAuth (relay as AS brokering to PocketID).
+    # Not yet wired to a broker; the metadata endpoint advertises the surface. ---
+    mcp_oauth_enabled: bool = False
+    mcp_required_scopes: str = ""  # comma-separated
+
     @property
     def attachment_max_bytes(self) -> int:
         return self.attachment_max_mb * 1024 * 1024
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret)
+
+    @property
+    def session_signing_key(self) -> str:
+        """Key for signing the session cookie; falls back to the API key."""
+        return self.session_secret or self.api_key
+
+    @property
+    def allowed_emails(self) -> set[str]:
+        return {e.strip().lower() for e in self.oidc_allowed_emails.split(",") if e.strip()}
+
+    @property
+    def mcp_scopes(self) -> list[str]:
+        return [s.strip() for s in self.mcp_required_scopes.split(",") if s.strip()]
 
     @property
     def relay_dir(self) -> str:
