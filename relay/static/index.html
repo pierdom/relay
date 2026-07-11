@@ -312,6 +312,18 @@
     }
     .btn-cancel:hover { border-color: var(--text); color: var(--text); }
 
+    .attach-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+    .btn-attach {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      padding: 4px 10px; border-radius: 3px; cursor: pointer;
+      font-family: inherit; font-size: 11px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-attach:hover { border-color: var(--accent); color: var(--accent); }
+    .attach-status { font-size: 11px; color: var(--muted); }
+    .attach-status.error { color: #e5534b; }
+    .edit-form textarea.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+
     /* ── Search bar ─────────────────────────────────────── */
     .search-bar {
       display: flex; align-items: center; gap: 8px;
@@ -608,7 +620,13 @@
       <div class="post">
         <div class="edit-form">
           <div><label>Title</label><input type="text" id="cpTitle" placeholder="(required — becomes the filename)"></div>
-          <div><label>Content</label><textarea id="cpContent" placeholder="Write something…"></textarea></div>
+          <div><label>Content</label><textarea id="cpContent" placeholder="Write something… (drop, paste, or attach a file)"></textarea>
+            <div class="attach-row">
+              <input type="file" id="cpFile" multiple style="display:none">
+              <button type="button" class="btn-attach" id="cpAttach">📎 Attach</button>
+              <span class="attach-status" id="cpAttachStatus"></span>
+            </div>
+          </div>
           <div><label>Tags</label><input type="text" id="cpTags" placeholder="comma-separated"></div>
           <div><label>Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
           <div><label>Expires</label><input type="datetime-local" id="cpExpires"></div>
@@ -890,7 +908,75 @@ function closeCompose() {
   composePanel.classList.remove('open');
   ['cpTitle', 'cpContent', 'cpTags', 'cpSource'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('cpExpires').value = '';
+  const st = document.getElementById('cpAttachStatus');
+  if (st) { st.textContent = ''; st.classList.remove('error'); }
 }
+
+/* ── Attachment upload ─────────────────────────────────────── */
+const IMG_NAME_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',', 2)[1] || '');
+    r.onerror = () => reject(new Error('could not read file'));
+    r.readAsDataURL(file);
+  });
+}
+function insertAtCursor(ta, text) {
+  const s = ta.selectionStart ?? ta.value.length, e = ta.selectionEnd ?? ta.value.length;
+  ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
+  ta.selectionStart = ta.selectionEnd = s + text.length;
+  ta.focus();
+}
+// Upload one file, then insert its ![[ref]] at the cursor. embed=false: the server
+// just stores it (in the post's folder when postId is set) and we place the ref.
+async function uploadOne(file, postId, ta, statusEl) {
+  const name = file.name || `pasted-${Date.now()}.png`;
+  statusEl.classList.remove('error');
+  statusEl.textContent = `Uploading ${name}…`;
+  try {
+    const data = await fileToBase64(file);
+    const body = { filename: name, data };
+    if (postId != null) { body.post_id = postId; body.embed = false; }
+    const res = await apiFetch('/attachments', { method: 'POST', body: JSON.stringify(body) });
+    insertAtCursor(ta, `\n${IMG_NAME_RE.test(res.filename) ? '!' : ''}[[${res.filename}]]\n`);
+    statusEl.textContent = `Attached ${res.filename}`;
+  } catch (e) {
+    statusEl.classList.add('error');
+    statusEl.textContent = `Upload failed: ${e.message}`;
+  }
+}
+async function uploadMany(files, postId, ta, statusEl) {
+  for (const f of files) await uploadOne(f, postId, ta, statusEl);
+}
+function wireAttachments(ta, fileInput, attachBtn, statusEl, getPostId) {
+  attachBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    await uploadMany([...fileInput.files], getPostId(), ta, statusEl);
+    fileInput.value = '';
+  });
+  ta.addEventListener('dragover', e => { e.preventDefault(); ta.classList.add('drag-over'); });
+  ta.addEventListener('dragleave', () => ta.classList.remove('drag-over'));
+  ta.addEventListener('drop', async e => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault(); ta.classList.remove('drag-over');
+    await uploadMany([...e.dataTransfer.files], getPostId(), ta, statusEl);
+  });
+  ta.addEventListener('paste', async e => {
+    const files = [...(e.clipboardData?.items || [])]
+      .filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
+    if (!files.length) return;   // let normal text paste through
+    e.preventDefault();
+    await uploadMany(files, getPostId(), ta, statusEl);
+  });
+}
+
+wireAttachments(
+  document.getElementById('cpContent'), document.getElementById('cpFile'),
+  document.getElementById('cpAttach'), document.getElementById('cpAttachStatus'),
+  () => null,
+);
 
 /* ── Search ───────────────────────────────────────────────── */
 searchInput.addEventListener('input', () => {
@@ -1235,7 +1321,13 @@ function enterEditMode(el, post) {
   el.innerHTML = `
     <div class="edit-form">
       <div><label>Title</label><input class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
-      <div><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea></div>
+      <div><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea>
+        <div class="attach-row">
+          <input type="file" class="ef-file" multiple style="display:none">
+          <button type="button" class="btn-attach ef-attach">📎 Attach</button>
+          <span class="attach-status ef-attach-status"></span>
+        </div>
+      </div>
       <div><label>Tags</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
       <div><label>Source</label><input class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
       <div><label>Expires</label><input class="ef-expires" type="datetime-local" value="${toDatetimeLocal(post.expires_at || '')}"></div>
@@ -1244,6 +1336,12 @@ function enterEditMode(el, post) {
         <button class="btn-save">Save</button>
       </div>
     </div>`;
+
+  wireAttachments(
+    el.querySelector('.ef-content'), el.querySelector('.ef-file'),
+    el.querySelector('.ef-attach'), el.querySelector('.ef-attach-status'),
+    () => post.id,
+  );
 
   el.querySelector('.btn-cancel').addEventListener('click', () => { el.classList.remove('editing'); el.innerHTML = savedHtml; rewirePost(el, post); });
   el.querySelector('.btn-save').addEventListener('click', async () => {

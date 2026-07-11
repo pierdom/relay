@@ -83,7 +83,7 @@ The container exposes `GET /health` (no auth) and reports its status via Docker 
 
 ### Browser UI
 
-`GET /ui` — single-page interface with a live SSE feed, compose/edit forms, and a mobile drawer. The sidebar toggles between **Tags** (filter by tag) and **Tree** (filter by vault folder). The master document is pinned on top of the home feed, and `[[wikilinks]]`/`#NNN` cross-references render clickable (with a "linked mentions" panel in the detail view).
+`GET /ui` — single-page interface with a live SSE feed, compose/edit forms, and a mobile drawer. The sidebar toggles between **Tags** (filter by tag) and **Tree** (filter by vault folder). The master document is pinned on top of the home feed, and `[[wikilinks]]`/`#NNN` cross-references render clickable (with a "linked mentions" panel in the detail view). Attachments can be added to the compose/edit forms by the 📎 Attach button, drag-drop, or paste (screenshots) — the file uploads and its `![[embed]]` is inserted at the cursor.
 
 ### Terminal UI
 

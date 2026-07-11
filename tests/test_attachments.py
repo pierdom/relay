@@ -164,6 +164,26 @@ async def test_add_attachment_to_post_appends_embed_and_uses_post_folder(client)
 
 
 @pytest.mark.asyncio
+async def test_add_attachment_embed_false_files_in_post_folder_without_appending(client):
+    post = await _create(client, "Switch Notes", content="Body only.", tags=["homelab"])
+    r = await client.post(
+        "/attachments",
+        json={"filename": "sw.png", "data": PNG, "post_id": post["id"], "embed": False},
+        headers=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["folder"] == "Homelab"      # filed under the post's folder
+    assert body["post_id"] is None          # nothing appended
+    # post body is untouched — the UI inserts the ref itself
+    updated = (await client.get(f"/posts/{post['id']}", headers=AUTH)).json()
+    assert updated["content"] == "Body only."
+    assert "![[sw.png]]" not in updated["content"]
+    # but the file is there, under the post's folder
+    assert (await client.get("/attachments/Homelab/assets/sw.png", headers=AUTH)).status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_add_attachment_collision_suffix(client):
     a = await client.post("/attachments", json={"filename": "dup.png", "data": PNG}, headers=AUTH)
     b = await client.post("/attachments", json={"filename": "dup.png", "data": PNG}, headers=AUTH)

@@ -133,6 +133,7 @@ relay/static/
 `GET /ui` serves a single-page interface backed by the REST API and SSE.
 
 - **Posts**: create (compose panel), edit inline, delete with confirmation; `expires_at` datetime picker in both compose and edit forms; posts with an expiry show "expires in X" in the footer
+- **Attachments**: compose + edit forms take a file via the 📎 Attach button, drag-drop onto the content box, or paste (e.g. a screenshot). Files upload to `POST /attachments` and the `![[file]]` embed is inserted at the cursor. Edit-mode uploads file under the post's folder (`embed=false` — the UI places the ref); compose uploads go to `Inbox/assets/` (resolved by bare name regardless of folder)
 - **Search**: search bar above the feed (visible after connect); 300 ms debounce; filters by title, content, or source; combinable with tag filter; `×` button or Escape to clear
 - **Sidebar Tags ⇄ Tree toggle**: two tabs at the top of the sidebar. **Tags** filters the feed by tag (create a new tag, rename inline, ⚙ per-tag expiry form). **Tree** lists the first-level vault folders (`GET /folders`) with counts; clicking one filters the feed to that folder (`GET /posts?folder=`). Tag and folder filters are mutually exclusive.
 - **Live feed**: SSE connection with amber dot + "live/offline/error" label; new posts flash and prepend automatically

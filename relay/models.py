@@ -116,8 +116,9 @@ class BacklinksResponse(BaseModel):
 class AttachmentCreate(BaseModel):
     filename: str = Field(min_length=1)
     data: str = Field(description="Base64-encoded file bytes")
-    post_id: int | None = None  # attach to this post (append ![[file]] to its body)
+    post_id: int | None = None  # attach to this post (file under its folder)
     folder: str | None = None   # first-level folder for a standalone attachment
+    embed: bool = True          # with post_id, also append ![[file]] to its body
 
     @field_validator("filename")
     @classmethod

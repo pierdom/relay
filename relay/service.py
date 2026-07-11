@@ -265,12 +265,14 @@ async def add_attachment(
     data: bytes,
     post_id: int | None = None,
     folder: str | None = None,
+    embed: bool = True,
 ) -> AttachmentResponse:
     """Store an attachment in a folder's ``assets/`` dir and return its embed ref.
 
-    With ``post_id``: the file is filed under that post's folder and its
-    ``![[file]]`` embed is appended to the post's body (streamed via SSE).
-    Without it: filed under ``folder`` (or ``Inbox``); the caller places the ref.
+    With ``post_id``: the file is filed under that post's folder; if ``embed`` is
+    true its ``![[file]]`` embed is also appended to the post's body (streamed via
+    SSE). With ``embed`` false (e.g. the UI, which inserts the ref itself) the post
+    is left untouched. Without ``post_id``: filed under ``folder`` (or ``Inbox``).
     """
     if not data:
         raise AttachmentError("attachment is empty")
@@ -294,7 +296,7 @@ async def add_attachment(
     ref = f"![[{written.name}]]"
 
     result_post_id = None
-    if row is not None:  # append outside the lock — update_post takes it itself
+    if row is not None and embed:  # append outside the lock — update_post takes it itself
         new_content = row["content"].rstrip() + f"\n\n{ref}\n"
         await update_post(db, post_id, PostUpdate(content=new_content))
         result_post_id = post_id
