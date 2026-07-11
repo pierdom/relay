@@ -1,8 +1,17 @@
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="relay/static/assets/relay-mark-on-dark.svg">
+  <img src="relay/static/assets/relay-mark.svg" alt="relay" width="96" height="96">
+</picture>
+
 # relay
 
 [![Build](https://github.com/pierdom/relay/actions/workflows/docker.yml/badge.svg)](https://github.com/pierdom/relay/actions/workflows/docker.yml)
 
 **An AI-integration layer over a plain-Markdown, Obsidian-compatible vault.**
+
+</div>
 
 Your knowledge base lives as ordinary `.md` files on disk — a first-class **Obsidian / filesystem vault** you can browse, `grep`, git-version, and edit in Obsidian, neovim, or any tool. relay wraps that *same* vault with the machine surface AI systems need: an **MCP server**, a **REST API**, a real-time **SSE** stream, and **browser + terminal UIs**. Agents publish structured content (digests, research notes, alerts, memory), query the archive, cross-reference posts by a stable `id` that survives renames, and subscribe live — all against files you can equally well open by hand.
 

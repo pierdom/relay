@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import watcher
@@ -64,12 +65,22 @@ app.add_middleware(
     session_cookie="relay_oauth",
 )
 
-_UI_PATH = Path(__file__).parent / "static" / "index.html"
+_STATIC_DIR = Path(__file__).parent / "static"
+_UI_PATH = _STATIC_DIR / "index.html"
+
+# Brand assets (logos, favicons) — public, no auth, so <link rel="icon"> and the
+# README can reference them directly.
+app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="assets")
 
 
 @app.get("/health", include_in_schema=False)
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> FileResponse:
+    return FileResponse(_STATIC_DIR / "assets" / "favicon-64.png", media_type="image/png")
 
 
 @app.get("/", include_in_schema=False)
