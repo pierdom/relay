@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -119,7 +120,7 @@ async def session_create(request: Request, response: Response) -> dict:
     auth = request.headers.get("authorization", "")
     if not key and auth.startswith("Bearer "):
         key = auth[7:]
-    if key != settings.api_key:
+    if not (key and hmac.compare_digest(key, settings.api_key)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     token = create_session()
     response.set_cookie(
@@ -128,7 +129,7 @@ async def session_create(request: Request, response: Response) -> dict:
         httponly=True,
         samesite="strict",
         secure=settings.secure_cookies,
-        max_age=86400 * 30,
+        max_age=settings.session_max_age_hours * 3600,
     )
     return {"ok": True}
 
