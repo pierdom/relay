@@ -8,6 +8,8 @@ with ``row_factory = aiosqlite.Row``.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from collections import Counter
 
@@ -240,6 +242,19 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
 
 # ── Attachments ───────────────────────────────────────────────────────────────
 
+_DATA_URI_RE = re.compile(r"^data:[^;,]*;base64,", re.IGNORECASE)
+
+
+def decode_attachment_b64(data: str) -> bytes:
+    """Decode a client-supplied base64 string, tolerating a ``data:...;base64,``
+    prefix and internal whitespace/newlines. Raises ``ValueError`` on bad input."""
+    s = _DATA_URI_RE.sub("", (data or "").strip())
+    s = re.sub(r"\s+", "", s)
+    try:
+        return base64.b64decode(s, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("data is not valid base64") from exc
+
 
 async def add_attachment(
     db: aiosqlite.Connection,
@@ -270,11 +285,14 @@ async def add_attachment(
     else:
         target_folder = folder or folders.INBOX
 
-    written = vault.write_attachment(target_folder, filename, data)
+    # Serialize name-allocation + write against other writers so two concurrent
+    # uploads of the same filename can't resolve to the same path and clobber.
+    async with vault.write_lock:
+        written = vault.write_attachment(target_folder, filename, data)
     ref = f"![[{written.name}]]"
 
     result_post_id = None
-    if row is not None:
+    if row is not None:  # append outside the lock — update_post takes it itself
         new_content = row["content"].rstrip() + f"\n\n{ref}\n"
         await update_post(db, post_id, PostUpdate(content=new_content))
         result_post_id = post_id

@@ -199,3 +199,45 @@ async def test_add_attachment_traversal_filename_is_sanitized(client):
     )
     assert r.status_code == 201
     assert "/" not in r.json()["filename"] and ".." not in r.json()["filename"]
+
+
+@pytest.mark.asyncio
+async def test_add_attachment_accepts_data_uri_and_whitespace(client):
+    from relay import service
+
+    wrapped = "data:image/png;base64," + "\n".join([PNG[i:i + 8] for i in range(0, len(PNG), 8)])
+    r = await client.post("/attachments", json={"filename": "u.png", "data": wrapped}, headers=AUTH)
+    assert r.status_code == 201, r.text
+    # served bytes match the original
+    got = await client.get("/attachments/u.png", headers=AUTH)
+    assert got.content == base64.b64decode(PNG)
+    # unit: same decoder used
+    assert service.decode_attachment_b64(wrapped) == base64.b64decode(PNG)
+
+
+# ── decode helper + mime + retrieval guard (unit) ─────────────────────────────
+
+
+def test_decode_attachment_b64_rejects_garbage():
+    from relay import service
+
+    with pytest.raises(ValueError):
+        service.decode_attachment_b64("!!!not base64!!!")
+
+
+def test_attachment_mime_fallback_for_avif(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path))
+    assert vault.attachment_mime(tmp_path / "x.avif") == "image/avif"
+    assert vault.attachment_mime(tmp_path / "x.svg") == "image/svg+xml"
+
+
+def test_read_attachment_size_guard(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path))
+    assets = tmp_path / "Inbox" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "big.png").write_bytes(b"x" * 2048)
+    with pytest.raises(ValueError):
+        vault.read_attachment("big.png", max_bytes=1024)
+    # under the limit reads fine
+    ok = vault.read_attachment("big.png", max_bytes=4096)
+    assert ok is not None and len(ok[1]) == 2048

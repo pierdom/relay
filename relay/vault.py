@@ -229,15 +229,31 @@ def write_attachment(folder: str, filename: str, data: bytes) -> Path:
     return path
 
 
-def read_attachment(name: str) -> tuple[Path, bytes, str] | None:
-    """Resolve and read an attachment. Returns ``(path, bytes, mime)`` or ``None``."""
+# Extensions mimetypes often can't guess but that relay treats as images.
+_IMAGE_MIME_FALLBACK = {
+    ".avif": "image/avif", ".bmp": "image/bmp", ".svg": "image/svg+xml", ".webp": "image/webp",
+}
+
+
+def attachment_mime(path: Path) -> str:
     import mimetypes
 
+    mime, _ = mimetypes.guess_type(str(path))
+    return mime or _IMAGE_MIME_FALLBACK.get(path.suffix.lower(), "application/octet-stream")
+
+
+def read_attachment(name: str, *, max_bytes: int | None = None) -> tuple[Path, bytes, str] | None:
+    """Resolve and read an attachment. Returns ``(path, bytes, mime)`` or ``None``.
+
+    Stats the file before reading; raises ``ValueError`` if it exceeds ``max_bytes``
+    so a huge file is never slurped into memory / an LLM context.
+    """
     path = resolve_attachment(name)
     if path is None:
         return None
-    mime, _ = mimetypes.guess_type(str(path))
-    return path, path.read_bytes(), mime or "application/octet-stream"
+    if max_bytes is not None and path.stat().st_size > max_bytes:
+        raise ValueError(f"attachment is larger than {max_bytes} bytes")
+    return path, path.read_bytes(), attachment_mime(path)
 
 
 # ── index mirror ─────────────────────────────────────────────────────────────

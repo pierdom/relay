@@ -8,8 +8,6 @@ transport can connect remotely with the relay's bearer key.
 """
 from __future__ import annotations
 
-import base64
-import binascii
 import hmac
 from contextlib import asynccontextmanager
 
@@ -160,9 +158,9 @@ async def add_attachment(
 ) -> dict:
     """Returns {filename, ref, folder, post_id}. `ref` is the ![[…]] embed to drop into a post."""
     try:
-        raw = base64.b64decode(data, validate=True)
-    except (binascii.Error, ValueError):
-        return {"error": "data is not valid base64"}
+        raw = service.decode_attachment_b64(data)
+    except ValueError as exc:
+        return {"error": str(exc)}
     async with _db() as db:
         try:
             result = await service.add_attachment(
@@ -184,12 +182,18 @@ async def add_attachment(
 )
 async def get_attachment(name: str):
     """Returns image content for images, else a dict describing the file."""
-    result = vault.read_attachment(name)
+    try:
+        result = vault.read_attachment(name, max_bytes=settings.attachment_max_bytes)
+    except ValueError:
+        return {"error": f"Attachment '{name}' is too large to return inline "
+                         f"(over {settings.attachment_max_mb} MB)."}
     if result is None:
         return {"error": f"Attachment '{name}' not found."}
     path, raw, mime = result
     if mime.startswith("image/"):
-        return Image(data=raw, format=path.suffix.lstrip(".").lower() or "png")
+        # Derive format from the mime (image/jpeg → 'jpeg') so Image doesn't emit
+        # a non-standard type like image/jpg from the '.jpg' suffix.
+        return Image(data=raw, format=mime.split("/", 1)[1])
     return {"filename": path.name, "mime": mime, "bytes": len(raw),
             "note": "Non-image attachment; not shown inline."}
 

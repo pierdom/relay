@@ -244,6 +244,12 @@ async def call_tool(
             response.raise_for_status()
             mime = response.headers.get("content-type", "application/octet-stream").split(";")[0]
             raw = response.content
+        max_bytes = settings.attachment_max_mb * 1024 * 1024
+        if len(raw) > max_bytes:
+            return [types.TextContent(
+                type="text",
+                text=f"Attachment '{arguments['name']}' is {len(raw)} bytes — too large to return inline.",
+            )]
         if mime.startswith("image/"):
             import base64 as _b64
             return [types.ImageContent(type="image", data=_b64.b64encode(raw).decode(), mimeType=mime)]

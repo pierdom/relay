@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import base64
-import binascii
-
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
@@ -28,8 +25,8 @@ async def create_attachment(
     """Store a base64 attachment in a folder's ``assets/``; with ``post_id`` the
     ``![[file]]`` embed is appended to that post's body."""
     try:
-        data = base64.b64decode(body.data, validate=True)
-    except (binascii.Error, ValueError):
+        data = service.decode_attachment_b64(body.data)
+    except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data is not valid base64")
     try:
         return await service.add_attachment(
