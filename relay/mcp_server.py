@@ -18,6 +18,7 @@ from mcp.server.auth.settings import (
     RevocationOptions,
 )
 from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -65,6 +66,14 @@ mcp = FastMCP(
     instructions=INSTRUCTIONS,
     stateless_http=True,
     streamable_http_path="/mcp",
+    # We mount into FastAPI behind a public reverse proxy, not FastMCP's own
+    # uvicorn. FastMCP's default host (127.0.0.1) otherwise auto-enables DNS-
+    # rebinding protection scoped to localhost, which 421s every real Host header
+    # (e.g. relay.geon.im) and 403s a browser Origin — so remote /mcp never worked
+    # over the network. DNS rebinding is a localhost-dev threat; our actual
+    # controls are bearer/OAuth auth + HTTPS + the proxy, so disable that check
+    # (this matches the SDK's own default for a non-localhost host).
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     **_auth_kwargs(),
 )
 
