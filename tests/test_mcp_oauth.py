@@ -121,8 +121,10 @@ async def test_register_and_get_client(provider):
     "redirect,ok",
     [
         ("https://claude.ai/cb", True),  # allowlisted host
+        ("https://chatgpt.com/oauth/callback", True),  # allowlisted (default set)
         ("http://localhost:41000/cb", True),  # loopback http allowed (native apps)
         ("http://127.0.0.1:8080/cb", True),
+        ("https://www.perplexity.ai/rest/connections/oauth_callback", False),  # not in default -> opt-in
         ("https://evil.example.com/cb", False),  # non-allowlisted https -> rejected
         ("http://evil.example.com/cb", False),  # remote cleartext -> rejected
         ("ftp://evil/cb", False),

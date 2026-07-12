@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # an attacker from registering a client that points an auth code at their own
     # https endpoint. Defaults to Claude's known connector callback hosts; empty =
     # allow any https (opt-out). http redirects stay loopback-only regardless.
-    mcp_allowed_redirect_hosts: str = "claude.ai,claude.com"
+    mcp_allowed_redirect_hosts: str = "claude.ai,claude.com,chatgpt.com"
     # Token lifetimes (seconds). Auth codes are single-use and short-lived;
     # access tokens rotate via long-lived refresh tokens.
     mcp_auth_code_ttl_seconds: int = 60
