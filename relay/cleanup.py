@@ -103,3 +103,16 @@ async def cleanup_loop() -> None:
                     logger.info("Cleanup deleted %d expired post(s)", count)
         except Exception as exc:
             logger.error("Cleanup error: %s", exc)
+
+        # Piggyback OAuth store hygiene: drop expired pending auths, codes, and
+        # access tokens (refresh tokens live until their own expiry). Gate on
+        # mcp_oauth_active — the store only exists when OAuth actually ran.
+        if settings.mcp_oauth_active:
+            try:
+                from .mcp_oauth.store import get_store
+
+                removed = await get_store().cleanup_expired()
+                if removed:
+                    logger.info("Cleanup removed %d expired OAuth row(s)", removed)
+            except Exception as exc:
+                logger.error("OAuth cleanup error: %s", exc)

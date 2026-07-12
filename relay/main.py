@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hmac
-import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,6 +34,19 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Persistent OAuth store (DCR clients + tokens) lives beside the index but is
+    # never rebuilt from files; create its schema once at startup when enabled.
+    if settings.mcp_oauth_active:
+        from .mcp_oauth.store import get_store
+
+        await get_store().init()
+    elif settings.mcp_oauth_enabled:
+        # Flag set but the upstream OIDC client isn't configured, so OAuth can't
+        # broker a login — fall back to static-bearer. Warn so it's not silent.
+        logging.getLogger(__name__).warning(
+            "MCP_OAUTH_ENABLED is set but OIDC is not configured; remote MCP OAuth "
+            "is inactive and /mcp still uses the static API key."
+        )
     task = asyncio.create_task(cleanup_loop())
     # Live vault watcher: external edits (e.g. from Obsidian) re-index + push SSE.
     watcher.start(asyncio.get_running_loop())
@@ -91,31 +103,6 @@ async def root() -> FileResponse:
 @app.get("/ui", include_in_schema=False)
 async def ui() -> RedirectResponse:
     return RedirectResponse("/", status_code=status.HTTP_301_MOVED_PERMANENTLY)
-
-
-@app.get("/.well-known/oauth-protected-resource/mcp", include_in_schema=False)
-async def mcp_protected_resource_metadata() -> Response:
-    """RFC 9728 protected-resource metadata for the MCP endpoint.
-
-    Phase-2 scaffold: advertises relay itself as the authorization server so a
-    remote MCP client (Claude Desktop / claude.ai) can discover the auth surface.
-    Gated behind MCP_OAUTH_ENABLED (default off) — the OAuth Authorization Server
-    broker is not yet implemented, so /mcp still enforces the static bearer key.
-    """
-    if not settings.mcp_oauth_enabled:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    base = settings.relay_base_url.rstrip("/")
-    return Response(
-        content=json.dumps(
-            {
-                "resource": f"{base}/mcp",
-                "authorization_servers": [base],
-                "scopes_supported": settings.mcp_scopes,
-                "bearer_methods_supported": ["header"],
-            }
-        ),
-        media_type="application/json",
-    )
 
 
 @app.post("/session", include_in_schema=False)
