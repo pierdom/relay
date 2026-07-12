@@ -278,6 +278,17 @@ class OAuthStore:
             )
             await db.commit()
 
+    async def revoke_all_for(self, client_id: str, sub: str) -> None:
+        """Revoke every token (access + refresh) for one principal on one client.
+        Used to make revocation cascade to the paired token, and to contain a
+        detected refresh-token reuse by killing the whole family (RFC 6819)."""
+        async with self._connect() as db:
+            await db.execute(
+                "UPDATE tokens SET revoked = 1 WHERE client_id = ? AND sub = ?",
+                (client_id, sub),
+            )
+            await db.commit()
+
     async def claim_refresh_token(self, token: str) -> bool:
         """Atomically revoke a refresh token as part of rotation. Returns True iff
         it was live (revoked in this call). A concurrent re-use of the same refresh
