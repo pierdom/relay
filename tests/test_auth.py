@@ -142,3 +142,30 @@ async def test_mcp_metadata_absent_when_oauth_disabled():
     # 200 discovery doc that would invite a client into an OAuth flow relay isn't
     # running).
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_mcp_accepts_public_host_and_origin(monkeypatch, tmp_path):
+    # Regression: FastMCP's default host (127.0.0.1) auto-enables localhost-scoped
+    # DNS-rebinding protection, which 421s any real Host (e.g. relay.geon.im) and
+    # 403s a browser Origin — breaking remote /mcp entirely. We disable it (auth +
+    # HTTPS + proxy are the real controls), so a real Host/Origin must pass through
+    # to the transport, not be blocked at 421/403.
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    body = {
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                   "clientInfo": {"name": "t", "version": "1"}},
+    }
+    headers = {
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "Origin": "https://claude.ai",
+    }
+    # The MCP streamable-HTTP session manager only runs inside the app lifespan.
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="https://relay.geon.im") as c:
+            r = await c.post("/mcp", headers=headers, json=body)
+    assert r.status_code not in (421, 403)  # not blocked by Host/Origin validation
+    assert r.status_code == 200
