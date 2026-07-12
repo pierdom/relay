@@ -78,8 +78,9 @@ Links are stored verbatim and resolved at **display time** (never rewritten exce
 | `SESSION_MAX_AGE_HOURS` | 720 | Signed session-cookie lifetime (default 30d) |
 | `OIDC_ALLOWED_SUBS` | "" | Comma-separated allowlist of OIDC `sub`s (immutable user id — preferred) |
 | `OIDC_ALLOWED_EMAILS` | "" | Comma-separated allowlist; matches **verified** emails only. Both allowlists empty = any PocketID user |
-| `MCP_OAUTH_ENABLED` | false | *(Phase-2 scaffold)* advertise `/.well-known/oauth-protected-resource/mcp`; AS broker not built yet |
-| `MCP_REQUIRED_SCOPES` | "" | *(Phase-2 scaffold)* scopes listed in the MCP resource metadata |
+| `MCP_OAUTH_ENABLED` | false | Turn `/mcp` into an OAuth 2.1 AS+RS (DCR + PKCE, tokens brokered to PocketID). Needs `OIDC_*`; add `<RELAY_BASE_URL>/mcp/oauth/callback` to that PocketID client. Off = static-bearer only |
+| `MCP_REQUIRED_SCOPES` | relay | Scopes required on `/mcp`; single scope = full tool access |
+| `MCP_AUTH_CODE_TTL_SECONDS` / `MCP_ACCESS_TOKEN_TTL_SECONDS` / `MCP_REFRESH_TOKEN_TTL_SECONDS` | 60 / 3600 / 2592000 | OAuth code / access / refresh lifetimes |
 
 ## Authentication
 
@@ -90,7 +91,7 @@ Two credential channels, both checked by the shared `require_api_key` dependency
 
 The cookie is minted two ways: **OIDC login** via PocketID (`GET /auth/login` → PocketID authorize with PKCE/S256 → `GET /auth/callback` validates the ID token, enforces the allowlist — immutable `OIDC_ALLOWED_SUBS`, or `OIDC_ALLOWED_EMAILS` on **verified** emails only — sets the cookie), or the **API-key paste** break-glass (`POST /session`, synthetic `sub=apikey`). `GET /auth/me` reports session state + whether OIDC is configured (drives the UI login control); `GET /auth/logout` / `DELETE /session` clear it. Transient OAuth state (state/nonce/PKCE verifier) rides a short-lived `relay_oauth` cookie via Starlette `SessionMiddleware`.
 
-**Remote MCP OAuth is scaffold-only.** PocketID lacks Dynamic Client Registration and Claude's remote connector requires it, so relay must eventually act as its own OAuth Authorization Server brokering to PocketID (`mcp==1.27.x` ships the stack). For now only the RFC 9728 resource-metadata endpoint exists (gated by `MCP_OAUTH_ENABLED`); `/mcp` still enforces the static bearer.
+**Remote MCP OAuth (`MCP_OAUTH_ENABLED`, off by default).** PocketID lacks Dynamic Client Registration and Claude's remote connector requires it, so relay acts as its **own** OAuth 2.1 Authorization Server and brokers the human login upstream to PocketID (reusing the Phase-1 OIDC client). When enabled, FastMCP (`mcp==1.27.1`) mounts `/authorize` `/token` `/register`(DCR) `/revoke` + RFC 8414/9728 metadata and wraps `/mcp` in `RequireAuthMiddleware`; a broker callback `/mcp/oauth/callback` (`relay/mcp_oauth/broker.py`) validates the PocketID id-token, enforces the **same `_authorized()` sub allowlist** as the web UI, and mints a relay auth code. Tokens are opaque, **hashed at rest**, audience-bound to `<RELAY_BASE_URL>/mcp` (RFC 8707), and stored in `<vault>/.relay/oauth.db` — a **separate** SQLite file the index rebuild never touches. The verifier also accepts the static `API_KEY` (synthetic full-scope bearer), so Claude Code CLI keeps working and flipping the flag is backward-compatible. Off = the minimal static-bearer gate (`BearerAuthASGI`), unchanged. Design: relay post #201. **Setup:** add `<RELAY_BASE_URL>/mcp/oauth/callback` to the PocketID client's redirect-URI allowlist before enabling.
 
 ## MCP
 
@@ -162,7 +163,8 @@ relay/
 ├── vault.py       # Canonical file layer: posts + attachments, id allocation, index rebuild, tags.yml
 ├── watcher.py     # watchdog: external edits → reindex + SSE (self-write suppressed)
 ├── service.py     # Shared post/tag/attachment logic — file-first via vault, then mirror to index
-├── mcp_server.py  # In-process FastMCP server (/mcp), bearer-gated
+├── mcp_server.py  # In-process FastMCP server (/mcp); static-bearer or OAuth (MCP_OAUTH_ENABLED)
+├── mcp_oauth/     # Remote MCP OAuth AS: store.py (hashed oauth.db) · provider.py · pocketid.py (broker) · broker.py (callback)
 ├── events.py · cleanup.py   # SSE broadcast hub · TTL cleanup loop
 └── routes/        # posts · tags · attachments · folders · links · events (thin — delegate to service)
 relay_mcp/server.py            # Legacy stdio MCP proxy (REST client)

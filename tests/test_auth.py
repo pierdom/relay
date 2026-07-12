@@ -131,19 +131,14 @@ async def test_session_endpoint_rejects_wrong_key():
 
 
 @pytest.mark.asyncio
-async def test_mcp_metadata_gated(monkeypatch):
-    monkeypatch.setattr(settings, "mcp_oauth_enabled", False)
+async def test_mcp_metadata_absent_when_oauth_disabled():
+    # With OAuth off (the default this app was imported under), the SDK mounts no
+    # auth metadata and there is no hand-rolled route — the path 404s. The
+    # enabled-mode metadata is emitted by the SDK when FastMCP is constructed with
+    # auth (import-time), covered in test_mcp_oauth via a fresh app build.
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/.well-known/oauth-protected-resource/mcp")
-    assert r.status_code == 404
-
-    monkeypatch.setattr(settings, "mcp_oauth_enabled", True)
-    monkeypatch.setattr(settings, "relay_base_url", "https://relay.example.com")
-    monkeypatch.setattr(settings, "mcp_required_scopes", "relay.read,relay.write")
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r = await c.get("/.well-known/oauth-protected-resource/mcp")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["resource"] == "https://relay.example.com/mcp"
-    assert body["authorization_servers"] == ["https://relay.example.com"]
-    assert body["scopes_supported"] == ["relay.read", "relay.write"]
+    # No metadata document is served; the static-bearer gate answers 401 (never a
+    # 200 discovery doc that would invite a client into an OAuth flow relay isn't
+    # running).
+    assert r.status_code == 401

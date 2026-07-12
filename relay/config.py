@@ -44,10 +44,20 @@ class Settings(BaseSettings):
     oidc_allowed_subs: str = ""
     oidc_allowed_emails: str = ""
 
-    # --- Phase 2 scaffold: remote MCP OAuth (relay as AS brokering to PocketID).
-    # Not yet wired to a broker; the metadata endpoint advertises the surface. ---
+    # --- Phase 2: remote MCP OAuth (relay as its own Authorization Server,
+    # brokering the human login upstream to PocketID). When enabled, /mcp is an
+    # OAuth 2.1 Resource Server; the SDK mounts /authorize /token /register
+    # /revoke + metadata, and relay mints audience-bound tokens for Claude.
+    # The upstream login reuses the Phase-1 OIDC client (oidc_*), so no separate
+    # MCP client credentials — just add the /mcp/oauth/callback redirect URI to
+    # that PocketID client. Absent/false keeps the static-bearer path unchanged. ---
     mcp_oauth_enabled: bool = False
-    mcp_required_scopes: str = ""  # comma-separated
+    mcp_required_scopes: str = "relay"  # comma-separated; single scope = full tool access
+    # Token lifetimes (seconds). Auth codes are single-use and short-lived;
+    # access tokens rotate via long-lived refresh tokens.
+    mcp_auth_code_ttl_seconds: int = 60
+    mcp_access_token_ttl_seconds: int = 60 * 60  # 1h
+    mcp_refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30  # 30d, rotating
 
     @property
     def attachment_max_bytes(self) -> int:
@@ -56,6 +66,13 @@ class Settings(BaseSettings):
     @property
     def oidc_enabled(self) -> bool:
         return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret)
+
+    @property
+    def mcp_oauth_active(self) -> bool:
+        """Whether remote MCP OAuth is *actually* running. It needs the upstream
+        OIDC client too — the flag alone can't broker a login. Single source of
+        truth so wiring, store init, and cleanup never disagree."""
+        return self.mcp_oauth_enabled and self.oidc_enabled
 
     @property
     def session_signing_key(self) -> str:
@@ -87,6 +104,20 @@ class Settings(BaseSettings):
     @property
     def tags_config_path(self) -> str:
         return str(Path(self.relay_dir) / "tags.yml")
+
+    @property
+    def mcp_oauth_db_path(self) -> str:
+        """Persistent OAuth store (DCR clients, codes, tokens).
+
+        Separate from the disposable ``index.db`` — the startup index rebuild must
+        never touch it. Lives in ``.relay/`` so it rides the vault backup.
+        """
+        return str(Path(self.relay_dir) / "oauth.db")
+
+    @property
+    def mcp_resource_url(self) -> str:
+        """RFC 8707 resource identifier for the MCP endpoint (token audience)."""
+        return f"{self.relay_base_url.rstrip('/')}/mcp"
 
 
 settings = Settings()

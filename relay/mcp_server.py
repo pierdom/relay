@@ -12,8 +12,14 @@ import hmac
 from contextlib import asynccontextmanager
 
 import aiosqlite
+from mcp.server.auth.settings import (
+    AuthSettings,
+    ClientRegistrationOptions,
+    RevocationOptions,
+)
 from mcp.server.fastmcp import FastMCP, Image
-from starlette.responses import JSONResponse
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 from . import service, vault
 from .config import settings
@@ -26,12 +32,49 @@ INSTRUCTIONS = (
     "post per topic and update it in place rather than creating duplicates."
 )
 
+
+def _auth_kwargs() -> dict:
+    """When MCP OAuth is enabled (and the upstream OIDC client is configured),
+    turn the MCP server into an OAuth 2.1 Authorization + Resource Server: the SDK
+    mounts /authorize /token /register /revoke + metadata and wraps /mcp in
+    RequireAuthMiddleware, using our provider (which also honors the static key).
+    Off => today's static-bearer BearerAuthASGI, unchanged."""
+    if not settings.mcp_oauth_active:
+        return {}
+    from .mcp_oauth.provider import get_provider
+
+    scopes = list(settings.mcp_scopes)
+    return {
+        "auth": AuthSettings(
+            issuer_url=settings.relay_base_url,
+            resource_server_url=settings.mcp_resource_url,
+            required_scopes=scopes,
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True,
+                valid_scopes=scopes,
+                default_scopes=scopes,
+            ),
+            revocation_options=RevocationOptions(enabled=True),
+        ),
+        "auth_server_provider": get_provider(),
+    }
+
+
 mcp = FastMCP(
     "relay",
     instructions=INSTRUCTIONS,
     stateless_http=True,
     streamable_http_path="/mcp",
+    **_auth_kwargs(),
 )
+
+
+@mcp.custom_route("/mcp/oauth/callback", methods=["GET"], include_in_schema=False)
+async def mcp_oauth_callback(request: Request) -> Response:
+    """Return leg of the upstream PocketID login (unauthenticated by design)."""
+    from .mcp_oauth.broker import handle_callback
+
+    return await handle_callback(request)
 
 
 @asynccontextmanager
@@ -274,5 +317,13 @@ class BearerAuthASGI:
 
 
 def mcp_asgi_app():
-    """Return the Streamable HTTP MCP app, bearer-protected, to mount on FastAPI."""
-    return BearerAuthASGI(mcp.streamable_http_app(), settings.api_key)
+    """Return the Streamable HTTP MCP app to mount on FastAPI.
+
+    With OAuth enabled the SDK already wraps /mcp in RequireAuthMiddleware (and our
+    verifier still accepts the static key), so we mount it bare. Otherwise we keep
+    the minimal static-bearer gate.
+    """
+    app = mcp.streamable_http_app()
+    if settings.mcp_oauth_active:
+        return app
+    return BearerAuthASGI(app, settings.api_key)

@@ -159,6 +159,12 @@ Or in a client config that speaks `streamable-http`:
 }
 ```
 
+**OAuth login (optional).** Set `MCP_OAUTH_ENABLED=true` (with OIDC configured)
+and relay becomes its own OAuth 2.1 Authorization Server, brokering the login
+upstream to your IdP — so a remote client like Claude Desktop / claude.ai can
+connect to `/mcp` via the standard OAuth + Dynamic Client Registration flow
+instead of a pasted bearer key. The static `API_KEY` keeps working either way.
+
 **Local — stdio proxy (legacy).** For clients that can't yet speak remote MCP,
 `relay-mcp` runs a stdio server on the client machine that proxies to the relay
 over REST. It needs a checkout of this repo and `uv`. Add to
