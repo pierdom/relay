@@ -165,6 +165,14 @@ upstream to your IdP — so a remote client like Claude Desktop / claude.ai can
 connect to `/mcp` via the standard OAuth + Dynamic Client Registration flow
 instead of a pasted bearer key. The static `API_KEY` keeps working either way.
 
+In the client's connector dialog fill only the **name + URL** and leave the OAuth
+client fields blank — DCR self-registers. Tokens are opaque, hashed at rest, and
+audience-bound to `/mcp`; revoking one cascades to its pair, and the allowlist is
+re-checked on refresh. Before enabling, add `<RELAY_BASE_URL>/mcp/oauth/callback`
+to your IdP client, keep `OIDC_ALLOWED_SUBS` non-empty (empty = any IdP user gets
+full tool access), and confirm the client's redirect host is in
+`MCP_ALLOWED_REDIRECT_HOSTS`.
+
 **Local — stdio proxy (legacy).** For clients that can't yet speak remote MCP,
 `relay-mcp` runs a stdio server on the client machine that proxies to the relay
 over REST. It needs a checkout of this repo and `uv`. Add to
@@ -296,6 +304,9 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `SESSION_MAX_AGE_HOURS` | `720` | Signed session-cookie lifetime (default 30 days) |
 | `OIDC_ALLOWED_SUBS` | `""` | Comma-separated allowlist of OIDC `sub`s (immutable IdP user ids — preferred over email) |
 | `OIDC_ALLOWED_EMAILS` | `""` | Comma-separated allowlist; matches **verified** emails only. Both allowlists empty = any authenticated user |
+| `MCP_OAUTH_ENABLED` | `false` | Turn `/mcp` into an OAuth 2.1 AS+RS so remote clients connect via OAuth + Dynamic Client Registration (needs `OIDC_*`); the static `API_KEY` still works. Off = static-bearer only |
+| `MCP_REQUIRED_SCOPES` | `relay` | Scope required on `/mcp` (single scope = full tool access) |
+| `MCP_ALLOWED_REDIRECT_HOSTS` | `claude.ai,claude.com,chatgpt.com` | Allowlist of DCR **https** redirect hosts (exact match) — blocks a rogue client pointing an auth code at its own host; blank = any https. `http` stays loopback-only. Add other clients (Perplexity `www.perplexity.ai`, Mistral `console.mistral.ai`) as needed |
 | `RELAY_PALETTE` | `default` | TUI colour theme |
 | `RELAY_TRANSPARENT` | `0` | TUI: show terminal background through the canvas |
 
