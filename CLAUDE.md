@@ -80,6 +80,7 @@ Links are stored verbatim and resolved at **display time** (never rewritten exce
 | `OIDC_ALLOWED_EMAILS` | "" | Comma-separated allowlist; matches **verified** emails only. Both allowlists empty = any PocketID user |
 | `MCP_OAUTH_ENABLED` | false | Turn `/mcp` into an OAuth 2.1 AS+RS (DCR + PKCE, tokens brokered to PocketID). Needs `OIDC_*`; add `<RELAY_BASE_URL>/mcp/oauth/callback` to that PocketID client. Off = static-bearer only |
 | `MCP_REQUIRED_SCOPES` | relay | Scopes required on `/mcp`; single scope = full tool access |
+| `MCP_ALLOWED_REDIRECT_HOSTS` | claude.ai,claude.com | DCR https redirect-URI host allowlist (blocks a rogue client pointing an auth code at its own host); blank = any https. http stays loopback-only |
 | `MCP_AUTH_CODE_TTL_SECONDS` / `MCP_ACCESS_TOKEN_TTL_SECONDS` / `MCP_REFRESH_TOKEN_TTL_SECONDS` | 60 / 3600 / 2592000 | OAuth code / access / refresh lifetimes |
 
 ## Authentication

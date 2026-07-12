@@ -42,10 +42,16 @@ _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 def _redirect_uri_allowed(uri: AnyUrl) -> bool:
+    """DCR redirect-URI policy. http is loopback-only (native apps, RFC 8252).
+    https is restricted to the ``MCP_ALLOWED_REDIRECT_HOSTS`` allowlist so an
+    attacker can't register a client pointing at their own https endpoint and
+    phish an auth code out to it. An empty allowlist means 'any https' (opt-out)."""
+    host = (uri.host or "").lower()
+    if uri.scheme == "http" and host in _LOOPBACK_HOSTS:
+        return True
     if uri.scheme == "https":
-        return True
-    if uri.scheme == "http" and (uri.host or "").lower() in _LOOPBACK_HOSTS:
-        return True
+        allowed = settings.mcp_redirect_hosts
+        return not allowed or host in allowed
     return False
 
 
