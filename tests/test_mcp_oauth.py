@@ -270,6 +270,58 @@ async def test_refresh_rotates_and_revokes_old(provider, store):
     assert await provider.load_refresh_token(_client(), tokens.refresh_token) is None
 
 
+@pytest.mark.asyncio
+async def test_refresh_denied_after_sub_removed_from_allowlist(provider, monkeypatch):
+    # #2: allowlist is re-evaluated on the refresh grant, so a de-authorized sub
+    # loses access at the next rotation instead of persisting for the 30-day TTL.
+    from mcp.server.auth.provider import TokenError
+
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-42")
+    code = await provider.mint_authorization_code(_pending(), sub="user-42")
+    loaded = await provider.load_authorization_code(_client(), code)
+    tokens = await provider.exchange_authorization_code(_client(), loaded)
+    rt = await provider.load_refresh_token(_client(), tokens.refresh_token)
+
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "someone-else")  # de-authorized
+    with pytest.raises(TokenError):
+        await provider.exchange_refresh_token(_client(), rt, scopes=[])
+    # the family is revoked too, so the leftover refresh token is dead
+    assert await provider.load_refresh_token(_client(), tokens.refresh_token) is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_access_token_cascades_to_paired_refresh(provider):
+    # #3a: revoking an access token also kills its paired refresh token (RFC 7009).
+    code = await provider.mint_authorization_code(_pending(), sub="user-42")
+    loaded = await provider.load_authorization_code(_client(), code)
+    tokens = await provider.exchange_authorization_code(_client(), loaded)
+
+    access = await provider.load_access_token(tokens.access_token)
+    assert access is not None
+    await provider.revoke_token(access)
+
+    assert await provider.load_access_token(tokens.access_token) is None
+    assert await provider.load_refresh_token(_client(), tokens.refresh_token) is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_revokes_whole_family(provider):
+    # #3b: replaying a rotated refresh token revokes the attacker's live
+    # descendants too (RFC 6819 containment), not just the replayed token.
+    code = await provider.mint_authorization_code(_pending(), sub="user-42")
+    loaded = await provider.load_authorization_code(_client(), code)
+    t0 = await provider.exchange_authorization_code(_client(), loaded)  # AT0/RT0
+
+    rt0 = await provider.load_refresh_token(_client(), t0.refresh_token)
+    t1 = await provider.exchange_refresh_token(_client(), rt0, scopes=[])  # AT1/RT1
+
+    # attacker replays the already-rotated RT0
+    assert await provider.load_refresh_token(_client(), t0.refresh_token) is None
+    # containment: the live descendants (RT1/AT1) are now revoked as well
+    assert await provider.load_refresh_token(_client(), t1.refresh_token) is None
+    assert await provider.load_access_token(t1.access_token) is None
+
+
 # --- provider: static-key back-compat --------------------------------------
 @pytest.mark.asyncio
 async def test_static_api_key_is_synthetic_full_scope_bearer(provider):

@@ -145,7 +145,14 @@ class RelayOAuthProvider:
         self, client: OAuthClientInformationFull, refresh_token: str
     ) -> RelayRefreshToken | None:
         t = await self._store.get_token(refresh_token)
-        if t is None or t.kind != "refresh" or t.revoked or t.client_id != client.client_id:
+        if t is None or t.kind != "refresh" or t.client_id != client.client_id:
+            return None
+        if t.revoked:
+            # Presenting an already-rotated/revoked refresh token is a reuse signal
+            # (possible theft): revoke the whole (client_id, sub) family so the
+            # attacker's already-rotated descendants die too — RFC 6819 containment,
+            # not just rejection of the replayed token.
+            await self._store.revoke_all_for(t.client_id, t.sub)
             return None
         return RelayRefreshToken(
             token=refresh_token,
@@ -161,6 +168,13 @@ class RelayOAuthProvider:
         refresh_token: RelayRefreshToken,
         scopes: list[str],
     ) -> OAuthToken:
+        # Re-evaluate authorization at each rotation: a sub removed from the
+        # allowlist since issuance must lose access now, not persist for the full
+        # 30-day refresh TTL. (Sub-allowlist only — the recommended/deployed gate;
+        # email-only allowlists carry no stored identity to re-check here.)
+        if settings.allowed_subs and refresh_token.sub not in settings.allowed_subs:
+            await self._store.revoke_all_for(client.client_id, refresh_token.sub)
+            raise TokenError("invalid_grant", "no longer authorized")
         # Rotate: atomically revoke the presented refresh token, then issue a fresh
         # pair. If it was already consumed (reuse), reject — the standard
         # refresh-token-reuse guard.
@@ -206,7 +220,13 @@ class RelayOAuthProvider:
         return None
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
-        await self._store.revoke_token(token.token)
+        # Cascade: RFC 7009 says revoking either token SHOULD revoke its pair. We
+        # don't track explicit pairs, so revoke every token for this principal on
+        # this client — the desired "de-authorize this session" behavior, and it
+        # closes the gap where revoking an access token left its refresh token live.
+        t = await self._store.get_token(token.token)
+        if t is not None:
+            await self._store.revoke_all_for(t.client_id, t.sub)
 
     # --- helpers -------------------------------------------------------------
     async def _issue_tokens(
