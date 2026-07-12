@@ -19,6 +19,7 @@ from mcp.server.auth.settings import (
 )
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import Icon
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -61,9 +62,27 @@ def _auth_kwargs() -> dict:
     }
 
 
+def _brand_icons() -> list[Icon]:
+    """Advertise relay's logo in the initialize serverInfo (MCP SEP-973).
+
+    Clients that read `serverInfo.icons` (spec 2025-11-25) show these instead of
+    the generic globe. `/assets` is public (no auth), so the src URLs resolve for
+    an unauthenticated fetch. Claude's remote connectors don't render this yet
+    (anthropics/claude-ai-mcp#152) but other clients already do, and it's the
+    spec-correct place for it — so it lights up automatically when Claude ships.
+    """
+    base = settings.relay_base_url.rstrip("/")
+    return [
+        Icon(src=f"{base}/assets/relay-mark.svg", mimeType="image/svg+xml"),
+        Icon(src=f"{base}/assets/relay-mark-512.png", mimeType="image/png", sizes=["512x512"]),
+    ]
+
+
 mcp = FastMCP(
     "relay",
     instructions=INSTRUCTIONS,
+    website_url=settings.relay_base_url.rstrip("/"),
+    icons=_brand_icons(),
     stateless_http=True,
     streamable_http_path="/mcp",
     # We mount into FastAPI behind a public reverse proxy, not FastMCP's own
