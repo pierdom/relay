@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # that PocketID client. Absent/false keeps the static-bearer path unchanged. ---
     mcp_oauth_enabled: bool = False
     mcp_required_scopes: str = "relay"  # comma-separated; single scope = full tool access
+    # DCR redirect-URI host allowlist (comma-separated) for https redirects. Blocks
+    # an attacker from registering a client that points an auth code at their own
+    # https endpoint. Defaults to Claude's known connector callback hosts; empty =
+    # allow any https (opt-out). http redirects stay loopback-only regardless.
+    mcp_allowed_redirect_hosts: str = "claude.ai,claude.com"
     # Token lifetimes (seconds). Auth codes are single-use and short-lived;
     # access tokens rotate via long-lived refresh tokens.
     mcp_auth_code_ttl_seconds: int = 60
@@ -90,6 +95,11 @@ class Settings(BaseSettings):
     @property
     def mcp_scopes(self) -> list[str]:
         return [s.strip() for s in self.mcp_required_scopes.split(",") if s.strip()]
+
+    @property
+    def mcp_redirect_hosts(self) -> set[str]:
+        """Allowlisted https redirect hosts for DCR (lowercased). Empty = any."""
+        return {h.strip().lower() for h in self.mcp_allowed_redirect_hosts.split(",") if h.strip()}
 
     @property
     def relay_dir(self) -> str:

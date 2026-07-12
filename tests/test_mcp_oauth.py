@@ -120,9 +120,10 @@ async def test_register_and_get_client(provider):
 @pytest.mark.parametrize(
     "redirect,ok",
     [
-        ("https://claude.ai/cb", True),
+        ("https://claude.ai/cb", True),  # allowlisted host
         ("http://localhost:41000/cb", True),  # loopback http allowed (native apps)
         ("http://127.0.0.1:8080/cb", True),
+        ("https://evil.example.com/cb", False),  # non-allowlisted https -> rejected
         ("http://evil.example.com/cb", False),  # remote cleartext -> rejected
         ("ftp://evil/cb", False),
     ],
@@ -137,6 +138,19 @@ async def test_register_redirect_scheme_policy(provider, redirect, ok):
     else:
         with pytest.raises(RegistrationError):
             await provider.register_client(client)
+
+
+@pytest.mark.asyncio
+async def test_register_redirect_host_allowlist_opt_out(provider, monkeypatch):
+    from mcp.server.auth.provider import RegistrationError
+
+    # Non-allowlisted https is rejected under the default allowlist...
+    with pytest.raises(RegistrationError):
+        await provider.register_client(_client(redirect="https://evil.example.com/cb"))
+    # ...but an empty allowlist opts out (any https allowed again).
+    monkeypatch.setattr(settings, "mcp_allowed_redirect_hosts", "")
+    await provider.register_client(_client(redirect="https://anything.example.com/cb"))
+    assert await provider.get_client("c1") is not None
 
 
 @pytest.mark.asyncio
