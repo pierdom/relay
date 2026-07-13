@@ -12,6 +12,7 @@ import base64
 import binascii
 import re
 from collections import Counter
+from pathlib import Path
 
 import aiosqlite
 
@@ -65,25 +66,50 @@ def _tags_from_sentinel(s: str) -> list[str]:
 
 
 async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostResponse:
+    now = vault.utcnow_iso()
+    # Allocate the id and claim it in one atomic step. `allocate_id` is
+    # `SELECT MAX(id)+1`, so two writers that read it before either inserts would
+    # pick the same id — and the old create path used `index_upsert`, whose
+    # `ON CONFLICT(id) DO UPDATE` would then *silently clobber* the first post.
+    # Fix: run allocate + INSERT under `BEGIN IMMEDIATE` (the MAX read takes the
+    # write lock, so a concurrent writer blocks until we commit and then reads the
+    # new MAX), use a plain INSERT (a surviving collision raises instead of
+    # overwriting), and retry once. `write_lock` still serialises coroutines in
+    # this process; the immediate txn extends the guarantee across connections.
     async with vault.write_lock:
-        post_id = await vault.allocate_id(db)
-        now = vault.utcnow_iso()
-        path = vault.write_file(
-            id=post_id,
-            title=body.title,
-            content=body.content,
-            tags=body.tags,
-            source=body.source,
-            created_at=now,
-            updated_at=None,
-            expires_at=body.expires_at,
-        )
-        await vault.index_upsert(
-            db, id=post_id, title=path.stem, path=path, content=body.content,
-            tags=body.tags, source=body.source, created_at=now,
-            updated_at=None, expires_at=body.expires_at,
-        )
-        await db.commit()
+        for attempt in range(2):
+            path: Path | None = None
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                post_id = await vault.allocate_id(db)
+                path = vault.write_file(
+                    id=post_id,
+                    title=body.title,
+                    content=body.content,
+                    tags=body.tags,
+                    source=body.source,
+                    created_at=now,
+                    updated_at=None,
+                    expires_at=body.expires_at,
+                )
+                await vault.index_insert(
+                    db, id=post_id, title=path.stem, path=path, content=body.content,
+                    tags=body.tags, source=body.source, created_at=now,
+                    updated_at=None, expires_at=body.expires_at,
+                )
+                await db.commit()
+                break
+            except aiosqlite.IntegrityError:
+                await db.rollback()
+                if path is not None:  # drop the orphaned file this attempt wrote
+                    vault.delete_file(path)
+                if attempt == 1:
+                    raise
+            except BaseException:
+                await db.rollback()
+                if path is not None:
+                    vault.delete_file(path)
+                raise
     post = PostResponse.from_row(await _fetch(db, post_id))
     await events.publish(post.model_dump())
     return post
