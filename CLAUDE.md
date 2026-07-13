@@ -151,6 +151,7 @@ SSE runs in a background thread (`● live`/`○ offline`); reconnect replays vi
 ## Tags · master doc · TTL
 
 - **Tags:** front-matter list (`tags: [news, ai]`); in the index stored with sentinel commas (`,news,ai,`) for `LIKE '%,tag,%'` matching. Per-tag TTL canonical in `<vault>/.relay/tags.yml`, mirrored to the index. `PATCH /tags/{tag}` rewrites the tag across all posts atomically (SQL `REPLACE()`).
+- **Search (`search=`):** SQLite **FTS5** full-text over title/content/source/tags — porter-stemmed, multi-term (implicit AND), prefix-matched, **bm25-ranked** (title/tags weighted above body, so the canonical post surfaces first). An external-content `posts_fts` vtable kept in sync by AFTER INSERT/UPDATE/DELETE triggers on `posts`, so it tracks every write path (service, MCP, watcher reindex, TTL cleanup) and is `'rebuild'`-populated at startup after the index rebuild. Free-text is sanitized to bare word-tokens before hitting FTS5 (operators like `"` `*` `:` `-` `()` can't cause a syntax error). Falls back to `LIKE` substring if the SQLite build lacks FTS5 (`database.FTS_ENABLED`).
 - **Master doc (`id=0`)** — reserved `Master Document.md`, seeded at startup if absent; the index + instruction set for agents. `DELETE` is blocked (403), TTL-exempt, and the watcher recreates it if deleted externally. Update via `update_post(id=0, …)`.
 - **TTL:** off by default (`DEFAULT_TTL_HOURS=0`). Precedence: per-post `expires_at` > per-tag config (`POST /tags/{tag}/config`) > global. For multi-tag posts, the shortest applicable TTL wins. Cleanup sleeps before its first run; `id=0` is exempt; errors are logged, never fatal.
 
@@ -159,7 +160,7 @@ SSE runs in a background thread (`● live`/`○ offline`); reconnect replays vi
 ```
 relay/
 ├── main.py        # FastAPI app + lifespan (index init, cleanup loop, watcher, MCP session); mounts /mcp
-├── config.py · auth.py · models.py · database.py   # settings · bearer auth · pydantic models · aiosqlite index
+├── config.py · auth.py · models.py · database.py   # settings · bearer auth · pydantic models · aiosqlite index (+ FTS5 search)
 ├── frontmatter.py # YAML front-matter + Obsidian filename rules (sanitize, collision suffix)
 ├── folders.py     # Folder placement policy (primary domain tag → folder)
 ├── links.py       # Wikilink/#id resolver + rename rewrite
