@@ -149,15 +149,25 @@ async def publish_post(
     return post.model_dump()
 
 
-@mcp.tool(description="List posts from the relay feed, optionally filtered by tag or search term.")
+@mcp.tool(
+    description=(
+        "List posts from the relay feed, optionally filtered by tag or search term. "
+        "Returns metadata-only summaries (id, title, tags, folder, and a short excerpt) "
+        "by default — call get_post(id) for a full body. Pass summary=false to get full "
+        "content inline (heavier)."
+    )
+)
 async def list_posts(
     tag: str | None = None,
     search: str | None = None,
     limit: int = 20,
     offset: int = 0,
+    summary: bool = True,
 ) -> dict:
     async with _db() as db:
-        result = await service.list_posts(db, tag=tag, search=search, limit=limit, offset=offset)
+        result = await service.list_posts(
+            db, tag=tag, search=search, limit=limit, offset=offset, summary=summary
+        )
     return result.model_dump()
 
 

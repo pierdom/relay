@@ -68,6 +68,80 @@ class PostListResponse(BaseModel):
     pinned: PostResponse | None = None  # master doc, on the home feed's first page
 
 
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_IMAGE_EMBED_RE = re.compile(r"!\[\[[^\]]*\]\]")
+_IMAGE_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_LINK_MD_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_WIKILINK_RE = re.compile(r"\[\[(?:[^\]|]*\|)?([^\]]*)\]\]")
+# Emphasis/heading/quote/code markers. Underscores are left alone on purpose —
+# this vault is full of snake_case identifiers (RELAY_VAULT_PATH, tag names) that
+# an excerpt shouldn't mangle; literal `_emphasis_` surviving is the lesser evil.
+_MD_SYNTAX_RE = re.compile(r"[`*>#~]")
+
+
+def make_excerpt(content: str, limit: int = 240) -> str:
+    """A short plain-text preview of a post body for summary listings.
+
+    Strips YAML front-matter (defensive — index content normally excludes it),
+    fenced code, Obsidian/Markdown embeds and links, inline emphasis/heading
+    markers and table pipes, then collapses whitespace and truncates to ~``limit``
+    characters on a word boundary. Never returns markdown syntax to render.
+    """
+    text = _FRONTMATTER_RE.sub("", content or "")
+    text = _FENCED_CODE_RE.sub(" ", text)
+    text = _IMAGE_EMBED_RE.sub(" ", text)
+    text = _IMAGE_MD_RE.sub(" ", text)
+    text = _LINK_MD_RE.sub(r"\1", text)
+    text = _WIKILINK_RE.sub(r"\1", text)
+    text = _MD_SYNTAX_RE.sub("", text)
+    text = text.replace("|", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0].rstrip() + "…"
+    return text
+
+
+class PostSummary(BaseModel):
+    """Metadata-only view of a post: everything but the full body, plus a short
+    plain-text ``excerpt``. Lets agents dedupe/browse without pulling every body
+    into context. See ``make_excerpt``; ``folder`` is derived from the vault path."""
+
+    id: int
+    title: str
+    tags: list[str]
+    source: str | None
+    folder: str
+    excerpt: str
+    created_at: str
+    updated_at: str | None = None
+    expires_at: str | None = None
+
+    @classmethod
+    def from_row(cls, row) -> PostSummary:
+        keys = row.keys()
+        path = row["path"] if "path" in keys else ""
+        return cls(
+            id=row["id"],
+            title=row["title"],
+            tags=[t for t in row["tags"].split(",") if t],
+            source=row["source"],
+            folder=path.split("/", 1)[0] if "/" in path else "",
+            excerpt=make_excerpt(row["content"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"] if "updated_at" in keys else None,
+            expires_at=row["expires_at"] if "expires_at" in keys else None,
+        )
+
+
+class PostSummaryListResponse(BaseModel):
+    items: list[PostSummary]
+    total: int
+    limit: int
+    offset: int
+    pinned: PostSummary | None = None  # master doc, on the home feed's first page
+
+
 class PostUpdate(BaseModel):
     title: str | None = None
     content: str | None = None

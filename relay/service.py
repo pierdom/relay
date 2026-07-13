@@ -30,6 +30,8 @@ from .models import (
     PostCreate,
     PostListResponse,
     PostResponse,
+    PostSummary,
+    PostSummaryListResponse,
     PostUpdate,
     TagConfigCreate,
     TagConfigResponse,
@@ -95,7 +97,8 @@ async def list_posts(
     limit: int = 20,
     offset: int = 0,
     search: str | None = None,
-) -> PostListResponse:
+    summary: bool = False,
+) -> PostListResponse | PostSummaryListResponse:
     conditions: list[str] = []
     params: list[str | int] = []
 
@@ -127,18 +130,25 @@ async def list_posts(
     ) as cur:
         rows = await cur.fetchall()
 
-    pinned = None
+    master = None
     if pin_master and offset == 0:
         master = await _fetch(db, 0)
-        if master is not None:
-            pinned = PostResponse.from_row(master)
+
+    if summary:
+        return PostSummaryListResponse(
+            items=[PostSummary.from_row(r) for r in rows],
+            total=count_row[0],
+            limit=limit,
+            offset=offset,
+            pinned=PostSummary.from_row(master) if master is not None else None,
+        )
 
     return PostListResponse(
         items=[PostResponse.from_row(r) for r in rows],
         total=count_row[0],
         limit=limit,
         offset=offset,
-        pinned=pinned,
+        pinned=PostResponse.from_row(master) if master is not None else None,
     )
 
 

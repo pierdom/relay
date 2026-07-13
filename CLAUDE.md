@@ -22,7 +22,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST/GET | /posts | Publish / list posts (`tag`, `folder`, `limit`, `offset`, `search`; master pinned on home feed) |
+| POST/GET | /posts | Publish / list posts (`tag`, `folder`, `limit`, `offset`, `search`, `summary`; master pinned on home feed). `summary=true` → metadata-only items (`PostSummary`: id/title/tags/folder + plain-text `excerpt`, no `content`); REST default `false` (UI feed renders content inline), MCP `list_posts` default `true` |
 | GET/PATCH/DELETE | /posts/{id} | Get / update (partial) / delete a post |
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |
 | GET | /links | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
@@ -106,7 +106,7 @@ The in-process server advertises relay's logo + website in the initialize `serve
 | Tool | Description |
 |------|-------------|
 | `publish_post` / `update_post` / `get_post` / `delete_post` | CRUD posts (partial update; `id=0` = master doc, delete blocked) |
-| `list_posts` | List (tag/search/limit/offset; stdio proxy omits search) |
+| `list_posts` | List (tag/search/limit/offset; `summary` defaults **true** = metadata + excerpt, no bodies — call `get_post` for a full body; stdio proxy omits search/summary) |
 | `add_attachment` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD (see [Attachments](#attachments)) |
 | `list_tags` / `set_tag_config` | Tags with counts / per-tag expiry |
 
