@@ -371,6 +371,36 @@ async def index_upsert(
     )
 
 
+async def index_insert(
+    db: aiosqlite.Connection,
+    *,
+    id: int,
+    title: str,
+    path: Path,
+    content: str,
+    tags: list[str],
+    source: str | None,
+    created_at: str,
+    updated_at: str | None,
+    expires_at: str | None,
+) -> None:
+    """Plain INSERT for a brand-new post — **no** ``ON CONFLICT``.
+
+    Unlike :func:`index_upsert`, a duplicate ``id`` raises ``IntegrityError``
+    instead of silently overwriting the existing row. ``create_post`` relies on
+    that so a lost allocate/insert race surfaces loudly (and is retried) rather
+    than clobbering a post.
+    """
+    await db.execute(
+        """
+        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
+         created_at, updated_at, expires_at),
+    )
+
+
 async def index_delete(db: aiosqlite.Connection, post_id: int) -> None:
     await db.execute("DELETE FROM posts WHERE id = ?", (post_id,))
 
