@@ -7,7 +7,14 @@ import aiosqlite
 from .. import service
 from ..auth import require_api_key
 from ..database import get_db
-from ..models import BacklinksResponse, PostCreate, PostListResponse, PostResponse, PostUpdate
+from ..models import (
+    BacklinksResponse,
+    PostCreate,
+    PostListResponse,
+    PostResponse,
+    PostSummaryListResponse,
+    PostUpdate,
+)
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
@@ -27,7 +34,7 @@ async def create_post(
 
 @router.get(
     "",
-    response_model=PostListResponse,
+    response_model=PostListResponse | PostSummaryListResponse,
     dependencies=[Depends(require_api_key)],
 )
 async def list_posts(
@@ -36,10 +43,14 @@ async def list_posts(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     search: str | None = Query(default=None),
+    summary: bool = Query(
+        default=False,
+        description="Return metadata-only items (id/title/tags/folder + excerpt), no full content.",
+    ),
     db: aiosqlite.Connection = Depends(get_db),
-) -> PostListResponse:
+) -> PostListResponse | PostSummaryListResponse:
     return await service.list_posts(
-        db, tag=tag, folder=folder, limit=limit, offset=offset, search=search
+        db, tag=tag, folder=folder, limit=limit, offset=offset, search=search, summary=summary
     )
 
 
