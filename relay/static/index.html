@@ -112,6 +112,27 @@
     }
     .btn-new-post:hover { background: var(--accent-dim); }
 
+    /* ── Login view (logged-out) ─────────────────────────── */
+    .login-view { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .login-card {
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      text-align: center; width: 100%; max-width: 300px;
+    }
+    .login-mark { height: 56px; width: auto; margin-bottom: 2px; }
+    .login-title { font-size: 20px; font-weight: 700; letter-spacing: 0.14em; color: var(--accent); margin: 0; }
+    .login-tag { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+    .login-card .oidc-login { flex-direction: column; gap: 12px; width: 100%; }
+    .btn-login-primary {
+      width: 100%; background: var(--accent); border: none; color: #000;
+      padding: 12px 16px; border-radius: 6px; cursor: pointer;
+      font-family: inherit; font-size: 13px; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase; transition: background 0.15s;
+    }
+    .btn-login-primary:hover { background: var(--accent-dim); }
+    .login-card .key-wrap { flex-direction: column; gap: 10px; width: 100%; }
+    .login-card .key-wrap input[type=password] { width: 100%; padding: 11px 12px; font-size: 13px; }
+    .login-card .btn-connect { width: 100%; padding: 11px 16px; font-size: 12px; }
+
     /* ── Layout ──────────────────────────────────────────── */
     .layout { display: flex; flex: 1; overflow: hidden; }
 
@@ -470,6 +491,9 @@
       .compose-panel.open { padding: 12px 12px 0; }
       .post { padding: 12px; }
       .load-more { padding: 10px 12px; }
+      /* Per-card Edit/Delete are hazardous in a touch scroll feed — drive
+         edits/deletes from the post detail view (tap a card to open it). */
+      .post-actions { display: none; }
     }
 
     /* Touch devices: always show post actions (no hover) */
@@ -551,6 +575,14 @@
     }
     .post.editing .post-body-wrap { max-height: none; overflow: visible; }
     .post.editing .post-body-wrap::after { display: none; }
+    /* The pinned master doc is a reference, not a read — keep its preview short. */
+    .post.pinned .post-body-wrap { max-height: 44px; }
+    /* Tighter previews on mobile so more posts fit per screen. Must follow the
+       base rules above (equal specificity → later source wins). */
+    @media (max-width: 768px) {
+      .post-body-wrap { max-height: 60px; }
+      .post.pinned .post-body-wrap { max-height: 40px; }
+    }
 
     /* ── Post modal ──────────────────────────────────────── */
     .post-modal { display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; }
@@ -592,7 +624,8 @@
       font-family: inherit; transition: color 0.15s;
     }
     .pm-close:hover { color: var(--text); }
-    .pm-meta { padding: 10px 20px 0; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+    .pm-meta { padding: 12px 20px 0; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+    .pm-meta .post-tags { row-gap: 6px; }
     .pm-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
     .pm-body {
       flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px 20px;
@@ -603,17 +636,36 @@
     .pm-footer {
       display: flex; gap: 8px; justify-content: flex-end;
       padding: 12px 20px; border-top: 1px solid var(--border); flex-shrink: 0;
+      background: var(--surface);
     }
     @media (max-width: 768px) {
       .pm-inner { width: 100%; max-width: 100%; max-height: 100vh; border-radius: 0; }
+      @supports (max-height: 100dvh) { .pm-inner { max-height: 100dvh; } }
       .post-modal.open { align-items: flex-end; }
       .pm-inner { animation: modalInMobile 0.22s ease both; }
       @keyframes modalInMobile {
         from { opacity: 0; transform: translateY(20px); }
         to   { opacity: 1; transform: none; }
       }
-      .pm-back { display: flex; align-items: center; padding: 4px 14px 4px 0; min-height: 44px; }
+      /* Back on its own row at the top, clear of the status bar / notch */
+      .pm-header {
+        flex-direction: column; align-items: stretch; gap: 6px;
+        padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 0;
+      }
+      /* Grab handle — signals the sheet swipes down to dismiss */
+      .pm-header::before {
+        content: ""; align-self: center; width: 36px; height: 4px;
+        border-radius: 2px; background: var(--border); margin-bottom: 4px;
+      }
+      .pm-back {
+        display: inline-flex; align-items: center; align-self: flex-start;
+        margin-left: -2px; padding: 6px 10px 6px 0; min-height: 40px;
+      }
+      .pm-title { font-size: 18px; font-weight: 700; line-height: 1.3; }
       .pm-close { display: none; }
+      .pm-meta { padding-left: 16px; padding-right: 16px; }
+      .pm-body { padding-left: 16px; padding-right: 16px; }
+      .pm-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
     }
   </style>
 </head>
@@ -632,17 +684,6 @@
   </button>
   <div class="header-right">
     <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
-    <div class="oidc-login" id="oidcLogin" style="display:none">
-      <button class="btn-connect" id="oidcLoginBtn" type="button">Login with PocketID</button>
-      <button class="link-btn" id="useKeyBtn" type="button">use API key</button>
-    </div>
-    <form class="key-wrap" id="connectForm" style="display:none">
-      <input type="text" id="apiUserInput" autocomplete="username" value="relay"
-             aria-hidden="true" tabindex="-1"
-             style="position:absolute;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none">
-      <input type="password" id="apiKeyInput" placeholder="API key" autocomplete="current-password" name="password">
-      <button class="btn-connect" id="connectBtn" type="submit">Connect</button>
-    </form>
     <div class="connected-bar" id="connectedBar" style="display:none">
       <button class="disconnect-btn" id="disconnectBtn">disconnect</button>
     </div>
@@ -667,6 +708,24 @@
   </aside>
 
   <main>
+    <div class="login-view" id="loginView" style="display:none">
+      <div class="login-card">
+        <img class="login-mark" src="/assets/relay-mark-on-dark.svg" alt="" width="56" height="56">
+        <h2 class="login-title">Relay</h2>
+        <p class="login-tag">Your personal knowledge base</p>
+        <div class="oidc-login" id="oidcLogin" style="display:none">
+          <button class="btn-login-primary" id="oidcLoginBtn" type="button">Log in</button>
+          <button class="link-btn" id="useKeyBtn" type="button">use an API key instead</button>
+        </div>
+        <form class="key-wrap login-key" id="connectForm" style="display:none">
+          <input type="text" id="apiUserInput" autocomplete="username" value="relay"
+                 aria-hidden="true" tabindex="-1"
+                 style="position:absolute;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none">
+          <input type="password" id="apiKeyInput" placeholder="API key" autocomplete="current-password" name="password">
+          <button class="btn-connect" id="connectBtn" type="submit">Connect</button>
+        </form>
+      </div>
+    </div>
     <div class="compose-panel" id="composePanel">
       <div class="post">
         <div class="edit-form">
@@ -742,6 +801,7 @@ let activeSearch = null;
 let searchDebounce = null;
 let offset = 0;
 let total = 0;
+let loadingMore = false;   // guards the infinite-scroll auto-load
 let es = null;
 let sseErrorTimer = null;
 
@@ -764,6 +824,7 @@ const tagNewWrap   = document.getElementById('tagNew');
 const tagNewInput  = document.getElementById('tagNewInput');
 const connectedBar    = document.getElementById('connectedBar');
 const disconnectBtn   = document.getElementById('disconnectBtn');
+const loginView       = document.getElementById('loginView');
 const menuBtn         = document.getElementById('menuBtn');
 const sidebarEl       = document.getElementById('sidebarEl');
 const sidebarOverlay  = document.getElementById('sidebarOverlay');
@@ -817,6 +878,9 @@ async function bootstrap() {
   let me = { authenticated: false, oidc: false };
   try { me = await (await fetch('/auth/me', { credentials: 'same-origin' })).json(); } catch {}
   if (me.authenticated) { authed = true; init(); return; }
+  // Logged out: hide the feed, show the centered login card.
+  feed.style.display = 'none';
+  loginView.style.display = '';
   if (me.oidc) { oidcLogin.style.display = ''; connectForm.style.display = 'none'; }
   else { connectForm.style.display = ''; oidcLogin.style.display = 'none'; }
 }
@@ -870,6 +934,7 @@ async function init() {
   document.getElementById('tabTree').classList.remove('active');
   document.getElementById('tabFiles').classList.remove('active');
   feed.style.display = ''; attachmentsView.style.display = 'none';
+  loginView.style.display = 'none';
   loadMoreWrap.style.display = 'none';
   connectForm.style.display = 'none';
   oidcLogin.style.display = 'none';
@@ -1498,6 +1563,16 @@ async function loadPosts(replace = false) {
 }
 
 loadMoreBtn.addEventListener('click', () => loadPosts(false));
+
+/* Infinite scroll: auto-load the next page as the feed bottom nears view.
+   The Load more button stays as a fallback (short feeds that never scroll). */
+feed.addEventListener('scroll', () => {
+  if (loadingMore || offset >= total) return;
+  if (feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 300) {
+    loadingMore = true;
+    loadPosts(false).finally(() => { loadingMore = false; });
+  }
+});
 
 function renderPost(post) {
   const el = document.createElement('div');
