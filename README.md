@@ -49,8 +49,9 @@ source of truth: browse it, `grep` it, git-version it, or open it in **Obsidian*
 (or any other filesystem-based notes / knowledge-management tool — nvim, VS Code, etc.).
 
 A disposable **SQLite index** under `<vault>/.relay/` mirrors the files for fast
-list/search/tag/TTL queries; it is rebuilt from the files on startup, so deleting
-it is harmless. A live filesystem watcher picks up edits made *outside* relay
+list/search/tag/TTL queries — including **FTS5 full-text search** (porter-stemmed,
+multi-term, prefix, bm25-ranked); it is rebuilt from the files on startup, so
+deleting it is harmless. A live filesystem watcher picks up edits made *outside* relay
 (e.g. in Obsidian) — re-indexing them and pushing them to subscribers in real time.
 `title` is required (it names the file); `id` in front-matter is authoritative and
 preserved across renames.
@@ -200,7 +201,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/posts` | Publish a post |
-| GET | `/posts` | List posts (`tag`, `folder`, `search`, `limit`, `offset`; master doc returned as `pinned` on the home feed) |
+| GET | `/posts` | List posts (`tag`, `folder`, `search` (FTS5, bm25-ranked), `summary`, `limit`, `offset`; master doc returned as `pinned` on the home feed) |
 | GET | `/posts/{id}` | Get a single post |
 | GET | `/posts/{id}/backlinks` | Posts that link to this one (`[[title]]` or `#id`) |
 | PATCH | `/posts/{id}` | Update fields (partial — omitted fields unchanged) |

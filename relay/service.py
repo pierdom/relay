@@ -15,7 +15,7 @@ from collections import Counter
 
 import aiosqlite
 
-from . import events, folders, links, vault
+from . import database, events, folders, links, vault
 from .config import settings
 from .models import (
     AttachmentDeleteResponse,
@@ -89,6 +89,25 @@ async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostRespons
     return post
 
 
+# bm25 column weights (title, content, source, tags) — title/tags outrank body
+# so the canonical post for a term surfaces above passing mentions of it.
+_BM25_WEIGHTS = "10.0, 1.0, 2.0, 5.0"
+_FTS_TOKEN_RE = re.compile(r"[^\w]+", re.UNICODE)
+
+
+def _fts_query(search: str) -> str | None:
+    """Turn free text into a safe FTS5 MATCH string, or ``None`` if it has no
+    searchable tokens. Every token is stripped to word characters (neutralising
+    ``"`` ``*`` ``:`` ``-`` ``(`` and other FTS operators that would raise a
+    syntax error), quoted as a literal, and prefix-matched; space = implicit AND,
+    so ``wireguard proton`` requires both terms."""
+    terms: list[str] = []
+    for tok in _FTS_TOKEN_RE.split(search):
+        if tok and any(c.isalnum() for c in tok):
+            terms.append(f'"{tok}"*')
+    return " ".join(terms) if terms else None
+
+
 async def list_posts(
     db: aiosqlite.Connection,
     *,
@@ -101,31 +120,45 @@ async def list_posts(
 ) -> PostListResponse | PostSummaryListResponse:
     conditions: list[str] = []
     params: list[str | int] = []
+    joins = ""
+    # Default newest-first; an FTS search reorders by relevance instead.
+    order_by = "posts.created_at DESC, posts.id DESC"
+
+    if search:
+        match = _fts_query(search) if database.FTS_ENABLED else None
+        if database.FTS_ENABLED and match is not None:
+            joins = "JOIN posts_fts ON posts_fts.rowid = posts.id"
+            conditions.append("posts_fts MATCH ?")
+            params.append(match)
+            order_by = f"bm25(posts_fts, {_BM25_WEIGHTS}), posts.created_at DESC, posts.id DESC"
+        elif database.FTS_ENABLED:
+            # Query had only punctuation/operators → no searchable tokens.
+            conditions.append("0")
+        else:  # FTS5 unavailable — substring fallback
+            q = f"%{search}%"
+            conditions.append("(posts.title LIKE ? OR posts.content LIKE ? OR posts.source LIKE ?)")
+            params.extend([q, q, q])
 
     if tag:
-        conditions.append("tags LIKE ?")
+        conditions.append("posts.tags LIKE ?")
         params.append(f"%,{tag.strip().lower()},%")
     if folder:
-        conditions.append("path LIKE ?")
+        conditions.append("posts.path LIKE ?")
         params.append(f"{folder}/%")
-    if search:
-        q = f"%{search}%"
-        conditions.append("(title LIKE ? OR content LIKE ? OR source LIKE ?)")
-        params.extend([q, q, q])
 
     # On the unfiltered home feed, pin the master document (id=0) on top and keep
     # it out of the dated stream so pagination stays consistent across pages.
     pin_master = tag is None and search is None and folder is None
     if pin_master:
-        conditions.append("id != 0")
+        conditions.append("posts.id != 0")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    async with db.execute(f"SELECT COUNT(*) FROM posts {where}", params) as cur:
+    async with db.execute(f"SELECT COUNT(*) FROM posts {joins} {where}", params) as cur:
         count_row = await cur.fetchone()
 
     async with db.execute(
-        f"SELECT * FROM posts {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+        f"SELECT posts.* FROM posts {joins} {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
         params + [limit, offset],
     ) as cur:
         rows = await cur.fetchall()
