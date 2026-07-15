@@ -261,20 +261,21 @@
     .post-source { font-size: 10px; color: var(--muted); }
 
     .post-body { color: #b8bfcc; line-height: 1.72; font-size: 13px; overflow-wrap: anywhere; }
-    .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 14px 0 6px; font-weight: 600; }
-    .post-body h1 { font-size: 14px; }
-    .post-body h2 { font-size: 13px; }
-    .post-body h3 { font-size: 12px; }
+    .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 16px 0 6px; font-weight: 700; font-family: system-ui, -apple-system, sans-serif; }
+    .post-body h1 { font-size: 16px; }
+    .post-body h2 { font-size: 14px; }
+    .post-body h3 { font-size: 13px; color: #c4cad8; }
+    .post-body hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
     .post-body p         { margin: 6px 0; }
     .post-body ul, .post-body ol { padding-left: 18px; margin: 6px 0; }
     .post-body li        { margin: 3px 0; }
-    .post-body a         { color: var(--accent); text-decoration: none; }
-    .post-body a:hover   { text-decoration: underline; }
-    .post-body a.wikilink { color: var(--accent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); cursor: pointer; }
-    .post-body a.wikilink:hover { text-decoration: none; border-bottom-color: var(--accent); }
-    .post-body .wikilink.broken { color: var(--muted); border-bottom: 1px dashed var(--muted); cursor: help; }
+    .post-body a         { color: var(--accent); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+    .post-body a:hover   { text-decoration-style: solid; }
+    .post-body a.wikilink { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); cursor: pointer; }
+    .post-body a.wikilink:hover { border-bottom-color: var(--accent); }
+    .post-body .wikilink.broken { color: var(--muted); text-decoration: none; border-bottom: 1px dashed var(--muted); cursor: help; }
     .post-body img.attachment { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 0.5rem 0; }
-    .post-body a.attachment-link { color: var(--accent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+    .post-body a.attachment-link { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
     .post-body a.attachment-link::before { content: "📎 "; }
     .post-body a.attachment-link.broken { color: var(--muted); border-bottom-color: var(--muted); }
     .pm-backlinks { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
@@ -633,12 +634,19 @@
     .pm-meta { padding: 12px 20px 0; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
     .pm-meta .post-tags { row-gap: 6px; }
     .pm-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
+    .pm-body-wrap { flex: 1; min-height: 0; position: relative; }
     .pm-body {
-      flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px;
+      height: 100%; overflow-y: auto; overflow-x: hidden; padding: 16px 20px;
       scrollbar-width: thin; scrollbar-color: var(--border) transparent;
     }
     .pm-body::-webkit-scrollbar { width: 4px; }
     .pm-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .pm-body-fade {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 52px;
+      background: linear-gradient(to bottom, transparent, var(--surface));
+      pointer-events: none; transition: opacity 0.2s;
+    }
+    .pm-body-fade.hidden { opacity: 0; }
     .pm-footer {
       display: flex; gap: 8px; justify-content: flex-end;
       padding: 12px 20px; border-top: 1px solid var(--border); flex-shrink: 0;
@@ -786,7 +794,10 @@
       <button class="pm-close" id="pmClose">×</button>
     </div>
     <div class="pm-meta" id="pmMeta"></div>
-    <div class="pm-body" id="pmBody"></div>
+    <div class="pm-body-wrap">
+      <div class="pm-body" id="pmBody"></div>
+      <div class="pm-body-fade" id="pmBodyFade"></div>
+    </div>
     <div class="pm-footer">
       <button class="btn-edit" id="pmEdit">✏️ Edit</button>
       <button class="btn-delete" id="pmDelete">🗑️ Delete</button>
@@ -1785,6 +1796,7 @@ const pmBack     = document.getElementById('pmBack');
 const pmTitle    = document.getElementById('pmTitle');
 const pmMeta     = document.getElementById('pmMeta');
 const pmBody     = document.getElementById('pmBody');
+const pmBodyFade = document.getElementById('pmBodyFade');
 const pmEdit     = document.getElementById('pmEdit');
 const pmDelete   = document.getElementById('pmDelete');
 const pmInner    = document.querySelector('.pm-inner');
@@ -1827,6 +1839,13 @@ function openPostModal(post) {
 
   postModal.classList.add('open');
   document.body.style.overflow = 'hidden';
+  pmBody.scrollTop = 0;
+  requestAnimationFrame(updateModalFade);
+}
+
+function updateModalFade() {
+  const atBottom = pmBody.scrollHeight - pmBody.scrollTop <= pmBody.clientHeight + 2;
+  pmBodyFade.classList.toggle('hidden', atBottom);
 }
 
 function closePostModal() {
@@ -1836,6 +1855,7 @@ function closePostModal() {
   _modalPost = null;
 }
 
+pmBody.addEventListener('scroll', updateModalFade);
 pmClose.addEventListener('click', closePostModal);
 pmBack.addEventListener('click', closePostModal);
 postModal.addEventListener('click', (e) => { if (!e.target.closest('.pm-inner')) closePostModal(); });
