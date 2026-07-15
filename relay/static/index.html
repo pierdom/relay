@@ -14,6 +14,8 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
     :root {
       --bg:          #090a0d;
@@ -344,7 +346,8 @@
       letter-spacing: 0.1em; text-transform: uppercase;
       transition: background 0.15s;
     }
-    .btn-save:hover { background: var(--accent-dim); }
+    .btn-save:hover    { background: var(--accent-dim); }
+    .btn-save:disabled { opacity: 0.55; cursor: not-allowed; background: var(--accent); }
 
     .btn-cancel {
       background: none; border: 1px solid var(--border); color: var(--muted);
@@ -391,7 +394,7 @@
     .att-del:hover { background: var(--red, #e5534b); color: #fff; }
     .att-empty { color: var(--muted); font-size: 13px; padding: 20px 2px; }
 
-    .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; cursor: pointer; }
     .lightbox-inner { max-width: 92vw; max-height: 92vh; display: flex; flex-direction: column; align-items: center; gap: 10px; }
     .lightbox img { max-width: 92vw; max-height: 82vh; object-fit: contain; border-radius: 4px; }
     .lightbox-cap { color: #ddd; font-size: 12px; }
@@ -416,7 +419,7 @@
       transition: color 0.15s; display: none;
     }
     .search-clear:hover { color: var(--text); }
-    .search-bar.active input { border-color: rgba(245,158,11,0.5); }
+    .search-bar.active input { border-color: var(--accent); }
     .search-bar.active .search-clear { display: block; }
     .search-label {
       font-size: 10px; color: var(--accent); letter-spacing: 0.08em;
@@ -580,6 +583,7 @@
       background: linear-gradient(transparent, var(--surface));
       pointer-events: none;
     }
+    .post.editing { border-color: rgba(245,158,11,0.4); background: rgba(245,158,11,0.025); }
     .post.editing .post-body-wrap { max-height: none; overflow: visible; }
     .post.editing .post-body-wrap::after { display: none; }
     /* The pinned master doc is a reference, not a read — keep its preview short. */
@@ -1093,12 +1097,15 @@ document.getElementById('cpPublish').addEventListener('click', async () => {
     source: document.getElementById('cpSource').value.trim() || null,
     expires_at: toUtcIso(document.getElementById('cpExpires').value) || null,
   };
+  const btn = document.getElementById('cpPublish');
+  btn.disabled = true; btn.textContent = 'Publishing…';
   try {
     await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
     closeCompose();
     refreshSidebarCounts();
     await loadLinkIndex();
   } catch (e) { alert(`Publish failed: ${e.message}`); }
+  finally { btn.disabled = false; btn.textContent = 'Publish'; }
 });
 
 function closeCompose() {
@@ -1701,11 +1708,16 @@ function enterEditMode(el, post) {
       source:     el.querySelector('.ef-source').value.trim() || null,
       expires_at: toUtcIso(el.querySelector('.ef-expires').value) || null,
     };
+    const btn = el.querySelector('.btn-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
     try {
       const updated = await apiFetch(`/posts/${post.id}`, { method: 'PATCH', body: JSON.stringify(body) });
       el.replaceWith(renderPost(updated));
       refreshSidebarCounts();
-    } catch (e) { alert(`Save failed: ${e.message}`); }
+    } catch (e) {
+      alert(`Save failed: ${e.message}`);
+      btn.disabled = false; btn.textContent = 'Save';
+    }
   });
 }
 
