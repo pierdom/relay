@@ -634,10 +634,9 @@
     .pm-meta { padding: 12px 20px 0; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
     .pm-meta .post-tags { row-gap: 6px; }
     .pm-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
-    .pm-body-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+    .pm-body-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
     .pm-body {
-      position: absolute; inset: 0;
-      overflow-y: auto; overflow-x: hidden; padding: 16px 20px;
+      flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px;
       scrollbar-width: thin; scrollbar-color: var(--border) transparent;
     }
     .pm-body::-webkit-scrollbar { width: 4px; }
