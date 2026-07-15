@@ -288,6 +288,12 @@
     .post-body blockquote { border-left: 2px solid var(--accent); padding-left: 12px; color: var(--muted); margin: 8px 0; }
     .post-body strong    { color: var(--text); font-weight: 600; }
     .post-body em        { font-style: italic; color: #c4cad8; }
+    .post-body table     { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+    .post-body th, .post-body td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; white-space: nowrap; }
+    .post-body th        { background: var(--bg); color: var(--text); font-weight: 600; }
+    .post-body tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    .table-scroll        { overflow-x: auto; margin: 8px 0; }
+    .table-scroll table  { margin: 0; }
 
     .post-footer {
       display: flex; align-items: center; justify-content: space-between;
@@ -597,7 +603,7 @@
     .pm-inner {
       position: relative; z-index: 1;
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; width: 92%; max-width: 760px; max-height: 88vh;
+      border-radius: 8px; width: 92%; max-width: 1100px; max-height: 88vh;
       display: flex; flex-direction: column;
       box-shadow: 0 24px 64px rgba(0,0,0,0.6);
       animation: modalIn 0.18s ease both;
@@ -1811,6 +1817,12 @@ function openPostModal(post) {
     ? post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '')
     : post.content;
   pmBody.innerHTML = `<div class="post-body">${renderBody(pmContent)}</div><div class="pm-backlinks" id="pmBacklinks"></div>`;
+  pmBody.querySelectorAll('.post-body table').forEach(t => {
+    const wrap = document.createElement('div');
+    wrap.className = 'table-scroll';
+    t.parentNode.insertBefore(wrap, t);
+    wrap.appendChild(t);
+  });
   renderBacklinks(post.id);
 
   postModal.classList.add('open');
