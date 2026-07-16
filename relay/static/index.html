@@ -376,7 +376,10 @@
     .ef-attach-del:hover { color: #e5534b; }
 
     /* ── Attachment gallery ─────────────────────────────── */
-    .attachments-view { padding: 4px 2px 40px; }
+    .attachments-view { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 20px 40px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .attachments-view::-webkit-scrollbar { width: 4px; }
+    .attachments-view::-webkit-scrollbar-track { background: transparent; }
+    .attachments-view::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
     .att-folder-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 18px 2px 8px; }
     .att-folder-head:first-child { margin-top: 4px; }
     .att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
