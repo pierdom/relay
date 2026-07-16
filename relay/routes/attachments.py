@@ -61,6 +61,9 @@ async def create_attachment(
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc))
 
 
+_FORCE_DOWNLOAD_SUFFIXES = {".svg", ".html", ".htm", ".xml", ".xhtml"}
+
+
 @router.get(
     "/attachments/{name:path}",
     dependencies=[Depends(require_api_key)],
@@ -75,8 +78,14 @@ async def get_attachment(name: str) -> FileResponse:
     path = vault.resolve_attachment(name)
     if path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    # nosniff: don't let the browser MIME-sniff (e.g. a .txt) into executable HTML.
-    return FileResponse(path, headers={"X-Content-Type-Options": "nosniff"})
+    headers: dict[str, str] = {"X-Content-Type-Options": "nosniff"}
+    # Force download for active document types (SVG, HTML, XML) that browsers
+    # render as live documents and execute scripts in, which would give uploaded
+    # content same-origin script execution. nosniff alone does not prevent this
+    # when the MIME type is already correctly identified.
+    if path.suffix.lower() in _FORCE_DOWNLOAD_SUFFIXES:
+        headers["Content-Disposition"] = f'attachment; filename="{path.name}"'
+    return FileResponse(path, headers=headers)
 
 
 @router.delete(
