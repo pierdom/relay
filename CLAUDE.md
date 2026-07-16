@@ -101,12 +101,14 @@ Two surfaces with **identical tools**, server `instructions`, and the `relay://m
 - **`relay/mcp_server.py`** — in-process, served over Streamable HTTP at `/mcp`; tools call `relay.service` directly. Remote-capable, **recommended**.
 - **`relay_mcp/server.py`** — legacy stdio proxy; runs on the client, proxies to REST over `RELAY_BASE_URL`. For clients that can't speak remote MCP (e.g. Claude Desktop). Full parity (same eleven tools); `git pull` + restart the client to update.
 
+**Feature parity rule:** every tool added, removed, or changed in `relay/mcp_server.py` must be reflected in `relay_mcp/server.py` and vice versa. Tool names, parameters (names, types, defaults), and descriptions must match exactly across both files. Whenever you touch either MCP server file, update the other one in the same change.
+
 The in-process server advertises relay's logo + website in the initialize `serverInfo` (`icons`/`websiteUrl`, MCP SEP-973, built from `RELAY_BASE_URL` → public `/assets/` marks). Clients that read `serverInfo.icons` show the brand mark instead of the generic globe; Claude's remote connectors don't render it yet ([claude-ai-mcp#152](https://github.com/anthropics/claude-ai-mcp/issues/152)) but light up automatically when they do.
 
 | Tool | Description |
 |------|-------------|
 | `publish_post` / `update_post` / `get_post` / `delete_post` | CRUD posts (partial update; `id=0` = master doc, delete blocked) |
-| `list_posts` | List (tag/search/limit/offset; `summary` defaults **true** = metadata + excerpt, no bodies — call `get_post` for a full body; stdio proxy omits search/summary) |
+| `list_posts` | List (tag/search/limit/offset; `summary` defaults **true** = metadata + excerpt, no bodies — call `get_post` for a full body) |
 | `add_attachment` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD (see [Attachments](#attachments)) |
 | `list_tags` / `set_tag_config` | Tags with counts / per-tag expiry |
 

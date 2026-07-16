@@ -85,13 +85,23 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="list_posts",
-            description="List posts from the relay feed, optionally filtered by tag.",
+            description=(
+                "List posts from the relay feed, optionally filtered by tag or search term. "
+                "Returns metadata-only summaries (id, title, tags, folder, and a short excerpt) "
+                "by default — call get_post(id) for a full body. Pass summary=false to get full "
+                "content inline (heavier)."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "tag": {"type": "string", "description": "Filter by tag"},
+                    "search": {"type": "string", "description": "Full-text search over title, content, source, and tags"},
                     "limit": {"type": "integer", "description": "Max number of posts to return (default 20)"},
                     "offset": {"type": "integer", "description": "Pagination offset (default 0)"},
+                    "summary": {
+                        "type": "boolean",
+                        "description": "Return metadata + excerpt only (default true); set false for full content inline",
+                    },
                 },
             },
         ),
@@ -337,7 +347,9 @@ async def call_tool(
         return [types.TextContent(type="text", text=text)]
 
     if name == "list_posts":
-        params = {k: v for k, v in arguments.items() if k in ("tag", "limit", "offset")}
+        summary = arguments.get("summary", True)
+        params = {k: v for k, v in arguments.items() if k in ("tag", "search", "limit", "offset")}
+        params["summary"] = "true" if summary else "false"
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{RELAY_BASE_URL}/posts",
@@ -358,7 +370,9 @@ async def call_tool(
             if p.get("tags"):
                 header += f" [{p['tags']}]"
             lines.append(header)
-            lines.append(p["content"])
+            body = p.get("excerpt") if summary else p.get("content", "")
+            if body:
+                lines.append(body)
             lines.append("")
         return [types.TextContent(type="text", text="\n".join(lines).strip())]
 
