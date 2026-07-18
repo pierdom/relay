@@ -4,6 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Relay</title>
+  <script>
+    // Apply saved theme before first paint to avoid a flash. Default: dark.
+    (function () {
+      try {
+        if (localStorage.getItem('relay-theme') === 'light')
+          document.documentElement.setAttribute('data-theme', 'light');
+      } catch (e) {}
+    })();
+  </script>
   <link rel="icon" href="/assets/relay-favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="icon" href="/assets/favicon-16.png" sizes="16x16" type="image/png">
@@ -18,6 +27,7 @@
     a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
     :root {
+      color-scheme: dark;
       --bg:          #090a0d;
       --surface:     #0f1116;
       --border:      #1d2230;
@@ -30,8 +40,30 @@
       --tag-active:  #231a05;
       --green:       #10b981;
       --red:         #f87171;
+      --body:        #b8bfcc;
+      --body-strong: #c4cad8;
+      --row-stripe:  rgba(255, 255, 255, 0.02);
       font-family: 'IBM Plex Mono', monospace;
       font-size: 13px;
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg:          #edeae1;
+      --surface:     #ffffff;
+      --border:      #d2ccbb;
+      --text:        #1c1e24;
+      --muted:       #736e5d;
+      --accent:      #b96809;
+      --accent-dim:  #914f06;
+      --accent-glow: rgba(185, 104, 9, 0.12);
+      --tag-bg:      #f7ecd6;
+      --tag-active:  #efe0c0;
+      --green:       #047857;
+      --red:         #c81e1e;
+      --body:        #33373f;
+      --body-strong: #22252c;
+      --row-stripe:  rgba(0, 0, 0, 0.03);
     }
 
     body {
@@ -68,6 +100,14 @@
     .live-dot.error     ~ .live-label { color: var(--red); }
 
     .header-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+
+    .theme-btn {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; font-size: 14px; line-height: 1; padding: 5px 8px;
+      border-radius: 4px; display: flex; align-items: center;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .theme-btn:hover { color: var(--accent); border-color: var(--accent); }
 
     .key-wrap { display: flex; align-items: center; gap: 6px; }
     .key-wrap input {
@@ -334,11 +374,11 @@
     .tag-pill:hover { background: var(--tag-active); }
     .post-source { font-size: 10px; color: var(--muted); }
 
-    .post-body { color: #b8bfcc; line-height: 1.72; font-size: 13px; overflow-wrap: anywhere; }
+    .post-body { color: var(--body); line-height: 1.72; font-size: 13px; overflow-wrap: anywhere; }
     .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 16px 0 6px; font-weight: 700; font-family: system-ui, -apple-system, sans-serif; }
     .post-body h1 { font-size: 16px; }
     .post-body h2 { font-size: 14px; }
-    .post-body h3 { font-size: 13px; color: #c4cad8; }
+    .post-body h3 { font-size: 13px; color: var(--body-strong); }
     .post-body hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
     .post-body p         { margin: 6px 0; }
     .post-body ul, .post-body ol { padding-left: 18px; margin: 6px 0; }
@@ -362,11 +402,11 @@
     .post-body pre code  { background: none; padding: 0; border: none; font-size: 11px; }
     .post-body blockquote { border-left: 2px solid var(--accent); padding-left: 12px; color: var(--muted); margin: 8px 0; }
     .post-body strong    { color: var(--text); font-weight: 600; }
-    .post-body em        { font-style: italic; color: #c4cad8; }
+    .post-body em        { font-style: italic; color: var(--body-strong); }
     .post-body table     { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
     .post-body th, .post-body td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; white-space: nowrap; }
     .post-body th        { background: var(--bg); color: var(--text); font-weight: 600; }
-    .post-body tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    .post-body tr:nth-child(even) td { background: var(--row-stripe); }
     .table-scroll        { overflow-x: auto; margin: 8px 0; }
     .table-scroll table  { margin: 0; }
 
@@ -787,6 +827,7 @@
     <span></span><span></span><span></span>
   </button>
   <div class="header-right">
+    <button class="theme-btn" id="themeBtn" aria-label="Toggle light/dark theme" title="Toggle theme"></button>
     <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
     <div class="connected-bar" id="connectedBar" style="display:none">
       <button class="disconnect-btn" id="disconnectBtn">disconnect</button>
@@ -958,6 +999,23 @@ function applyViewMode() {
 vtList.addEventListener('click', () => { viewMode = 'list'; applyViewMode(); });
 vtGrid.addEventListener('click', () => { viewMode = 'grid'; applyViewMode(); });
 applyViewMode();
+
+// Light ⇄ dark theme — CSS var override on <html>, persisted locally. Default: dark.
+const themeBtn = document.getElementById('themeBtn');
+const brandMark = document.querySelector('.brand-mark');
+function applyTheme() {
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  themeBtn.textContent = light ? '☾' : '☀';
+  if (brandMark) brandMark.src = light ? '/assets/relay-mark.svg' : '/assets/relay-mark-on-dark.svg';
+}
+themeBtn.addEventListener('click', () => {
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  if (light) document.documentElement.removeAttribute('data-theme');
+  else       document.documentElement.setAttribute('data-theme', 'light');
+  try { localStorage.setItem('relay-theme', light ? 'dark' : 'light'); } catch (e) {}
+  applyTheme();
+});
+applyTheme();
 
 function openSidebar()  { sidebarEl.classList.add('open'); sidebarOverlay.classList.add('visible'); menuBtn.classList.add('active'); }
 function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.classList.remove('visible'); menuBtn.classList.remove('active'); }
