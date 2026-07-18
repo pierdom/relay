@@ -231,6 +231,17 @@
     .feed::-webkit-scrollbar-track { background: transparent; }
     .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+    /* Grid view: cards flow into a responsive column grid instead of a stack. */
+    .feed.grid {
+      display: grid; align-content: start;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 12px;
+    }
+    .feed.grid > .post:not(.editing) { align-self: start; }
+    .feed.grid > .post.pinned,
+    .feed.grid > .empty,
+    .feed.grid > .auth-prompt { grid-column: 1 / -1; }   /* master doc / states span full width */
+
     /* ── Post card ───────────────────────────────────────── */
     .post {
       background: var(--surface); border: 1px solid var(--border);
@@ -247,6 +258,67 @@
     @keyframes flash {
       0%   { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 24px var(--accent-glow); }
       100% { border-color: var(--border); box-shadow: none; }
+    }
+
+    /* Feed cards lay their parts out on a grid so the media thumbnail can sit
+       beside the text in list mode and jump on top as a hero in grid mode —
+       one markup, pure-CSS switch. Editing cards fall back to block flow
+       (their children become form fields with no grid areas). */
+    .feed > .post:not(.editing) {
+      display: grid; column-gap: 14px; align-items: start;
+      grid-template-columns: 1fr auto;
+      grid-template-areas: "badge  badge" "header header" "body media" "footer footer";
+    }
+    .feed > .post .master-badge   { grid-area: badge; }
+    .feed > .post .post-header    { grid-area: header; }
+    .feed > .post .post-body-wrap { grid-area: body; min-width: 0; }
+    .feed > .post .post-media     { grid-area: media; }
+    .feed > .post .post-footer    { grid-area: footer; }
+    .feed.grid > .post:not(.editing) {
+      grid-template-columns: 1fr;
+      grid-template-areas: "media" "badge" "header" "body" "footer";
+    }
+    /* Uniform tile height so rows never go ragged (CSS grid sizes a row to its
+       tallest cell — one hero-image tile would otherwise blow out the whole row).
+       The body row flex-fills and clips with the fade; the footer pins to the
+       bottom. Image tiles show a short excerpt, text-only tiles use the freed
+       space for more text. The full-width master banner keeps its own height. */
+    .feed.grid > .post:not(.editing):not(.pinned) {
+      height: 340px;
+      grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    }
+    .feed.grid > .post:not(.pinned) .post-body-wrap {
+      max-height: none; height: 100%; min-height: 0;
+    }
+
+    .post-media { align-self: start; line-height: 0; }
+    .post-media img {
+      width: 108px; height: 78px; object-fit: cover; display: block;
+      border-radius: 5px; border: 1px solid var(--border);
+    }
+    .feed.grid .post-media { margin-bottom: 10px; }
+    .feed.grid .post-media img { width: 100%; height: 100px; }
+    .post-media-count { font-size: 10px; color: var(--muted); }
+
+    /* Denser previews in feed cards: tighter leading + no leading margin fit
+       ~a full extra line inside the same clamped height. The modal (.pm-body)
+       keeps the airy 1.72 for comfortable reading. */
+    .feed .post-body { line-height: 1.55; }
+    .feed .post-body > :first-child { margin-top: 0; }
+
+    /* Narrow grid tiles: stack the header (title on its own line, tags below) so
+       tags don't crush the title into a hard ellipsis, and let long titles wrap
+       to two lines. The footer meta wraps instead of overflowing. */
+    .feed.grid .post-header { flex-direction: column; align-items: flex-start; gap: 6px; }
+    .feed.grid .post-title {
+      white-space: normal; overflow: hidden; text-overflow: clip;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .feed.grid .post-footer-left { flex-wrap: wrap; row-gap: 3px; }
+    /* Long "via https://…" sources shouldn't wrap to two lines in a narrow tile. */
+    .feed.grid .post-source {
+      display: inline-block; max-width: 100%; vertical-align: bottom;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
 
     .post-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
@@ -429,6 +501,17 @@
       text-transform: uppercase; flex-shrink: 0; display: none;
     }
     .search-bar.active .search-label { display: block; }
+
+    .view-toggle { display: flex; flex-shrink: 0; }
+    .vt-btn {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; font-size: 13px; line-height: 1; padding: 5px 9px;
+      font-family: inherit; transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .vt-btn:first-child { border-radius: 4px 0 0 4px; }
+    .vt-btn:last-child  { border-radius: 0 4px 4px 0; border-left: none; }
+    .vt-btn.active { color: var(--accent); border-color: rgba(245,158,11,0.4); background: var(--tag-bg); }
+    .vt-btn:hover:not(.active) { color: var(--text); }
 
     /* ── Load more / states ──────────────────────────────── */
     .load-more { text-align: center; padding: 14px 20px; }
@@ -773,6 +856,10 @@
       <span class="search-label">search</span>
       <input type="text" id="searchInput" placeholder="Search title, content, source…" autocomplete="off">
       <button class="search-clear" id="searchClear" title="Clear search">×</button>
+      <div class="view-toggle" id="viewToggle">
+        <button class="vt-btn active" id="vtList" title="List view" aria-label="List view">☰</button>
+        <button class="vt-btn" id="vtGrid" title="Grid view" aria-label="Grid view">▦</button>
+      </div>
     </div>
 
     <div class="feed" id="feed"></div>
@@ -857,6 +944,20 @@ const attachmentsView = document.getElementById('attachmentsView');
 const lightbox        = document.getElementById('lightbox');
 const searchInput     = document.getElementById('searchInput');
 const searchClear     = document.getElementById('searchClear');
+const vtList          = document.getElementById('vtList');
+const vtGrid          = document.getElementById('vtGrid');
+
+// List ⇄ grid feed layout — pure CSS (a class on the feed), persisted locally.
+let viewMode = localStorage.getItem('relay-view') === 'grid' ? 'grid' : 'list';
+function applyViewMode() {
+  feed.classList.toggle('grid', viewMode === 'grid');
+  vtList.classList.toggle('active', viewMode === 'list');
+  vtGrid.classList.toggle('active', viewMode === 'grid');
+  localStorage.setItem('relay-view', viewMode);
+}
+vtList.addEventListener('click', () => { viewMode = 'list'; applyViewMode(); });
+vtGrid.addEventListener('click', () => { viewMode = 'grid'; applyViewMode(); });
+applyViewMode();
 
 function openSidebar()  { sidebarEl.classList.add('open'); sidebarOverlay.classList.add('visible'); menuBtn.classList.add('active'); }
 function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.classList.remove('visible'); menuBtn.classList.remove('active'); }
@@ -1036,6 +1137,21 @@ function linkifySegment(text) {
   text = text.replace(/(^|[^\w#])#(\d{1,5})\b/g, (m, pre, n) =>
     linkIds.has(Number(n)) ? `${pre}<a class="wikilink" data-post-id="${n}">#${n}</a>` : m);
   return text;
+}
+
+// First image embed → thumbnail URL + image count, plus the content with image
+// embeds removed so a card's text preview shows prose instead of an image slice.
+// Non-image embeds (pdf, note transclusions) are left in place.
+function extractMedia(content) {
+  let thumb = null, count = 0;
+  const stripped = content.replace(/!\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]/g, (m, target) => {
+    const name = target.trim();
+    if (!IMAGE_EXT_RE.test(name)) return m;
+    count++;
+    if (!thumb) thumb = attUrl(name);
+    return '';
+  });
+  return { thumb, count, stripped };
 }
 
 async function openPostById(id) {
@@ -1622,28 +1738,44 @@ function renderPost(post) {
   const tagsRow    = (tagsHtml || srcHtml) ? `<div class="post-tags">${tagsHtml}${srcHtml}</div>` : '';
   const headerHtml = (titleHtml || tagsRow) ? `<div class="post-header">${titleHtml}${tagsRow}</div>` : '';
 
-  let contentToRender = post.content;
+  // Pull images out first — to a card thumbnail (placed by CSS: right in list,
+  // on top in grid) and out of the preview so text shows instead of an image
+  // slice. Doing it before the strippers below also stops a leading ![[image]]
+  // from hiding the title heading / "Last updated:" line, which only match at
+  // the very start of the content.
+  const media = extractMedia(post.content);
+  let contentToRender = media.stripped;
   let extractedUpdated = null;
   if (post.title) {
     contentToRender = contentToRender.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '');
-    const m = contentToRender.match(/^\s*Last updated:\s*([^\n]+)\n?/i);
+    // Tolerate the line being wrapped in * / _ emphasis (*Last updated: …*).
+    const lu = /^\s*[*_]*\s*Last updated:\s*([^\n]+?)\s*[*_]*\s*(?:\n|$)/i;
+    const m = contentToRender.match(lu);
     if (m) {
       extractedUpdated = m[1].trim();
-      contentToRender = contentToRender.replace(/^\s*Last updated:\s*[^\n]+\n?/i, '');
+      contentToRender = contentToRender.replace(lu, '');
     }
   }
 
   const bodyHtml = `<div class="post-body">${renderBody(contentToRender)}</div>`;
+  const mediaHtml = media.thumb
+    ? `<div class="post-media"><img src="${escHtml(media.thumb)}" alt="" loading="lazy"></div>`
+    : '';
+  const mediaChip = media.count
+    ? `<span class="post-media-count">🖼 ${media.count}</span>`
+    : '';
 
   el.innerHTML = `
     ${masterBadge}
     ${headerHtml}
     <div class="post-body-wrap">${bodyHtml}</div>
+    ${mediaHtml}
     <div class="post-footer">
       <div class="post-footer-left">
         <span class="post-id-pill">#${post.id}</span>
         <span class="post-time" title="${timeTitle}">${timeLabel}</span>
         ${extractedUpdated ? `<span class="post-time">· updated ${escHtml(extractedUpdated)}</span>` : ''}
+        ${mediaChip}
         ${expiresHtml}
       </div>
       <div class="post-actions">
@@ -1655,6 +1787,9 @@ function renderPost(post) {
   el.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
   );
+  // A broken/unauthorised thumbnail just drops the media block (text stays).
+  const mediaImg = el.querySelector('.post-media img');
+  if (mediaImg) mediaImg.addEventListener('error', () => el.querySelector('.post-media')?.remove());
   el.querySelector('.btn-delete').addEventListener('click', async (e) => {
     e.stopPropagation();
     if (!confirm('Delete this post?')) return;
@@ -1728,6 +1863,9 @@ function rewirePost(el, post) {
   el.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
   );
+  // A broken/unauthorised thumbnail just drops the media block (text stays).
+  const mediaImg = el.querySelector('.post-media img');
+  if (mediaImg) mediaImg.addEventListener('error', () => el.querySelector('.post-media')?.remove());
   el.querySelector('.btn-delete').addEventListener('click', async (e) => {
     e.stopPropagation();
     if (!confirm('Delete this post?')) return;
