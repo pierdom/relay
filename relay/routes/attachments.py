@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 
-from .. import service, vault
+from .. import ingest, service, vault
 from ..auth import require_api_key
+from ..config import settings
 from ..database import get_db
 from ..models import (
     AttachmentCreate,
     AttachmentDeleteResponse,
     AttachmentListResponse,
     AttachmentResponse,
+    UploadSlotResponse,
+    UploadStatusResponse,
 )
 
 router = APIRouter(tags=["attachments"])
@@ -44,21 +47,58 @@ async def create_attachment(
     body: AttachmentCreate,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> AttachmentResponse:
-    """Store a base64 attachment in a folder's ``assets/``; with ``post_id`` the
-    ``![[file]]`` embed is appended to that post's body."""
+    """Store an attachment in a folder's ``assets/``; with ``post_id`` the
+    ``![[file]]`` embed is appended to that post's body. The bytes come from
+    exactly one of ``data`` (inline base64), ``source_url`` (server fetches), or
+    ``upload_id`` (a filled presigned slot — see ``POST /attachments/uploads``)."""
     try:
-        data = service.decode_attachment_b64(body.data)
+        return await service.ingest_attachment(
+            db, filename=body.filename, data=body.data, source_url=body.source_url,
+            upload_id=body.upload_id, post_id=body.post_id, folder=body.folder,
+            tags=body.tags, embed=body.embed,
+        )
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data is not valid base64")
-    try:
-        return await service.add_attachment(
-            db, filename=body.filename, data=data, post_id=body.post_id,
-            folder=body.folder, tags=body.tags, embed=body.embed,
-        )
+    except service.AttachmentSourceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{body.post_id} not found")
     except service.AttachmentError as exc:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc))
+
+
+@router.post(
+    "/attachments/uploads",
+    response_model=UploadSlotResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_api_key)],
+)
+async def create_upload_slot() -> UploadSlotResponse:
+    """Mint a presigned upload slot. PUT the raw bytes to the returned
+    ``upload_url``, then call ``POST /attachments`` with ``upload_id`` to file it.
+    Lets real files reach the vault without base64 in the request body."""
+    return service.create_upload_slot()
+
+
+@router.put(
+    "/attachments/uploads/{upload_id}",
+    response_model=UploadStatusResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def put_upload_bytes(upload_id: str, request: Request) -> UploadStatusResponse:
+    """Stream raw bytes into a presigned upload slot (single, capped body)."""
+    try:
+        size = await ingest.stage_upload(
+            upload_id, request.stream(), max_bytes=settings.attachment_max_bytes
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"upload slot '{upload_id}' is unknown or expired",
+        )
+    except ingest.FetchError as exc:
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc))
+    return UploadStatusResponse(upload_id=upload_id, bytes=size, ready=True)
 
 
 _FORCE_DOWNLOAD_SUFFIXES = {".svg", ".html", ".htm", ".xml", ".xhtml"}

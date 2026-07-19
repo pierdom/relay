@@ -20,12 +20,22 @@ from mcp.server.auth.settings import (
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import Icon
+from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import service, vault
 from .config import settings
-from .models import PostCreate, PostUpdate, TagConfigCreate
+from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
+
+
+def _first_error(exc: ValidationError) -> str:
+    """Flatten a pydantic ValidationError to its first human-readable message."""
+    errors = exc.errors()
+    if errors:
+        msg = errors[0].get("msg", "invalid input")
+        return msg.removeprefix("Value error, ")
+    return "invalid input"
 
 INSTRUCTIONS = (
     "Relay is a personal content feed. AI agents publish posts; clients subscribe in "
@@ -225,33 +235,58 @@ async def delete_post(id: int) -> dict:
 
 @mcp.tool(
     description=(
-        "Attach a file (image, PDF, …) to the vault. `data` is the file's bytes, "
-        "base64-encoded. With `post_id`, the file is filed under that post's folder and "
-        "its ![[file]] embed is appended to the post body. Without it, the file goes to "
-        "`folder` (or Inbox) and you place the returned `ref` in a post yourself."
+        "Attach a file (image, PDF, …) to the vault. Provide the bytes exactly one way: "
+        "`data` (base64 — only viable for tiny files, since you must emit the whole blob), "
+        "`source_url` (an http(s) URL the server fetches — preferred for real files), or "
+        "`upload_id` from create_upload (bytes PUT out-of-band). With `post_id`, the file is "
+        "filed under that post's folder and its ![[file]] embed is appended to the post body; "
+        "otherwise it goes to `folder` (or Inbox) and you place the returned `ref` yourself. "
+        "`filename` is required with `data`; with `source_url`/`upload_id` it's derived when omitted."
     )
 )
 async def add_attachment(
-    filename: str,
-    data: str,
+    filename: str | None = None,
+    data: str | None = None,
+    source_url: str | None = None,
+    upload_id: str | None = None,
     post_id: int | None = None,
     folder: str | None = None,
 ) -> dict:
     """Returns {filename, ref, folder, post_id}. `ref` is the ![[…]] embed to drop into a post."""
     try:
-        raw = service.decode_attachment_b64(data)
-    except ValueError as exc:
-        return {"error": str(exc)}
+        body = AttachmentCreate(
+            filename=filename, data=data, source_url=source_url,
+            upload_id=upload_id, post_id=post_id, folder=folder,
+        )
+    except ValidationError as exc:
+        return {"error": _first_error(exc)}
     async with _db() as db:
         try:
-            result = await service.add_attachment(
-                db, filename=filename, data=raw, post_id=post_id, folder=folder
+            result = await service.ingest_attachment(
+                db, filename=body.filename, data=body.data, source_url=body.source_url,
+                upload_id=body.upload_id, post_id=body.post_id, folder=body.folder,
             )
+        except ValueError:
+            return {"error": "data is not valid base64"}
+        except service.AttachmentSourceError as exc:
+            return {"error": str(exc)}
         except service.PostNotFound:
             return {"error": f"Post #{post_id} not found."}
         except service.AttachmentError as exc:
             return {"error": str(exc)}
     return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Mint a presigned upload slot for a file too large to pass as base64. Returns "
+        "{upload_id, upload_url, method, max_bytes, expires_at}: PUT the raw bytes to "
+        "`upload_url` (out-of-band — not through this tool call), then call add_attachment "
+        "with the `upload_id` to file it. Use when you can reach the relay host to PUT."
+    )
+)
+async def create_upload() -> dict:
+    return service.create_upload_slot().model_dump()
 
 
 @mcp.tool(

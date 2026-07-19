@@ -12,11 +12,12 @@ import base64
 import binascii
 import re
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiosqlite
 
-from . import database, events, folders, links, vault
+from . import database, events, folders, ingest, links, vault
 from .config import settings
 from .models import (
     AttachmentDeleteResponse,
@@ -38,6 +39,7 @@ from .models import (
     TagConfigResponse,
     TagCount,
     TagListResponse,
+    UploadSlotResponse,
 )
 
 
@@ -51,6 +53,12 @@ class ProtectedPost(Exception):
 
 class AttachmentError(Exception):
     """Raised when an attachment can't be stored (e.g. too large)."""
+
+
+class AttachmentSourceError(Exception):
+    """Raised when the attachment's byte source fails to resolve — a source_url
+    fetch error or a presigned upload slot that's unknown/expired/unfilled. Maps
+    to a 400 (loud, actionable), distinct from the 413 size cap."""
 
 
 async def _fetch(db: aiosqlite.Connection, post_id: int) -> aiosqlite.Row | None:
@@ -399,6 +407,83 @@ def decode_attachment_b64(data: str) -> bytes:
         return base64.b64decode(s, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError("data is not valid base64") from exc
+
+
+async def _resolve_attachment_bytes(
+    *,
+    filename: str | None,
+    data: str | None,
+    source_url: str | None,
+    upload_id: str | None,
+) -> tuple[bytes, str]:
+    """Turn whichever transport the caller used into ``(raw_bytes, filename)``.
+
+    - ``data``: inline base64 (``ValueError`` on garbage → 400).
+    - ``source_url``: the server fetches it (SSRF-guarded, capped); the name falls
+      back to the response's Content-Disposition / URL basename.
+    - ``upload_id``: claim a filled presigned slot (single-use).
+    """
+    if data is not None:
+        raw = decode_attachment_b64(data)  # ValueError → 400
+        name = filename
+    elif source_url is not None:
+        try:
+            raw, derived = await ingest.fetch_url(
+                source_url, max_bytes=settings.attachment_max_bytes
+            )
+        except ingest.FetchError as exc:
+            raise AttachmentSourceError(str(exc)) from exc
+        name = filename or derived
+    elif upload_id is not None:
+        claimed = ingest.registry.claim_slot(upload_id)
+        if claimed is None:
+            raise AttachmentSourceError(
+                f"upload slot '{upload_id}' is unknown, expired, or has no bytes yet"
+            )
+        raw, name = claimed, filename
+    else:
+        raise AttachmentSourceError("no attachment source provided")
+    if not name:
+        raise AttachmentSourceError(
+            "filename could not be determined from the source; pass an explicit filename"
+        )
+    return raw, name
+
+
+async def ingest_attachment(
+    db: aiosqlite.Connection,
+    *,
+    filename: str | None = None,
+    data: str | None = None,
+    source_url: str | None = None,
+    upload_id: str | None = None,
+    post_id: int | None = None,
+    folder: str | None = None,
+    tags: list[str] | None = None,
+    embed: bool = True,
+) -> AttachmentResponse:
+    """Resolve any of the three byte transports (base64 / source_url / upload_id)
+    then store via ``add_attachment``. The single entry point REST + MCP share."""
+    raw, name = await _resolve_attachment_bytes(
+        filename=filename, data=data, source_url=source_url, upload_id=upload_id
+    )
+    return await add_attachment(
+        db, filename=name, data=raw, post_id=post_id, folder=folder, tags=tags, embed=embed
+    )
+
+
+def create_upload_slot() -> UploadSlotResponse:
+    """Mint a presigned upload slot: the caller PUTs raw bytes to ``upload_url``
+    out-of-band, then finalizes with ``ingest_attachment(upload_id=…)``. Keeps the
+    bytes out of the model context entirely."""
+    slot = ingest.registry.create_slot()
+    base = settings.relay_base_url.rstrip("/")
+    return UploadSlotResponse(
+        upload_id=slot.id,
+        upload_url=f"{base}/attachments/uploads/{slot.id}",
+        max_bytes=settings.attachment_max_bytes,
+        expires_at=datetime.fromtimestamp(slot.expires_at, tz=timezone.utc).isoformat(),
+    )
 
 
 async def add_attachment(

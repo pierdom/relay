@@ -60,7 +60,9 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are removed |
 | `RELAY_WATCH_ENABLED` | `true` | Live-reindex + SSE on edits made outside relay (e.g. in Obsidian) |
 | `SECURE_COOKIES` | `true` | `Secure` flag on the session cookie; set `false` for plain HTTP |
-| `ATTACHMENT_MAX_MB` | `25` | Max upload size (base64-decoded); larger uploads → 413 |
+| `ATTACHMENT_MAX_MB` | `25` | Max upload size; larger uploads → 413 (all transports) |
+| `ATTACHMENT_UPLOAD_TTL_SECONDS` | `3600` | Presigned upload slot lifetime before it's purged |
+| `ATTACHMENT_FETCH_TIMEOUT_SECONDS` | `20` | Timeout for a server-side `source_url` fetch |
 | `OIDC_ISSUER` | `""` | OIDC provider base URL. Set with the client credentials below to enable Login with OIDC; blank = API-key-paste login |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | `""` | Confidential OIDC client credentials |
 | `SESSION_SECRET` | `""` | Signs the session cookie; falls back to `API_KEY` if unset |

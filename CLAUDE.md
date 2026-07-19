@@ -27,7 +27,9 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |
 | GET | /links | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
 | GET | /folders | First-level folders with post counts |
-| POST/GET | /attachments | Upload (base64) / list attachments — see [Attachments](#attachments) |
+| POST/GET | /attachments | Upload / list attachments — bytes via `data` (base64), `source_url` (server fetches), or `upload_id` (filled slot); see [Attachments](#attachments) |
+| POST | /attachments/uploads | Mint a presigned upload slot (`upload_id` + `upload_url`) for out-of-band bytes |
+| PUT | /attachments/uploads/{upload_id} | Stream raw bytes into a slot (single, capped body) |
 | GET/DELETE | /attachments/{path} | Serve / delete an attachment file |
 | GET | /tags | Tags with counts (incl. 0-count from tag_config) |
 | POST/PATCH | /tags/{tag}[/config] | Set per-tag expiry / rename a tag across all posts |
@@ -42,8 +44,10 @@ Non-`.md` files (images, PDFs, …) live in a per-folder `<Folder>/assets/` subd
 - **Names are vault-globally unique** (`vault.write_attachment` suffixes ` N` across *all* `assets/` dirs), so a bare `![[name]]` always resolves to exactly one file.
 - **Rendering:** `![[img]]` → inline image (Obsidian `|WxH` sizing); `![[file]]`/`[[file.ext]]` → 📎 link. An `![[…]]` embed is always a file (any extension); a plain `[[…]]` uses a curated extension list so dotted note titles (`[[Section 2.1]]`) aren't misread. `![[Note]]` (no extension) → note transclusion, rendered as a link.
 - **Placement:** with `post_id` → the post's folder (auto-embeds `![[file]]` unless `embed=false`); else by `folder`; else derived from `tags` (`folders.folder_for`); else `Inbox`.
+- **Byte transport (`relay/ingest.py`):** an upload provides its bytes exactly one of three ways — `data` (inline base64; only viable for tiny files, since an MCP client must *emit the whole blob* as model tokens), `source_url` (an http(s) URL the **server** fetches — SSRF-guarded on every hop incl. redirects, streamed, size-capped; filename derived from Content-Disposition/URL when omitted; note the guard resolves DNS once so it's not rebind-proof — fine given callers are authenticated), or `upload_id` (a presigned slot: `POST /attachments/uploads` → PUT raw bytes out-of-band → finalize with the id). The model validator enforces exactly-one. Slots are in-memory + disk-staged under `.relay/uploads/`, single-use, TTL'd (`ATTACHMENT_UPLOAD_TTL_SECONDS`), swept by the cleanup loop, and wiped at startup — **single-worker assumption** (PUT + finalize must hit the same process). A failed `source_url`/unknown `upload_id` → **400** (loud); over-cap → **413**.
+- **Presigned consumers:** the browser UI streams files ≥4 MB through a slot instead of base64; the **stdio proxy's** `add_attachment(path=…)` reads a local file on the client machine and drives the same create→PUT→finalize flow (see the parity exception in [MCP](#mcp)).
 - **Lifecycle:** deleting a post removes attachments in its folder that no other post references (shared assets kept). Deleting an attachment reports the post ids still referencing it (now dangling).
-- `ATTACHMENT_MAX_MB` (25) caps uploads → 413. `get_attachment` returns images as inline image content, size-guarded.
+- `ATTACHMENT_MAX_MB` (25) caps uploads → 413 (enforced on all three transports). `get_attachment` returns images as inline image content, size-guarded.
 
 ## SSE / real-time
 
@@ -71,7 +75,9 @@ Links are stored verbatim and resolved at **display time** (never rewritten exce
 | `RELAY_VAULT_PATH` | /data/vault | Vault dir; index at `<vault>/.relay/index.db` |
 | `RELAY_WATCH_ENABLED` | true | Live-reindex + SSE on external edits |
 | `SECURE_COOKIES` | true | `Secure` on the UI session cookie; `false` for plain HTTP |
-| `ATTACHMENT_MAX_MB` | 25 | Max attachment upload size (base64-decoded) → 413 |
+| `ATTACHMENT_MAX_MB` | 25 | Max attachment upload size → 413 (all transports) |
+| `ATTACHMENT_UPLOAD_TTL_SECONDS` | 3600 | How long a presigned upload slot stays open before purge |
+| `ATTACHMENT_FETCH_TIMEOUT_SECONDS` | 20 | Timeout for a server-side `source_url` fetch |
 | `OIDC_ISSUER` | "" | PocketID base URL. Set (with client id/secret) to enable OIDC login for `/ui`; blank = key-paste only |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | "" | Confidential OIDC client registered in PocketID (redirect URI `<RELAY_BASE_URL>/auth/callback`) |
 | `SESSION_SECRET` | "" | Signs the session cookie; falls back to `API_KEY` if unset |
@@ -99,9 +105,11 @@ The cookie is minted two ways: **OIDC login** via PocketID (`GET /auth/login` �
 Two surfaces with **identical tools**, server `instructions`, and the `relay://master-document` resource (post 0 as `text/markdown`):
 
 - **`relay/mcp_server.py`** — in-process, served over Streamable HTTP at `/mcp`; tools call `relay.service` directly. Remote-capable, **recommended**.
-- **`relay_mcp/server.py`** — legacy stdio proxy; runs on the client, proxies to REST over `RELAY_BASE_URL`. For clients that can't speak remote MCP (e.g. Claude Desktop). Full parity (same eleven tools); `git pull` + restart the client to update.
+- **`relay_mcp/server.py`** — legacy stdio proxy; runs on the client, proxies to REST over `RELAY_BASE_URL`. For clients that can't speak remote MCP (e.g. Claude Desktop). Full parity (same twelve tools); `git pull` + restart the client to update.
 
 **Feature parity rule:** every tool added, removed, or changed in `relay/mcp_server.py` must be reflected in `relay_mcp/server.py` and vice versa. Tool names, parameters (names, types, defaults), and descriptions must match exactly across both files. Whenever you touch either MCP server file, update the other one in the same change.
+
+> **Documented parity exception:** `add_attachment`'s **`path`** parameter is **stdio-proxy-only**. Only the stdio proxy runs on the client's machine, so only it can read a local file and stream it to relay (via the presigned slot flow). The in-process HTTP server must **never** gain `path` — reading a server-host path over an authenticated call would be an arbitrary file-read on the relay host. This is the single intentional divergence; everything else stays at exact parity.
 
 The in-process server advertises relay's logo + website in the initialize `serverInfo` (`icons`/`websiteUrl`, MCP SEP-973, built from `RELAY_BASE_URL` → public `/assets/` marks). Clients that read `serverInfo.icons` show the brand mark instead of the generic globe; Claude's remote connectors don't render it yet ([claude-ai-mcp#152](https://github.com/anthropics/claude-ai-mcp/issues/152)) but light up automatically when they do.
 
@@ -109,7 +117,7 @@ The in-process server advertises relay's logo + website in the initialize `serve
 |------|-------------|
 | `publish_post` / `update_post` / `get_post` / `delete_post` | CRUD posts (partial update; `id=0` = master doc, delete blocked) |
 | `list_posts` | List (tag/search/limit/offset; `summary` defaults **true** = metadata + excerpt, no bodies — call `get_post` for a full body) |
-| `add_attachment` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD (see [Attachments](#attachments)) |
+| `add_attachment` / `create_upload` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD; `add_attachment` bytes via `data`/`source_url`/`upload_id`, `create_upload` mints a presigned slot (see [Attachments](#attachments)) |
 | `list_tags` / `set_tag_config` | Tags with counts / per-tag expiry |
 
 ```bash
@@ -169,6 +177,7 @@ relay/
 ├── vault.py       # Canonical file layer: posts + attachments, id allocation, index rebuild, tags.yml
 ├── watcher.py     # watchdog: external edits → reindex + SSE (self-write suppressed)
 ├── service.py     # Shared post/tag/attachment logic — file-first via vault, then mirror to index
+├── ingest.py      # Attachment byte transports: source_url fetch (SSRF-guarded) + presigned upload slots
 ├── mcp_server.py  # In-process FastMCP server (/mcp); static-bearer or OAuth (MCP_OAUTH_ENABLED)
 ├── mcp_oauth/     # Remote MCP OAuth AS: store.py (hashed oauth.db) · provider.py · pocketid.py (broker) · broker.py (callback)
 ├── events.py · cleanup.py   # SSE broadcast hub · TTL cleanup loop

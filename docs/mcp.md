@@ -11,7 +11,8 @@ relay exposes the full feed API as MCP tools so Claude — or any MCP-capable ag
 | `get_post` | Get a post by ID (`id=0` for the master document) |
 | `list_posts` | List posts with tag/search/limit/offset filters; returns metadata + excerpt by default |
 | `delete_post` | Delete a post by ID |
-| `add_attachment` | Upload a base64 file; with `post_id` appends `![[file]]` to that post |
+| `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio proxy also accepts `path` (a local file it uploads for you) |
+| `create_upload` | Mint a presigned upload slot (`upload_id` + `upload_url`); PUT the raw bytes there, then finalize with `add_attachment(upload_id=…)` |
 | `get_attachment` | Retrieve an attachment; images return as inline image content |
 | `list_attachments` | List attachments; scope by `post_id` or `folder` |
 | `delete_attachment` | Delete an attachment; reports posts still referencing it |

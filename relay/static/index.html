@@ -1309,6 +1309,26 @@ function insertAtCursor(ta, text) {
   ta.selectionStart = ta.selectionEnd = s + text.length;
   ta.focus();
 }
+// At/above this size, skip base64 (which inflates the JSON body ~33% and buffers
+// the whole blob as a string) and stream the raw bytes through a presigned slot:
+// POST a slot → PUT the file bytes → finalize with the upload_id.
+const PRESIGNED_MIN_BYTES = 4 * 1024 * 1024;   // 4 MB
+
+async function postAttachment(name, file, extra) {
+  if (file.size >= PRESIGNED_MIN_BYTES) {
+    const slot = await apiFetch('/attachments/uploads', { method: 'POST' });
+    // Relative, same-origin path so the session cookie authenticates the PUT.
+    const put = await apiSend(`/attachments/uploads/${encodeURIComponent(slot.upload_id)}`,
+                              { method: 'PUT', body: file });
+    if (!put.ok) throw new Error(`upload ${put.status} ${put.statusText}`);
+    return apiFetch('/attachments', { method: 'POST',
+      body: JSON.stringify({ upload_id: slot.upload_id, filename: name, ...extra }) });
+  }
+  const data = await fileToBase64(file);
+  return apiFetch('/attachments', { method: 'POST',
+    body: JSON.stringify({ filename: name, data, ...extra }) });
+}
+
 // Upload one file, then insert its ![[ref]] at the cursor. `getExtra` supplies the
 // placement fields: an existing post ({post_id, embed:false} — server files it in
 // the post's folder, UI places the ref) or a new note ({tags} — server derives the
@@ -1318,9 +1338,7 @@ async function uploadOne(file, ta, statusEl, getExtra) {
   statusEl.classList.remove('error');
   statusEl.textContent = `Uploading ${name}…`;
   try {
-    const data = await fileToBase64(file);
-    const body = { filename: name, data, ...getExtra() };
-    const res = await apiFetch('/attachments', { method: 'POST', body: JSON.stringify(body) });
+    const res = await postAttachment(name, file, getExtra());
     // ![[…]] embed for everything: images render inline, other files as a 📎 link.
     insertAtCursor(ta, `\n![[${res.filename}]]\n`);
     statusEl.textContent = `Attached ${res.filename} → ${res.folder}/assets`;

@@ -76,7 +76,7 @@ Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the work
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven two-panel split: TOPICS sidebar + FEED list (`n` new, `e` edit, `d` delete, `Enter` view, `/` search, `q` quit). Set `RELAY_PALETTE` to match your terminal — themes include `nord`, `dracula`, `gruvbox`, `solarized`, `molokai`, and more.
 
-**MCP server** — 11 MCP tools over Streamable HTTP (`/mcp`) or the legacy stdio proxy. See [docs/mcp.md](docs/mcp.md).
+**MCP server** — 12 MCP tools over Streamable HTTP (`/mcp`) or the legacy stdio proxy. See [docs/mcp.md](docs/mcp.md).
 
 ## Docs
 
