@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _clean_tag_list(v: list[str]) -> list[str]:
@@ -188,8 +188,12 @@ class BacklinksResponse(BaseModel):
 
 
 class AttachmentCreate(BaseModel):
-    filename: str = Field(min_length=1)
-    data: str = Field(description="Base64-encoded file bytes")
+    # Exactly one byte source: inline base64 (`data`), a URL the server fetches
+    # (`source_url`), or a presigned upload slot already filled (`upload_id`).
+    filename: str | None = None  # required for data/upload_id; optional for source_url (derived from the response)
+    data: str | None = Field(default=None, description="Base64-encoded file bytes")
+    source_url: str | None = None  # server fetches the bytes from this http(s) URL
+    upload_id: str | None = None   # id of a filled presigned upload slot
     post_id: int | None = None  # attach to this post (file under its folder)
     folder: str | None = None   # explicit first-level folder for a standalone attachment
     tags: list[str] = Field(default_factory=list)  # derive the folder from these (compose)
@@ -202,11 +206,36 @@ class AttachmentCreate(BaseModel):
 
     @field_validator("filename")
     @classmethod
-    def filename_not_blank(cls, v: str) -> str:
+    def filename_not_blank(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         v = v.strip()
-        if not v:
-            raise ValueError("filename must not be empty")
-        return v
+        return v or None
+
+    @model_validator(mode="after")
+    def one_source(self) -> "AttachmentCreate":
+        sources = [s for s in (self.data, self.source_url, self.upload_id) if s]
+        if len(sources) != 1:
+            raise ValueError("provide exactly one of: data, source_url, upload_id")
+        # Only source_url can derive a name (from Content-Disposition / URL path);
+        # data and upload_id carry no name, so require an explicit filename.
+        if (self.data is not None or self.upload_id is not None) and not self.filename:
+            raise ValueError("filename is required with data or upload_id")
+        return self
+
+
+class UploadSlotResponse(BaseModel):
+    upload_id: str
+    upload_url: str          # PUT the raw bytes here (out-of-band, not through the model)
+    method: str = "PUT"
+    max_bytes: int
+    expires_at: str          # ISO 8601; slot is purged after this
+
+
+class UploadStatusResponse(BaseModel):
+    upload_id: str
+    bytes: int
+    ready: bool
 
 
 class AttachmentResponse(BaseModel):

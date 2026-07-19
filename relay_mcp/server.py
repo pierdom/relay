@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 import mcp.server.stdio
 import mcp.types as types
@@ -10,6 +12,52 @@ from pydantic import AnyUrl
 from relay.config import settings
 
 RELAY_BASE_URL = settings.relay_base_url
+_AUTH = {"Authorization": f"Bearer {settings.api_key}"}
+
+
+async def _upload_local_path(arguments: dict) -> list[types.TextContent]:
+    """Handle add_attachment(path=…): read a file on the machine running this proxy
+    and upload it to relay via a presigned slot (create → PUT bytes → finalize), so
+    no base64 blob ever passes through the model. Proxy-only — the remote HTTP MCP
+    server can't (and mustn't) read the client's filesystem."""
+    p = Path(arguments["path"]).expanduser()
+    if not p.is_file():
+        return [types.TextContent(type="text", text=f"Local file not found: {arguments['path']}")]
+    filename = arguments.get("filename") or p.name
+    async with httpx.AsyncClient() as client:
+        slot_resp = await client.post(f"{RELAY_BASE_URL}/attachments/uploads", headers=_AUTH, timeout=10)
+        slot_resp.raise_for_status()
+        slot = slot_resp.json()
+        size = p.stat().st_size
+        if size > slot["max_bytes"]:
+            return [types.TextContent(
+                type="text",
+                text=f"'{p.name}' is {size} bytes — over the server's {slot['max_bytes']}-byte limit.",
+            )]
+        put = await client.put(
+            f"{RELAY_BASE_URL}/attachments/uploads/{slot['upload_id']}",
+            content=p.read_bytes(), headers=_AUTH, timeout=120,
+        )
+        if put.status_code == 413:
+            return [types.TextContent(type="text", text=put.json().get("detail", "Attachment too large."))]
+        put.raise_for_status()
+        final = {"upload_id": slot["upload_id"], "filename": filename}
+        for k in ("post_id", "folder"):
+            if arguments.get(k) is not None:
+                final[k] = arguments[k]
+        response = await client.post(f"{RELAY_BASE_URL}/attachments", json=final, headers=_AUTH, timeout=30)
+        if response.status_code == 404:
+            return [types.TextContent(type="text", text=f"Post #{arguments.get('post_id')} not found.")]
+        if response.status_code in (400, 413):
+            return [types.TextContent(type="text", text=response.json().get("detail", "Attachment error."))]
+        response.raise_for_status()
+        a = response.json()
+    where = f" appended to post #{a['post_id']}" if a.get("post_id") is not None else ""
+    return [types.TextContent(
+        type="text",
+        text=f"Uploaded '{a['filename']}' ({size} bytes) to {a['folder']}/assets{where}.\nEmbed: {a['ref']}",
+    )]
+
 
 INSTRUCTIONS = (
     "Relay is a personal content feed. AI agents publish posts; clients subscribe in "
@@ -157,21 +205,37 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="add_attachment",
             description=(
-                "Attach a file (image, PDF, …) to the vault. 'data' is the file's bytes, "
-                "base64-encoded. With 'post_id', the file is filed under that post's folder and "
-                "its ![[file]] embed is appended to the post body. Without it, the file goes to "
-                "'folder' (or Inbox) and you place the returned ref in a post yourself."
+                "Attach a file (image, PDF, …) to the vault. Provide the bytes exactly one way: "
+                "'path' (a file on THIS machine — the proxy reads it and streams it to relay; best "
+                "for a real local file), 'source_url' (an http(s) URL the server fetches), "
+                "'data' (base64 — only viable for tiny files, since you must emit the whole blob), or "
+                "'upload_id' from create_upload (bytes PUT out-of-band). With 'post_id', the file is "
+                "filed under that post's folder and its ![[file]] embed is appended to the post body; "
+                "otherwise it goes to 'folder' (or Inbox) and you place the returned ref yourself. "
+                "'filename' is required with 'data'; with 'path'/'source_url'/'upload_id' it's derived when omitted."
             ),
             inputSchema={
                 "type": "object",
-                "required": ["filename", "data"],
                 "properties": {
-                    "filename": {"type": "string", "description": "Attachment filename, e.g. 'diagram.png'"},
-                    "data": {"type": "string", "description": "Base64-encoded file bytes"},
+                    "filename": {"type": "string", "description": "Attachment filename, e.g. 'diagram.png'. Required with data; derived when omitted for path/source_url/upload_id"},
+                    "path": {"type": "string", "description": "Path to a file on the machine running this proxy; the proxy reads and uploads it (streamed, no base64)"},
+                    "data": {"type": "string", "description": "Base64-encoded file bytes (tiny files only)"},
+                    "source_url": {"type": "string", "description": "http(s) URL the server fetches the bytes from"},
+                    "upload_id": {"type": "string", "description": "Id of a filled presigned upload slot (see create_upload)"},
                     "post_id": {"type": "integer", "description": "Post to attach to (appends ![[file]] to its body)"},
                     "folder": {"type": "string", "description": "First-level folder for a standalone attachment (default Inbox)"},
                 },
             },
+        ),
+        types.Tool(
+            name="create_upload",
+            description=(
+                "Mint a presigned upload slot for a file too large to pass as base64. Returns "
+                "{upload_id, upload_url, method, max_bytes, expires_at}: PUT the raw bytes to "
+                "'upload_url' (out-of-band — not through this tool call), then call add_attachment "
+                "with the 'upload_id' to file it. Use when you can reach the relay host to PUT."
+            ),
+            inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
             name="delete_attachment",
@@ -249,7 +313,14 @@ async def call_tool(
     name: str, arguments: dict
 ) -> list[types.TextContent | types.ImageContent]:
     if name == "add_attachment":
-        payload = {k: v for k, v in arguments.items() if v is not None}
+        if sum(bool(arguments.get(k)) for k in ("path", "data", "source_url", "upload_id")) > 1:
+            return [types.TextContent(
+                type="text",
+                text="Provide exactly one of: path, data, source_url, upload_id.",
+            )]
+        if arguments.get("path"):
+            return await _upload_local_path(arguments)
+        payload = {k: v for k, v in arguments.items() if v is not None and k != "path"}
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{RELAY_BASE_URL}/attachments",
@@ -260,7 +331,11 @@ async def call_tool(
             if response.status_code == 404:
                 return [types.TextContent(type="text", text=f"Post #{arguments.get('post_id')} not found.")]
             if response.status_code == 400:
-                return [types.TextContent(type="text", text="Attachment 'data' is not valid base64.")]
+                return [types.TextContent(type="text", text=response.json().get("detail", "Invalid attachment source."))]
+            if response.status_code == 422:
+                detail = response.json().get("detail")
+                msg = detail[0]["msg"] if isinstance(detail, list) and detail else "Invalid attachment request."
+                return [types.TextContent(type="text", text=msg.removeprefix("Value error, "))]
             if response.status_code == 413:
                 return [types.TextContent(type="text", text=response.json().get("detail", "Attachment too large."))]
             response.raise_for_status()
@@ -269,6 +344,23 @@ async def call_tool(
         return [types.TextContent(
             type="text",
             text=f"Stored attachment '{a['filename']}' in {a['folder']}/assets{where}.\nEmbed: {a['ref']}",
+        )]
+
+    if name == "create_upload":
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{RELAY_BASE_URL}/attachments/uploads",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            s = response.json()
+        return [types.TextContent(
+            type="text",
+            text=(f"Upload slot ready. PUT the raw bytes (up to {s['max_bytes']} bytes) to:\n"
+                  f"  {s['method']} {s['upload_url']}\n"
+                  f"then call add_attachment with upload_id='{s['upload_id']}'. "
+                  f"Expires {s['expires_at']}."),
         )]
 
     if name == "delete_attachment":

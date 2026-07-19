@@ -14,7 +14,9 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Interactive docs (Swagg
 | GET | `/posts/{id}/backlinks` | Posts linking here via `[[title]]` or `#id` |
 | GET | `/links` | `(id, title)` index for resolving `[[Title]]` wikilinks |
 | GET | `/folders` | First-level vault folders with post counts |
-| POST | `/attachments` | Upload a base64 attachment; with `post_id`, appends `![[file]]` to that post |
+| POST | `/attachments` | Store an attachment; bytes via `data` (base64), `source_url` (server fetches), or `upload_id` (filled slot). With `post_id`, appends `![[file]]` to that post |
+| POST | `/attachments/uploads` | Mint a presigned upload slot (`upload_id` + `upload_url`) |
+| PUT | `/attachments/uploads/{upload_id}` | Stream raw bytes into a slot (single, capped body) |
 | GET | `/attachments` | List attachments (`folder`/`post_id` scope) |
 | GET | `/attachments/{path}` | Serve a vault attachment |
 | DELETE | `/attachments/{path}` | Delete an attachment; reports posts still referencing it |
@@ -117,4 +119,10 @@ curl -X PATCH http://localhost:8000/tags/news \
 
 ## Attachments
 
-Upload via `POST /attachments` with a base64-encoded body. With `post_id`, the `![[file]]` embed is automatically appended to that post. Filenames are vault-globally unique, so `![[name]]` always resolves to exactly one file. Deleting a post removes orphaned attachments; shared assets are kept.
+Upload via `POST /attachments`, providing the bytes exactly one of three ways:
+
+- **`data`** — base64-encoded body. Simple, but the whole blob rides in the request; fine for small files.
+- **`source_url`** — an `http(s)` URL the **server** fetches (streamed, size-capped, SSRF-guarded; filename derived from the response when omitted). No bytes in the request.
+- **`upload_id`** — for large files, mint a slot with `POST /attachments/uploads`, `PUT` the raw bytes to the returned `upload_url` (out-of-band, not base64), then finalize with `POST /attachments` carrying the `upload_id`. Slots are single-use and short-lived (`ATTACHMENT_UPLOAD_TTL_SECONDS`).
+
+With `post_id`, the `![[file]]` embed is automatically appended to that post. Filenames are vault-globally unique, so `![[name]]` always resolves to exactly one file. Deleting a post removes orphaned attachments; shared assets are kept. A failed `source_url`/unknown `upload_id` → `400`; over the size cap → `413`.

@@ -34,6 +34,11 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Presigned upload slots are in-memory + disk-staged; any bytes left in the
+    # staging dir from a prior run belong to slots that no longer exist. Wipe them.
+    from . import ingest
+
+    ingest.registry.reset()
     # Persistent OAuth store (DCR clients + tokens) lives beside the index but is
     # never rebuilt from files; create its schema once at startup when enabled.
     if settings.mcp_oauth_active:

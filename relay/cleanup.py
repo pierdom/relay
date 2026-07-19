@@ -5,7 +5,7 @@ import logging
 
 import aiosqlite
 
-from . import vault
+from . import ingest, vault
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -103,6 +103,14 @@ async def cleanup_loop() -> None:
                     logger.info("Cleanup deleted %d expired post(s)", count)
         except Exception as exc:
             logger.error("Cleanup error: %s", exc)
+
+        # Sweep expired presigned upload slots (staged bytes never finalized).
+        try:
+            dropped = ingest.registry.purge_expired()
+            if dropped:
+                logger.info("Cleanup purged %d expired upload slot(s)", dropped)
+        except Exception as exc:
+            logger.error("Upload-slot cleanup error: %s", exc)
 
         # Piggyback OAuth store hygiene: drop expired pending auths, codes, and
         # access tokens (refresh tokens live until their own expiry). Gate on

@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     relay_transparent: bool = False
     secure_cookies: bool = True
     attachment_max_mb: int = 25  # reject uploads larger than this (base64-decoded)
+    # How long a presigned upload slot (POST /attachments/uploads) stays open for
+    # its out-of-band PUT before it's purged. Short-lived like an OAuth code.
+    attachment_upload_ttl_seconds: int = 3600  # 1h
+    # Timeout (seconds) for a server-side source_url fetch on add_attachment.
+    attachment_fetch_timeout_seconds: int = 20
 
     # --- Web UI OIDC (PocketID). All optional; absent => OIDC login disabled,
     # the API-key paste + bearer paths keep working unchanged. ---
@@ -67,6 +72,14 @@ class Settings(BaseSettings):
     @property
     def attachment_max_bytes(self) -> int:
         return self.attachment_max_mb * 1024 * 1024
+
+    @property
+    def uploads_dir(self) -> str:
+        """Staging dir for presigned uploads (bytes land here before finalize).
+
+        Under ``.relay/`` so it rides the vault dir, but wiped at startup — an
+        unclaimed slot is disposable, like an OAuth auth code."""
+        return str(Path(self.relay_dir) / "uploads")
 
     @property
     def oidc_enabled(self) -> bool:

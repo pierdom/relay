@@ -150,4 +150,4 @@ Notes without a domain tag land in `Inbox/`. As soon as the note gets its first 
 | PDF or binary file | `![[file.pdf]]` — renders as a download link |
 | External URL | `[label](url)` |
 
-Attachments live in `<Folder>/assets/`. Deleting a post removes orphaned attachments; shared assets are kept.
+Attachments live in `<Folder>/assets/`. Deleting a post removes orphaned attachments; shared assets are kept. In the browser UI, drag/drop, paste, or the 📎 button uploads a file and inserts its embed (large files stream through a presigned slot instead of base64). Agents attach via MCP `add_attachment` — a `source_url` the server fetches, a `path` the stdio proxy uploads from your machine, or a presigned `upload_id`.
