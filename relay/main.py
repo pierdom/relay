@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import watcher
+from . import metrics, watcher
 from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
 from .config import settings
@@ -22,6 +22,7 @@ from .routes.auth import router as auth_router
 from .routes.events import router as events_router
 from .routes.folders import router as folders_router
 from .routes.links import router as links_router
+from .routes.metrics import router as metrics_router
 from .routes.posts import router as posts_router
 from .routes.tags import router as tags_router
 
@@ -68,7 +69,67 @@ async def lifespan(app: FastAPI):
         pass
 
 
-app = FastAPI(title="relay", version="0.1.0", lifespan=lifespan)
+from . import __version__
+
+app = FastAPI(title="relay", version=__version__, lifespan=lifespan)
+
+# Top-level path segments we count under a stable label. Anything else (e.g. a
+# 404 probe at /random/xyz) buckets to "other" so /metrics cardinality can't be
+# blown up by unmatched paths.
+_KNOWN_SEGMENTS = frozenset({
+    "posts", "tags", "folders", "links", "events", "attachments", "mcp",
+    "auth", "session", "health", "metrics", "assets", "favicon.ico",
+})
+
+
+def _metric_path(scope) -> str:
+    """Stable, low-cardinality path label for an HTTP request.
+
+    A matched FastAPI route exposes its template (``/posts/{post_id}``); a mounted
+    sub-app (the MCP app at ``/mcp``) or an unmatched path has no APIRoute, so we
+    bucket by the first path segment (allowlisted, else ``other``)."""
+    route = scope.get("route")
+    template = getattr(route, "path", None)
+    if template:  # APIRoute template — already parameterised, bounded cardinality
+        return template
+    segment = scope.get("path", "/").strip("/").split("/", 1)[0]
+    if not segment:
+        return "/"
+    return f"/{segment}" if segment in _KNOWN_SEGMENTS else "/other"
+
+
+class MetricsMiddleware:
+    """Pure-ASGI request counter.
+
+    Kept as raw ASGI (not ``BaseHTTPMiddleware``) so it never buffers a response
+    body — that would break the SSE ``/events`` stream and the MCP Streamable HTTP
+    transport. It only peeks at the response-start status message."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        status_code = 500  # assume failure until we see a response start
+        method = scope.get("method", "GET")
+
+        async def send_wrapper(message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            metrics.http_requests.inc(
+                method=method, path=_metric_path(scope), status=str(status_code)
+            )
+
+
+app.add_middleware(MetricsMiddleware)
 
 # Holds transient OAuth state (state/nonce/PKCE verifier) between /auth/login and
 # /auth/callback. SameSite=lax so it survives the top-level redirect back from
@@ -155,6 +216,7 @@ app.include_router(events_router)
 app.include_router(links_router)
 app.include_router(folders_router)
 app.include_router(attachments_router)
+app.include_router(metrics_router)
 
 # Remote MCP endpoint (Streamable HTTP). Any MCP client can connect to /mcp
 # with the relay bearer key; shares relay.service with the REST routes. The

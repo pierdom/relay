@@ -17,6 +17,11 @@ def unsubscribe(q: asyncio.Queue, tag: str | None) -> None:
     _subscribers[tag].discard(q)
 
 
+def subscriber_count() -> int:
+    """Number of currently connected SSE subscribers (across all tag filters)."""
+    return sum(len(queues) for queues in _subscribers.values())
+
+
 async def _broadcast(envelope: dict) -> None:
     """Fan an event envelope out to tag-matched and global subscribers.
 

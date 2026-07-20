@@ -17,7 +17,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from . import database, events, folders, ingest, links, vault
+from . import database, events, folders, ingest, links, metrics, vault
 from .config import settings
 from .models import (
     AttachmentDeleteResponse,
@@ -159,6 +159,7 @@ async def list_posts(
     order_by = "posts.created_at DESC, posts.id DESC"
 
     if search:
+        metrics.search_queries.inc()
         match = _fts_query(search) if database.FTS_ENABLED else None
         if database.FTS_ENABLED and match is not None:
             joins = "JOIN posts_fts ON posts_fts.rowid = posts.id"
