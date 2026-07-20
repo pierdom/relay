@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import service, vault
+from . import metrics, service, vault
 from .config import settings
 from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
 
@@ -147,6 +147,7 @@ async def publish_post(
     expires_at: str | None = None,
 ) -> dict:
     """`title` becomes the Markdown filename. `expires_at`: optional ISO 8601 datetime; overrides tag/global TTL."""
+    metrics.record_tool_call("publish_post")
     body = PostCreate(
         content=content,
         title=title,
@@ -174,6 +175,7 @@ async def list_posts(
     offset: int = 0,
     summary: bool = True,
 ) -> dict:
+    metrics.record_tool_call("list_posts")
     async with _db() as db:
         result = await service.list_posts(
             db, tag=tag, search=search, limit=limit, offset=offset, summary=summary
@@ -183,6 +185,7 @@ async def list_posts(
 
 @mcp.tool(description="Get a single post by its ID. Use id=0 for the master document.")
 async def get_post(id: int) -> dict:
+    metrics.record_tool_call("get_post")
     async with _db() as db:
         post = await service.get_post(db, id)
     if post is None:
@@ -205,6 +208,7 @@ async def update_post(
     source: str | None = None,
     expires_at: str | None = None,
 ) -> dict:
+    metrics.record_tool_call("update_post")
     fields = {
         "title": title,
         "content": content,
@@ -223,6 +227,7 @@ async def update_post(
 
 @mcp.tool(description="Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.")
 async def delete_post(id: int) -> dict:
+    metrics.record_tool_call("delete_post")
     async with _db() as db:
         try:
             await service.delete_post(db, id)
@@ -253,6 +258,7 @@ async def add_attachment(
     folder: str | None = None,
 ) -> dict:
     """Returns {filename, ref, folder, post_id}. `ref` is the ![[…]] embed to drop into a post."""
+    metrics.record_tool_call("add_attachment")
     try:
         body = AttachmentCreate(
             filename=filename, data=data, source_url=source_url,
@@ -286,6 +292,7 @@ async def add_attachment(
     )
 )
 async def create_upload() -> dict:
+    metrics.record_tool_call("create_upload")
     return service.create_upload_slot().model_dump()
 
 
@@ -298,6 +305,7 @@ async def create_upload() -> dict:
 )
 async def get_attachment(name: str):
     """Returns image content for images, else a dict describing the file."""
+    metrics.record_tool_call("get_attachment")
     try:
         result = vault.read_attachment(name, max_bytes=settings.attachment_max_bytes)
     except ValueError:
@@ -321,6 +329,7 @@ async def get_attachment(name: str):
     )
 )
 async def delete_attachment(name: str) -> dict:
+    metrics.record_tool_call("delete_attachment")
     async with _db() as db:
         result = await service.delete_attachment(db, name)
     if result is None:
@@ -336,6 +345,7 @@ async def delete_attachment(name: str) -> dict:
     )
 )
 async def list_attachments(post_id: int | None = None, folder: str | None = None) -> dict:
+    metrics.record_tool_call("list_attachments")
     async with _db() as db:
         try:
             result = await service.list_attachments(db, post_id=post_id, folder=folder)
@@ -346,6 +356,7 @@ async def list_attachments(post_id: int | None = None, folder: str | None = None
 
 @mcp.tool(description="List all tags in the relay feed with their post counts.")
 async def list_tags() -> dict:
+    metrics.record_tool_call("list_tags")
     async with _db() as db:
         result = await service.list_tags(db)
     return result.model_dump()
@@ -363,6 +374,7 @@ async def set_tag_config(
     ttl_hours: int | None = None,
     expires_at: str | None = None,
 ) -> dict:
+    metrics.record_tool_call("set_tag_config")
     body = TagConfigCreate(ttl_hours=ttl_hours, expires_at=expires_at)
     async with _db() as db:
         result = await service.set_tag_config(db, tag, body)

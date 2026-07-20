@@ -5,7 +5,7 @@ import logging
 
 import aiosqlite
 
-from . import ingest, vault
+from . import ingest, metrics, vault
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -100,6 +100,7 @@ async def cleanup_loop() -> None:
                 db.row_factory = aiosqlite.Row
                 count = await _delete_expired(db)
                 if count:
+                    metrics.cleanup_deletions.inc(count)
                     logger.info("Cleanup deleted %d expired post(s)", count)
         except Exception as exc:
             logger.error("Cleanup error: %s", exc)
@@ -108,6 +109,7 @@ async def cleanup_loop() -> None:
         try:
             dropped = ingest.registry.purge_expired()
             if dropped:
+                metrics.upload_slots_purged.inc(dropped)
                 logger.info("Cleanup purged %d expired upload slot(s)", dropped)
         except Exception as exc:
             logger.error("Upload-slot cleanup error: %s", exc)

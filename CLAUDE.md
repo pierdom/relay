@@ -34,6 +34,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 | GET | /tags | Tags with counts (incl. 0-count from tag_config) |
 | POST/PATCH | /tags/{tag}[/config] | Set per-tag expiry / rename a tag across all posts |
 | GET | /events | SSE stream (`?tag=` filter) |
+| GET | /metrics | Prometheus/OpenMetrics text exposition (bearer-gated); see [Metrics](#metrics) |
 | POST/GET | /mcp | Streamable HTTP MCP endpoint (bearer auth) |
 
 ## Attachments
@@ -48,6 +49,13 @@ Non-`.md` files (images, PDFs, …) live in a per-folder `<Folder>/assets/` subd
 - **Presigned consumers:** the browser UI streams files ≥4 MB through a slot instead of base64; the **stdio proxy's** `add_attachment(path=…)` reads a local file on the client machine and drives the same create→PUT→finalize flow (see the parity exception in [MCP](#mcp)).
 - **Lifecycle:** deleting a post removes attachments in its folder that no other post references (shared assets kept). Deleting an attachment reports the post ids still referencing it (now dangling).
 - `ATTACHMENT_MAX_MB` (25) caps uploads → 413 (enforced on all three transports). `get_attachment` returns images as inline image content, size-guarded.
+
+## Metrics
+
+`GET /metrics` exposes Prometheus text format 0.0.4 (`relay/metrics.py` — a zero-dep counter registry + renderer, no `prometheus_client`; Telegraf/Prometheus both scrape it). **Gated behind the same `require_api_key`** as the rest of the API (scraper sends `Authorization: Bearer <API_KEY>`) — relay is behind a public proxy, so an open `/metrics` would leak vault size/activity; the bearer gate needs no new config. On a trusted-network deploy you could bind it loopback/tailnet-only instead.
+
+- **Counters** (process-lifetime, reset on restart): `relay_http_requests_total{method,path,status}` (a raw-ASGI middleware — *not* `BaseHTTPMiddleware`, so it never buffers the SSE/MCP streams; `path` is the matched route template or a bucketed first segment, so cardinality stays bounded), `relay_mcp_tool_calls_total{tool}` (in-process `/mcp` tools only — the stdio proxy runs on the client and its calls land as REST `http_requests`; **not** a parity concern — internal instrumentation, not part of the tool contract), `relay_search_queries_total`, `relay_cleanup_deletions_total`, `relay_upload_slots_purged_total`.
+- **Gauges** (sampled from the DB/state at scrape time, always exact): `relay_posts_total`, `relay_tags_total`, `relay_sse_clients`, `relay_build_info{version}` (from `relay.__version__`, the single version source, also FastAPI's `version=`).
 
 ## SSE / real-time
 
@@ -181,7 +189,8 @@ relay/
 ├── mcp_server.py  # In-process FastMCP server (/mcp); static-bearer or OAuth (MCP_OAUTH_ENABLED)
 ├── mcp_oauth/     # Remote MCP OAuth AS: store.py (hashed oauth.db) · provider.py · pocketid.py (broker) · broker.py (callback)
 ├── events.py · cleanup.py   # SSE broadcast hub · TTL cleanup loop
-└── routes/        # posts · tags · attachments · folders · links · events (thin — delegate to service)
+├── metrics.py     # Zero-dep Prometheus counter registry + text renderer (/metrics)
+└── routes/        # posts · tags · attachments · folders · links · events · metrics (thin — delegate to service)
 relay_mcp/server.py            # Legacy stdio MCP proxy (REST client)
 relay/static/index.html        # Browser UI (/ui)
 relay_tui/                      # Textual TUI — app.py · api.py · sse.py · theme.py · palettes/ · widgets/
