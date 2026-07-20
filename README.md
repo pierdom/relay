@@ -8,6 +8,7 @@
 # relay
 
 [![Build](https://github.com/pierdom/relay/actions/workflows/docker.yml/badge.svg)](https://github.com/pierdom/relay/actions/workflows/docker.yml)
+[![Docker image](https://img.shields.io/github/v/tag/pierdom/relay?sort=semver&logo=docker&logoColor=white&label=ghcr.io&color=2496ED)](https://github.com/pierdom/relay/pkgs/container/relay)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fpierdom%2Frelay%2Fmain%2Fpyproject.toml)](pyproject.toml)
 [![MCP](https://img.shields.io/badge/MCP-server-6E56CF?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io)
@@ -55,8 +56,10 @@ Or with Docker (pre-built image from GHCR):
 
 ```bash
 docker compose up -d
-docker compose pull && docker compose up -d   # update to latest
+docker compose pull && docker compose up -d   # update within the pinned 0.1.x line
 ```
+
+The compose file pins `ghcr.io/pierdom/relay:0.1` (the 0.1 minor line) so updates are deliberate and rollback-able; pin an exact `:0.1.N` to freeze a version. Every `vX.Y.Z` git tag publishes `:X.Y.Z` and `:X.Y` to GHCR.
 
 Service on `http://localhost:8000` — interactive docs at `/docs`.
 
