@@ -178,3 +178,50 @@ async def test_index_insert_rejects_duplicate_id(vault_dir):
         await db.rollback()
     finally:
         await db.close()
+
+
+# ── Ordering (sort/order params) ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_sort_and_order(client, monkeypatch):
+    # Drive an increasing clock so timestamps are distinct (utcnow_iso is
+    # second-resolution, and the three creates otherwise land in the same second).
+    clock = {"n": 0}
+
+    def fake_now() -> str:
+        clock["n"] += 1
+        return f"2026-01-01T00:00:{clock['n']:02d}Z"
+
+    monkeypatch.setattr(vault, "utcnow_iso", fake_now)
+
+    # three posts, created A → B → C
+    ids = []
+    for t in ("A", "B", "C"):
+        r = await client.post("/posts", json={"title": t, "content": t, "tags": ["z"]}, headers=AUTH)
+        ids.append(r.json()["id"])
+    a, b, c = ids
+
+    # edit A last so its updated_at is newest
+    r = await client.patch(f"/posts/{a}", json={"content": "A2"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+
+    async def titles(**params):
+        r = await client.get("/posts", params={"tag": "z", **params}, headers=AUTH)
+        assert r.status_code == 200, r.text
+        return [p["title"] for p in r.json()["items"]]
+
+    # default: updated desc → A (just edited) first, then C, B
+    assert await titles() == ["A", "C", "B"]
+    # updated asc → reverse
+    assert await titles(order="asc") == ["B", "C", "A"]
+    # created desc → newest-created first, edits ignored
+    assert await titles(sort="created") == ["C", "B", "A"]
+    # created asc → creation order
+    assert await titles(sort="created", order="asc") == ["A", "B", "C"]
+
+
+@pytest.mark.asyncio
+async def test_list_rejects_bad_sort_params(client):
+    assert (await client.get("/posts", params={"sort": "bogus"}, headers=AUTH)).status_code == 422
+    assert (await client.get("/posts", params={"order": "sideways"}, headers=AUTH)).status_code == 422

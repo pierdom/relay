@@ -105,6 +105,8 @@ class RelayTuiApp(App):
         Binding("d", "delete_post", "Delete"),
         Binding("slash", "search", "Search"),
         Binding("a", "attachments", "Attachments"),
+        Binding("s", "cycle_sort", "Sort field"),
+        Binding("o", "cycle_order", "Sort order"),
         Binding("r", "reload", "Refresh"),
         Binding("tab", "focus_next_panel", "Switch panel", show=False),
         Binding("shift+tab", "focus_prev_panel", "Switch panel", show=False),
@@ -156,6 +158,8 @@ class RelayTuiApp(App):
         self._active_tag: str | None = None
         self._active_folder: str | None = None
         self._topics_mode = "tags"   # "tags" | "tree"
+        self._sort = "updated"       # "updated" | "created"
+        self._order = "desc"         # "desc" | "asc"
         self._search: str | None = None
         self._link_index: dict[str, int] = {}   # normalised title -> id
         self._link_titles: dict[int, str] = {}   # id -> title
@@ -213,7 +217,13 @@ class RelayTuiApp(App):
             # place; otherwise prepend it (respecting the active-tag filter).
             if panel.has_post(post.id):
                 panel.update_post(post, flash=True)
-            elif self._active_tag is None or self._active_tag in post.tags:
+            elif (
+                # A new post belongs at the top only under the default sort
+                # (updated · desc). Under any other order, prepending would
+                # misplace it — leave it for the next refresh (`r`) instead.
+                self._sort == "updated" and self._order == "desc"
+                and (self._active_tag is None or self._active_tag in post.tags)
+            ):
                 panel.prepend_post(post)
             # A streamed post may carry a brand-new tag or bump a count, so
             # refresh the sidebar regardless of the active-tag filter.
@@ -227,6 +237,7 @@ class RelayTuiApp(App):
             posts, total, pinned = api.list_posts(
                 tag=self._active_tag, folder=self._active_folder,
                 search=self._search, limit=self._page_size,
+                sort=self._sort, order=self._order,
             )
             tags = api.list_tags()
             try:
@@ -270,6 +281,8 @@ class RelayTuiApp(App):
                 search=self._search,
                 limit=self._page_size,
                 offset=offset,
+                sort=self._sort,
+                order=self._order,
             )
             self.call_from_thread(self._append_page, posts, total)
         except Exception as e:
@@ -359,6 +372,18 @@ class RelayTuiApp(App):
     async def action_reload(self) -> None:
         self._reload()
         self.notify("Refreshing…", severity="information", timeout=2)
+
+    def action_cycle_sort(self) -> None:
+        self._sort = "created" if self._sort == "updated" else "updated"
+        self._reload()
+        label = "update time" if self._sort == "updated" else "create time"
+        self.notify(f"Sorting by {label}", severity="information", timeout=2)
+
+    def action_cycle_order(self) -> None:
+        self._order = "asc" if self._order == "desc" else "desc"
+        self._reload()
+        label = "oldest first" if self._order == "asc" else "newest first"
+        self.notify(f"Order: {label}", severity="information", timeout=2)
 
     def action_search(self) -> None:
         def _on_result(query: str | None) -> None:

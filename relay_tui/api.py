@@ -70,8 +70,10 @@ def list_posts(
     limit: int = 50,
     offset: int = 0,
     search: str | None = None,
+    sort: str = "updated",
+    order: str = "desc",
 ) -> tuple[list[Post], int, Post | None]:
-    params: dict[str, object] = {"limit": limit, "offset": offset}
+    params: dict[str, object] = {"limit": limit, "offset": offset, "sort": sort, "order": order}
     if tag is not None:
         params["tag"] = tag
     if folder is not None:
