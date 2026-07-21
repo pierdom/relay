@@ -553,6 +553,35 @@
     .vt-btn.active { color: var(--accent); border-color: rgba(245,158,11,0.4); background: var(--tag-bg); }
     .vt-btn:hover:not(.active) { color: var(--text); }
 
+    .sort-control { display: flex; flex-shrink: 0; }
+    .sort-select {
+      appearance: none; -webkit-appearance: none;
+      background-color: var(--bg); border: 1px solid var(--border); color: var(--text);
+      cursor: pointer; font-size: 12px; font-family: inherit;
+      padding: 4px 22px 4px 8px; border-radius: 4px 0 0 4px;
+      transition: border-color 0.15s;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none' stroke='%238a8a8a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 7px center;
+    }
+    .sort-select:hover { border-color: var(--muted); }
+    .sort-select:focus { outline: none; border-color: var(--accent); }
+    .sort-select option { background: var(--surface); color: var(--text); }
+    .sort-dir { border-radius: 0 4px 4px 0; border-left: none; min-width: 30px; }
+    /* Separate the sort group from the list/grid view group. */
+    .search-bar .view-toggle { margin-left: 6px; padding-left: 12px; border-left: 1px solid var(--border); }
+
+    /* New-posts pill — shown when live posts arrive but the current sort
+       wouldn't place them at the top (so we don't insert them out of order). */
+    .new-posts-pill {
+      position: sticky; top: 8px; z-index: 20;
+      display: block; width: fit-content; margin: 8px auto -4px; padding: 6px 16px;
+      background: var(--accent); color: #1a1205; border: none; border-radius: 999px;
+      font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.35); transition: opacity 0.15s, transform 0.15s;
+    }
+    .new-posts-pill:hover { transform: translateY(-1px); }
+    .new-posts-pill .np-arrow { font-weight: 700; }
+
     /* ── Load more / states ──────────────────────────────── */
     .load-more { text-align: center; padding: 14px 20px; }
     .load-more button {
@@ -705,7 +734,7 @@
     .post-body-wrap { position: relative; max-height: 72px; overflow: hidden; }
     .post-body-wrap::after {
       content: ''; position: absolute; bottom: 0; left: 0; right: 0;
-      height: 36px;
+      height: 24px;
       background: linear-gradient(transparent, var(--surface));
       pointer-events: none;
     }
@@ -897,11 +926,22 @@
       <span class="search-label">search</span>
       <input type="text" id="searchInput" placeholder="Search title, content, source…" autocomplete="off">
       <button class="search-clear" id="searchClear" title="Clear search">×</button>
+      <div class="sort-control" id="sortControl">
+        <select class="sort-select" id="sortField" title="Sort by" aria-label="Sort by">
+          <option value="updated">Updated</option>
+          <option value="created">Created</option>
+        </select>
+        <button class="vt-btn sort-dir" id="sortDir" title="Sort direction" aria-label="Sort direction">↓</button>
+      </div>
       <div class="view-toggle" id="viewToggle">
         <button class="vt-btn active" id="vtList" title="List view" aria-label="List view">☰</button>
         <button class="vt-btn" id="vtGrid" title="Grid view" aria-label="Grid view">▦</button>
       </div>
     </div>
+
+    <button class="new-posts-pill" id="newPostsPill" style="display:none">
+      <span class="np-arrow">↑</span> <span id="newPostsLabel">new posts</span>
+    </button>
 
     <div class="feed" id="feed"></div>
 
@@ -999,6 +1039,42 @@ function applyViewMode() {
 vtList.addEventListener('click', () => { viewMode = 'list'; applyViewMode(); });
 vtGrid.addEventListener('click', () => { viewMode = 'grid'; applyViewMode(); });
 applyViewMode();
+
+// Feed ordering — sort field (updated/created) + direction (desc/asc), persisted.
+const sortFieldEl = document.getElementById('sortField');
+const sortDirEl   = document.getElementById('sortDir');
+let sortField = localStorage.getItem('relay-sort') === 'created' ? 'created' : 'updated';
+let sortOrder = localStorage.getItem('relay-order') === 'asc' ? 'asc' : 'desc';
+function applySort() {
+  sortFieldEl.value = sortField;
+  sortDirEl.textContent = sortOrder === 'asc' ? '↑' : '↓';
+  sortDirEl.title = 'Sort direction: ' + (sortOrder === 'asc' ? 'oldest first' : 'newest first');
+  localStorage.setItem('relay-sort', sortField);
+  localStorage.setItem('relay-order', sortOrder);
+}
+function reloadSorted() { offset = 0; total = 0; applySort(); loadPosts(true); }
+sortFieldEl.addEventListener('change', () => { sortField = sortFieldEl.value; reloadSorted(); });
+sortDirEl.addEventListener('click', () => { sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'; reloadSorted(); });
+applySort();
+
+// A live post belongs at the top of the feed only under the default sort
+// (last-modified, newest first). Under any other order it would land mid-list,
+// so we surface it via the "new posts" pill instead of inserting it out of place.
+function isDefaultSort() { return sortField === 'updated' && sortOrder === 'desc'; }
+
+const newPostsPill  = document.getElementById('newPostsPill');
+const newPostsLabel = document.getElementById('newPostsLabel');
+let pendingNew = 0;
+function bumpNewPostsPill() {
+  pendingNew++;
+  newPostsLabel.textContent = pendingNew === 1 ? '1 new post' : `${pendingNew} new posts`;
+  newPostsPill.style.display = '';
+}
+function clearNewPostsPill() {
+  pendingNew = 0;
+  newPostsPill.style.display = 'none';
+}
+newPostsPill.addEventListener('click', () => { clearNewPostsPill(); reloadSorted(); });
 
 // Light ⇄ dark theme — CSS var override on <html>, persisted locally. Default: dark.
 const themeBtn = document.getElementById('themeBtn');
@@ -1745,6 +1821,8 @@ async function loadPosts(replace = false) {
   if (!authed) return;
   try {
     const params = new URLSearchParams({ limit: LIMIT, offset });
+    params.set('sort', sortField);
+    params.set('order', sortOrder);
     if (activeTag) params.set('tag', activeTag);
     if (activeFolder) params.set('folder', activeFolder);
     if (activeSearch) params.set('search', activeSearch);
@@ -1752,7 +1830,7 @@ async function loadPosts(replace = false) {
     total = data.total;
     offset += data.items.length;
 
-    if (replace) feed.innerHTML = '';
+    if (replace) { feed.innerHTML = ''; clearNewPostsPill(); }
 
     if (replace && data.pinned) {
       const pin = renderPost(data.pinned);
@@ -1982,12 +2060,17 @@ function connectSSE() {
     if (existing) {
       if (existing.classList.contains('pinned')) el.classList.add('pinned');
       existing.replaceWith(el);   // edit: update in place (don't bump total)
-    } else {
+    } else if (isDefaultSort()) {
       const empty = feed.querySelector('.empty');
       if (empty) empty.remove();
       const pinnedEl = feed.querySelector('.post.pinned');
       if (pinnedEl) pinnedEl.after(el); else feed.prepend(el);  // keep master on top
       total++;
+    } else {
+      // Non-default sort: the new post doesn't belong at the top — count it and
+      // let the user pull it in via the pill rather than misplacing the card.
+      total++;
+      bumpNewPostsPill();
     }
     scheduleLoadTags();
   });

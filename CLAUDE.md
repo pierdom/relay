@@ -22,7 +22,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST/GET | /posts | Publish / list posts (`tag`, `folder`, `limit`, `offset`, `search`, `summary`; master pinned on home feed). `summary=true` → metadata-only items (`PostSummary`: id/title/tags/folder + plain-text `excerpt`, no `content`); REST default `false` (UI feed renders content inline), MCP `list_posts` default `true` |
+| POST/GET | /posts | Publish / list posts (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`; master pinned on home feed). `sort` = `updated` (default, last-modified via `COALESCE(updated_at, created_at)`) or `created`; `order` = `desc` (default) or `asc`; an FTS `search` ranks by bm25 first, then `sort`/`order` as tiebreak. `summary=true` → metadata-only items (`PostSummary`: id/title/tags/folder + plain-text `excerpt`, no `content`); REST default `false` (UI feed renders content inline), MCP `list_posts` default `true` |
 | GET/PATCH/DELETE | /posts/{id} | Get / update (partial) / delete a post |
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |
 | GET | /links | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
@@ -150,7 +150,7 @@ Single-page app on the REST API + SSE.
 - **Posts:** compose panel, inline edit, delete-with-confirm, `expires_at` picker; live SSE feed (new posts flash + prepend).
 - **Attachments:** 📎 button / drag-drop / paste (screenshots) in compose + edit forms → uploads and inserts `![[embed]]` at the cursor. Edit form lists the post-folder's files with delete (×).
 - **Sidebar tabs — Tags / Tree / Files:** Tags filters by tag (create/rename/⚙ expiry); Tree filters the feed by folder (`GET /folders`); **Files** swaps the feed for an attachment gallery (thumbnails/chips, folder filter, click-to-enlarge lightbox, delete). Tag and folder filters are mutually exclusive.
-- **Search:** debounced bar over the feed (title/content/source), combinable with a tag filter.
+- **Search:** debounced bar over the feed (title/content/source), combinable with a tag filter. The same bar holds the **sort control** (Updated/Created field + ↓/↑ direction toggle) and the list/grid view toggle; sort + view are persisted in `localStorage` (default: updated · desc).
 - **Responsive:** sidebar → slide-in drawer on mobile (≤768px).
 
 ## Terminal UI (`uv run relay-tui`)
@@ -163,6 +163,7 @@ Textual two-panel split: TOPICS sidebar + FEED. `RELAY_PALETTE=<name>` picks a t
 | `/` | Search (title/content/source) | | `t` | Toggle TOPICS Tags ⇄ Tree |
 | `c`/`R` | Tag expiry / rename (TOPICS) | | `Enter` | View full post |
 | `f` | Follow-link picker (in detail view) | | `r`/`Tab`/`q` | Refresh / switch panel / quit |
+| `s`/`o` | Sort field (updated⇄created) / order (desc⇄asc) | | | (default: updated · desc) |
 
 SSE runs in a background thread (`● live`/`○ offline`); reconnect replays via `Last-Event-ID`. Feed paginates 50/page, auto-loading on scroll.
 

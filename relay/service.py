@@ -129,6 +129,20 @@ _BM25_WEIGHTS = "10.0, 1.0, 2.0, 5.0"
 _FTS_TOKEN_RE = re.compile(r"[^\w]+", re.UNICODE)
 
 
+# Sort keys → SQL column. "updated" falls back to created_at for never-edited
+# posts (updated_at is NULL), so it reads as a true "last modified" order.
+_SORT_COLUMNS = {
+    "created": "posts.created_at",
+    "updated": "COALESCE(posts.updated_at, posts.created_at)",
+}
+
+
+def _order_clause(sort: str, order: str) -> str:
+    col = _SORT_COLUMNS.get(sort, _SORT_COLUMNS["updated"])
+    direction = "ASC" if order == "asc" else "DESC"
+    return f"{col} {direction}, posts.id {direction}"
+
+
 def _fts_query(search: str) -> str | None:
     """Turn free text into a safe FTS5 MATCH string, or ``None`` if it has no
     searchable tokens. Every token is stripped to word characters (neutralising
@@ -151,12 +165,14 @@ async def list_posts(
     offset: int = 0,
     search: str | None = None,
     summary: bool = False,
+    sort: str = "updated",
+    order: str = "desc",
 ) -> PostListResponse | PostSummaryListResponse:
     conditions: list[str] = []
     params: list[str | int] = []
     joins = ""
-    # Default newest-first; an FTS search reorders by relevance instead.
-    order_by = "posts.created_at DESC, posts.id DESC"
+    # Default: last-modified first; an FTS search reorders by relevance instead.
+    order_by = _order_clause(sort, order)
 
     if search:
         metrics.search_queries.inc()
@@ -165,7 +181,7 @@ async def list_posts(
             joins = "JOIN posts_fts ON posts_fts.rowid = posts.id"
             conditions.append("posts_fts MATCH ?")
             params.append(match)
-            order_by = f"bm25(posts_fts, {_BM25_WEIGHTS}), posts.created_at DESC, posts.id DESC"
+            order_by = f"bm25(posts_fts, {_BM25_WEIGHTS}), {_order_clause(sort, order)}"
         elif database.FTS_ENABLED:
             # Query had only punctuation/operators → no searchable tokens.
             conditions.append("0")

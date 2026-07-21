@@ -47,10 +47,28 @@ async def list_posts(
         default=False,
         description="Return metadata-only items (id/title/tags/folder + excerpt), no full content.",
     ),
+    sort: str = Query(
+        default="updated",
+        pattern="^(created|updated)$",
+        description="Sort field: 'updated' (last-modified) or 'created'.",
+    ),
+    order: str = Query(
+        default="desc",
+        pattern="^(asc|desc)$",
+        description="Sort direction: 'desc' (newest first) or 'asc'.",
+    ),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostListResponse | PostSummaryListResponse:
     return await service.list_posts(
-        db, tag=tag, folder=folder, limit=limit, offset=offset, search=search, summary=summary
+        db,
+        tag=tag,
+        folder=folder,
+        limit=limit,
+        offset=offset,
+        search=search,
+        summary=summary,
+        sort=sort,
+        order=order,
     )
 
 
