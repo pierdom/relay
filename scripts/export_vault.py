@@ -1,14 +1,27 @@
-"""Migrate a running relay (SQLite-backed) into an Obsidian-style Markdown vault.
+"""Export a running relay into a fresh Obsidian-style Markdown vault.
 
-Pulls every post over the REST API (works against a remote instance) and writes
-one Markdown file per post — front-matter for
-``id/tags/source/created_at/updated_at/expires_at``, the title as the filename —
-then builds the disposable SQLite index.
+Pulls every post over the REST API — so it works against a *remote* instance —
+and writes one Markdown file per post: front-matter for
+``id/tags/source/created_at/updated_at/expires_at``, the title as the filename,
+placement by first domain tag. Then it builds the disposable SQLite index, so
+the result is a vault relay can serve directly.
 
-    uv run python scripts/migrate_to_vault.py --source https://your-relay.example.com --vault ./vault
+    uv run python scripts/export_vault.py --source https://your-relay.example.com --vault ./snapshot
 
-Note: per-tag TTL config is NOT migrated — the REST API has no read endpoint for
-it. Re-apply tag expiries via set_tag_config after migrating.
+Use it to snapshot a remote relay to local disk, or to seed a second instance.
+It originally existed to migrate the pre-vault SQLite backend (done, Jul 2026);
+that path is gone, but pulling a live relay into a vault still works.
+
+Two caveats:
+
+* **Per-tag TTL config is not exported** — the REST API has no read endpoint for
+  it. Re-apply tag expiries with ``set_tag_config`` afterwards.
+* **Point ``--vault`` at a new or empty directory.** Writing into a populated
+  vault does not merge: same-titled posts land beside the existing ones with a
+  numeric suffix (``vault.write_file``'s collision rule).
+
+Nothing imports this module and no test covers it; it is a standalone operator
+tool that talks to relay over HTTP like any other client.
 """
 from __future__ import annotations
 
@@ -62,7 +75,7 @@ def fetch_all(base: str, key: str) -> list[dict]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description="Export a running relay into a fresh Markdown vault.")
     ap.add_argument("--source", default=settings.relay_base_url, help="Source relay base URL")
     ap.add_argument("--vault", default=settings.vault_path, help="Target vault directory")
     ap.add_argument("--key", default=settings.api_key, help="Bearer API key for the source")
@@ -95,7 +108,7 @@ def main() -> int:
     print("Building index …")
     asyncio.run(database.init_db())
     print(f"Done. Vault ready at {args.vault} (index at {settings.database_path}).")
-    print("Reminder: per-tag TTL config was not migrated — re-apply via set_tag_config if needed.")
+    print("Reminder: per-tag TTL config was not exported — re-apply via set_tag_config if needed.")
     return 0
 
 
