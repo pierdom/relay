@@ -109,6 +109,17 @@
     }
     .theme-btn:hover { color: var(--accent); border-color: var(--accent); }
 
+    /* Sidebar collapse toggle (desktop) */
+    .collapse-btn {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; padding: 4px; margin-left: -2px;
+      display: flex; align-items: center; flex-shrink: 0;
+      transition: color 0.15s;
+    }
+    .collapse-btn:hover { color: var(--accent); }
+    .collapse-btn svg { display: block; transition: transform 0.24s cubic-bezier(0.4,0,0.2,1); }
+    .collapse-btn.collapsed svg { transform: rotate(180deg); }
+
     .key-wrap { display: flex; align-items: center; gap: 6px; }
     .key-wrap input {
       background: var(--bg); border: 1px solid var(--border); color: var(--text);
@@ -184,7 +195,16 @@
       border-right: 1px solid var(--border);
       display: flex; flex-direction: column; overflow: hidden;
       background: var(--bg);
+      transition: width 0.24s cubic-bezier(0.4,0,0.2,1),
+                  border-right-color 0.24s ease,
+                  opacity 0.18s ease;
     }
+    /* Desktop collapse — width animates to 0, content clipped by overflow:hidden */
+    aside.collapsed {
+      width: 0; opacity: 0; border-right-color: transparent;
+      pointer-events: none;
+    }
+    aside.collapsed > * { min-width: 220px; }
     .sidebar-header {
       padding: 14px 16px 10px;
       font-size: 9px; font-weight: 600; color: var(--muted);
@@ -309,9 +329,14 @@
       grid-template-columns: 1fr auto;
       grid-template-areas: "badge  badge" "header header" "body media" "footer footer";
     }
+    /* Every area needs min-width:0: a `1fr` track's automatic minimum is the
+       item's min-content width, so one non-shrinkable child (a nowrap source,
+       a nowrap table) would otherwise widen the track past the card border and
+       everything inside it would paint outside the frame. */
+    .feed > .post:not(.editing) > * { min-width: 0; }
     .feed > .post .master-badge   { grid-area: badge; }
     .feed > .post .post-header    { grid-area: header; }
-    .feed > .post .post-body-wrap { grid-area: body; min-width: 0; }
+    .feed > .post .post-body-wrap { grid-area: body; }
     .feed > .post .post-media     { grid-area: media; }
     .feed > .post .post-footer    { grid-area: footer; }
     .feed.grid > .post:not(.editing) {
@@ -349,22 +374,19 @@
     /* Narrow grid tiles: stack the header (title on its own line, tags below) so
        tags don't crush the title into a hard ellipsis, and let long titles wrap
        to two lines. The footer meta wraps instead of overflowing. */
-    .feed.grid .post-header { flex-direction: column; align-items: flex-start; gap: 6px; }
+    /* `stretch` (not flex-start) so the tag row inherits the header's definite
+       width — that's what makes the source's max-width:100% ellipsis resolve. */
+    .feed.grid .post-header { flex-direction: column; align-items: stretch; gap: 6px; }
     .feed.grid .post-title {
       white-space: normal; overflow: hidden; text-overflow: clip;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     }
     .feed.grid .post-footer-left { flex-wrap: wrap; row-gap: 3px; }
-    /* Long "via https://…" sources shouldn't wrap to two lines in a narrow tile. */
-    .feed.grid .post-source {
-      display: inline-block; max-width: 100%; vertical-align: bottom;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
 
     .post-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
     .post-title  { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    .post-tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; flex-shrink: 0; }
+    .post-tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; flex-shrink: 0; min-width: 0; max-width: 100%; }
     .tag-pill {
       font-size: 10px; padding: 2px 7px; border-radius: 3px;
       background: var(--tag-bg); color: var(--accent); cursor: pointer;
@@ -372,7 +394,13 @@
       transition: background 0.12s;
     }
     .tag-pill:hover { background: var(--tag-active); }
-    .post-source { font-size: 10px; color: var(--muted); }
+    /* A long "via …" is one unbreakable run: cap + ellipsis it so it can never
+       push the header (and with it the card's 1fr track) wider than the card. */
+    .post-source {
+      font-size: 10px; color: var(--muted);
+      display: inline-block; min-width: 0; max-width: 100%; vertical-align: bottom;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
 
     .post-body { color: var(--body); line-height: 1.72; font-size: 13px; overflow-wrap: anywhere; }
     .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 16px 0 6px; font-weight: 700; font-family: system-ui, -apple-system, sans-serif; }
@@ -409,6 +437,13 @@
     .post-body tr:nth-child(even) td { background: var(--row-stripe); }
     .table-scroll        { overflow-x: auto; margin: 8px 0; }
     .table-scroll table  { margin: 0; }
+    /* Feed previews have no room to scroll sideways, so cells wrap to fit the
+       card instead of being sliced off at its edge. `fixed` splits the width
+       evenly and — unlike auto layout — ignores cell min-content, which would
+       otherwise let a long cell squeeze its neighbours down to one character
+       per line. The modal keeps nowrap cells + .table-scroll for real reading. */
+    .feed .post-body table { table-layout: fixed; }
+    .feed .post-body th, .feed .post-body td { white-space: normal; overflow-wrap: break-word; }
 
     .post-footer {
       display: flex; align-items: center; justify-content: space-between;
@@ -635,6 +670,9 @@
       /* Header */
       header { padding: 0 14px; gap: 10px; }
       .menu-btn { display: flex; }
+      /* Drawer model on mobile — desktop collapse is meaningless here */
+      .collapse-btn { display: none !important; }
+      aside.collapsed { width: 260px; opacity: 1; }
       .brand-sep { display: none; }
       .live-label { display: none; }
       .key-wrap input { width: 140px; }
@@ -701,6 +739,20 @@
       padding: 2px 8px; border-radius: 3px; letter-spacing: 0.14em;
       text-transform: uppercase; margin-bottom: 10px;
     }
+    .accordion-chevron {
+      display: inline-block; margin-left: 2px; font-size: 8px;
+      transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+    }
+    .post.master-doc.accordion.collapsed .accordion-chevron { transform: rotate(-90deg); }
+
+    /* ── Master document accordion ───────────────────────── */
+    /* max-height is driven by JS (scrollHeight ↔ a few-line peek) for a smooth
+       animation over arbitrary content; the collapsed peek keeps the fade. */
+    .post.master-doc.accordion .post-body-wrap {
+      overflow: hidden;
+      transition: max-height 0.3s cubic-bezier(0.4,0,0.2,1);
+    }
+    .post.master-doc.accordion .post-body-wrap::after { display: none; }
 
     /* ── Post footer left group ──────────────────────────── */
     .post-footer-left { display: flex; align-items: center; gap: 8px; }
@@ -845,6 +897,12 @@
 <body>
 
 <header>
+  <button class="collapse-btn" id="collapseBtn" aria-label="Collapse sidebar" title="Collapse sidebar" style="display:none">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="3" width="12" height="10" rx="1.5"></rect>
+      <line x1="6" y1="3" x2="6" y2="13"></line>
+    </svg>
+  </button>
   <img class="brand-mark" src="/assets/relay-mark-on-dark.svg" alt="Relay" width="20" height="20">
   <h1 class="brand-name">Relay</h1>
   <span class="brand-sep">·</span>
@@ -1010,6 +1068,7 @@ const oidcLogin    = document.getElementById('oidcLogin');
 const oidcLoginBtn = document.getElementById('oidcLoginBtn');
 const useKeyBtn    = document.getElementById('useKeyBtn');
 const newPostBtn   = document.getElementById('newPostBtn');
+const collapseBtn  = document.getElementById('collapseBtn');
 const composePanel = document.getElementById('composePanel');
 const newTagBtn    = document.getElementById('newTagBtn');
 const tagNewWrap   = document.getElementById('tagNew');
@@ -1098,6 +1157,20 @@ function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.cla
 menuBtn.addEventListener('click', () => sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar());
 sidebarOverlay.addEventListener('click', closeSidebar);
 
+// Desktop sidebar collapse — width animates to 0, state persisted.
+function applySidebarCollapsed(collapsed) {
+  sidebarEl.classList.toggle('collapsed', collapsed);
+  collapseBtn.classList.toggle('collapsed', collapsed);
+  collapseBtn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  collapseBtn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+}
+collapseBtn.addEventListener('click', () => {
+  const collapsed = !sidebarEl.classList.contains('collapsed');
+  applySidebarCollapsed(collapsed);
+  try { localStorage.setItem('relay-sidebar-collapsed', collapsed ? '1' : '0'); } catch (e) {}
+});
+try { applySidebarCollapsed(localStorage.getItem('relay-sidebar-collapsed') === '1'); } catch (e) {}
+
 document.getElementById('connectForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const val = apiKeyInput.value.trim();
@@ -1161,6 +1234,7 @@ disconnectBtn.addEventListener('click', async () => {
   searchBar.style.display = 'none';
   activeSearch = null; searchInput.value = ''; searchBar.classList.remove('active');
   connectedBar.style.display = 'none';
+  collapseBtn.style.display = 'none';
   apiKeyInput.value = '';
   setDot('');
   // Show whichever login control fits the deployment (OIDC button vs key form).
@@ -1198,6 +1272,7 @@ async function init() {
   connectForm.style.display = 'none';
   oidcLogin.style.display = 'none';
   connectedBar.style.display = '';
+  collapseBtn.style.display = '';
   newPostBtn.style.display = '';
   newTagBtn.style.display = '';
   searchBar.style.display = '';
@@ -1871,6 +1946,30 @@ feed.addEventListener('scroll', () => {
   }
 });
 
+// Master-doc accordion: collapsed shows a single line (~1× the 1.55/13px body
+// line-height); expanded animates max-height to the content's scrollHeight, then
+// releases to `none` so late reflow (images, wraps) isn't clipped.
+const MASTER_PEEK_PX = 21;
+function toggleMasterAccordion(el, wrap) {
+  const collapsing = !el.classList.contains('collapsed');
+  if (collapsing) {
+    wrap.style.maxHeight = wrap.scrollHeight + 'px';   // pin current height first
+    requestAnimationFrame(() => {
+      el.classList.add('collapsed');
+      wrap.style.maxHeight = MASTER_PEEK_PX + 'px';
+    });
+  } else {
+    el.classList.remove('collapsed');
+    wrap.style.maxHeight = wrap.scrollHeight + 'px';
+    const onEnd = (ev) => {
+      if (ev.propertyName !== 'max-height') return;
+      wrap.style.maxHeight = 'none';
+      wrap.removeEventListener('transitionend', onEnd);
+    };
+    wrap.addEventListener('transitionend', onEnd);
+  }
+}
+
 function renderPost(post) {
   const el = document.createElement('div');
   el.className = 'post' + (post.id === 0 ? ' master-doc' : '');
@@ -1885,7 +1984,9 @@ function renderPost(post) {
   const expiresHtml = post.expires_at
     ? `<span class="post-expires">expires ${relativeTime(post.expires_at)}</span>`
     : '';
-  const masterBadge = post.id === 0 ? `<div class="master-badge">✦ master document</div>` : '';
+  const masterBadge = post.id === 0
+    ? `<div class="master-badge">✦ master document<span class="accordion-chevron">▾</span></div>`
+    : '';
   const titleHtml  = post.title ? `<span class="post-title">${escHtml(post.title)}</span>` : '';
   const tagsHtml   = post.tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
   const srcHtml    = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
@@ -1955,7 +2056,20 @@ function renderPost(post) {
     } catch {}
   });
   el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); enterEditMode(el, post); });
-  el.addEventListener('click', () => { if (!el.classList.contains('editing')) openPostModal(post); });
+  if (post.id === 0) {
+    // Master doc → inline accordion (collapsed by default → a few-line peek).
+    // Clicking the card toggles it; body links/buttons still work via the guard.
+    el.classList.add('accordion', 'collapsed');
+    const wrap = el.querySelector('.post-body-wrap');
+    wrap.style.maxHeight = MASTER_PEEK_PX + 'px';   // collapsed on first paint
+    el.addEventListener('click', (e) => {
+      if (el.classList.contains('editing')) return;
+      if (e.target.closest('a, button, .tag-pill, .post-actions')) return;
+      toggleMasterAccordion(el, wrap);
+    });
+  } else {
+    el.addEventListener('click', () => { if (!el.classList.contains('editing')) openPostModal(post); });
+  }
   return el;
 }
 
