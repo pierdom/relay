@@ -201,4 +201,15 @@ relay/
 relay_mcp/server.py            # Legacy stdio MCP proxy (REST client)
 relay/static/index.html        # Browser UI (/ui)
 relay_tui/                      # Textual TUI — app.py · api.py · sse.py · theme.py · palettes/ · widgets/
+scripts/export_vault.py        # Operator tool: pull a live relay into a fresh vault (see below)
 ```
+
+## Exporting a vault
+
+```bash
+uv run python scripts/export_vault.py --source https://your-relay.example.com --vault ./snapshot
+```
+
+Pulls every post (incl. `#0`, which `GET /posts` omits) over REST, writes the Markdown files with front-matter and folder placement, then builds the index — so the output is a vault relay can serve as-is. Use it to snapshot a **remote** instance to local disk or to seed a second one. It's a standalone client: nothing imports it and no test covers it, so **re-run it after changing `vault.write_file`** — ruff won't catch signature drift.
+
+Two caveats: per-tag TTL config isn't exported (no REST read endpoint — re-apply with `set_tag_config`), and `--vault` must be a new or empty directory, since writing into a populated vault suffixes collisions rather than merging.
