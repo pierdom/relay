@@ -23,7 +23,7 @@ class Post:
     expires_at: str | None = None
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Post":
+    def from_dict(cls, d: dict) -> Post:
         return cls(
             id=d["id"],
             title=d.get("title") or "",

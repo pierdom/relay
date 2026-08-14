@@ -7,9 +7,9 @@ os.environ.setdefault("API_KEY", "test-key")
 import aiosqlite
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from relay import database, service, vault
+from relay import database, vault
 from relay.auth import require_api_key
 from relay.config import settings
 from relay.main import app

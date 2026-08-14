@@ -9,7 +9,7 @@ os.environ.setdefault("API_KEY", "test-key")
 import aiosqlite
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from relay import database, service, vault
 from relay.auth import require_api_key
@@ -97,7 +97,7 @@ async def test_concurrent_creates_yield_distinct_ids(client):
     assert len(set(ids)) == n, f"duplicate ids allocated: {ids}"
 
     # Every post is independently retrievable with its own distinct body.
-    for i, pid in enumerate(ids):
+    for pid in ids:
         got = await client.get(f"/posts/{pid}", headers=AUTH)
         assert got.status_code == 200
     bodies = set()
@@ -166,10 +166,10 @@ async def test_index_insert_rejects_duplicate_id(vault_dir):
     silently overwriting via ON CONFLICT DO UPDATE."""
     db = await _db()
     try:
-        kw = dict(
-            content="c", tags=["t"], source=None,
-            created_at=vault.utcnow_iso(), updated_at=None, expires_at=None,
-        )
+        kw = {
+            "content": "c", "tags": ["t"], "source": None,
+            "created_at": vault.utcnow_iso(), "updated_at": None, "expires_at": None,
+        }
         vp = Path(settings.vault_path)
         await vault.index_insert(db, id=555, title="first", path=vp / "Inbox/first.md", **kw)
         await db.commit()

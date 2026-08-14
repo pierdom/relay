@@ -29,7 +29,7 @@ def _to_iso(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, _dt.datetime):
-        s = value.astimezone(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        s = value.astimezone(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         return s
     if isinstance(value, _dt.date):
         return value.strftime("%Y-%m-%dT00:00:00Z")

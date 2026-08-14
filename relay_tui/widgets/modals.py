@@ -7,6 +7,7 @@ from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -18,12 +19,10 @@ from textual.widgets import (
     TextArea,
 )
 from textual.widgets.option_list import Option
-from textual.containers import Horizontal, Vertical, VerticalScroll
 
 from .. import api
 from ..theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG
 from .post_panel import _time_ago, _time_until
-
 
 # ── Wikilink preprocessing ────────────────────────────────────────────────────
 
@@ -931,7 +930,7 @@ class AttachmentsModal(ModalScreen[None]):
         ol.highlighted = 0
         ol.focus()
 
-    def _selected(self) -> "api.Attachment | None":
+    def _selected(self) -> api.Attachment | None:
         ol = self.query_one("#att-list", OptionList)
         idx = ol.highlighted
         if idx is None or not self._items or idx >= len(self._items):
@@ -961,7 +960,7 @@ class AttachmentsModal(ModalScreen[None]):
         self.app.push_screen(ConfirmModal(f"Delete {a.filename} from the vault?"), _cb)
 
     @work(thread=True)
-    def _do_delete(self, a: "api.Attachment") -> None:
+    def _do_delete(self, a: api.Attachment) -> None:
         try:
             res = api.delete_attachment(a.filename)
         except Exception as exc:

@@ -50,7 +50,7 @@ def extract_links(content: str, title_to_id: dict[str, int], ids: set[int]) -> l
 
 def target_ids(content: str, title_to_id: dict[str, int], ids: set[int]) -> set[int]:
     """Set of post ids ``content`` links to (resolved links only)."""
-    return {l.resolved_id for l in extract_links(content, title_to_id, ids) if l.resolved_id is not None}
+    return {link.resolved_id for link in extract_links(content, title_to_id, ids) if link.resolved_id is not None}
 
 
 def rewrite_wikilink_targets(content: str, old_title: str, new_title: str) -> tuple[str, bool]:

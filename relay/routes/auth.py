@@ -57,9 +57,7 @@ def _authorized(sub: str, email: str, email_verified: bool) -> bool:
         return True
     if subs and sub in subs:
         return True
-    if emails and email_verified and email in emails:
-        return True
-    return False
+    return bool(emails and email_verified and email in emails)
 
 
 def _set_session_cookie(resp: RedirectResponse, sub: str, email: str) -> None:

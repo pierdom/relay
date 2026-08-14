@@ -31,4 +31,28 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.3",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    # FastAPI's whole dependency system is `Depends()`/`Query()` in a default —
+    # the "mutable default argument" warning does not apply to it.
+    "B008",
+    # `contextlib.suppress` is a context-manager call per invocation; the plain
+    # try/except/pass is both faster and clearer in the cleanup + parse paths.
+    "SIM105",
+    # Nested `with` blocks read better than one wrapped line in the test fixtures.
+    "SIM117",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The stdio proxy carries the MCP tool schemas as single-line description
+# strings that must stay byte-identical to relay/mcp_server.py (see the feature
+# parity rule in CLAUDE.md). Reflowing them to fit is a silent parity hazard.
+"relay_mcp/server.py" = ["E501"]

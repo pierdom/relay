@@ -72,7 +72,7 @@ PERF_POOR     = _c("perf_poor",     "red")
 PERF_TERRIBLE = _c("perf_terrible", "bright_red")
 
 
-def build_textual_theme() -> "TextualTheme":
+def build_textual_theme() -> TextualTheme:
     """Return a Textual Theme derived from the active palette.
 
     Maps palette constants to Textual's CSS variable layer so that built-in

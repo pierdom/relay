@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import metrics, watcher
+from . import __version__, metrics, watcher
 from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
 from .config import settings
@@ -68,8 +68,6 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
-
-from . import __version__
 
 app = FastAPI(title="relay", version=__version__, lifespan=lifespan)
 
