@@ -213,7 +213,7 @@ class AttachmentCreate(BaseModel):
         return v or None
 
     @model_validator(mode="after")
-    def one_source(self) -> "AttachmentCreate":
+    def one_source(self) -> AttachmentCreate:
         sources = [s for s in (self.data, self.source_url, self.upload_id) if s]
         if len(sources) != 1:
             raise ValueError("provide exactly one of: data, source_url, upload_id")

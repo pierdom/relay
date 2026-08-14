@@ -6,7 +6,7 @@ os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from relay import links
 from relay.auth import require_api_key
@@ -47,7 +47,7 @@ async def _create(client, title, content="body", tags=None):
 def test_extract_wikilinks_exact_alias_and_broken():
     t2i = {"my note": 5}
     ls = links.extract_links("see [[My Note]], [[My Note|the note]], [[Ghost]]", t2i, {5})
-    assert [(l.target, l.alias, l.resolved_id) for l in ls] == [
+    assert [(k.target, k.alias, k.resolved_id) for k in ls] == [
         ("My Note", None, 5),
         ("My Note", "the note", 5),
         ("Ghost", None, None),
@@ -56,8 +56,8 @@ def test_extract_wikilinks_exact_alias_and_broken():
 
 def test_extract_idrefs_and_ignores_headings():
     ls = links.extract_links("# Heading\nsee #5 and #999", {}, {5})
-    idrefs = [l for l in ls if l.kind == "id"]
-    assert [(l.target, l.resolved_id) for l in idrefs] == [("5", 5), ("999", None)]
+    idrefs = [k for k in ls if k.kind == "id"]
+    assert [(k.target, k.resolved_id) for k in idrefs] == [("5", 5), ("999", None)]
 
 
 def test_rewrite_preserves_alias_and_heading():
@@ -103,7 +103,7 @@ async def test_backlinks_404_for_missing(client):
 @pytest.mark.asyncio
 async def test_rename_rewrites_inbound_wikilinks(client):
     a = await _create(client, "Old Name")
-    b = await _create(client, "B", content="see [[Old Name]] and [[Old Name|alias]] and #%d" % a["id"])
+    b = await _create(client, "B", content=f"see [[Old Name]] and [[Old Name|alias]] and #{a['id']}")
 
     r = await client.patch(f"/posts/{a['id']}", json={"title": "New Name"}, headers=AUTH)
     assert r.status_code == 200
@@ -112,4 +112,4 @@ async def test_rename_rewrites_inbound_wikilinks(client):
     assert "[[New Name]]" in updated["content"]
     assert "[[New Name|alias]]" in updated["content"]
     assert "[[Old Name" not in updated["content"]
-    assert "#%d" % a["id"] in updated["content"]  # id-ref untouched (stable)
+    assert f"#{a['id']}" in updated["content"]  # id-ref untouched (stable)

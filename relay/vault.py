@@ -37,7 +37,7 @@ _deleted: set[str] = set()      # abspaths we just unlinked
 
 
 def utcnow_iso() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def vault_dir() -> Path:

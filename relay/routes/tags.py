@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
-
 import aiosqlite
+from fastapi import APIRouter, Depends, status
 
 from .. import service
 from ..auth import require_api_key

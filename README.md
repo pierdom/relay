@@ -7,12 +7,14 @@
 
 # relay
 
+[![Tests](https://github.com/pierdom/relay/actions/workflows/tests.yml/badge.svg)](https://github.com/pierdom/relay/actions/workflows/tests.yml)
 [![Build](https://github.com/pierdom/relay/actions/workflows/docker.yml/badge.svg)](https://github.com/pierdom/relay/actions/workflows/docker.yml)
 [![Docker image](https://img.shields.io/github/v/tag/pierdom/relay?sort=semver&logo=docker&logoColor=white&label=ghcr.io&color=2496ED)](https://github.com/pierdom/relay/pkgs/container/relay)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fpierdom%2Frelay%2Fmain%2Fpyproject.toml)](pyproject.toml)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![MCP](https://img.shields.io/badge/MCP-server-6E56CF?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io)
-[![Last commit](https://img.shields.io/github/last-commit/pierdom/relay)](https://github.com/pierdom/relay/commits/main)
 
 **An AI-integration layer over a plain-Markdown, Obsidian-compatible vault.**
 
@@ -80,6 +82,16 @@ Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the work
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven two-panel split: TOPICS sidebar + FEED list (`n` new, `e` edit, `d` delete, `Enter` view, `/` search, `q` quit). Set `RELAY_PALETTE` to match your terminal — themes include `nord`, `dracula`, `gruvbox`, `solarized`, `molokai`, and more.
 
 **MCP server** — 12 MCP tools over Streamable HTTP (`/mcp`) or the legacy stdio proxy. See [docs/mcp.md](docs/mcp.md).
+
+## Development
+
+```bash
+uv sync --all-extras --dev   # install (uv only — never pip)
+uv run pytest -q             # 193 tests
+uv run ruff check .          # lint (config in pyproject.toml)
+```
+
+Both run on every push and pull request via [`tests.yml`](.github/workflows/tests.yml).
 
 ## Docs
 

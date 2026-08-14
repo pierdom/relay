@@ -6,7 +6,7 @@ os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from relay import vault
 from relay.auth import require_api_key
@@ -208,7 +208,9 @@ async def test_add_attachment_names_are_vault_global_unique(client):
     # same filename to two different folders → the second is suffixed, so a bare
     # ![[chart.png]] can never resolve ambiguously across folders.
     a = await client.post("/attachments", json={"filename": "chart.png", "data": PNG, "folder": "Audio"}, headers=AUTH)
-    b = await client.post("/attachments", json={"filename": "chart.png", "data": PNG, "folder": "Homelab"}, headers=AUTH)
+    b = await client.post(
+        "/attachments", json={"filename": "chart.png", "data": PNG, "folder": "Homelab"}, headers=AUTH
+    )
     assert a.json()["filename"] == "chart.png"
     assert b.json()["filename"] == "chart 1.png"
     assert a.json()["folder"] == "Audio" and b.json()["folder"] == "Homelab"

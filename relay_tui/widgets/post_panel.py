@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from rich.markup import escape
 from textual.app import ComposeResult
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Label, ListView, ListItem, Static
+from textual.widgets import Label, ListItem, ListView, Static
 
 from .. import api
 from ..theme import ACCENT, BORDER, PERF_BAD, PERF_TERRIBLE
@@ -26,8 +26,8 @@ def _time_ago(iso: str) -> str:
     try:
         dt = datetime.fromisoformat(iso)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        s = int((datetime.now(timezone.utc) - dt).total_seconds())
+            dt = dt.replace(tzinfo=UTC)
+        s = int((datetime.now(UTC) - dt).total_seconds())
         if s < 60:
             return "just now"
         return f"{_fmt_span(s)} ago"
@@ -40,8 +40,8 @@ def _time_until(iso: str) -> str:
     try:
         dt = datetime.fromisoformat(iso)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        s = int((dt - datetime.now(timezone.utc)).total_seconds())
+            dt = dt.replace(tzinfo=UTC)
+        s = int((dt - datetime.now(UTC)).total_seconds())
         if s < 0:
             return f"{_fmt_span(-s)} ago"
         if s < 60:
@@ -56,8 +56,8 @@ def _expiry_markup(iso: str) -> str:
     try:
         dt = datetime.fromisoformat(iso)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        s = int((dt - datetime.now(timezone.utc)).total_seconds())
+            dt = dt.replace(tzinfo=UTC)
+        s = int((dt - datetime.now(UTC)).total_seconds())
     except Exception:
         return ""
     if s < 86400:
@@ -248,10 +248,10 @@ class PostPanel(Widget):
                     lv.mount(new_item)
                 if flash:
                     new_item.add_class("flash")
-                    self.set_timer(1.2, lambda: new_item.remove_class("flash"))
+                    self.set_timer(1.2, lambda item=new_item: item.remove_class("flash"))
                 break
 
-    def focus(self, scroll_visible: bool = True) -> "PostPanel":
+    def focus(self, scroll_visible: bool = True) -> PostPanel:
         self.query_one("#post-listview", ListView).focus(scroll_visible)
         return self
 

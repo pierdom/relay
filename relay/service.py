@@ -12,7 +12,7 @@ import base64
 import binascii
 import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
@@ -499,7 +499,7 @@ def create_upload_slot() -> UploadSlotResponse:
         upload_id=slot.id,
         upload_url=f"{base}/attachments/uploads/{slot.id}",
         max_bytes=settings.attachment_max_bytes,
-        expires_at=datetime.fromtimestamp(slot.expires_at, tz=timezone.utc).isoformat(),
+        expires_at=datetime.fromtimestamp(slot.expires_at, tz=UTC).isoformat(),
     )
 
 

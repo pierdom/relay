@@ -3,11 +3,11 @@ from __future__ import annotations
 import os
 import sys
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Footer, Header
-from textual import work
 
 from . import api
 from .sse import SSESubscriber
@@ -25,7 +25,6 @@ from .widgets.modals import (
 from .widgets.post_panel import PostPanel
 from .widgets.tag_panel import TagPanel
 
-
 # ── terminal-transparency filter ──────────────────────────────────────────────
 # Textual renders in truecolor, and its built-in ANSIToTruecolor line filter
 # rewrites any "terminal default" background into a concrete RGB colour pulled
@@ -37,13 +36,15 @@ from .widgets.tag_panel import TagPanel
 if TRANSPARENT:
     from functools import lru_cache
 
-    from rich.color import Color as _RichColor, ColorType as _ColorType
+    from rich.color import Color as _RichColor
+    from rich.color import ColorType as _ColorType
     from rich.style import Style as _RichStyle
-    from textual.filter import ANSIToTruecolor as _ANSIToTruecolor, NO_DIM, dim_color
+    from textual.filter import NO_DIM, dim_color
+    from textual.filter import ANSIToTruecolor as _ANSIToTruecolor
 
     class _TransparentANSIToTruecolor(_ANSIToTruecolor):
-        @lru_cache(1024)
-        def truecolor_style(self, style: "_RichStyle", background: "_RichColor") -> "_RichStyle":
+        @lru_cache(1024)  # noqa: B019 — matches Textual's own cached override
+        def truecolor_style(self, style: _RichStyle, background: _RichColor) -> _RichStyle:
             terminal_theme = self._terminal_theme
             changed = False
 
@@ -243,7 +244,7 @@ class RelayTuiApp(App):
             try:
                 targets = api.link_targets()
                 self._link_index = {t.strip().lower(): i for i, t in targets}
-                self._link_titles = {i: t for i, t in targets}
+                self._link_titles = dict(targets)
             except Exception:
                 pass
             if posts:

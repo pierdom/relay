@@ -8,7 +8,7 @@ os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from relay import metrics
 from relay.auth import require_api_key

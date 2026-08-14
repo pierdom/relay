@@ -34,7 +34,7 @@ async def list_attachments(
     try:
         return await service.list_attachments(db, post_id=post_id, folder=folder)
     except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{post_id} not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{post_id} not found") from None
 
 
 @router.post(
@@ -58,13 +58,13 @@ async def create_attachment(
             tags=body.tags, embed=body.embed,
         )
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data is not valid base64")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data is not valid base64") from None
     except service.AttachmentSourceError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{body.post_id} not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{body.post_id} not found") from None
     except service.AttachmentError as exc:
-        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
 
 
 @router.post(
@@ -95,9 +95,9 @@ async def put_upload_bytes(upload_id: str, request: Request) -> UploadStatusResp
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"upload slot '{upload_id}' is unknown or expired",
-        )
+        ) from None
     except ingest.FetchError as exc:
-        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
     return UploadStatusResponse(upload_id=upload_id, bytes=size, ready=True)
 
 

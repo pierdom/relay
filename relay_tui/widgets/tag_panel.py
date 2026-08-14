@@ -5,7 +5,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Label, ListView, ListItem
+from textual.widgets import Label, ListItem, ListView
 
 from .. import api
 
@@ -93,7 +93,7 @@ class TagPanel(Widget):
                 lv.index = i
                 break
 
-    def focus(self, scroll_visible: bool = True) -> "TagPanel":
+    def focus(self, scroll_visible: bool = True) -> TagPanel:
         self.query_one("#tag-listview", ListView).focus(scroll_visible)
         return self
 

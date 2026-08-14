@@ -33,7 +33,8 @@ async def stream_events(
     Optional ?tag= filter to receive only matching content.
     Auth: relay_session cookie or Authorization Bearer header.
     """
-    from fastapi import HTTPException, status as http_status
+    from fastapi import HTTPException
+    from fastapi import status as http_status
 
     authed = False
     if relay_session and verify_session(relay_session):
@@ -100,7 +101,7 @@ async def stream_events(
                             high_water = post.id
                             frame["id"] = str(post.id)
                         yield frame
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield {"event": "keepalive", "data": ""}
         finally:
             unsubscribe(q, tag)

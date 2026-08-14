@@ -432,10 +432,7 @@ async def call_tool(
             response.raise_for_status()
             tags = response.json()["tags"]
 
-        if not tags:
-            text = "No tags yet."
-        else:
-            text = "\n".join(f"{t['tag']} ({t['count']} posts)" for t in tags)
+        text = "\n".join(f"{t['tag']} ({t['count']} posts)" for t in tags) if tags else "No tags yet."
         return [types.TextContent(type="text", text=text)]
 
     if name == "list_posts":

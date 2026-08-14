@@ -5,15 +5,14 @@ canonical file **and** its index row."""
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("API_KEY", "test-key")
 
 import aiosqlite
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from relay import cleanup, database, vault
 from relay.auth import require_api_key
@@ -24,7 +23,7 @@ AUTH = {"Authorization": "Bearer test-key"}
 
 
 def _iso(hours_from_now: float) -> str:
-    return (datetime.now(timezone.utc) + timedelta(hours=hours_from_now)).strftime(
+    return (datetime.now(UTC) + timedelta(hours=hours_from_now)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
 

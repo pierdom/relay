@@ -9,7 +9,7 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 import yaml
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from relay import database, frontmatter, vault
 from relay.auth import require_api_key

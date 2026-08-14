@@ -39,7 +39,7 @@ class Counter:
     def family(self) -> Family:
         with self._lock:
             samples = [
-                (dict(zip(self.labelnames, key)), value)
+                (dict(zip(self.labelnames, key, strict=True)), value)
                 for key, value in self._values.items()
             ]
         return (self.name, self.documentation, "counter", samples)

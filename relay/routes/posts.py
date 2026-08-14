@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-
 import aiosqlite
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from .. import service
 from ..auth import require_api_key
@@ -99,7 +98,7 @@ async def get_backlinks(
     try:
         return await service.get_backlinks(db, post_id)
     except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
 
 
 @router.patch(
@@ -115,7 +114,7 @@ async def update_post(
     try:
         return await service.update_post(db, post_id, body)
     except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
 
 
 @router.delete(
@@ -133,6 +132,6 @@ async def delete_post(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Master document (id=0) cannot be deleted",
-        )
+        ) from None
     except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
