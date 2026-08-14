@@ -16,10 +16,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
+      # setup-uv stopped publishing major/minor tags at v8 (supply-chain
+      # hardening), so `@v10` does not resolve — pin the full release tag.
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
 
