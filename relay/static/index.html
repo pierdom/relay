@@ -382,6 +382,18 @@
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     }
     .feed.grid .post-footer-left { flex-wrap: wrap; row-gap: 3px; }
+    /* A tile footer can't fit pill + both stamps + two labelled buttons on one
+       line, so grid mode drops the two most redundant parts: the created stamp
+       when an edit stamp is already there (same information, usually the same
+       value) and the button captions, leaving the icons. List mode keeps both. */
+    .feed.grid .t-created:not(:only-child) { display: none; }
+    .feed:not(.grid) .t-created + .t-edited::before { content: " · "; }
+    .feed.grid .btn-label { display: none; }
+    .feed.grid .post-actions button { padding-left: 7px; padding-right: 7px; }
+    /* The note's own "Last updated:" line is already in the body, which the
+       detail modal shows in full — in a tile it only buys a second footer row. */
+    .feed.grid .t-doc-updated { display: none; }
+    .feed:not(.grid) .t-doc-updated::before { content: "· "; }
 
     .post-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
     .post-title  { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -449,8 +461,10 @@
       display: flex; align-items: center; justify-content: space-between;
       margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
     }
-    .post-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
-    .post-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.15s; }
+    /* Never break a stamp mid-phrase — an orphaned "ago" on its own line was
+       the ugliest part of a wrapped footer. Chunks wrap whole or not at all. */
+    .post-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; white-space: nowrap; }
+    .post-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; }
     .post:hover .post-actions { opacity: 1; }
 
     .btn-delete {
@@ -1975,9 +1989,13 @@ function renderPost(post) {
   el.className = 'post' + (post.id === 0 ? ' master-doc' : '');
   el.dataset.id = post.id;
 
+  // Two spans, not one string: grid tiles hide the created stamp via CSS when an
+  // edit stamp is present, and the separator is drawn by the list-mode rule so
+  // the surviving chunk never starts with a stray "·".
   const timeLabel  = post.updated_at
-    ? `${relativeTime(post.created_at)} · edited ${relativeTime(post.updated_at)}`
-    : relativeTime(post.created_at);
+    ? `<span class="t-created">${relativeTime(post.created_at)}</span>` +
+      `<span class="t-edited">edited ${relativeTime(post.updated_at)}</span>`
+    : `<span class="t-created">${relativeTime(post.created_at)}</span>`;
   const timeTitle  = post.updated_at
     ? `created ${post.created_at}\nedited ${post.updated_at}`
     : post.created_at;
@@ -2029,13 +2047,13 @@ function renderPost(post) {
       <div class="post-footer-left">
         <span class="post-id-pill">#${post.id}</span>
         <span class="post-time" title="${timeTitle}">${timeLabel}</span>
-        ${extractedUpdated ? `<span class="post-time">· updated ${escHtml(extractedUpdated)}</span>` : ''}
+        ${extractedUpdated ? `<span class="post-time t-doc-updated">updated ${escHtml(extractedUpdated)}</span>` : ''}
         ${mediaChip}
         ${expiresHtml}
       </div>
       <div class="post-actions">
-        <button class="btn-edit">✏️ Edit</button>
-        <button class="btn-delete">🗑️ Delete</button>
+        <button class="btn-edit" title="Edit">✏️ <span class="btn-label">Edit</span></button>
+        <button class="btn-delete" title="Delete">🗑️ <span class="btn-label">Delete</span></button>
       </div>
     </div>`;
 
