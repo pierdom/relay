@@ -12,9 +12,14 @@ Personal knowledge base kept as a plain-Markdown, **Obsidian-compatible vault** 
 cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
+
+uv run pytest -q                # 193 tests
+uv run ruff check .             # lint — config in pyproject.toml
 ```
 
 `GET /health` (no auth) is probed every 30s by the Dockerfile HEALTHCHECK and compose. Uses `uv` — never `pip`; add deps with `uv add <package>`.
+
+**CI (`.github/workflows/tests.yml`) runs `ruff check` + `pytest` on every push and PR**, so both must pass before a change lands. Ruff selects `E,F,I,UP,B,C4,SIM` at line-length 120; each ignore is documented inline in `pyproject.toml` (notably `B008` for FastAPI's `Depends()` idiom, and a per-file `E501` exemption for `relay_mcp/server.py` whose tool-description strings must stay byte-identical to `relay/mcp_server.py` under the parity rule below). `docker.yml` builds and publishes the image on pushes to `main`. Workflow actions are pinned to majors except `astral-sh/setup-uv`, which stopped publishing major tags at v8 — it needs a full release tag (`@v10.0.1`).
 
 ## API
 
@@ -147,11 +152,12 @@ claude mcp add --transport http relay https://your-relay.example.com/mcp \
 
 Single-page app on the REST API + SSE.
 
-- **Posts:** compose panel, inline edit, delete-with-confirm, `expires_at` picker; live SSE feed (new posts flash + prepend).
+- **Posts:** compose panel, inline edit, delete-with-confirm, `expires_at` picker; live SSE feed (new posts flash + prepend). Clicking a card opens the detail modal — **except the master doc (`#0`)**, which is an inline accordion instead: a one-line peek that expands in place (`max-height` animated from JS, released to `none` after the transition so late reflow isn't clipped).
 - **Attachments:** 📎 button / drag-drop / paste (screenshots) in compose + edit forms → uploads and inserts `![[embed]]` at the cursor. Edit form lists the post-folder's files with delete (×).
 - **Sidebar tabs — Tags / Tree / Files:** Tags filters by tag (create/rename/⚙ expiry); Tree filters the feed by folder (`GET /folders`); **Files** swaps the feed for an attachment gallery (thumbnails/chips, folder filter, click-to-enlarge lightbox, delete). Tag and folder filters are mutually exclusive.
 - **Search:** debounced bar over the feed (title/content/source), combinable with a tag filter. The same bar holds the **sort control** (Updated/Created field + ↓/↑ direction toggle) and the list/grid view toggle; sort + view are persisted in `localStorage` (default: updated · desc).
-- **Responsive:** sidebar → slide-in drawer on mobile (≤768px).
+- **Grid tiles are the tight constraint.** A tile is fixed-height with a `1fr` inner track, and a `1fr` track's automatic minimum is its items' *min-content* width — so any child that can't shrink (a `nowrap` source, a `nowrap` table) widens the track past the card border and everything inside then paints outside the frame. Every card grid area therefore carries `min-width: 0`; the source ellipsizes; feed tables use `table-layout: fixed` with wrapping cells (the modal keeps `nowrap` + `.table-scroll`). The footer drops what a tile has no room for — the created stamp when an edit stamp is present, the button captions, the body's `Last updated:` chunk — via CSS only, since the view toggle swaps a class on `.feed` and never re-renders. **Check any new card element against a narrow tile.**
+- **Responsive:** sidebar → slide-in drawer on mobile (≤768px); on desktop a header toggle collapses it to zero width, persisted in `localStorage`.
 
 ## Terminal UI (`uv run relay-tui`)
 
