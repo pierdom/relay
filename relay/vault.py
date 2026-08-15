@@ -109,7 +109,17 @@ def note_write(path: Path, text: str) -> None:
 
 
 def note_delete(path: Path) -> None:
-    _deleted.add(str(path.resolve()))
+    key = str(path.resolve())
+    _deleted.add(key)
+    # Forget the content hash for this path. Once the file is gone, a file
+    # reappearing at it with exactly the bytes relay last wrote is a *restore* —
+    # `git checkout` out of the history repo, a backup copy, a Syncthing
+    # resurrection — not relay's own write. Leaving the hash behind made
+    # was_self_write() suppress that restore, so the note came back on disk but
+    # stayed invisible to the index (and the API) until something changed a byte
+    # or the next restart rebuilt from files. That silently broke recovery for
+    # exactly the case the history repo exists to cover.
+    _written.pop(key, None)
 
 
 def was_self_write(path: Path, current_text: str) -> bool:
