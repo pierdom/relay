@@ -144,3 +144,35 @@ def test_sidebar_tabs_switch_views(page):
     page.locator("#tabTags").click()
     page.wait_for_function("() => document.getElementById('tabTags').classList.contains('active')")
     assert page.locator(".feed .post").count() >= 4
+
+
+def test_stylesheet_is_served_and_applied(page, relay_server):
+    """The stylesheet now lives in /static/app.css instead of a <style> block.
+
+    Added with that extraction, because the other smokes are geometry- and
+    behaviour-based and all nine of them passed with the stylesheet entirely
+    missing — an unstyled page still renders posts, filters tags and opens modals.
+    This is the one that notices.
+    """
+    with urllib.request.urlopen(f"{relay_server}/static/app.css", timeout=10) as r:
+        assert r.status == 200
+        css = r.read().decode()
+    assert ".feed" in css and "--accent" in css, "served file does not look like the app stylesheet"
+
+    # Computed values that only exist if the sheet actually applied.
+    applied = page.evaluate(
+        """() => {
+            const body = getComputedStyle(document.body);
+            const card = document.querySelector('.feed .post');
+            return {
+                bg: body.backgroundColor,
+                font: body.fontFamily,
+                radius: card ? getComputedStyle(card).borderRadius : null,
+            };
+        }"""
+    )
+    assert applied["bg"] not in ("rgba(0, 0, 0, 0)", "rgb(255, 255, 255)"), (
+        f"body has no themed background ({applied['bg']}) — stylesheet did not apply"
+    )
+    assert "Plex" in applied["font"] or "mono" in applied["font"].lower(), applied["font"]
+    assert applied["radius"] and applied["radius"] != "0px", "cards lost their border radius"
