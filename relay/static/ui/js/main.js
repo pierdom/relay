@@ -568,16 +568,38 @@ function scheduleLoadTags() {
 }
 
 function renderTags(tags) {
+  openTagEditor = null;   // the DOM these forms lived in is about to be replaced
   tagList.innerHTML = '';
   tagList.appendChild(makeTagItem('all', null, tags.reduce((s, t) => s + t.count, 0)));
   tags.forEach(t => tagList.appendChild(makeTagItem(t.tag, t.tag, t.count)));
 }
 
+/* Inline SVG rather than ✏︎ / ⚙ glyphs.
+ *
+ * The pencil was U+270F with a text-presentation selector, which renders as a
+ * thin *horizontal* stroke at this size — indistinguishable from a minus, and so
+ * read as "remove tag" rather than "rename". A drawn, diagonal pencil cannot be
+ * mistaken for one. The gear follows for consistency, and both now scale with the
+ * icon size rather than the font's idea of a dingbat.
+ */
+const ICON_PENCIL = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <path d="M11.4 2.4l2.2 2.2L6 12.2l-2.9.7.7-2.9z"/><path d="M10 3.8l2.2 2.2"/></svg>`;
+
+/* A clock, not a gear. The button sets TTL/expiry, so a clock says what it does —
+ * and a gear at 13px renders as radiating spokes around a dot, which reads as a
+ * brightness control rather than settings. */
+const ICON_CLOCK = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <circle cx="8" cy="8" r="5.8"/><path d="M8 4.6V8l2.3 1.7"/></svg>`;
+
 function makeTagItem(label, value, count) {
   const el = document.createElement('div');
   el.className = 'tag-item' + (query.tag === value ? ' active' : '');
-  const renameBtn = value !== null ? `<button class="tag-rename" title="Rename">✏︎</button>` : '';
-  const configBtn = value !== null ? `<button class="tag-config-btn" title="Configure">⚙</button>` : '';
+  const renameBtn = value !== null
+    ? `<button class="tag-rename" title="Rename tag" aria-label="Rename tag">${ICON_PENCIL}</button>` : '';
+  const configBtn = value !== null
+    ? `<button class="tag-config-btn" title="Expiry settings" aria-label="Expiry settings">${ICON_CLOCK}</button>` : '';
   el.innerHTML = `<span class="tag-name">${escHtml(label)}</span>${renameBtn}${configBtn}<span class="tag-count">${count}</span>`;
   el.addEventListener('click', () => selectTag(value));
   if (value !== null) {
@@ -727,13 +749,57 @@ function closeLightbox() { lightbox.style.display = 'none'; document.getElementB
 lightbox.addEventListener('click', closeLightbox);
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && lightbox.style.display === 'flex') closeLightbox(); });
 
+/* Only one tag editor may be open at a time.
+ *
+ * Both the rename and the TTL form replace a row's contents in place, and nothing
+ * previously closed the last one — so a second click left two forms stacked over
+ * the tag list, and the tag they belonged to was no longer readable. This tracks
+ * the open one so opening another (or clicking away, or pressing Escape) closes
+ * it first. Re-clicking the same control toggles it shut.
+ */
+let openTagEditor = null;   // { el, kind, cancel }
+
+function closeTagEditor() {
+  if (!openTagEditor) return;
+  const { cancel } = openTagEditor;
+  openTagEditor = null;
+  cancel();
+}
+
+/** True when this control was already open, meaning the click should just close it. */
+function toggledTagEditor(el, kind) {
+  if (openTagEditor && openTagEditor.el === el && openTagEditor.kind === kind) {
+    closeTagEditor();
+    return true;
+  }
+  closeTagEditor();
+  return false;
+}
+
+// Clicking anywhere outside the open editor dismisses it. Without this the only
+// way out of a form was Escape while it still had focus — click elsewhere first
+// and the row was stuck open until a page reload.
+//
+// Tag controls are exempt: closing on mousedown collapses the open row, which
+// shifts every row below it *between* mousedown and mouseup, so the click landed
+// somewhere other than the gear that was pressed and appeared to do nothing.
+// Those buttons close the previous editor themselves, after the click resolves.
+document.addEventListener('mousedown', e => {
+  if (!openTagEditor) return;
+  if (openTagEditor.el.contains(e.target)) return;
+  if (e.target.closest?.('.tag-config-btn, .tag-rename')) return;
+  closeTagEditor();
+});
+
 function startTagRename(el, oldName) {
+  if (toggledTagEditor(el, 'rename')) return;
   const nameSpan = el.querySelector('.tag-name');
   const input = document.createElement('input');
   input.className = 'tag-rename-input';
   input.value = oldName;
   nameSpan.replaceWith(input);
   input.focus(); input.select();
+  openTagEditor = { el, kind: 'rename', cancel: () => cancelRename() };
 
   let committed = false;
   async function commit() {
@@ -750,7 +816,9 @@ function startTagRename(el, oldName) {
   }
 
   function cancelRename() {
+    if (committed) return;
     committed = true;
+    if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
     const span = document.createElement('span');
     span.className = 'tag-name'; span.textContent = oldName;
     input.replaceWith(span);
@@ -764,18 +832,29 @@ function startTagRename(el, oldName) {
 }
 
 function startTagConfig(el, tagName) {
+  if (toggledTagEditor(el, 'config')) return;
   const savedHtml = el.innerHTML;
   const form = document.createElement('div');
   form.className = 'tag-config-form';
+  // Explicit Save/Cancel, not just Enter/Escape: the keyboard-only version was
+  // undiscoverable, and unreachable once focus had left the inputs.
   form.innerHTML = `
+    <div class="tc-label"></div>
     <input type="number" class="tc-ttl" placeholder="TTL hours (optional)" min="1">
-    <input type="datetime-local" class="tc-expires">`;
+    <input type="datetime-local" class="tc-expires">
+    <div class="tc-actions">
+      <button type="button" class="tc-save">Save</button>
+      <button type="button" class="tc-cancel">Cancel</button>
+    </div>`;
+  form.querySelector('.tc-label').textContent = `expiry for #${tagName}`;
   el.innerHTML = '';
+  el.classList.add('tag-editing');
   el.appendChild(form);
 
   const ttlInput = form.querySelector('.tc-ttl');
   const expiresInput = form.querySelector('.tc-expires');
   ttlInput.focus();
+  openTagEditor = { el, kind: 'config', cancel: () => cancel() };
 
   let committed = false;
   async function commit() {
@@ -795,7 +874,10 @@ function startTagConfig(el, tagName) {
   }
 
   function cancel() {
+    if (committed) return;
     committed = true;
+    if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
+    el.classList.remove('tag-editing');
     el.innerHTML = savedHtml;
     el.querySelector('.tag-rename')?.addEventListener('click', ev => {
       ev.stopPropagation(); startTagRename(el, tagName);
@@ -805,9 +887,13 @@ function startTagConfig(el, tagName) {
     });
   }
 
+  form.querySelector('.tc-save').addEventListener('click', e => { e.stopPropagation(); commit(); });
+  form.querySelector('.tc-cancel').addEventListener('click', e => { e.stopPropagation(); cancel(); });
+  // The row itself filters the feed on click; a click inside the form must not.
+  form.addEventListener('click', e => e.stopPropagation());
   form.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') cancel();
+    if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
   });
 }
 
@@ -1011,13 +1097,46 @@ function renderPost(post) {
   return el;
 }
 
-function enterEditMode(el, post) {
-  el.classList.add('editing');
-  const savedHtml = el.innerHTML;
-  el.innerHTML = `
+/* Editing happens in its own modal, not inside the card.
+ *
+ * The form used to replace the post card's contents, which in grid view meant a
+ * ~200px column: the textarea was a few words wide and a long note was unusable.
+ * The markup is unchanged — it just gets the room the reading modal already had,
+ * with the content field taking whatever height is left.
+ */
+const editModal = document.getElementById('editModal');
+const emBody = document.getElementById('emBody');
+const emTitle = document.getElementById('emTitle');
+let editingPost = null;
+
+function isEditOpen() {
+  return editModal.classList.contains('open');
+}
+
+function closeEditModal() {
+  editModal.classList.remove('open');
+  document.body.style.overflow = '';
+  emBody.innerHTML = '';
+  editingPost = null;
+}
+
+/** Close, asking first if the body was touched — the modal is easy to dismiss. */
+function tryCloseEditModal() {
+  const field = emBody.querySelector('.ef-content');
+  const dirty = editingPost && field && field.value !== editingPost.content;
+  if (dirty && !confirm('Discard your changes to this post?')) return;
+  closeEditModal();
+}
+
+function enterEditMode(_el, post) {
+  editingPost = post;
+  editModal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  emTitle.textContent = `#${post.id}`;
+  emBody.innerHTML = `
     <div class="edit-form">
       <div><label>Title</label><input class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
-      <div><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea>
+      <div class="ef-content-wrap"><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea>
         <div class="attach-row">
           <input type="file" class="ef-file" multiple style="display:none">
           <button type="button" class="btn-attach ef-attach">📎 Attach</button>
@@ -1035,28 +1154,33 @@ function enterEditMode(el, post) {
     </div>`;
 
   wireAttachments(
-    el.querySelector('.ef-content'), el.querySelector('.ef-file'),
-    el.querySelector('.ef-attach'), el.querySelector('.ef-attach-status'),
+    emBody.querySelector('.ef-content'), emBody.querySelector('.ef-file'),
+    emBody.querySelector('.ef-attach'), emBody.querySelector('.ef-attach-status'),
     () => ({ post_id: post.id, embed: false }),
   );
-  renderEditAttachments(el, post.id);
+  renderEditAttachments(emBody, post.id);
+  emBody.querySelector('.ef-title').focus();
 
-  el.querySelector('.btn-cancel').addEventListener('click', () => { el.classList.remove('editing'); el.innerHTML = savedHtml; rewirePost(el, post); });
-  el.querySelector('.btn-save').addEventListener('click', async () => {
-    const newTitle = el.querySelector('.ef-title').value.trim();
+  emBody.querySelector('.btn-cancel').addEventListener('click', tryCloseEditModal);
+  emBody.querySelector('.btn-save').addEventListener('click', async () => {
+    const newTitle = emBody.querySelector('.ef-title').value.trim();
     if (!newTitle) { alert('Title is required'); return; }
     const body = {
       title:      newTitle,
-      content:    el.querySelector('.ef-content').value,
-      tags:       el.querySelector('.ef-tags').value.split(',').map(s => s.trim()).filter(Boolean),
-      source:     el.querySelector('.ef-source').value.trim() || null,
-      expires_at: toUtcIso(el.querySelector('.ef-expires').value) || null,
+      content:    emBody.querySelector('.ef-content').value,
+      tags:       emBody.querySelector('.ef-tags').value.split(',').map(s => s.trim()).filter(Boolean),
+      source:     emBody.querySelector('.ef-source').value.trim() || null,
+      expires_at: toUtcIso(emBody.querySelector('.ef-expires').value) || null,
     };
-    const btn = el.querySelector('.btn-save');
+    const btn = emBody.querySelector('.btn-save');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
       const updated = await apiFetch(`/posts/${post.id}`, { method: 'PATCH', body: JSON.stringify(body) });
-      el.replaceWith(renderPost(updated));
+      // The card is looked up rather than held: the feed may have re-rendered
+      // (a filter, a sort, an SSE push) while the modal was open.
+      const card = feed.querySelector(`[data-id="${post.id}"]`);
+      if (card) card.replaceWith(renderPost(updated));
+      closeEditModal();
       refreshSidebarCounts();
     } catch (e) {
       alert(`Save failed: ${e.message}`);
@@ -1064,6 +1188,9 @@ function enterEditMode(el, post) {
     }
   });
 }
+
+document.getElementById('emClose').onclick = tryCloseEditModal;
+document.getElementById('emBackdrop').onclick = tryCloseEditModal;
 
 function rewirePost(el, post) {
   el.querySelectorAll('.tag-pill').forEach(pill =>
@@ -1253,8 +1380,9 @@ initPostHistory(() => { resetPaging(); loadPosts(true); });
 pmEdit.addEventListener('click', () => {
   const post = _modalPost; if (!post) return;
   closePostModal();
-  const card = feed.querySelector(`[data-id="${post.id}"]`);
-  if (card) enterEditMode(card, post);
+  // No longer needs the card: the editor is its own modal, so a post that is
+  // filtered out of the current feed can still be edited from its detail view.
+  enterEditMode(null, post);
 });
 pmDelete.addEventListener('click', async () => {
   const post = _modalPost; if (!post) return;
@@ -1269,6 +1397,7 @@ pmDelete.addEventListener('click', async () => {
   } catch {}
 });
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && isEditOpen()) { tryCloseEditModal(); return; }
   if (e.key === 'Escape' && isStatusOpen()) { closeStatusModal(); return; }
   if (e.key === 'Escape' && isHistoryOpen()) { closeHistoryModal(); return; }
   if (e.key === 'Escape' && postModal.classList.contains('open')) closePostModal();

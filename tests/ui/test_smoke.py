@@ -20,6 +20,17 @@ from .conftest import API_KEY
 pytestmark = pytest.mark.ui
 
 
+def _api_patch(base_url: str, post_id: int, payload: dict) -> dict:
+    req = urllib.request.Request(
+        f"{base_url}/posts/{post_id}",
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+        method="PATCH",
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
 def _api_post(base_url: str, payload: dict) -> dict:
     req = urllib.request.Request(
         f"{base_url}/posts",
@@ -269,6 +280,90 @@ def test_restoring_from_the_panel_undoes_a_clobber(page, relay_server):
     assert "THE GOOD VERSION" in page.locator("#pmBody").inner_text()
 
 
+def test_history_panel_does_not_resize_when_switching_revisions(page, relay_server):
+    """The panel used to be sized by its contents, so selecting a revision
+    collapsed it to the height of the loading line and re-inflated when the body
+    arrived — a visible jump on every click. Panes now exist up front and scroll
+    internally, so the shell must not move at all."""
+    post = _api_post(relay_server, {"title": "Steady Panel", "content": "SHORT", "tags": ["homelab"]})
+    _api_patch(relay_server, post["id"], {"content": "A MUCH LONGER BODY\n" * 60})
+    _api_patch(relay_server, post["id"], {"content": "tiny again"})
+
+    page.reload()
+    page.get_by_text("Steady Panel").first.wait_for(timeout=10_000)
+    page.get_by_text("Steady Panel").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmHistory").click()
+    page.locator("#historyModal.open").wait_for(timeout=10_000)
+    page.locator("#hmBody .hm-rev").first.wait_for(timeout=10_000)
+    page.wait_for_timeout(400)  # let the 0.18s modalIn entry animation settle
+
+    def size():
+        box = page.locator(".hm-inner").bounding_box()
+        return (round(box["width"]), round(box["height"]))
+
+    seen = {size()}
+    rows = page.locator("#hmBody .hm-rev")
+    assert rows.count() >= 3, "need several revisions of differing length"
+    for i in range(rows.count()):
+        rows.nth(i).click()
+        page.wait_for_timeout(120)   # catch it mid-load, where the collapse used to happen
+        seen.add(size())
+        page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
+        seen.add(size())
+    assert len(seen) == 1, f"panel changed size while switching revisions: {sorted(seen)}"
+
+
+def test_history_panel_keeps_the_revision_list_visible_while_previewing(page):
+    """Two panes, not a stacked list-then-preview: the list has to stay on screen
+    so versions can actually be compared."""
+    page.locator(".feed .post").first.wait_for(timeout=10_000)
+    page.get_by_text("Smoke Post 0").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmHistory").click()
+    page.locator("#historyModal.open").wait_for(timeout=10_000)
+    rows = page.locator("#hmBody .hm-rev")
+    rows.first.wait_for(timeout=10_000)
+    rows.first.click()
+    page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
+    assert rows.first.is_visible(), "the revision list was pushed out of view by the preview"
+
+
+def test_history_revision_rows_show_the_whole_message(page, relay_server):
+    """The row put sha, message and timestamp on one line, so the message was
+    squeezed between them and ellipsized to a couple of characters — "post 86
+    update: …" rendered as "va…", which identifies nothing. Choosing which
+    revision to restore is the entire job of this list."""
+    post = _api_post(
+        relay_server,
+        {"title": "Scarif — Server Build Project", "content": "v1", "tags": ["homelab"]},
+    )
+    _api_patch(relay_server, post["id"], {"content": "v2"})
+
+    page.reload()
+    page.get_by_text("Scarif — Server Build Project").first.wait_for(timeout=10_000)
+    page.get_by_text("Scarif — Server Build Project").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmHistory").click()
+    page.locator("#historyModal.open").wait_for(timeout=10_000)
+    page.locator("#hmBody .hm-rev").first.wait_for(timeout=10_000)
+
+    rows = page.evaluate(
+        """() => [...document.querySelectorAll('.hm-msg')].map(m => ({
+            text: m.textContent,
+            // Both axes: line-clamp overflows vertically, a single-line ellipsis
+            // horizontally. Checking only one made this test pass either way.
+            clipped: m.scrollHeight > m.clientHeight + 1 || m.scrollWidth > m.clientWidth + 1,
+        }))"""
+    )
+    assert rows, "no revisions listed"
+    for row in rows:
+        assert not row["clipped"], f"message clipped in the list: {row['text']!r}"
+        assert len(row["text"]) > 12, f"suspiciously short message: {row['text']!r}"
+    # the newest is marked so the current state is identifiable at a glance
+    assert page.locator("#hmBody .hm-badge").count() == 1
+
+
 def test_history_panel_closes_on_escape(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
     page.get_by_text("Smoke Post 0").first.click()
@@ -279,3 +374,189 @@ def test_history_panel_closes_on_escape(page):
     page.locator("#historyModal.open").wait_for(state="detached", timeout=5_000)
     # the post modal it opened over is still there
     assert page.locator("#postModal.open").count() == 1
+
+
+# ── tag config form (sidebar) ────────────────────────────────────────────────
+
+
+def _open_tag_config(page, tag: str):
+    row = page.locator(".tag-item", has_text=tag).first
+    row.hover()
+    row.locator(".tag-config-btn").click()
+    page.wait_for_timeout(150)
+
+
+def test_tag_config_form_stays_inside_the_sidebar(page):
+    """It used to spill out of the sidebar, taking its controls off-screen with it
+    — the row could then only be closed by reloading the page.
+
+    `datetime-local` has a wide min-content width, and a flex child's automatic
+    minimum is min-content unless `min-width: 0` says otherwise. How wide that
+    widget renders depends on browser, locale and zoom, so the sidebar is forced
+    narrow here rather than trusting this browser to reproduce it: without the
+    fix the form measures ~196px inside a 149px sidebar, with it ~123px. A test
+    that only ran at the default width passed either way and proved nothing.
+    """
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+    page.add_style_tag(
+        content="#sidebarEl, .sidebar { width: 150px !important; min-width: 150px !important; }"
+    )
+    _open_tag_config(page, "homelab")
+    page.locator(".tag-config-form").wait_for(timeout=5_000)
+
+    fits = page.evaluate(
+        """() => {
+            const bar = document.getElementById('sidebarEl');
+            const form = document.querySelector('.tag-config-form');
+            return { available: bar.clientWidth, needed: form.scrollWidth };
+        }"""
+    )
+    assert fits["needed"] <= fits["available"], (
+        f"form needs {fits['needed']}px in a {fits['available']}px sidebar — it will spill out"
+    )
+
+    overflowing = page.evaluate(
+        """() => {
+            const bar = document.getElementById('sidebarEl').getBoundingClientRect();
+            const bad = [];
+            for (const el of document.querySelectorAll('.tag-config-form, .tag-config-form *')) {
+                const r = el.getBoundingClientRect();
+                if (r.width && (r.right > bar.right + 1 || r.left < bar.left - 1)) {
+                    bad.push(`${el.className || el.tagName}: ${Math.round(r.left)}..${Math.round(r.right)}`);
+                }
+            }
+            return bad;
+        }"""
+    )
+    assert not overflowing, "tag config form spilled outside the sidebar:\n  " + "\n  ".join(overflowing)
+    assert page.locator(".tc-save").is_visible()
+    assert page.locator(".tc-cancel").is_visible()
+
+
+def test_only_one_tag_config_form_can_be_open(page):
+    """Opening a second used to stack another form over the tag list."""
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+    _open_tag_config(page, "homelab")
+    assert page.locator(".tag-config-form").count() == 1
+    _open_tag_config(page, "radio")
+    assert page.locator(".tag-config-form").count() == 1, "a second form stayed open"
+
+
+def test_tag_config_form_can_be_dismissed(page):
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+
+    _open_tag_config(page, "homelab")
+    page.locator(".tc-cancel").click()
+    page.wait_for_timeout(150)
+    assert page.locator(".tag-config-form").count() == 0, "Cancel did not close it"
+
+    _open_tag_config(page, "homelab")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(150)
+    assert page.locator(".tag-config-form").count() == 0, "Escape did not close it"
+
+    _open_tag_config(page, "homelab")
+    page.locator("#feed").click(position={"x": 5, "y": 5})
+    page.wait_for_timeout(200)
+    assert page.locator(".tag-config-form").count() == 0, "clicking away did not close it"
+
+
+def test_the_tag_row_is_restored_after_closing_its_config(page):
+    """The form replaces the row's contents, so the gear is gone while it is open
+    — that is why closing is done with Cancel/Escape/click-away rather than by
+    clicking the gear again. The row must come back intact afterwards, or the tag
+    becomes unusable until a reload."""
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+    row = page.locator(".tag-item", has_text="homelab").first
+
+    _open_tag_config(page, "homelab")
+    assert row.locator(".tag-config-btn").count() == 0, "the gear survived inside the form"
+
+    page.locator(".tc-cancel").click()
+    page.wait_for_timeout(150)
+    assert row.locator(".tag-name").inner_text() == "homelab"
+    assert row.locator(".tag-config-btn").count() == 1, "the gear did not come back"
+    assert row.locator(".tag-rename").count() == 1, "the rename control did not come back"
+
+    # and it still works a second time
+    _open_tag_config(page, "homelab")
+    assert page.locator(".tag-config-form").count() == 1
+
+
+def test_tag_row_controls_are_drawn_icons_with_labels(page):
+    """The rename control was ✏︎ with a text-presentation selector, which renders
+    as a thin horizontal stroke at this size — read as a minus, i.e. "remove tag".
+    Drawn SVGs cannot degrade into a glyph the font happens to pick, and the
+    accessible names say what each does."""
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+    row = page.locator(".tag-item", has_text="homelab").first
+    row.hover()
+
+    rename, expiry = row.locator(".tag-rename"), row.locator(".tag-config-btn")
+    assert rename.locator("svg").count() == 1, "rename control is not a drawn icon"
+    assert expiry.locator("svg").count() == 1, "expiry control is not a drawn icon"
+    assert rename.get_attribute("aria-label") == "Rename tag"
+    assert expiry.get_attribute("aria-label") == "Expiry settings"
+
+    # a real hit area, not a 10px glyph
+    for control, name in ((rename, "rename"), (expiry, "expiry")):
+        box = control.bounding_box()
+        assert box["width"] >= 15 and box["height"] >= 15, f"{name} control is {box} — too small to hit"
+
+
+# ── editing ──────────────────────────────────────────────────────────────────
+
+
+def _edit_first_card(page, title: str):
+    card = page.locator(".feed .post", has_text=title).first
+    card.hover()
+    card.locator(".btn-edit").click()
+    page.locator("#editModal.open").wait_for(timeout=10_000)
+    page.wait_for_timeout(300)
+
+
+def test_editing_opens_a_roomy_modal_in_both_views(page, relay_server):
+    """Editing used to replace the card's contents. In grid view that is a ~200px
+    column, so the textarea was a few words wide and a long note unusable."""
+    _api_post(relay_server, {"title": "Roomy Edit", "content": "line\n" * 40, "tags": ["homelab"]})
+    page.reload()
+    page.get_by_text("Roomy Edit").first.wait_for(timeout=10_000)
+
+    for view in ("#vtGrid", "#vtList"):
+        page.locator(view).click()
+        page.wait_for_timeout(250)
+        _edit_first_card(page, "Roomy Edit")
+        box = page.locator("#emBody .ef-content").bounding_box()
+        assert box["width"] > 600, f"{view}: editor only {round(box['width'])}px wide"
+        assert box["height"] > 200, f"{view}: editor only {round(box['height'])}px tall"
+        # and nothing is being edited inside a card any more
+        assert page.locator(".feed .post .edit-form").count() == 0
+        page.locator("#emBody .btn-cancel").click()
+        page.locator("#editModal.open").wait_for(state="detached", timeout=5_000)
+
+
+def test_editing_from_the_modal_saves_and_updates_the_card(page, relay_server):
+    post = _api_post(relay_server, {"title": "Save Me", "content": "before", "tags": ["homelab"]})
+    page.reload()
+    page.get_by_text("Save Me").first.wait_for(timeout=10_000)
+    _edit_first_card(page, "Save Me")
+
+    page.locator("#emBody .ef-content").fill("after the edit")
+    page.locator("#emBody .btn-save").click()
+    page.locator("#editModal.open").wait_for(state="detached", timeout=10_000)
+
+    page.wait_for_function(
+        """(id) => {
+            const card = document.querySelector(`[data-id="${id}"]`);
+            return card && card.textContent.includes('after the edit');
+        }""",
+        arg=post["id"],
+        timeout=10_000,
+    )
+
+
+def test_cancelling_an_untouched_edit_closes_without_a_prompt(page):
+    page.locator(".feed .post").first.wait_for(timeout=10_000)
+    _edit_first_card(page, "Smoke Post 0")
+    page.locator("#emBody .btn-cancel").click()
+    page.locator("#editModal.open").wait_for(state="detached", timeout=5_000)

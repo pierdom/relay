@@ -245,13 +245,24 @@ aside.collapsed > * { min-width: 220px; }
 }
 .tag-item.active .tag-count { background: var(--accent); color: #000; }
 
-.tag-rename {
+/* Both row controls share a shape: a comfortable hit area around a 13px icon,
+   revealed on hover. They carry SVGs now, so size comes from the icon rather
+   than a font's dingbat metrics. */
+.tag-rename, .tag-config-btn {
   background: none; border: none; cursor: pointer;
-  padding: 0 1px; font-size: 10px; opacity: 0; flex-shrink: 0;
-  transition: opacity 0.12s; line-height: 1;
+  padding: 2px; opacity: 0; flex-shrink: 0; line-height: 0;
+  color: var(--muted); border-radius: 3px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: opacity 0.12s, color 0.12s;
 }
-.tag-item:hover .tag-rename { opacity: 0.6; }
-.tag-rename:hover { opacity: 1 !important; }
+.tag-item:hover .tag-rename,
+.tag-item:hover .tag-config-btn { opacity: 0.75; }
+.tag-rename:hover, .tag-config-btn:hover { opacity: 1 !important; color: var(--accent); }
+.tag-rename:focus-visible, .tag-config-btn:focus-visible { opacity: 1; color: var(--accent); }
+/* Touch devices have no hover, so the controls would never appear at all. */
+@media (hover: none) {
+  .tag-rename, .tag-config-btn { opacity: 0.55; }
+}
 
 .tag-rename-input {
   background: var(--bg); border: 1px solid var(--accent); color: var(--text);
@@ -765,22 +776,46 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 }
 
 /* ── Tag config inline form ──────────────────────────── */
+/* The row is a flex container, so its child's automatic minimum is min-content —
+   and `datetime-local` has a wide one (the mm/dd/yyyy, --:-- -- placeholder plus
+   the picker icon). Without min-width:0 the form refused to shrink and spilled
+   out of the sidebar, taking its controls off-screen with it: the same automatic
+   minimum that bites the grid tiles. `tag-editing` drops the row out of flex
+   layout entirely while a form is in it. */
+/* Last-resort clip: even if some future control has an intrinsic minimum wider
+   than the sidebar, it is scrolled rather than painted over the feed. */
+.tag-list { overflow-x: hidden; }
+.tag-item.tag-editing {
+  display: block; padding: 4px 12px 10px; cursor: default;
+  background: rgba(255,255,255,0.02);
+}
 .tag-config-form {
-  padding: 4px 12px 8px;
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 5px;
+  min-width: 0; max-width: 100%;
+}
+.tc-label {
+  font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .tag-config-form input {
   background: var(--bg); border: 1px solid var(--accent); color: var(--text);
-  border-radius: 3px; font-size: 11px; padding: 3px 6px; width: 100%;
+  border-radius: 3px; font-size: 11px; padding: 4px 6px;
+  width: 100%; min-width: 0; max-width: 100%;
   outline: none; font-family: inherit;
 }
-.tag-config-btn {
-  background: none; border: none; cursor: pointer;
-  padding: 0 1px; font-size: 10px; opacity: 0; flex-shrink: 0;
-  transition: opacity 0.12s; line-height: 1;
+.tc-actions { display: flex; gap: 6px; min-width: 0; }
+.tc-actions button {
+  flex: 1; min-width: 0;
+  background: none; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--muted); font-family: inherit; font-size: 10px;
+  padding: 4px 6px; cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
 }
-.tag-item:hover .tag-config-btn { opacity: 0.6; }
-.tag-config-btn:hover { opacity: 1 !important; }
+.tc-actions .tc-save { color: var(--accent); border-color: var(--accent-dim); }
+.tc-actions button:hover { color: var(--text); border-color: var(--accent); }
+/* The rename input lives inside the row's flex layout and needs the same escape. */
+.tag-rename-input { min-width: 0; max-width: 100%; }
+/* .tag-config-btn is styled with .tag-rename above — same shape, same behaviour. */
 
 /* ── Card truncation ─────────────────────────────────── */
 .post:not(.editing) { cursor: pointer; }
@@ -935,28 +970,101 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 }
 
 /* ── Post history panel ───────────────────────────────────── */
-/* Wider than the status panel: it shows a revision body, not a few key/values. */
-.hm-inner { max-width: 680px; }
-.hm-list { display: flex; flex-direction: column; gap: 2px; }
+/* Fixed height and a two-pane grid, both deliberate. The panel used to be sized
+   by its content, so selecting a revision collapsed it to the loading state and
+   re-inflated when the body arrived — a visible jump on every click. Panes that
+   exist up front and scroll internally cannot do that. The extra width is for
+   reading an old version, which is the actual task here. */
+.hm-inner {
+  max-width: 1040px;
+  width: 94%;
+  height: min(82vh, 860px);
+}
+#historyModal .sm-body { flex: 1; min-height: 0; overflow: hidden; }
+
+.hm-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+.hm-list {
+  display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto; min-height: 0; padding-right: 12px;
+}
+.hm-pane {
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  border-left: 1px solid var(--border); padding-left: 16px;
+}
 .hm-rev {
-  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%;
   background: none; border: 1px solid transparent; border-radius: 4px;
-  padding: 6px 8px; cursor: pointer; text-align: left;
+  padding: 7px 9px; cursor: pointer; text-align: left; flex-shrink: 0;
   font-family: inherit; font-size: 12.5px; color: var(--text);
   transition: background 0.12s, border-color 0.12s;
 }
+.hm-meta { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.hm-badge {
+  color: var(--accent); border: 1px solid var(--accent-dim); border-radius: 3px;
+  padding: 0 4px; font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase;
+  flex-shrink: 0;
+}
 .hm-rev:hover { border-color: var(--border); background: var(--accent-glow); }
-.hm-rev.active { border-color: var(--accent); }
-.hm-sha { color: var(--accent); font-variant-numeric: tabular-nums; flex-shrink: 0; }
-/* min-width:0 so a long commit subject ellipsizes instead of widening the panel. */
-.hm-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hm-when { color: var(--muted); font-size: 11.5px; flex-shrink: 0; }
-.hm-rev.hm-current .hm-sha::after { content: ' ·current'; color: var(--muted); }
-.hm-preview { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.hm-rev.active { border-color: var(--accent); background: var(--accent-glow); }
+.hm-sha { color: var(--accent); font-size: 10.5px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+/* The message wraps to two lines rather than ellipsizing on one: it is the only
+   thing that says what a revision *was*. min-width:0 still keeps it from widening
+   the column. */
+.hm-msg {
+  min-width: 0; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+.hm-when { color: var(--muted); font-size: 10.5px; flex-shrink: 0; }
+
+.hm-pane-head { flex-shrink: 0; margin-bottom: 8px; }
 .hm-body-text {
-  margin: 8px 0 12px; padding: 10px; max-height: 260px; overflow: auto;
+  flex: 1; min-height: 0; overflow: auto; margin: 0;
+  padding: 12px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
-  font-family: inherit; font-size: 12px; line-height: 1.5; color: var(--text);
+  font-family: inherit; font-size: 12.5px; line-height: 1.55; color: var(--text);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.hm-restore { width: 100%; }
+.hm-restore { width: 100%; margin-top: 10px; flex-shrink: 0; }
+/* Placeholder and loading share the pane's centre so neither changes its size. */
+.hm-placeholder {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 12.5px; text-align: center; padding: 20px;
+}
+
+@media (max-width: 860px) {
+  .hm-inner { height: 88vh; }
+  .hm-layout { grid-template-columns: 1fr; grid-template-rows: minmax(0, 40%) 1fr; }
+  .hm-list { padding-right: 0; padding-bottom: 10px; }
+  .hm-pane { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 12px; }
+}
+
+/* ── Edit modal ───────────────────────────────────────────── */
+/* Editing used to happen inside the post card. In grid view that meant a ~200px
+   column: the textarea was a few words wide and long notes were unusable. The
+   form is the same, it just gets the room the reading modal already had. */
+.em-inner {
+  max-width: 1100px;
+  width: 94%;
+  height: min(88vh, 940px);
+}
+#editModal .sm-body { flex: 1; min-height: 0; display: flex; padding-top: 10px; }
+#editModal .edit-form {
+  display: flex; flex-direction: column; gap: 10px;
+  flex: 1; min-height: 0; min-width: 0;
+}
+/* The content field takes whatever is left, so a long note gets the whole panel
+   rather than a fixed few rows. */
+#editModal .edit-form > .ef-content-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#editModal .edit-form textarea.ef-content { flex: 1; min-height: 140px; resize: none; }
+#editModal .edit-form .ef-attachments { max-height: 22vh; overflow-y: auto; }
+#editModal .edit-actions { margin-top: 0; flex-shrink: 0; }
+@media (max-width: 860px) {
+  .em-inner { height: 92vh; }
+}
