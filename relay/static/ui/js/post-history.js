@@ -135,7 +135,11 @@ export async function openPostHistory(postId, title) {
     renderRevisions(await apiFetch(`/posts/${postId}/history`));
   } catch (err) {
     hmBody.innerHTML = '';
-    hmBody.appendChild(note(`Could not load history: ${err.message}`, 'sm-error'));
+    // 503 is the one expected failure — the server has history switched off, or no
+    // git binary — and deserves plain words rather than a bare status line.
+    hmBody.appendChild(err.message.startsWith('503')
+      ? note('Vault history is not enabled on this server, so there is nothing to restore from.', 'sm-error')
+      : note(`Could not load history: ${err.message}`, 'sm-error'));
   }
 }
 

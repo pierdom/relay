@@ -261,6 +261,13 @@ def test_restoring_from_the_panel_undoes_a_clobber(page, relay_server):
         timeout=15_000,
     )
 
+    # The post modal stays open behind the history panel, and the restore streams
+    # back over SSE — so it refreshes in place rather than showing the version we
+    # just undid. Worth pinning: it depends on the SSE handler continuing to treat
+    # a `post` event for the open modal as an in-place update.
+    assert page.locator("#postModal.open").count() == 1
+    assert "THE GOOD VERSION" in page.locator("#pmBody").inner_text()
+
 
 def test_history_panel_closes_on_escape(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
