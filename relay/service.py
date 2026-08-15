@@ -402,11 +402,19 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
         await vault.index_delete(db, post_id)
         await db.commit()
     await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]))
-    # Orphan cleanup: drop attachments in the deleted post's folder that no
-    # remaining post references. Shared assets (still referenced elsewhere) stay.
+    # Orphan cleanup: drop the attachments *this post* referenced that no
+    # remaining post references. Scoped to the deleted post's own embeds on
+    # purpose — a folder's assets/ dir also holds files a human dropped in from
+    # Obsidian but hasn't embedded yet, and sweeping every unreferenced file in
+    # the folder would delete those bystanders. Shared assets (still referenced
+    # elsewhere) stay.
+    own = referenced_attachment_names(row["content"])
+    if not own:
+        return
     referenced = await _all_referenced_attachments(db)
     for name, _f, _s in vault.list_attachments(folder):
-        if name.lower() not in referenced:
+        lowered = name.lower()
+        if lowered in own and lowered not in referenced:
             vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
 
 

@@ -422,3 +422,29 @@ def test_read_attachment_size_guard(tmp_path, monkeypatch):
     # under the limit reads fine
     ok = vault.read_attachment("big.png", max_bytes=4096)
     assert ok is not None and len(ok[1]) == 2048
+
+
+@pytest.mark.asyncio
+async def test_delete_post_keeps_unreferenced_bystanders(client):
+    """Orphan cleanup must not sweep the whole folder.
+
+    ``diagram.png`` / ``notes.pdf`` are seeded in ``Homelab/assets/`` and embedded
+    by nothing — exactly what a human dropping files in from Obsidian looks like
+    before they're linked. Deleting an unrelated Homelab post must leave them.
+    """
+    post = await _create(client, "Unrelated", content="no embeds here", tags=["homelab"])
+    assert (await client.delete(f"/posts/{post['id']}", headers=AUTH)).status_code == 204
+    assert (await client.get("/attachments/diagram.png", headers=AUTH)).status_code == 200
+    assert (await client.get("/attachments/notes.pdf", headers=AUTH)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_post_removes_only_its_own_orphan(client):
+    """The deleted post's own embed goes; a bystander in the same folder stays."""
+    post = await _create(client, "Owner", content="body", tags=["homelab"])
+    await client.post(
+        "/attachments", json={"filename": "mine.png", "data": PNG, "post_id": post["id"]}, headers=AUTH
+    )
+    await client.delete(f"/posts/{post['id']}", headers=AUTH)
+    assert (await client.get("/attachments/mine.png", headers=AUTH)).status_code == 404
+    assert (await client.get("/attachments/diagram.png", headers=AUTH)).status_code == 200
