@@ -408,10 +408,44 @@ def read_attachment(name: str, *, max_bytes: int | None = None) -> tuple[Path, b
 # ── index mirror ─────────────────────────────────────────────────────────────
 
 
+def id_counter_path() -> Path:
+    """High-water mark of every post id ever issued.
+
+    Lives beside the index but is **not** derived from it: the index is wiped and
+    rebuilt from files at startup, and a deleted post leaves no file, so
+    ``MAX(id)`` alone drops whenever the newest post is deleted and hands its id
+    straight to the next post created. Reused ids silently repoint every ``#id``
+    cross-link in the vault at unrelated content, and make a post's history
+    ambiguous. Durable, like ``oauth.db`` and ``history.git``; excluded from git
+    and from Syncthing along with the rest of ``.relay/``.
+    """
+    return Path(settings.relay_dir) / "last_id"
+
+
+def read_id_counter() -> int:
+    try:
+        return int(id_counter_path().read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def write_id_counter(value: int) -> None:
+    _atomic_write(id_counter_path(), f"{value}\n")
+
+
 async def allocate_id(db: aiosqlite.Connection) -> int:
+    """Next post id — strictly greater than any id ever issued.
+
+    Takes the max of the live table and the persisted counter, so an id is never
+    handed out twice even after the highest-numbered post is deleted. Bumping the
+    counter before the caller's insert commits means a failed create burns an id
+    rather than risking a reuse; ids are not required to be contiguous.
+    """
     async with db.execute("SELECT COALESCE(MAX(id), 0) FROM posts") as cur:
         row = await cur.fetchone()
-    return int(row[0]) + 1
+    new_id = max(int(row[0]), read_id_counter()) + 1
+    write_id_counter(new_id)
+    return new_id
 
 
 async def path_for_id(db: aiosqlite.Connection, post_id: int) -> Path | None:
@@ -530,7 +564,9 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
 
     parsed: list[tuple[Path, dict, str]] = []
     seen_ids: set[int] = set()
-    max_id = 0
+    # Seeded from the persisted high-water mark, not just the files present, so a
+    # note stamped during a rebuild can't take the id of a post deleted earlier.
+    max_id = read_id_counter()
     needs_id: list[tuple[Path, dict, str]] = []
 
     for path in files:
@@ -579,6 +615,7 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
             updated_at=effective_updated_at(path, meta),
             expires_at=meta.get("expires_at"),
         )
+    write_id_counter(max(max_id, read_id_counter()))
     await _load_tag_config(db)
     await db.commit()
     logger.info("Index rebuilt from %s — %d post(s)", vault_dir(), len(parsed))
