@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import logging
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -154,11 +156,70 @@ _UI_PATH = _STATIC_DIR / "index.html"
 # README can reference them directly.
 app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="assets")
 
-# UI source served to the browser (app.css today, JS modules as index.html gets
-# split further). Public like /assets — it is the same markup any visitor already
-# receives — and separate from it so brand marks stay their own thing. StaticFiles
-# sends ETag/Last-Modified, so a redeploy invalidates a cached copy.
-app.mount("/static", StaticFiles(directory=_STATIC_DIR / "ui"), name="static")
+_UI_DIR = _STATIC_DIR / "ui"
+
+
+@lru_cache(maxsize=1)
+def asset_version() -> str:
+    """A token that changes whenever any UI file does.
+
+    Content-derived rather than just ``__version__`` so it also moves during
+    development, where the version does not.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(_UI_DIR.rglob("*")):
+        if path.is_file():
+            digest.update(str(path.relative_to(_UI_DIR)).encode("utf-8"))
+            digest.update(path.read_bytes())
+    return f"{__version__}.{digest.hexdigest()[:8]}"
+
+
+# Versioned asset URLs — /static/<version>/js/main.js.
+#
+# The version lives in the **path**, not a query string, because main.js does
+# `import './status.js'`: a `?v=` on the entry point does not propagate to its
+# imports, so they would keep being served from cache, while a path segment does
+# propagate — the browser resolves the relative import against the versioned
+# directory.
+#
+# This exists because splitting the UI out of index.html introduced a version
+# skew that could not happen when everything was inline. `/` always revalidates,
+# but a proxy in front of relay may cache /static aggressively (bespin's adds
+# `max-age` ~4h), so a deploy could hand a browser the new markup with the old
+# script — a button present with no handler behind it. A URL that changes with
+# the content makes a stale copy unreachable rather than merely unlikely.
+#
+# Registered **before** the unversioned mount below: Starlette matches routes in
+# registration order, and the mount would otherwise swallow this path.
+@app.get("/static/{version}/{path:path}", include_in_schema=False)
+async def versioned_asset(version: str, path: str) -> FileResponse:
+    root = _UI_DIR.resolve()
+
+    def resolve(rel: str) -> Path | None:
+        candidate = (root / rel).resolve()
+        return candidate if candidate.is_file() and candidate.is_relative_to(root) else None
+
+    # Versioned URL: the first segment is a version token to be discarded.
+    target = resolve(path)
+    if target is not None:
+        # Safe to cache hard: the URL changes whenever the bytes do.
+        return FileResponse(target, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+    # Not a version after all — this path pattern also swallows the plain
+    # /static/js/main.js form, which is precisely what a browser holding a cached
+    # index.html asks for. Treat the first segment as a real directory and serve it
+    # without the immutable header, since that URL does not change with content.
+    target = resolve(f"{version}/{path}")
+    if target is not None:
+        return FileResponse(target, headers={"Cache-Control": "no-cache"})
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+# Unversioned fallback, kept deliberately. A browser holding a cached index.html
+# still asks for /static/js/main.js, and 404ing that would break its UI outright
+# until the cache expired.
+app.mount("/static", StaticFiles(directory=_UI_DIR), name="static")
 
 
 @app.get("/health", include_in_schema=False)
@@ -172,8 +233,15 @@ async def favicon() -> FileResponse:
 
 
 @app.get("/", include_in_schema=False)
-async def root() -> FileResponse:
-    return FileResponse(_UI_PATH, media_type="text/html")
+async def root() -> HTMLResponse:
+    """The UI shell, with the asset version stamped into its URLs.
+
+    Explicitly `no-cache`: this document is what carries the current asset
+    version, so a cached copy would keep pointing at the previous release's
+    scripts. It revalidates cheaply (a few KB, and usually a 304).
+    """
+    html = _UI_PATH.read_text(encoding="utf-8").replace("__ASSETS__", asset_version())
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/ui", include_in_schema=False)
