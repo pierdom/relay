@@ -154,6 +154,12 @@ _UI_PATH = _STATIC_DIR / "index.html"
 # README can reference them directly.
 app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="assets")
 
+# UI source served to the browser (app.css today, JS modules as index.html gets
+# split further). Public like /assets — it is the same markup any visitor already
+# receives — and separate from it so brand marks stay their own thing. StaticFiles
+# sends ETag/Last-Modified, so a redeploy invalidates a cached copy.
+app.mount("/static", StaticFiles(directory=_STATIC_DIR / "ui"), name="static")
+
 
 @app.get("/health", include_in_schema=False)
 async def health() -> dict:

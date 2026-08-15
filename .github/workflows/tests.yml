@@ -34,5 +34,11 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      # The browser smokes (tests/ui) drive the real UI in Chromium. Without this
+      # they skip rather than fail, so a missing browser would silently lose
+      # coverage of the least-tested file in the repo — install it explicitly.
+      - name: Install Playwright browser
+        run: uv run playwright install --with-deps chromium
+
       - name: Test
         run: uv run pytest -q
