@@ -17,7 +17,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from . import database, events, folders, history, ingest, links, metrics, vault
+from . import database, events, folders, frontmatter, history, ingest, links, metrics, vault
 from .config import settings
 from .models import (
     AttachmentDeleteResponse,
@@ -30,8 +30,10 @@ from .models import (
     LinkIndexResponse,
     LinkTarget,
     PostCreate,
+    PostHistoryResponse,
     PostListResponse,
     PostResponse,
+    PostRevision,
     PostSummary,
     PostSummaryListResponse,
     PostUpdate,
@@ -49,6 +51,14 @@ class PostNotFound(Exception):
 
 class ProtectedPost(Exception):
     """Raised when an operation is not allowed on a reserved post (e.g. id=0)."""
+
+
+class RevisionNotFound(Exception):
+    """Raised when a restore names a revision that isn't in the post's history."""
+
+
+class HistoryUnavailable(Exception):
+    """Raised when history is off or git is missing, so there is nothing to read."""
 
 
 class AttachmentError(Exception):
@@ -242,7 +252,9 @@ async def get_post(db: aiosqlite.Connection, post_id: int) -> PostResponse | Non
     return PostResponse.from_row(row) if row is not None else None
 
 
-async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) -> PostResponse:
+async def update_post(
+    db: aiosqlite.Connection, post_id: int, body: PostUpdate, *, commit_message: str | None = None
+) -> PostResponse:
     row = await _fetch(db, post_id)
     if row is None:
         raise PostNotFound
@@ -289,7 +301,7 @@ async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) 
     # reconnect cursor. Self-write suppression already covers the vault write, so
     # this is the only path that propagates API/MCP edits (incl. Inbox→domain moves).
     await events.publish(post.model_dump())
-    await history.commit(f"post {post_id} update: {post.title}")
+    await history.commit(commit_message or f"post {post_id} update: {post.title}")
     return post
 
 
@@ -362,6 +374,110 @@ async def get_backlinks(db: aiosqlite.Connection, post_id: int) -> BacklinksResp
     ]
     items.sort(key=lambda t: t.id)
     return BacklinksResponse(items=items)
+
+
+# ── History / restore ─────────────────────────────────────────────────────────
+
+# How deep to look when resolving a sha for a restore. Larger than the listing
+# default: the caller may hold a sha from an older page of history.
+_RESTORE_SCAN_LIMIT = 200
+
+
+async def get_post_history(
+    db: aiosqlite.Connection, post_id: int, *, limit: int = 20
+) -> PostHistoryResponse:
+    """A post's revisions, newest first.
+
+    Deliberately does **not** require the post to exist — a deleted post is the
+    case most worth recovering, and its history is still in the repo.
+    """
+    if not history.enabled():
+        raise HistoryUnavailable
+    row = await _fetch(db, post_id)
+    revs = await history.revisions(
+        post_id, current_path=row["path"] if row is not None else None, limit=limit
+    )
+    return PostHistoryResponse(
+        id=post_id,
+        exists=row is not None,
+        items=[
+            PostRevision(
+                sha=r.sha, short_sha=r.short_sha, when=r.when, message=r.message, path=r.path
+            )
+            for r in revs
+        ],
+    )
+
+
+async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> PostResponse:
+    """Roll a post back to an earlier revision, recreating it if it was deleted.
+
+    A restore is an ordinary write, so it is committed like any other — a restore
+    can itself be restored. ``history.revisions`` has already verified that every
+    revision's front-matter id matches, so a filename later reused by a different
+    post cannot smuggle that post's body in under this id; the id is re-checked
+    here anyway because this one writes.
+    """
+    if not history.enabled():
+        raise HistoryUnavailable
+    row = await _fetch(db, post_id)
+    revs = await history.revisions(
+        post_id,
+        current_path=row["path"] if row is not None else None,
+        limit=_RESTORE_SCAN_LIMIT,
+    )
+    match = next((r for r in revs if r.sha == sha or r.sha.startswith(sha)), None)
+    if match is None:
+        raise RevisionNotFound
+    text = await history.blob(match.sha, match.path)
+    if text is None:
+        raise RevisionNotFound
+    meta, body = frontmatter.parse(text)
+    if meta.get("id") != post_id:
+        raise RevisionNotFound
+
+    title = Path(match.path).stem
+    tags = meta.get("tags") or []
+    source = meta.get("source")
+    expires_at = meta.get("expires_at")
+    label = f"post {post_id} restore: {title} (from {match.short_sha})"
+
+    if row is not None:
+        # Reuse the normal edit path: it handles the rename back to the old title,
+        # rewrites inbound [[wikilinks]], mirrors the index and streams SSE.
+        return await update_post(
+            db,
+            post_id,
+            PostUpdate(title=title, content=body, tags=tags, source=source, expires_at=expires_at),
+            commit_message=label,
+        )
+
+    # Deleted: recreate the file and its index row, keeping the original id so
+    # inbound [[links]] and #id references resolve again.
+    #
+    # Placement goes through move_to_folder rather than old_path. write_file's
+    # `exclude=old_path` treats that path as free even when a file sits there, so
+    # passing the deleted post's old path would overwrite whatever now owns that
+    # filename; folder placement keeps the original directory and still
+    # collision-suffixes.
+    folder = match.path.split("/", 1)[0] if "/" in match.path else folders.INBOX
+    now = vault.utcnow_iso()
+    created_at = meta.get("created_at") or now
+    async with vault.write_lock:
+        path = vault.write_file(
+            id=post_id, title=title, content=body, tags=tags, source=source,
+            created_at=created_at, updated_at=now, expires_at=expires_at,
+            move_to_folder=folder,
+        )
+        await vault.index_insert(
+            db, id=post_id, title=path.stem, path=path, content=body, tags=tags,
+            source=source, created_at=created_at, updated_at=now, expires_at=expires_at,
+        )
+        await db.commit()
+    post = PostResponse.from_row(await _fetch(db, post_id))
+    await events.publish(post.model_dump())
+    await history.commit(label)
+    return post
 
 
 # Matches ![[file]] embeds and [[file]] links (Obsidian), capturing the target.

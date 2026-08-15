@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from relay import database
+from relay import database, vault
 from relay.auth import require_api_key
 from relay.config import Settings, settings
 from relay.main import app
@@ -60,3 +60,24 @@ async def test_a_write_from_an_unpatched_test_lands_in_the_throwaway_vault(tmp_p
     written = list(Path(settings.vault_path).rglob("Isolated.md"))
     assert written, "post file was not written into the isolated vault"
     assert str(written[0]).startswith(str(tmp_path))
+
+
+def test_vault_dir_refuses_a_real_path_from_a_test(monkeypatch):
+    """The backstop for what conftest can't reach.
+
+    `tests/conftest.py` only applies to files under `tests/`, so an ad-hoc script
+    run from elsewhere still resolves vault_path from the developer's .env — a
+    live vault. The guard sits in `vault_dir()`, which every vault path flows
+    through, so it holds regardless of where the test file lives.
+
+    A monkeypatch *context* so vault_path is restored before the autouse fixture's
+    teardown assert runs.
+    """
+    with monkeypatch.context() as m:
+        m.setattr(settings, "vault_path", "/home/someone/RealNotes")
+        with pytest.raises(RuntimeError, match="refusing to use vault"):
+            vault.vault_dir()
+
+
+def test_the_guard_allows_a_tmp_vault(tmp_path):
+    assert str(vault.vault_dir()).startswith(str(tmp_path))

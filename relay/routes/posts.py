@@ -9,8 +9,10 @@ from ..database import get_db
 from ..models import (
     BacklinksResponse,
     PostCreate,
+    PostHistoryResponse,
     PostListResponse,
     PostResponse,
+    PostRestore,
     PostSummaryListResponse,
     PostUpdate,
 )
@@ -99,6 +101,58 @@ async def get_backlinks(
         return await service.get_backlinks(db, post_id)
     except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
+
+
+@router.get(
+    "/{post_id}/history",
+    response_model=PostHistoryResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_post_history(
+    post_id: int,
+    limit: int = Query(default=20, ge=1, le=200),
+    db: aiosqlite.Connection = Depends(get_db),
+) -> PostHistoryResponse:
+    """Revisions of a post, newest first.
+
+    Answers for a **deleted** post too (`exists: false`) — that's the case worth
+    recovering — so this is deliberately not a 404 when the post is gone.
+    """
+    try:
+        return await service.get_post_history(db, post_id, limit=limit)
+    except service.HistoryUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Vault history is disabled or git is unavailable",
+        ) from None
+
+
+@router.post(
+    "/{post_id}/restore",
+    response_model=PostResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def restore_post(
+    post_id: int,
+    body: PostRestore,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> PostResponse:
+    """Roll a post back to a revision from its history, recreating it if deleted.
+
+    The restore is itself committed, so it can be undone the same way.
+    """
+    try:
+        return await service.restore_post(db, post_id, body.sha)
+    except service.HistoryUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Vault history is disabled or git is unavailable",
+        ) from None
+    except service.RevisionNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No revision '{body.sha}' in the history of post #{post_id}",
+        ) from None
 
 
 @router.patch(

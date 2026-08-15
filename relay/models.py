@@ -282,6 +282,26 @@ class TagListResponse(BaseModel):
     tags: list[TagCount]
 
 
+class PostRevision(BaseModel):
+    """One commit in a post's history."""
+
+    sha: str
+    short_sha: str
+    when: str
+    message: str
+    path: str
+
+
+class PostHistoryResponse(BaseModel):
+    id: int
+    exists: bool = Field(description="False when the post is deleted but recoverable")
+    items: list[PostRevision]
+
+
+class PostRestore(BaseModel):
+    sha: str = Field(min_length=4, description="Revision to restore, from GET /posts/{id}/history")
+
+
 class TagConfigCreate(BaseModel):
     ttl_hours: int | None = Field(default=None, gt=0)
     expires_at: str | None = None

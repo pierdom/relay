@@ -106,7 +106,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="publish_post",
-            description="Publish a post to the relay feed. The dashboard will display it in real time.",
+            description='Publish a post to the relay feed. Subscribers receive it in real time.',
             inputSchema={
                 "type": "object",
                 "required": ["title", "content"],
@@ -155,7 +155,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_post",
-            description="Get a single post by its ID.",
+            description='Get a single post by its ID. Use id=0 for the master document.',
             inputSchema={
                 "type": "object",
                 "required": ["id"],
@@ -165,8 +165,42 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="get_post_history",
+            description=(
+                "List a post's revision history from the vault's git history, newest first. "
+                "Works for a deleted post too (exists=false), which is the case most worth "
+                "recovering. Each item has sha, short_sha, when, message, and path — pass a sha "
+                "to restore_post. Returns an error if vault history is disabled."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "integer", "description": "Post ID"},
+                    "limit": {"type": "integer", "description": "Max revisions to return (default 20)"},
+                },
+            },
+        ),
+        types.Tool(
+            name="restore_post",
+            description=(
+                "Restore a post to an earlier revision, recreating it if it was deleted. Pass a "
+                "sha from get_post_history. The restore is itself recorded in history, so it can "
+                "be undone the same way. Use this to undo a bad overwrite rather than "
+                "reconstructing the body by hand."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["id", "sha"],
+                "properties": {
+                    "id": {"type": "integer", "description": "Post ID"},
+                    "sha": {"type": "string", "description": "Revision sha from get_post_history"},
+                },
+            },
+        ),
+        types.Tool(
             name="delete_post",
-            description="Delete a post from the relay feed by its ID.",
+            description='Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.',
             inputSchema={
                 "type": "object",
                 "required": ["id"],
@@ -178,9 +212,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="update_post",
             description=(
-                "Update an existing post in the relay feed. "
-                "Only fields that are explicitly provided are changed; omitted fields are left untouched. "
-                "Providing tags replaces the tag list wholesale; an empty array clears all tags."
+                'Update an existing post. Only provided fields change; omitted fields are left untouched. Providing tags replaces the list wholesale; an empty array clears them. Pass expires_at=null to clear an existing expiry.'
             ),
             inputSchema={
                 "type": "object",
@@ -230,18 +262,14 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="create_upload",
             description=(
-                "Mint a presigned upload slot for a file too large to pass as base64. Returns "
-                "{upload_id, upload_url, method, max_bytes, expires_at}: PUT the raw bytes to "
-                "'upload_url' (out-of-band — not through this tool call), then call add_attachment "
-                "with the 'upload_id' to file it. Use when you can reach the relay host to PUT."
+                'Mint a presigned upload slot for a file too large to pass as base64. Returns {upload_id, upload_url, method, max_bytes, expires_at}: PUT the raw bytes to `upload_url` (out-of-band — not through this tool call), then call add_attachment with the `upload_id` to file it. Use when you can reach the relay host to PUT.'
             ),
             inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
             name="delete_attachment",
             description=(
-                "Delete an attachment from the vault by its filename. Reports any post ids that "
-                "still embed/link it (now dangling)."
+                'Delete an attachment from the vault by its filename. Returns the removed name and any post ids that still embed/link it (now dangling) so you can fix them.'
             ),
             inputSchema={
                 "type": "object",
@@ -254,9 +282,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="list_attachments",
             description=(
-                "List attachments stored in the vault (filename, folder, size, and the ![[…]] "
-                "embed ref). Scope with 'post_id' (that post's folder) or 'folder'; omit both to "
-                "list every attachment. Use the returned filename with get_attachment."
+                "List attachments stored in the vault (filename, folder, size, and the ![[…]] embed ref). Scope with `post_id` (that post's folder) or `folder`; omit both to list every attachment. Use the returned filename with get_attachment."
             ),
             inputSchema={
                 "type": "object",
@@ -269,8 +295,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="get_attachment",
             description=(
-                "Retrieve an attachment from the vault by its filename (as used in ![[file]]). "
-                "Images are returned so they can be viewed inline."
+                'Retrieve an attachment from the vault by its filename (as used in ![[file]]). Images are returned so they can be viewed inline; other files return a note with the vault path.'
             ),
             inputSchema={
                 "type": "object",
@@ -283,11 +308,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="set_tag_config",
             description=(
-                "Set expiry configuration for a tag. "
-                "At least one of ttl_hours or expires_at must be provided. "
-                "ttl_hours is relative to each post's creation time; "
-                "expires_at is an absolute cutoff for all posts with this tag. "
-                "Only applies to posts that don't have their own expires_at set."
+                "Set expiry configuration for a tag. Provide ttl_hours (relative to each post's creation), expires_at (absolute cutoff), or both. Only affects posts without their own expires_at."
             ),
             inputSchema={
                 "type": "object",
@@ -481,6 +502,51 @@ async def call_tool(
         if p.get("tags"):
             header += f" [{p['tags']}]"
         return [types.TextContent(type="text", text=f"{header}\n\n{p['content']}")]
+
+    if name == "get_post_history":
+        post_id = arguments["id"]
+        params = {"limit": arguments.get("limit", 20)}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/posts/{post_id}/history",
+                params=params,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            if response.status_code == 503:
+                return [types.TextContent(type="text", text="Vault history is disabled or git is unavailable.")]
+            response.raise_for_status()
+            data = response.json()
+        items = data.get("items", [])
+        if not items:
+            return [types.TextContent(type="text", text=f"No history recorded for post #{post_id}.")]
+        state = "exists" if data.get("exists") else "deleted — restorable"
+        lines = [f"#{post_id} ({state}) — {len(items)} revision(s):"]
+        lines += [f"  {r['short_sha']}  {r['when']}  {r['message']}" for r in items]
+        return [types.TextContent(type="text", text="\n".join(lines))]
+
+    if name == "restore_post":
+        post_id = arguments["id"]
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{RELAY_BASE_URL}/posts/{post_id}/restore",
+                json={"sha": arguments["sha"]},
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            if response.status_code == 503:
+                return [types.TextContent(type="text", text="Vault history is disabled or git is unavailable.")]
+            if response.status_code == 404:
+                return [types.TextContent(
+                    type="text",
+                    text=f"No revision '{arguments['sha']}' in the history of post #{post_id}.",
+                )]
+            response.raise_for_status()
+            p = response.json()
+        return [types.TextContent(
+            type="text",
+            text=f"Restored post #{p['id']} — {p['title']} (from {arguments['sha'][:7]}).",
+        )]
 
     if name == "delete_post":
         post_id = arguments["id"]
