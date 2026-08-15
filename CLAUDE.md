@@ -81,7 +81,7 @@ Every write commits the vault to a git repo, so a clobbered post is recoverable.
 - **Coverage:** every service write path (create/update/delete, attachment add/delete, tag rename), TTL expiry, **and external edits** — the watcher commits once per debounced batch, so Obsidian/nvim edits relay never saw through its API are captured too. Attachments are tracked, so the note and the assets deleted with it land in one commit and revert together.
 - **Messages:** `post <id> <verb>: <title>`, `attachment add|delete: <name>`, `tag rename: a -> b (N post(s))`, `external edit: <file>`, `ttl expiry: N post(s)`, `vault: initial import`.
 - **Never a gate.** Every call swallows its errors and logs; a missing `git` binary disables history after one warning and writes proceed untouched. Commits run in a worker thread (never blocking the loop) under a lock, since each stages the whole tree.
-- **Recovery** is plain git — no relay API involved:
+- **Recovery** is plain git — no relay API involved; full runbook in [docs/recovery.md](docs/recovery.md):
   ```bash
   cd /path/to/vault && export GIT_DIR=.relay/history.git GIT_WORK_TREE=.
   git log --oneline --follow -- "Dev/Some Note.md"   # history of one note

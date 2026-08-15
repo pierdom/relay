@@ -101,6 +101,7 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 | REST API reference | [docs/api.md](docs/api.md) |
 | MCP tools and connection | [docs/mcp.md](docs/mcp.md) |
 | Best practices: Master Document, tags, agents | [docs/usage.md](docs/usage.md) |
+| Recovering an overwritten or deleted post | [docs/recovery.md](docs/recovery.md) |
 
 ## Stack
 
