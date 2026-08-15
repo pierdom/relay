@@ -36,6 +36,10 @@ def isolated_vault(tmp_path, monkeypatch):
     holds them to somewhere under ``tmp_path``.
     """
     monkeypatch.setattr(settings, "vault_path", str(tmp_path / "_vault"))
+    # Vault history is on by default in production but off for the suite: it
+    # shells out to git on every write, which would make unrelated tests slower
+    # and dependent on a git binary. tests/test_history.py turns it back on.
+    monkeypatch.setattr(settings, "history_enabled", False)
     yield
     # Runs before monkeypatch's undo (this fixture was set up first, so it tears
     # down last), meaning it sees whatever the test left in place — a test that

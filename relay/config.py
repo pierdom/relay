@@ -23,6 +23,13 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("RELAY_WATCH_ENABLED", "WATCH_ENABLED"),
     )
+    # Commit the vault to a git repo after every write, so a clobbered post is
+    # recoverable (`git log`/`revert`). Degrades to a no-op with one warning if
+    # the git binary is missing — history never gates a write.
+    history_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("RELAY_HISTORY_ENABLED", "HISTORY_ENABLED"),
+    )
     relay_palette: str = "default"
     relay_transparent: bool = False
     secure_cookies: bool = True
@@ -118,6 +125,19 @@ class Settings(BaseSettings):
     def relay_dir(self) -> str:
         """Hidden control folder inside the vault (index DB + tag config)."""
         return str(Path(self.vault_path) / ".relay")
+
+    @property
+    def history_dir(self) -> str:
+        """Git dir for the vault history.
+
+        Inside ``.relay/`` on purpose: that path is already excluded from
+        Syncthing and hidden from Obsidian, so the object store never syncs
+        between machines (a reliable way to corrupt a repo) and never shows up as
+        vault content. The work-tree is the vault itself, passed explicitly, so
+        no ``.git`` entry is created in the vault root. Durable, unlike the index
+        beside it — the startup rebuild must never touch this.
+        """
+        return str(Path(self.relay_dir) / "history.git")
 
     @property
     def database_path(self) -> str:
