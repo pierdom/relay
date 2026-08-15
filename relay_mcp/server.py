@@ -106,7 +106,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="publish_post",
-            description="Publish a post to the relay feed. The dashboard will display it in real time.",
+            description='Publish a post to the relay feed. Subscribers receive it in real time.',
             inputSchema={
                 "type": "object",
                 "required": ["title", "content"],
@@ -155,7 +155,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_post",
-            description="Get a single post by its ID.",
+            description='Get a single post by its ID. Use id=0 for the master document.',
             inputSchema={
                 "type": "object",
                 "required": ["id"],
@@ -200,7 +200,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="delete_post",
-            description="Delete a post from the relay feed by its ID.",
+            description='Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.',
             inputSchema={
                 "type": "object",
                 "required": ["id"],
@@ -212,9 +212,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="update_post",
             description=(
-                "Update an existing post in the relay feed. "
-                "Only fields that are explicitly provided are changed; omitted fields are left untouched. "
-                "Providing tags replaces the tag list wholesale; an empty array clears all tags."
+                'Update an existing post. Only provided fields change; omitted fields are left untouched. Providing tags replaces the list wholesale; an empty array clears them. Pass expires_at=null to clear an existing expiry.'
             ),
             inputSchema={
                 "type": "object",
@@ -264,18 +262,14 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="create_upload",
             description=(
-                "Mint a presigned upload slot for a file too large to pass as base64. Returns "
-                "{upload_id, upload_url, method, max_bytes, expires_at}: PUT the raw bytes to "
-                "'upload_url' (out-of-band — not through this tool call), then call add_attachment "
-                "with the 'upload_id' to file it. Use when you can reach the relay host to PUT."
+                'Mint a presigned upload slot for a file too large to pass as base64. Returns {upload_id, upload_url, method, max_bytes, expires_at}: PUT the raw bytes to `upload_url` (out-of-band — not through this tool call), then call add_attachment with the `upload_id` to file it. Use when you can reach the relay host to PUT.'
             ),
             inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
             name="delete_attachment",
             description=(
-                "Delete an attachment from the vault by its filename. Reports any post ids that "
-                "still embed/link it (now dangling)."
+                'Delete an attachment from the vault by its filename. Returns the removed name and any post ids that still embed/link it (now dangling) so you can fix them.'
             ),
             inputSchema={
                 "type": "object",
@@ -288,9 +282,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="list_attachments",
             description=(
-                "List attachments stored in the vault (filename, folder, size, and the ![[…]] "
-                "embed ref). Scope with 'post_id' (that post's folder) or 'folder'; omit both to "
-                "list every attachment. Use the returned filename with get_attachment."
+                "List attachments stored in the vault (filename, folder, size, and the ![[…]] embed ref). Scope with `post_id` (that post's folder) or `folder`; omit both to list every attachment. Use the returned filename with get_attachment."
             ),
             inputSchema={
                 "type": "object",
@@ -303,8 +295,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="get_attachment",
             description=(
-                "Retrieve an attachment from the vault by its filename (as used in ![[file]]). "
-                "Images are returned so they can be viewed inline."
+                'Retrieve an attachment from the vault by its filename (as used in ![[file]]). Images are returned so they can be viewed inline; other files return a note with the vault path.'
             ),
             inputSchema={
                 "type": "object",
@@ -317,11 +308,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="set_tag_config",
             description=(
-                "Set expiry configuration for a tag. "
-                "At least one of ttl_hours or expires_at must be provided. "
-                "ttl_hours is relative to each post's creation time; "
-                "expires_at is an absolute cutoff for all posts with this tag. "
-                "Only applies to posts that don't have their own expires_at set."
+                "Set expiry configuration for a tag. Provide ttl_hours (relative to each post's creation), expires_at (absolute cutoff), or both. Only affects posts without their own expires_at."
             ),
             inputSchema={
                 "type": "object",

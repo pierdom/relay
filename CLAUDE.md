@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 236 tests
+uv run pytest -q                # 240 tests
 uv run ruff check .             # lint — config in pyproject.toml
 ```
 
@@ -143,9 +143,9 @@ Two surfaces with **identical tools**, server `instructions`, and the `relay://m
 - **`relay/mcp_server.py`** — in-process, served over Streamable HTTP at `/mcp`; tools call `relay.service` directly. Remote-capable, **recommended**.
 - **`relay_mcp/server.py`** — legacy stdio proxy; runs on the client, proxies to REST over `RELAY_BASE_URL`. For clients that can't speak remote MCP (e.g. Claude Desktop). Full parity (same twelve tools); `git pull` + restart the client to update.
 
-**Feature parity rule:** every tool added, removed, or changed in `relay/mcp_server.py` must be reflected in `relay_mcp/server.py` and vice versa. Tool names, parameters (names, types, defaults), and descriptions must match exactly across both files. Whenever you touch either MCP server file, update the other one in the same change.
+**Feature parity rule:** every tool added, removed, or changed in `relay/mcp_server.py` must be reflected in `relay_mcp/server.py` and vice versa. Tool names, parameters, and descriptions must match exactly across both files. Whenever you touch either MCP server file, update the other one in the same change. **`tests/test_mcp_parity.py` enforces this in CI** — it ast-parses both files and diffs names, parameters, and descriptions. The rule previously relied on a `PostToolUse` hook nudging the agent, and the descriptions had silently drifted in 9 of 12 tools; a reminder is not a gate. (Parameter *types and defaults* aren't compared: one side is Python annotations, the other JSON Schema, and stdio documents defaults in prose.)
 
-> **Documented parity exception:** `add_attachment`'s **`path`** parameter is **stdio-proxy-only**. Only the stdio proxy runs on the client's machine, so only it can read a local file and stream it to relay (via the presigned slot flow). The in-process HTTP server must **never** gain `path` — reading a server-host path over an authenticated call would be an arbitrary file-read on the relay host. This is the single intentional divergence; everything else stays at exact parity.
+> **Documented parity exception** (encoded in the test as `PROXY_ONLY_PARAMS` / `DESCRIPTION_EXEMPT`)**:** `add_attachment`'s **`path`** parameter is **stdio-proxy-only**, and its description differs because it has to document that parameter. Only the stdio proxy runs on the client's machine, so only it can read a local file and stream it to relay (via the presigned slot flow). The in-process HTTP server must **never** gain `path` — reading a server-host path over an authenticated call would be an arbitrary file-read on the relay host. This is the single intentional divergence; everything else stays at exact parity.
 
 The in-process server advertises relay's logo + website in the initialize `serverInfo` (`icons`/`websiteUrl`, MCP SEP-973, built from `RELAY_BASE_URL` → public `/assets/` marks). Clients that read `serverInfo.icons` show the brand mark instead of the generic globe; Claude's remote connectors don't render it yet ([claude-ai-mcp#152](https://github.com/anthropics/claude-ai-mcp/issues/152)) but light up automatically when they do.
 
