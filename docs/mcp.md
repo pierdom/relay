@@ -1,6 +1,6 @@
 # MCP server
 
-relay exposes the full feed API as MCP tools so Claude — or any MCP-capable agent — can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
+relay exposes the full feed API as **15 MCP tools** so Claude — or any MCP-capable agent — can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
 
 ## Tools
 
@@ -21,6 +21,46 @@ relay exposes the full feed API as MCP tools so Claude — or any MCP-capable ag
 | `get_status` | Version, uptime, which vault is served, counts, and which features actually work |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`) |
+
+## Recovering a post
+
+Every write to the vault is committed to git, so a post that was overwritten or
+deleted can be brought back without leaving the tool call.
+
+```
+get_post_history(id=54)        → [{sha, short_sha, when, message, path}, …] newest first
+restore_post(id=54, sha="a8dcc37")
+```
+
+- **Works for a deleted post.** `get_post_history` answers with `exists: false` and
+  still lists restorable revisions — that is the case most worth recovering, so it
+  is deliberately not a 404.
+- **The delete commit itself is not listed.** Every revision returned is one you
+  can restore *to*, and a file has no content at the commit that removed it.
+  Restore from the newest listed revision to undo a deletion.
+- **A restore keeps the post's id**, so inbound `[[wikilinks]]` and `#id`
+  references resolve again — and it is itself committed, so it can be undone the
+  same way.
+- **Short shas are accepted.**
+- Posts that predate vault history show a single `vault: initial import`
+  revision — their state when history was first enabled.
+
+To read a revision's *content* before restoring it, use the REST endpoint
+`GET /posts/{id}/history/{sha}`; the browser UI's History panel is built on it.
+There is no MCP tool for the preview.
+
+## Notes for agents
+
+- **`get_status` reports what is actually working**, not what is configured:
+  `history.effective` is false when the git binary is missing (so writes are not
+  recoverable), `search.fts5` false means search fell back to substring matching,
+  and `watcher.running` false means edits made directly to the files are not being
+  indexed. It also reports which vault path is being served, which settles "am I
+  talking to the instance I think I am".
+- **Post ids are never reused.** Deleting the newest post does not free its id, so
+  an `#id` reference always means the same post — ids are simply not contiguous.
+- **`list_posts` returns metadata + excerpt by default** (`summary=true`); call
+  `get_post` for a full body.
 
 ---
 
