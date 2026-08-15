@@ -165,6 +165,40 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="get_post_history",
+            description=(
+                "List a post's revision history from the vault's git history, newest first. "
+                "Works for a deleted post too (exists=false), which is the case most worth "
+                "recovering. Each item has sha, short_sha, when, message, and path — pass a sha "
+                "to restore_post. Returns an error if vault history is disabled."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "integer", "description": "Post ID"},
+                    "limit": {"type": "integer", "description": "Max revisions to return (default 20)"},
+                },
+            },
+        ),
+        types.Tool(
+            name="restore_post",
+            description=(
+                "Restore a post to an earlier revision, recreating it if it was deleted. Pass a "
+                "sha from get_post_history. The restore is itself recorded in history, so it can "
+                "be undone the same way. Use this to undo a bad overwrite rather than "
+                "reconstructing the body by hand."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["id", "sha"],
+                "properties": {
+                    "id": {"type": "integer", "description": "Post ID"},
+                    "sha": {"type": "string", "description": "Revision sha from get_post_history"},
+                },
+            },
+        ),
+        types.Tool(
             name="delete_post",
             description="Delete a post from the relay feed by its ID.",
             inputSchema={
@@ -481,6 +515,51 @@ async def call_tool(
         if p.get("tags"):
             header += f" [{p['tags']}]"
         return [types.TextContent(type="text", text=f"{header}\n\n{p['content']}")]
+
+    if name == "get_post_history":
+        post_id = arguments["id"]
+        params = {"limit": arguments.get("limit", 20)}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/posts/{post_id}/history",
+                params=params,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            if response.status_code == 503:
+                return [types.TextContent(type="text", text="Vault history is disabled or git is unavailable.")]
+            response.raise_for_status()
+            data = response.json()
+        items = data.get("items", [])
+        if not items:
+            return [types.TextContent(type="text", text=f"No history recorded for post #{post_id}.")]
+        state = "exists" if data.get("exists") else "deleted — restorable"
+        lines = [f"#{post_id} ({state}) — {len(items)} revision(s):"]
+        lines += [f"  {r['short_sha']}  {r['when']}  {r['message']}" for r in items]
+        return [types.TextContent(type="text", text="\n".join(lines))]
+
+    if name == "restore_post":
+        post_id = arguments["id"]
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{RELAY_BASE_URL}/posts/{post_id}/restore",
+                json={"sha": arguments["sha"]},
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            if response.status_code == 503:
+                return [types.TextContent(type="text", text="Vault history is disabled or git is unavailable.")]
+            if response.status_code == 404:
+                return [types.TextContent(
+                    type="text",
+                    text=f"No revision '{arguments['sha']}' in the history of post #{post_id}.",
+                )]
+            response.raise_for_status()
+            p = response.json()
+        return [types.TextContent(
+            type="text",
+            text=f"Restored post #{p['id']} — {p['title']} (from {arguments['sha'][:7]}).",
+        )]
 
     if name == "delete_post":
         post_id = arguments["id"]

@@ -29,8 +29,10 @@ import asyncio
 import logging
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
+from . import frontmatter
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -168,3 +170,140 @@ def reset_state_for_tests() -> None:
     """Forget the cached git probe (tests toggle the setting between cases)."""
     global _available
     _available = None
+
+
+# ── reading history back out ─────────────────────────────────────────────────
+#
+# Git keys history by *path*; relay keys posts by *id*, and a post's path changes
+# when its title does and disappears when it's deleted. Everything below exists to
+# bridge that gap safely.
+
+# Record/field separators: a subject line can contain anything printable, so the
+# parser keys on control characters rather than a punctuation convention.
+_RS, _FS = "\x1e", "\x1f"
+_LOG_FORMAT = f"{_RS}%H{_FS}%aI{_FS}%s"
+
+
+@dataclass(frozen=True)
+class Revision:
+    """One commit that touched a post's file, with the path *as of that commit*."""
+
+    sha: str
+    when: str
+    message: str
+    path: str
+
+    @property
+    def short_sha(self) -> str:
+        return self.sha[:7]
+
+
+def _parse_log(out: str) -> list[Revision]:
+    """Parse `git log --name-only` output into (commit, path) pairs."""
+    revisions: list[Revision] = []
+    sha = when = message = ""
+    for line in out.split("\n"):
+        if line.startswith(_RS):
+            parts = line[1:].split(_FS)
+            if len(parts) == 3:
+                sha, when, message = parts
+            continue
+        path = line.strip()
+        # --name-only prints one line per path touched; the pathspec filter means
+        # only the post's own file appears, so the first is the one we want.
+        if path and sha and not any(r.sha == sha for r in revisions):
+            revisions.append(Revision(sha=sha, when=when, message=message, path=path))
+    return revisions
+
+
+def _historical_paths_sync(post_id: int) -> list[str]:
+    """Paths a post's file has occupied, found by content rather than by name.
+
+    The pickaxe reports the commits where that front-matter line appeared or
+    vanished — i.e. where the file was created and where it was deleted — which
+    gives a path for a post that no longer exists without depending on relay's
+    commit-message convention holding.
+
+    `-G` with an anchored regex, not `-S` with a literal: `-S"id: 2"` also matches
+    `id: 21` (substring), which would drag an unrelated post's paths in. The id
+    check in `_revisions_sync` would still filter them, but only after walking
+    their history for nothing. Note the flag and its value must be **one** argv
+    element — `["-G", regex]` and `"-G regex"` both silently match nothing.
+    """
+    got = _run("log", f"-G^id: {post_id}$", "--format=" + _LOG_FORMAT, "--name-only")
+    if got.returncode:
+        return []
+    seen: list[str] = []
+    for rev in _parse_log(got.stdout):
+        if rev.path not in seen:
+            seen.append(rev.path)
+    return seen
+
+
+def _blob_sync(sha: str, path: str) -> str | None:
+    got = _run("show", f"{sha}:{path}")
+    return got.stdout if got.returncode == 0 else None
+
+
+def _post_id_of(sha: str, path: str) -> int | None:
+    text = _blob_sync(sha, path)
+    if text is None:
+        return None
+    try:
+        meta, _ = frontmatter.parse(text)
+    except Exception:  # a malformed or half-written revision is simply not a match
+        return None
+    pid = meta.get("id")
+    return pid if isinstance(pid, int) else None
+
+
+def _revisions_sync(post_id: int, current_path: str | None, limit: int) -> list[Revision]:
+    if current_path:
+        # The post still exists, so --follow walks the rename chain correctly.
+        candidates = _parse_log(
+            _run("log", "--follow", "--format=" + _LOG_FORMAT, "--name-only", "--", current_path).stdout
+        )
+    else:
+        # Deleted. --follow must NOT be used here: with no path at HEAD, git's
+        # rename detection latches onto an unrelated file and walks *its* history,
+        # which would list another post's revisions under this id. Plain log over
+        # every path this post is known to have occupied stays clean.
+        paths = _historical_paths_sync(post_id)
+        if not paths:
+            return []
+        candidates = _parse_log(
+            _run("log", "--format=" + _LOG_FORMAT, "--name-only", "--", *paths).stdout
+        )
+
+    # Verify each revision really belongs to this post. Titles are filenames, so a
+    # deleted note's path can later be reused by a different post; without this a
+    # restore could write another post's body under this id.
+    out: list[Revision] = []
+    for rev in candidates:
+        if len(out) >= limit:
+            break
+        if _post_id_of(rev.sha, rev.path) == post_id:
+            out.append(rev)
+    return out
+
+
+async def revisions(post_id: int, *, current_path: str | None, limit: int = 20) -> list[Revision]:
+    """Commits that touched this post's file, newest first."""
+    if not _probe():
+        return []
+    try:
+        return await asyncio.to_thread(_revisions_sync, post_id, current_path, limit)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Vault history: could not read revisions — %s", exc)
+        return []
+
+
+async def blob(sha: str, path: str) -> str | None:
+    """The full file text at a revision, or None if it isn't there."""
+    if not _probe():
+        return None
+    try:
+        return await asyncio.to_thread(_blob_sync, sha, path)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Vault history: could not read %s:%s — %s", sha, path, exc)
+        return None

@@ -225,6 +225,44 @@ async def update_post(
     return post.model_dump()
 
 
+@mcp.tool(
+    description=(
+        "List a post's revision history from the vault's git history, newest first. "
+        "Works for a deleted post too (exists=false), which is the case most worth "
+        "recovering. Each item has sha, short_sha, when, message, and path — pass a sha "
+        "to restore_post. Returns an error if vault history is disabled."
+    )
+)
+async def get_post_history(id: int, limit: int = 20) -> dict:
+    metrics.record_tool_call("get_post_history")
+    async with _db() as db:
+        try:
+            result = await service.get_post_history(db, id, limit=limit)
+        except service.HistoryUnavailable:
+            return {"error": "Vault history is disabled or git is unavailable."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Restore a post to an earlier revision, recreating it if it was deleted. Pass a "
+        "sha from get_post_history. The restore is itself recorded in history, so it can "
+        "be undone the same way. Use this to undo a bad overwrite rather than "
+        "reconstructing the body by hand."
+    )
+)
+async def restore_post(id: int, sha: str) -> dict:
+    metrics.record_tool_call("restore_post")
+    async with _db() as db:
+        try:
+            post = await service.restore_post(db, id, sha)
+        except service.HistoryUnavailable:
+            return {"error": "Vault history is disabled or git is unavailable."}
+        except service.RevisionNotFound:
+            return {"error": f"No revision '{sha}' in the history of post #{id}."}
+    return post.model_dump()
+
+
 @mcp.tool(description="Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.")
 async def delete_post(id: int) -> dict:
     metrics.record_tool_call("delete_post")

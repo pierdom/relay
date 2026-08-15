@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 223 tests
+uv run pytest -q                # 236 tests
 uv run ruff check .             # lint — config in pyproject.toml
 ```
 
@@ -32,6 +32,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 | POST/GET | /posts | Publish / list posts (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`; master pinned on home feed). `sort` = `updated` (default, last-modified via `COALESCE(updated_at, created_at)`) or `created`; an **externally-edited** note (Obsidian/nvim leaves front-matter alone) takes its `updated_at` from the file's **mtime** — `vault.effective_updated_at`, applied by both the watcher and the startup rebuild, with a 2s slack so a fresh write never reads as an edit; `order` = `desc` (default) or `asc`; an FTS `search` ranks by bm25 first, then `sort`/`order` as tiebreak. `summary=true` → metadata-only items (`PostSummary`: id/title/tags/folder + plain-text `excerpt`, no `content`); REST default `false` (UI feed renders content inline), MCP `list_posts` default `true` |
 | GET/PATCH/DELETE | /posts/{id} | Get / update (partial) / delete a post |
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |
+| GET/POST | /posts/{id}/history · /posts/{id}/restore | Revisions from vault history (works for a **deleted** post — `exists:false`) / roll back to a `sha`, recreating if deleted. 503 when history is off |
 | GET | /links | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
 | GET | /folders | First-level folders with post counts |
 | POST/GET | /attachments | Upload / list attachments — bytes via `data` (base64), `source_url` (server fetches), or `upload_id` (filled slot); see [Attachments](#attachments) |
@@ -81,7 +82,8 @@ Every write commits the vault to a git repo, so a clobbered post is recoverable.
 - **Coverage:** every service write path (create/update/delete, attachment add/delete, tag rename), TTL expiry, **and external edits** — the watcher commits once per debounced batch, so Obsidian/nvim edits relay never saw through its API are captured too. Attachments are tracked, so the note and the assets deleted with it land in one commit and revert together.
 - **Messages:** `post <id> <verb>: <title>`, `attachment add|delete: <name>`, `tag rename: a -> b (N post(s))`, `external edit: <file>`, `ttl expiry: N post(s)`, `vault: initial import`.
 - **Never a gate.** Every call swallows its errors and logs; a missing `git` binary disables history after one warning and writes proceed untouched. Commits run in a worker thread (never blocking the loop) under a lock, since each stages the whole tree.
-- **Recovery** is plain git — no relay API involved; full runbook in [docs/recovery.md](docs/recovery.md):
+- **Recovery, in-band:** `GET /posts/{id}/history` + `POST /posts/{id}/restore` (and the `get_post_history` / `restore_post` MCP tools) — both answer for a **deleted** post, and a restore keeps the original id so `[[links]]` and `#id` resolve again. A restore is an ordinary write, so it is itself committed and can be undone. Every revision is verified to carry the right front-matter `id` before it is listed or restored, because titles are filenames and a deleted note's path can be taken over by a different post. Only restorable revisions are listed — the delete commit itself is not, since the file has no blob there.
+- **Recovery, by hand** — plain git, no relay involved; full runbook in [docs/recovery.md](docs/recovery.md):
   ```bash
   cd /path/to/vault && export GIT_DIR=.relay/history.git GIT_WORK_TREE=.
   git log --oneline --follow -- "Dev/Some Note.md"   # history of one note
@@ -152,6 +154,7 @@ The in-process server advertises relay's logo + website in the initialize `serve
 | `publish_post` / `update_post` / `get_post` / `delete_post` | CRUD posts (partial update; `id=0` = master doc, delete blocked) |
 | `list_posts` | List (tag/search/limit/offset; `summary` defaults **true** = metadata + excerpt, no bodies — call `get_post` for a full body) |
 | `add_attachment` / `create_upload` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD; `add_attachment` bytes via `data`/`source_url`/`upload_id`, `create_upload` mints a presigned slot (see [Attachments](#attachments)) |
+| `get_post_history` / `restore_post` | Read a post's revisions / roll it back to a sha (recreates a deleted post, keeping its id) |
 | `list_tags` / `set_tag_config` | Tags with counts / per-tag expiry |
 
 ```bash

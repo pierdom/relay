@@ -3,8 +3,32 @@
 Relay commits the vault to a git repository after every write, so a post that was
 overwritten, retagged, or deleted can be brought back. This page is the runbook.
 
-Recovery is **plain git** — there is no relay API, MCP tool, or UI button for it
-yet. You need a shell on the host relay runs on.
+There are two ways in. **In-band** (below) works from anywhere you can reach the
+API and covers the common cases; **by hand with git** (the rest of this page) is
+the full-power path for anything the API doesn't express.
+
+## In-band: the API and MCP tools
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" $RELAY/posts/54/history
+curl -X POST -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+     -d '{"sha":"ab43c1e"}' $RELAY/posts/54/restore
+```
+
+Agents can drive the same thing with the `get_post_history` and `restore_post`
+MCP tools — so "undo what you just did to #54" is one turn, with no shell.
+
+Both work for a **deleted** post (`"exists": false`), and a restore keeps the
+post's original id, so `[[links]]` and `#id` references resolve again. The restore
+is itself committed, so it can be undone the same way. A short sha is fine.
+
+Two things the listing deliberately does *not* include: the delete commit itself
+(the file has no content at that commit — restore from the revision before it,
+which is the newest one listed), and any revision whose front-matter `id` doesn't
+match, since a deleted note's filename can later be taken over by a different post.
+
+Everything below is the manual path — for reading diffs, recovering attachments,
+or anything the endpoints don't cover. You need a shell on the host relay runs on.
 
 ---
 
