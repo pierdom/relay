@@ -5,7 +5,7 @@ import logging
 
 import aiosqlite
 
-from . import events, ingest, metrics, vault
+from . import events, history, ingest, metrics, vault
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,7 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
     # can't rewind a client's replay cursor.
     for post_id, _rel, tags in expired:
         await events.publish_delete(post_id, [t for t in tags.split(",") if t])
+    await history.commit(f"ttl expiry: {len(expired)} post(s)")
     return len(to_delete)
 
 

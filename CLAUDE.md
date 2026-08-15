@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 211 tests
+uv run pytest -q                # 223 tests
 uv run ruff check .             # lint — config in pyproject.toml
 ```
 
@@ -72,6 +72,24 @@ Event types: `post` (new **or edited** — the watcher streams external edits) a
 
 Both `create_post` and `update_post` publish SSE, so API/MCP edits (incl. Inbox→domain moves) propagate live; clients refresh the active sidebar counts (Tags or Tree) on any streamed change. **Known limitation:** offline edits/deletes to already-seen posts aren't replayed on reconnect (catch-up is append-only).
 
+## History
+
+Every write commits the vault to a git repo, so a clobbered post is recoverable. `update_post` is a full-body replace and `delete_post` unlinks — before this, a bad reconstruction by one agent overwrote a canonical post with no way back.
+
+- **Layout:** the repo is at `<vault>/.relay/history.git` with the **vault as work-tree**, every command passing `--git-dir`/`--work-tree`. There is deliberately **no `.git` in the vault root**: the vault is typically a Syncthing folder, and syncing a live object store between machines corrupts repos. `.relay/` is already Syncthing-ignored and invisible to Obsidian. The ignore rule for `.relay/` lives in the repo's `info/exclude`, so no `.gitignore` appears in the vault either.
+- **Durable, unlike its neighbour.** `.relay/index.db` is disposable and rebuilt at startup; `history.git` must never be wiped (same standing as `oauth.db`).
+- **Coverage:** every service write path (create/update/delete, attachment add/delete, tag rename), TTL expiry, **and external edits** — the watcher commits once per debounced batch, so Obsidian/nvim edits relay never saw through its API are captured too. Attachments are tracked, so the note and the assets deleted with it land in one commit and revert together.
+- **Messages:** `post <id> <verb>: <title>`, `attachment add|delete: <name>`, `tag rename: a -> b (N post(s))`, `external edit: <file>`, `ttl expiry: N post(s)`, `vault: initial import`.
+- **Never a gate.** Every call swallows its errors and logs; a missing `git` binary disables history after one warning and writes proceed untouched. Commits run in a worker thread (never blocking the loop) under a lock, since each stages the whole tree.
+- **Recovery** is plain git — no relay API involved:
+  ```bash
+  cd /path/to/vault && export GIT_DIR=.relay/history.git GIT_WORK_TREE=.
+  git log --oneline --follow -- "Dev/Some Note.md"   # history of one note
+  git show HEAD~2:"Dev/Some Note.md"                 # read a prior body
+  git revert <sha>                                   # undo a bad write
+  ```
+- **Residual:** attachments are committed too, so the repo grows with binary uploads (bounded by `ATTACHMENT_MAX_MB`). Tracking them is deliberate — attachment deletion was a real data-loss path. Run `git gc` on the history repo if it ever matters.
+
 ## Cross-links
 
 - **`[[Title]]` / `[[Title|alias]]`** — resolved by filename, case-insensitive; renaming a post rewrites inbound `[[…]]` across the vault (`links.rewrite_wikilink_targets`). Unresolved → dimmed.
@@ -89,6 +107,7 @@ Links are stored verbatim and resolved at **display time** (never rewritten exce
 | `CLEANUP_INTERVAL_MINUTES` | 60 | Cleanup loop interval |
 | `RELAY_VAULT_PATH` | /data/vault | Vault dir; index at `<vault>/.relay/index.db` |
 | `RELAY_WATCH_ENABLED` | true | Live-reindex + SSE on external edits |
+| `RELAY_HISTORY_ENABLED` | true | Commit the vault to git after every write (see [History](#history)); no-ops with a warning if `git` is missing |
 | `SECURE_COOKIES` | true | `Secure` on the UI session cookie; `false` for plain HTTP |
 | `ATTACHMENT_MAX_MB` | 25 | Max attachment upload size → 413 (all transports) |
 | `ATTACHMENT_UPLOAD_TTL_SECONDS` | 3600 | How long a presigned upload slot stays open before purge |
@@ -193,6 +212,7 @@ relay/
 ├── links.py       # Wikilink/#id resolver + rename rewrite
 ├── vault.py       # Canonical file layer: posts + attachments, id allocation, index rebuild, tags.yml
 ├── watcher.py     # watchdog: external edits → reindex + SSE (self-write suppressed)
+├── history.py     # git commit per write → <vault>/.relay/history.git (detached git-dir, vault as work-tree)
 ├── service.py     # Shared post/tag/attachment logic — file-first via vault, then mirror to index
 ├── ingest.py      # Attachment byte transports: source_url fetch (SSRF-guarded) + presigned upload slots
 ├── mcp_server.py  # In-process FastMCP server (/mcp); static-bearer or OAuth (MCP_OAUTH_ENABLED)

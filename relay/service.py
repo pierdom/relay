@@ -17,7 +17,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from . import database, events, folders, ingest, links, metrics, vault
+from . import database, events, folders, history, ingest, links, metrics, vault
 from .config import settings
 from .models import (
     AttachmentDeleteResponse,
@@ -120,6 +120,7 @@ async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostRespons
                 raise
     post = PostResponse.from_row(await _fetch(db, post_id))
     await events.publish(post.model_dump())
+    await history.commit(f"post {post_id} create: {post.title}")
     return post
 
 
@@ -288,6 +289,7 @@ async def update_post(db: aiosqlite.Connection, post_id: int, body: PostUpdate) 
     # reconnect cursor. Self-write suppression already covers the vault write, so
     # this is the only path that propagates API/MCP edits (incl. Inbox→domain moves).
     await events.publish(post.model_dump())
+    await history.commit(f"post {post_id} update: {post.title}")
     return post
 
 
@@ -409,13 +411,15 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
     # the folder would delete those bystanders. Shared assets (still referenced
     # elsewhere) stay.
     own = referenced_attachment_names(row["content"])
-    if not own:
-        return
-    referenced = await _all_referenced_attachments(db)
-    for name, _f, _s in vault.list_attachments(folder):
-        lowered = name.lower()
-        if lowered in own and lowered not in referenced:
-            vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
+    if own:
+        referenced = await _all_referenced_attachments(db)
+        for name, _f, _s in vault.list_attachments(folder):
+            lowered = name.lower()
+            if lowered in own and lowered not in referenced:
+                vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
+    # After the orphan sweep, so the note and the assets it took with it are one
+    # commit — restoring the post restores its images in the same revert.
+    await history.commit(f"post {post_id} delete: {row['title']}")
 
 
 # ── Attachments ───────────────────────────────────────────────────────────────
@@ -555,6 +559,9 @@ async def add_attachment(
     async with vault.write_lock:
         written = vault.write_attachment(target_folder, filename, data)
     ref = f"![[{written.name}]]"
+    # Before the embed below: the upload and the post edit that references it read
+    # as two steps in the log instead of the file appearing inside a post update.
+    await history.commit(f"attachment add: {written.name}")
 
     result_post_id = None
     if row is not None and embed:  # append outside the lock — update_post takes it itself
@@ -596,6 +603,7 @@ async def delete_attachment(db: aiosqlite.Connection, name: str) -> AttachmentDe
     async with db.execute("SELECT id, content FROM posts") as cur:
         rows = await cur.fetchall()
     referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
+    await history.commit(f"attachment delete: {removed.name}")
     return AttachmentDeleteResponse(filename=removed.name, referenced_by=sorted(referenced_by))
 
 
@@ -662,6 +670,7 @@ async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagLi
         await db.execute("UPDATE tag_config SET tag = ? WHERE tag = ?", (new_name, old))
         await vault.write_tag_config(db)
         await db.commit()
+    await history.commit(f"tag rename: {old} -> {new_name} ({len(affected)} post(s))")
     return await list_tags(db)
 
 

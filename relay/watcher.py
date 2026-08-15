@@ -15,7 +15,7 @@ import aiosqlite
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import events, frontmatter, service, vault
+from . import events, frontmatter, history, service, vault
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,18 @@ async def _reconcile(paths: list[str]) -> None:
             await _reconcile_file(db, path)
         for path in missing:
             await _reconcile_delete(db, path)
+    # One commit per debounced batch, so a bulk edit in Obsidian is one revision
+    # rather than a commit per file. This is the path that captures *human* edits
+    # — the ones relay never sees through its own API.
+    await history.commit(_batch_message(existing, missing))
+
+
+def _batch_message(existing: list[Path], missing: list[Path]) -> str:
+    if len(existing) == 1 and not missing:
+        return f"external edit: {existing[0].name}"
+    if len(missing) == 1 and not existing:
+        return f"external delete: {missing[0].name}"
+    return f"external change: {len(existing)} edited, {len(missing)} removed"
 
 
 async def _reconcile_file(db: aiosqlite.Connection, path: Path) -> None:

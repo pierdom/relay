@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, metrics, watcher
+from . import __version__, history, metrics, watcher
 from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
 from .config import settings
@@ -53,6 +53,9 @@ async def lifespan(app: FastAPI):
             "MCP_OAUTH_ENABLED is set but OIDC is not configured; remote MCP OAuth "
             "is inactive and /mcp still uses the static API key."
         )
+    # Vault history: baseline commit of the current tree, then a commit per write.
+    # Runs after the index rebuild, which may itself stamp ids into id-less notes.
+    await history.init()
     task = asyncio.create_task(cleanup_loop())
     # Live vault watcher: external edits (e.g. from Obsidian) re-index + push SSE.
     watcher.start(asyncio.get_running_loop())
