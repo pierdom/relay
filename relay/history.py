@@ -48,7 +48,19 @@ _available: bool | None = None
 
 # Pinned identity so commits never depend on the host's global git config, which
 # a container almost certainly lacks.
-_IDENTITY = ("-c", "user.name=relay", "-c", "user.email=relay@localhost")
+#
+# `core.quotePath=false` is load-bearing, not cosmetic: with the default (true)
+# git prints any path containing a non-ASCII byte quoted and octal-escaped —
+# "Digests/Digest mattutino \342\200\224 15 agosto.md". `--name-only` output is
+# how this module learns a post's path, so every note whose title carries an em
+# dash, an arrow, an accent or «» parsed to a path that does not exist, its blob
+# read failed, and the post reported *no history at all* — and could not be
+# restored. Titles are filenames here, so that was most of a real vault.
+_IDENTITY = (
+    "-c", "user.name=relay",
+    "-c", "user.email=relay@localhost",
+    "-c", "core.quotePath=false",
+)
 
 _TIMEOUT_SECONDS = 30
 
