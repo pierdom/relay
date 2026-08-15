@@ -58,10 +58,10 @@ Or with Docker (pre-built image from GHCR):
 
 ```bash
 docker compose up -d
-docker compose pull && docker compose up -d   # update within the pinned 0.4.x line
+docker compose pull && docker compose up -d   # update within the pinned 0.5.x line
 ```
 
-The compose file pins `ghcr.io/pierdom/relay:0.4` (the 0.4 minor line) so updates are deliberate and rollback-able; pin an exact `:0.4.N` to freeze a version. Every `vX.Y.Z` git tag publishes `:X.Y.Z` and `:X.Y` to GHCR.
+The compose file pins `ghcr.io/pierdom/relay:0.5` (the 0.5 minor line) so updates are deliberate and rollback-able; pin an exact `:0.5.N` to freeze a version. Every `vX.Y.Z` git tag publishes `:X.Y.Z` and `:X.Y` to GHCR.
 
 Service on `http://localhost:8000` — interactive docs at `/docs`.
 
