@@ -13,11 +13,14 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 258 tests
+uv run pytest -q                # 267 tests (incl. 9 browser smokes)
 uv run ruff check .             # lint — config in pyproject.toml
+uv run playwright install chromium           # once, for the tests/ui browser smokes
 ```
 
 `GET /health` (no auth) is probed every 30s by the Dockerfile HEALTHCHECK and compose. Uses `uv` — never `pip`; add deps with `uv add <package>`.
+
+**Browser smokes (`tests/ui/`).** 9 Playwright tests drive the real UI in Chromium against a real uvicorn on a throwaway vault, logging in through the actual API-key form. They exist because `relay/static/index.html` is the largest file in the repo, has the most `fix(ui)` commits, and had no automated coverage — they are the safety net that has to be in place *before* it gets split into modules. **Every one was mutation-checked**: each was confirmed to fail when the behaviour it covers is deliberately broken. That caught a vacuous test — the grid-overflow smoke passed even with `min-width: 0` removed, because the seeded posts were too tame to overflow; the fixture now seeds a hostile card (long `nowrap` source, wide table, unbreakable token) so the invariant is genuinely pinned. Without the browser installed they **skip**, not error (guarded at collection time). CI installs Chromium explicitly so the coverage can't silently vanish.
 
 **Tests always run against a throwaway vault.** `tests/conftest.py` has an **autouse** `isolated_vault` fixture that repoints `settings.vault_path` under `tmp_path` for every test, and asserts on teardown that nothing moved it back out. This is not optional hygiene: `Settings` loads the developer's real `.env`, so an unpatched `settings.vault_path` resolves to their live Obsidian vault — a test that forgets to patch it *writes real notes* (and `rebuild_index` will stamp ids into any id-less file it finds there). Never patch `vault_path` to anything outside `tmp_path`, and never disable this fixture to "test the real thing". **conftest only covers files under `tests/`** — an ad-hoc script run from anywhere else resolves `vault_path` from the real `.env`, which has caused real writes twice — so `vault.vault_dir()` carries a backstop that raises under `PYTEST_CURRENT_TEST` when the vault isn't under the temp dir. Put throwaway test scripts in `tests/`.
 
