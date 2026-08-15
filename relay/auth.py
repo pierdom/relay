@@ -13,6 +13,10 @@ _bearer = HTTPBearer(auto_error=False)
 SESSION_COOKIE = "relay_session"
 _SALT = "relay-session"
 
+# The break-glass API-key paste (`POST /session`) mints this subject. Possession
+# of API_KEY is itself the credential there, so the OIDC allowlist doesn't apply.
+APIKEY_SUB = "apikey"
+
 
 def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.session_signing_key, salt=_SALT)
@@ -27,16 +31,44 @@ def create_session(sub: str = "apikey", email: str = "") -> str:
     return _serializer().dumps({"sub": sub, "email": email})
 
 
+def still_authorized(payload: dict) -> bool:
+    """Whether the session's subject is *currently* allowed in.
+
+    ``routes.auth._authorized()`` runs once, at the OIDC callback — but the cookie
+    then stays valid for ``SESSION_MAX_AGE_HOURS`` (30d default), so without a
+    re-check, dropping a sub from ``OIDC_ALLOWED_SUBS`` wouldn't revoke a session
+    already in the wild: the documented access-control knob would silently not be
+    one. Mirrors the same re-check the MCP OAuth refresh grant does
+    (``mcp_oauth/provider.py``) so deauthorization behaves alike on both surfaces.
+
+    Sub-allowlist only, exactly like the refresh grant: the session carries
+    ``email`` but not ``email_verified``, so an email allowlist can't be
+    re-evaluated safely here and is left to login-time enforcement.
+    """
+    if not settings.allowed_subs:
+        return True
+    sub = payload.get("sub", "")
+    return sub == APIKEY_SUB or sub in settings.allowed_subs
+
+
 def verify_session(token: str) -> dict | None:
-    """Return the session payload if the token is validly signed and unexpired."""
+    """Return the session payload if the token is validly signed, unexpired, and
+    its subject is still authorized."""
     try:
-        return _serializer().loads(token, max_age=settings.session_max_age_hours * 3600)
+        payload = _serializer().loads(token, max_age=settings.session_max_age_hours * 3600)
     except (BadSignature, SignatureExpired):
         return None
+    return payload if still_authorized(payload) else None
 
 
 def revoke_session(token: str) -> None:
-    pass  # stateless signed cookie; deletion in the endpoint is sufficient
+    """No-op: the session is a stateless signed cookie, so there is nothing to
+    delete server-side — the endpoint clearing the cookie is the logout.
+
+    Note this means a *captured* token stays valid until it expires; there is no
+    per-token revocation. Deauthorization (removing a sub from the allowlist) is
+    handled by :func:`still_authorized` on every request instead.
+    """
 
 
 async def require_api_key(

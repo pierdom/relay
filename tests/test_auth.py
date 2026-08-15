@@ -169,3 +169,67 @@ async def test_mcp_accepts_public_host_and_origin(monkeypatch, tmp_path):
             r = await c.post("/mcp", headers=headers, json=body)
     assert r.status_code not in (421, 403)  # not blocked by Host/Origin validation
     assert r.status_code == 200
+
+
+# ── deauthorization: the allowlist must revoke live sessions ─────────────────
+
+
+def test_session_dies_when_sub_leaves_the_allowlist(monkeypatch):
+    """Dropping a sub from OIDC_ALLOWED_SUBS must revoke sessions already minted.
+
+    `_authorized()` only runs at the OIDC callback, so without a per-request
+    re-check a removed user would coast for the full SESSION_MAX_AGE_HOURS (30d).
+    Same guarantee the MCP OAuth refresh grant gives.
+    """
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123,other")
+    token = auth.create_session(sub="user-123", email="me@example.com")
+    assert auth.verify_session(token) is not None
+
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "other")
+    assert auth.verify_session(token) is None
+
+
+def test_session_survives_while_sub_stays_allowlisted(monkeypatch):
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123,other")
+    token = auth.create_session(sub="user-123", email="me@example.com")
+    assert auth.verify_session(token)["sub"] == "user-123"
+
+
+def test_apikey_session_is_exempt_from_the_allowlist(monkeypatch):
+    """Break-glass: the API-key paste proves possession of API_KEY, so it must
+    keep working even though `sub=apikey` is in no OIDC allowlist."""
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123")
+    assert auth.verify_session(auth.create_session())["sub"] == auth.APIKEY_SUB
+
+
+def test_no_allowlist_leaves_sessions_untouched(monkeypatch):
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "someone@else.com")
+    assert auth.verify_session(auth.create_session(sub="anyone")) is not None
+
+
+@pytest.mark.asyncio
+async def test_deauthorized_session_is_401_on_a_protected_route(monkeypatch, tmp_path):
+    from relay import database
+
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    await database.init_db()
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123")
+    token = auth.create_session(sub="user-123", email="me@example.com")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        c.cookies.set(auth.SESSION_COOKIE, token)
+        assert (await c.get("/posts")).status_code == 200
+        monkeypatch.setattr(settings, "oidc_allowed_subs", "somebody-else")
+        assert (await c.get("/posts")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_auth_me_reports_deauthorized_session_as_logged_out(monkeypatch):
+    """So the SPA drops back to the login control instead of showing a dead session."""
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123")
+    token = auth.create_session(sub="user-123", email="me@example.com")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        c.cookies.set(auth.SESSION_COOKIE, token)
+        assert (await c.get("/auth/me")).json()["authenticated"] is True
+        monkeypatch.setattr(settings, "oidc_allowed_subs", "somebody-else")
+        assert (await c.get("/auth/me")).json()["authenticated"] is False
