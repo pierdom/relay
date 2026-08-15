@@ -817,6 +817,44 @@
     }
 
     /* ── Post modal ──────────────────────────────────────── */
+    /* Status / about modal. Reuses .pm-backdrop and the modalIn keyframes; its own
+       shell because it is a narrow read-only panel, not the post viewer. */
+    .status-modal { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; }
+    .status-modal.open { display: flex; }
+    .sm-inner {
+      position: relative; z-index: 1;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; width: 92%; max-width: 460px; max-height: 88vh;
+      display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+      animation: modalIn 0.18s ease both;
+    }
+    .sm-head { display: flex; align-items: baseline; gap: 8px; padding: 18px 20px 0; flex-shrink: 0; }
+    .sm-name { font-size: 15px; font-weight: 600; color: var(--text); }
+    .sm-version { font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
+    .sm-close {
+      margin-left: auto; background: none; border: none; color: var(--muted); cursor: pointer;
+      font-size: 22px; line-height: 1; padding: 0; font-family: inherit; transition: color 0.15s;
+    }
+    .sm-close:hover { color: var(--text); }
+    .sm-body { padding: 14px 20px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+    .sm-section-title {
+      font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 8px;
+    }
+    /* auto 1fr, and the value column may wrap — a long vault path must not widen
+       the panel (same min-width:0 lesson as the grid tiles). */
+    .sm-rows { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; margin: 0; }
+    .sm-rows dt { color: var(--muted); }
+    .sm-rows dd { margin: 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+    .sm-feat { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 3px 0; }
+    .sm-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .sm-dot.ok   { background: var(--green); }
+    .sm-dot.warn { background: var(--accent); }
+    .sm-dot.bad  { background: var(--red); }
+    .sm-feat-note { margin-left: auto; color: var(--muted); font-size: 11.5px; text-align: right; }
+    .sm-error { font-size: 12.5px; color: var(--red); }
+
     .post-modal { display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; }
     .post-modal.open { display: flex; }
 
@@ -881,6 +919,8 @@
       .pm-inner { width: 100%; max-width: 100%; max-height: 100vh; border-radius: 0; }
       @supports (max-height: 100dvh) { .pm-inner { max-height: 100dvh; } }
       .post-modal.open { align-items: flex-end; }
+      .status-modal.open { align-items: flex-end; }
+      .sm-inner { width: 100%; max-width: none; border-radius: 8px 8px 0 0; }
       .pm-inner { animation: modalInMobile 0.22s ease both; }
       @keyframes modalInMobile {
         from { opacity: 0; transform: translateY(20px); }
@@ -929,6 +969,7 @@
   </button>
   <div class="header-right">
     <button class="theme-btn" id="themeBtn" aria-label="Toggle light/dark theme" title="Toggle theme"></button>
+    <button class="theme-btn" id="statusBtn" aria-label="Server status" title="Server status" style="display:none">i</button>
     <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
     <div class="connected-bar" id="connectedBar" style="display:none">
       <button class="disconnect-btn" id="disconnectBtn">disconnect</button>
@@ -1032,6 +1073,18 @@
   </div>
 </div>
 
+<div class="status-modal" id="statusModal">
+  <div class="pm-backdrop" id="smBackdrop"></div>
+  <div class="sm-inner">
+    <div class="sm-head">
+      <span class="sm-name">Relay</span>
+      <span class="sm-version" id="smVersion"></span>
+      <button class="sm-close" id="smClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="sm-body" id="smBody"></div>
+  </div>
+</div>
+
 <div class="post-modal" id="postModal">
   <div class="pm-backdrop" id="pmBackdrop"></div>
   <div class="pm-inner">
@@ -1082,6 +1135,7 @@ const oidcLogin    = document.getElementById('oidcLogin');
 const oidcLoginBtn = document.getElementById('oidcLoginBtn');
 const useKeyBtn    = document.getElementById('useKeyBtn');
 const newPostBtn   = document.getElementById('newPostBtn');
+const statusBtn    = document.getElementById('statusBtn');
 const collapseBtn  = document.getElementById('collapseBtn');
 const composePanel = document.getElementById('composePanel');
 const newTagBtn    = document.getElementById('newTagBtn');
@@ -1245,6 +1299,7 @@ disconnectBtn.addEventListener('click', async () => {
   loadMoreWrap.style.display = 'none';
   newPostBtn.style.display = 'none';
   newTagBtn.style.display = 'none';
+  statusBtn.style.display = 'none';
   searchBar.style.display = 'none';
   activeSearch = null; searchInput.value = ''; searchBar.classList.remove('active');
   connectedBar.style.display = 'none';
@@ -1289,6 +1344,7 @@ async function init() {
   collapseBtn.style.display = '';
   newPostBtn.style.display = '';
   newTagBtn.style.display = '';
+  statusBtn.style.display = '';
   searchBar.style.display = '';
   await Promise.all([loadTags(), loadPosts(true), loadLinkIndex()]);
   setDot('connected');
@@ -2292,6 +2348,133 @@ function updateModalFade() {
   pmBodyFade.classList.toggle('hidden', atBottom);
 }
 
+// ── Status / about modal ─────────────────────────────────────────────────────
+// Surfaces GET /status. The counts are incidental; the point is the health block,
+// which reports what is *working* — relay can quietly lose vault history (no git),
+// full-text search (no FTS5), or external-edit pickup (watcher off), and none of
+// that is otherwise visible from the browser.
+
+const statusModal = document.getElementById('statusModal');
+const smBody = document.getElementById('smBody');
+const smVersion = document.getElementById('smVersion');
+
+// fmtBytes already exists above (attachments gallery) — reused here.
+function fmtUptime(sec) {
+  if (sec < 60) return `${sec}s`;
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// Built with textContent throughout — no innerHTML for server-provided values
+// like the vault path.
+function smSection(title, node) {
+  const wrap = document.createElement('div');
+  const h = document.createElement('div');
+  h.className = 'sm-section-title';
+  h.textContent = title;
+  wrap.appendChild(h);
+  wrap.appendChild(node);
+  return wrap;
+}
+
+function smRows(pairs) {
+  const dl = document.createElement('dl');
+  dl.className = 'sm-rows';
+  for (const [label, value] of pairs) {
+    const dt = document.createElement('dt'); dt.textContent = label;
+    const dd = document.createElement('dd'); dd.textContent = value;
+    dl.append(dt, dd);
+  }
+  return dl;
+}
+
+function smFeature(label, state, note) {
+  const row = document.createElement('div');
+  row.className = 'sm-feat';
+  const dot = document.createElement('span');
+  dot.className = `sm-dot ${state}`;
+  const name = document.createElement('span');
+  name.textContent = label;
+  const hint = document.createElement('span');
+  hint.className = 'sm-feat-note';
+  hint.textContent = note;
+  row.append(dot, name, hint);
+  return row;
+}
+
+function renderStatus(d) {
+  smVersion.textContent = d.version;
+  smBody.innerHTML = '';
+
+  const health = document.createElement('div');
+  const h = d.features.history;
+  health.appendChild(smFeature(
+    'Vault history',
+    h.effective ? 'ok' : 'bad',                       // not recoverable is a fault, not a warning
+    h.effective ? `git ${h.git}` : (h.git ? 'disabled' : 'git missing'),
+  ));
+  health.appendChild(smFeature(
+    'Full-text search',
+    d.features.search.fts5 ? 'ok' : 'warn',           // degraded but still functional
+    d.features.search.fts5 ? 'FTS5' : 'substring fallback',
+  ));
+  health.appendChild(smFeature(
+    'External edits',
+    d.features.watcher.running ? 'ok' : 'warn',
+    d.features.watcher.running ? 'watching' : (d.features.watcher.enabled ? 'not running' : 'disabled'),
+  ));
+  smBody.appendChild(smSection('Health', health));
+
+  const v = d.vault;
+  smBody.appendChild(smSection('Vault', smRows([
+    ['Path', v.path],
+    ['Posts', String(v.posts)],
+    ['Tags', String(v.tags)],
+    ['Folders', String(v.folders)],
+    ['Attachments', `${v.attachments} (${fmtBytes(v.attachment_bytes)})`],
+  ])));
+
+  smBody.appendChild(smSection('Server', smRows([
+    ['Uptime', fmtUptime(d.uptime_seconds)],
+    ['Started', d.started_at || '—'],
+    ['Live clients', String(d.sse_clients)],
+    ['OIDC login', d.features.auth.oidc ? 'enabled' : 'off'],
+    ['MCP OAuth', d.features.auth.mcp_oauth ? 'enabled' : 'off'],
+  ])));
+}
+
+async function openStatusModal() {
+  statusModal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  smVersion.textContent = '';
+  smBody.innerHTML = '';
+  const loading = document.createElement('div');
+  loading.className = 'sm-section-title';
+  loading.textContent = 'loading…';
+  smBody.appendChild(loading);
+  try {
+    renderStatus(await apiFetch('/status'));
+  } catch (err) {
+    smBody.innerHTML = '';
+    const e = document.createElement('div');
+    e.className = 'sm-error';
+    e.textContent = `Could not load status: ${err.message}`;
+    smBody.appendChild(e);
+  }
+}
+
+function closeStatusModal() {
+  statusModal.classList.remove('open');
+  document.body.style.overflow = '';
+  smBody.innerHTML = '';
+}
+
+statusBtn.onclick = openStatusModal;
+document.getElementById('smClose').onclick = closeStatusModal;
+document.getElementById('smBackdrop').onclick = closeStatusModal;
+
 function closePostModal() {
   postModal.classList.remove('open');
   document.body.style.overflow = '';
@@ -2339,6 +2522,7 @@ pmDelete.addEventListener('click', async () => {
   } catch {}
 });
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && statusModal.classList.contains('open')) { closeStatusModal(); return; }
   if (e.key === 'Escape' && postModal.classList.contains('open')) closePostModal();
 });
 
