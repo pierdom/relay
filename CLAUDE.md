@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 249 tests
+uv run pytest -q                # 258 tests
 uv run ruff check .             # lint — config in pyproject.toml
 ```
 
@@ -42,6 +42,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 | GET | /tags | Tags with counts (incl. 0-count from tag_config) |
 | POST/PATCH | /tags/{tag}[/config] | Set per-tag expiry / rename a tag across all posts |
 | GET | /events | SSE stream (`?tag=` filter) |
+| GET | /status | Runtime diagnostics as JSON (bearer-gated): version, uptime, vault path + counts, and **effective** feature state — see [Status](#status) |
 | GET | /metrics | Prometheus/OpenMetrics text exposition (bearer-gated); see [Metrics](#metrics) |
 | POST/GET | /mcp | Streamable HTTP MCP endpoint (bearer auth) |
 
@@ -57,6 +58,21 @@ Non-`.md` files (images, PDFs, …) live in a per-folder `<Folder>/assets/` subd
 - **Presigned consumers:** the browser UI streams files ≥4 MB through a slot instead of base64; the **stdio proxy's** `add_attachment(path=…)` reads a local file on the client machine and drives the same create→PUT→finalize flow (see the parity exception in [MCP](#mcp)).
 - **Lifecycle:** deleting a post removes the attachments **that post embedded** which no other post references (shared assets kept). Scoped to its own `![[…]]` refs on purpose — a folder's `assets/` also holds files a human dropped in from Obsidian but hasn't linked yet, and sweeping every unreferenced file in the folder would delete those bystanders. Deleting an attachment reports the post ids still referencing it (now dangling).
 - `ATTACHMENT_MAX_MB` (25) caps uploads → 413 (enforced on all three transports). `get_attachment` returns images as inline image content, size-guarded.
+
+## Status
+
+`GET /status` (bearer-gated, same reasoning as `/metrics` — it reports the vault path and size) and the `get_status` MCP tool return JSON: `version`, `uptime_seconds`, `started_at`, `sse_clients`, a `vault` block (path, posts, tags, folders, attachments, attachment_bytes) and a `features` block.
+
+**The counts are the bonus; effective feature state is the point.** Relay degrades silently in ways visible only in a startup log line, and `features` reports what is *working*, not what is configured:
+
+| Field | Why it matters |
+|---|---|
+| `history.effective` | `enabled` is intent; this is false when `git` is missing, meaning writes are **not** recoverable. `history.git` carries the version or `null`. An image shipped without git once already |
+| `search.fts5` | false = search silently fell back to `LIKE` substring matching |
+| `watcher.running` | false = external Obsidian/nvim edits are never re-indexed |
+| `auth.mcp_oauth` | true only when the flag **and** an OIDC client are set — the flag alone can't broker a login |
+
+`vault.path` answers "which vault am I actually talking to", which is not obvious when a local checkout and a remote deployment are both in play. Post/tag counts come from the same helpers `/metrics` uses (`relay/status.py`), so the two surfaces can't disagree. `/health` is untouched and stays public and trivial — it is probed every 30s by the Dockerfile HEALTHCHECK and compose.
 
 ## Metrics
 
@@ -155,6 +171,7 @@ The in-process server advertises relay's logo + website in the initialize `serve
 | `list_posts` | List (tag/search/limit/offset; `summary` defaults **true** = metadata + excerpt, no bodies — call `get_post` for a full body) |
 | `add_attachment` / `create_upload` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD; `add_attachment` bytes via `data`/`source_url`/`upload_id`, `create_upload` mints a presigned slot (see [Attachments](#attachments)) |
 | `get_post_history` / `restore_post` | Read a post's revisions / roll it back to a sha (recreates a deleted post, keeping its id) |
+| `get_status` | Version, uptime, vault path + counts, and which features actually work |
 | `list_tags` / `set_tag_config` | Tags with counts / per-tag expiry |
 
 ```bash
@@ -222,6 +239,7 @@ relay/
 ├── mcp_oauth/     # Remote MCP OAuth AS: store.py (hashed oauth.db) · provider.py · pocketid.py (broker) · broker.py (callback)
 ├── events.py · cleanup.py   # SSE broadcast hub · TTL cleanup loop
 ├── metrics.py     # Zero-dep Prometheus counter registry + text renderer (/metrics)
+├── status.py      # Runtime diagnostics for /status + get_status (shared counts with /metrics)
 └── routes/        # posts · tags · attachments · folders · links · events · metrics (thin — delegate to service)
 relay_mcp/server.py            # Legacy stdio MCP proxy (REST client)
 relay/static/index.html        # Browser UI (/ui)

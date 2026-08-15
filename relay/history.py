@@ -89,6 +89,30 @@ def _probe() -> bool:
     return _available
 
 
+async def git_version() -> str | None:
+    """The git version string, or ``None`` when the binary is unavailable.
+
+    Reported by ``/status`` so a deployment missing git — which silently disables
+    vault history — is visible without reading container logs.
+    """
+    if shutil.which("git") is None:
+        return None
+
+    def _read() -> str | None:
+        got = subprocess.run(
+            ["git", "--version"], capture_output=True, text=True, timeout=_TIMEOUT_SECONDS
+        )
+        if got.returncode:
+            return None
+        # "git version 2.47.3" -> "2.47.3"
+        return got.stdout.strip().removeprefix("git version ").strip() or None
+
+    try:
+        return await asyncio.to_thread(_read)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _init_sync() -> bool:
     """Create the history repo if absent and stamp the ignore rule. Idempotent."""
     git_dir = _git_dir()

@@ -13,7 +13,7 @@ import aiosqlite
 from fastapi import APIRouter, Depends
 from starlette.responses import PlainTextResponse
 
-from .. import events, metrics
+from .. import events, metrics, status
 from ..auth import require_api_key
 from ..database import get_db
 
@@ -25,15 +25,10 @@ _CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 @router.get("/metrics", dependencies=[Depends(require_api_key)], include_in_schema=False)
 async def metrics_endpoint(db: aiosqlite.Connection = Depends(get_db)) -> PlainTextResponse:
-    async with db.execute("SELECT COUNT(*) FROM posts") as cur:
-        posts_total = (await cur.fetchone())[0]
-    # Distinct tags across all posts (sentinel-comma encoded), counted the same
-    # way service.list_tags splits them — cheap enough at this vault's scale.
-    async with db.execute("SELECT tags FROM posts WHERE tags != ''") as cur:
-        distinct: set[str] = set()
-        for row in await cur.fetchall():
-            distinct.update(t for t in row[0].split(",") if t)
-    tags_total = len(distinct)
+    # Shared with GET /status so the two surfaces can never report different
+    # numbers for the same vault.
+    posts_total = await status.post_count(db)
+    tags_total = await status.tag_count(db)
 
     families = [
         metrics.build_info_family(),

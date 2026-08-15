@@ -18,6 +18,7 @@ relay exposes the full feed API as MCP tools so Claude — or any MCP-capable ag
 | `get_attachment` | Retrieve an attachment; images return as inline image content |
 | `list_attachments` | List attachments; scope by `post_id` or `folder` |
 | `delete_attachment` | Delete an attachment; reports posts still referencing it |
+| `get_status` | Version, uptime, which vault is served, counts, and which features actually work |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`) |
 

@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import metrics, service, vault
+from . import metrics, service, status, vault
 from .config import settings
 from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
 
@@ -261,6 +261,21 @@ async def restore_post(id: int, sha: str) -> dict:
         except service.RevisionNotFound:
             return {"error": f"No revision '{sha}' in the history of post #{id}."}
     return post.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Report this relay's runtime status: version, uptime, which vault it is serving, counts of "
+        "posts/tags/folders/attachments, and which features are actually working. Use it to confirm you "
+        "are talking to the vault you think you are, and to check features that degrade silently — vault "
+        "history is off when git is missing (writes would be unrecoverable), search falls back to "
+        "substring matching without FTS5, and external edits are not picked up when the watcher is off."   )
+)
+async def get_status() -> dict:
+    metrics.record_tool_call("get_status")
+    async with _db() as db:
+        result = await status.build(db)
+    return result.model_dump()
 
 
 @mcp.tool(description="Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.")

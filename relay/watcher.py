@@ -166,6 +166,11 @@ def start(loop: asyncio.AbstractEventLoop) -> None:
     logger.info("Vault watcher started on %s", settings.vault_path)
 
 
+def is_running() -> bool:
+    """Whether the filesystem observer thread is actually up (not just enabled)."""
+    return _observer is not None
+
+
 def stop() -> None:
     global _observer
     if _observer is not None:
