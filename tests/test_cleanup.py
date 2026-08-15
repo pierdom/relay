@@ -203,3 +203,54 @@ async def test_global_ttl_deletes_untagged_but_not_configured_tag(client, monkey
         assert await _row(db, kept["id"]) is not None
     finally:
         await db.close()
+
+
+# ── live clients are told about expiries ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_expiry_publishes_sse_delete(client):
+    """A TTL'd post must stream a `delete` to live subscribers.
+
+    The file unlink is self-delete-suppressed, so the watcher never emits for an
+    expiry — without this the post lingers in every connected UI/TUI until reload.
+    """
+    from relay import events
+
+    post = await _create(client, tags=["news"])
+    q = events.subscribe(None)
+    db = await _db()
+    try:
+        await db.execute("UPDATE posts SET expires_at = ? WHERE id = ?", (_iso(-1), post["id"]))
+        await db.commit()
+        assert await cleanup._delete_expired(db) == 1
+
+        assert not q.empty(), "expiry published no SSE event"
+        event = q.get_nowait()
+        assert event["type"] == "delete"
+        assert event["id"] == post["id"]
+        assert event["data"] == {"id": post["id"]}
+        assert event["tags"] == ["news"]
+    finally:
+        events.unsubscribe(q, None)
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_expiry_delete_reaches_tag_filtered_subscriber(client):
+    from relay import events
+
+    post = await _create(client, tags=["news"])
+    matching = events.subscribe("news")
+    other = events.subscribe("homelab")
+    db = await _db()
+    try:
+        await db.execute("UPDATE posts SET expires_at = ? WHERE id = ?", (_iso(-1), post["id"]))
+        await db.commit()
+        await cleanup._delete_expired(db)
+        assert matching.get_nowait()["id"] == post["id"]
+        assert other.empty()
+    finally:
+        events.unsubscribe(matching, "news")
+        events.unsubscribe(other, "homelab")
+        await db.close()

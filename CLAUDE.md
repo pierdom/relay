@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 193 tests
+uv run pytest -q                # 202 tests
 uv run ruff check .             # lint — config in pyproject.toml
 ```
 
@@ -27,7 +27,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST/GET | /posts | Publish / list posts (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`; master pinned on home feed). `sort` = `updated` (default, last-modified via `COALESCE(updated_at, created_at)`) or `created`; `order` = `desc` (default) or `asc`; an FTS `search` ranks by bm25 first, then `sort`/`order` as tiebreak. `summary=true` → metadata-only items (`PostSummary`: id/title/tags/folder + plain-text `excerpt`, no `content`); REST default `false` (UI feed renders content inline), MCP `list_posts` default `true` |
+| POST/GET | /posts | Publish / list posts (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`; master pinned on home feed). `sort` = `updated` (default, last-modified via `COALESCE(updated_at, created_at)`) or `created`; an **externally-edited** note (Obsidian/nvim leaves front-matter alone) takes its `updated_at` from the file's **mtime** — `vault.effective_updated_at`, applied by both the watcher and the startup rebuild, with a 2s slack so a fresh write never reads as an edit; `order` = `desc` (default) or `asc`; an FTS `search` ranks by bm25 first, then `sort`/`order` as tiebreak. `summary=true` → metadata-only items (`PostSummary`: id/title/tags/folder + plain-text `excerpt`, no `content`); REST default `false` (UI feed renders content inline), MCP `list_posts` default `true` |
 | GET/PATCH/DELETE | /posts/{id} | Get / update (partial) / delete a post |
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |
 | GET | /links | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
@@ -52,7 +52,7 @@ Non-`.md` files (images, PDFs, …) live in a per-folder `<Folder>/assets/` subd
 - **Placement:** with `post_id` → the post's folder (auto-embeds `![[file]]` unless `embed=false`); else by `folder`; else derived from `tags` (`folders.folder_for`); else `Inbox`.
 - **Byte transport (`relay/ingest.py`):** an upload provides its bytes exactly one of three ways — `data` (inline base64; only viable for tiny files, since an MCP client must *emit the whole blob* as model tokens), `source_url` (an http(s) URL the **server** fetches — SSRF-guarded on every hop incl. redirects, streamed, size-capped; filename derived from Content-Disposition/URL when omitted; note the guard resolves DNS once so it's not rebind-proof — fine given callers are authenticated), or `upload_id` (a presigned slot: `POST /attachments/uploads` → PUT raw bytes out-of-band → finalize with the id). The model validator enforces exactly-one. Slots are in-memory + disk-staged under `.relay/uploads/`, single-use, TTL'd (`ATTACHMENT_UPLOAD_TTL_SECONDS`), swept by the cleanup loop, and wiped at startup — **single-worker assumption** (PUT + finalize must hit the same process). A failed `source_url`/unknown `upload_id` → **400** (loud); over-cap → **413**.
 - **Presigned consumers:** the browser UI streams files ≥4 MB through a slot instead of base64; the **stdio proxy's** `add_attachment(path=…)` reads a local file on the client machine and drives the same create→PUT→finalize flow (see the parity exception in [MCP](#mcp)).
-- **Lifecycle:** deleting a post removes attachments in its folder that no other post references (shared assets kept). Deleting an attachment reports the post ids still referencing it (now dangling).
+- **Lifecycle:** deleting a post removes the attachments **that post embedded** which no other post references (shared assets kept). Scoped to its own `![[…]]` refs on purpose — a folder's `assets/` also holds files a human dropped in from Obsidian but hasn't linked yet, and sweeping every unreferenced file in the folder would delete those bystanders. Deleting an attachment reports the post ids still referencing it (now dangling).
 - `ATTACHMENT_MAX_MB` (25) caps uploads → 413 (enforced on all three transports). `get_attachment` returns images as inline image content, size-guarded.
 
 ## Metrics
@@ -66,7 +66,7 @@ Non-`.md` files (images, PDFs, …) live in a per-folder `<Folder>/assets/` subd
 
 `GET /events` for live push. On reconnect, send `Last-Event-ID` with the last post id — the server replays missed posts (`id > Last-Event-ID`) before the live stream.
 
-Event types: `post` (new **or edited** — the watcher streams external edits) and `delete` (`data: {"id": N}`). A `keepalive` fires every 30s. Both edits and deletes are sent **without** an SSE `id:` so they can't rewind the client's cursor (no replay storm). Clients treat a `post` for a known id as an in-place update and never clobber an inline edit-in-progress.
+Event types: `post` (new **or edited** — the watcher streams external edits) and `delete` (`data: {"id": N}`). A `keepalive` fires every 30s. **TTL expiry emits its own `delete`** — the cleanup loop's file unlink is self-delete-suppressed, so the watcher never sees it and the post would otherwise linger in every connected client until reload. Both edits and deletes are sent **without** an SSE `id:` so they can't rewind the client's cursor (no replay storm). Clients treat a `post` for a known id as an in-place update and never clobber an inline edit-in-progress.
 
 Both `create_post` and `update_post` publish SSE, so API/MCP edits (incl. Inbox→domain moves) propagate live; clients refresh the active sidebar counts (Tags or Tree) on any streamed change. **Known limitation:** offline edits/deletes to already-seen posts aren't replayed on reconnect (catch-up is append-only).
 

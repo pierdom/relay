@@ -40,6 +40,47 @@ def utcnow_iso() -> str:
     return _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _iso(ts: float) -> str:
+    return _dt.datetime.fromtimestamp(ts, _dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_iso(value: str) -> _dt.datetime | None:
+    try:
+        return _dt.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=_dt.UTC)
+    except (TypeError, ValueError):
+        return None
+
+
+# Slack between a stamp relay wrote and the resulting file mtime. relay stamps
+# whole seconds *before* writing, so a write straddling a second boundary lands
+# an mtime 1s later — without this margin every fresh post would look edited.
+_MTIME_SLACK = _dt.timedelta(seconds=2)
+
+
+def effective_updated_at(path: Path, meta: dict) -> str | None:
+    """The post's real last-modified stamp: front-matter ``updated_at``, or the
+    file's mtime when the file has changed since that stamp.
+
+    External editors (Obsidian, nvim) rewrite the body without touching the
+    front-matter, so ``updated_at`` alone goes stale the moment a human edits a
+    note — the post would never rise in the default "updated" sort and the UI
+    would show no edit stamp. mtime is a property of the canonical file, so
+    deriving from it keeps files-are-truth intact and survives an index rebuild
+    with no write-back into the note (which would fight the editor holding it).
+    """
+    recorded = meta.get("updated_at") or meta.get("created_at")
+    parsed = _parse_iso(recorded) if recorded else None
+    if parsed is None:
+        return meta.get("updated_at")
+    try:
+        mtime = _dt.datetime.fromtimestamp(path.stat().st_mtime, _dt.UTC)
+    except OSError:
+        return meta.get("updated_at")
+    if mtime > parsed + _MTIME_SLACK:
+        return _iso(mtime.timestamp())
+    return meta.get("updated_at")
+
+
 def vault_dir() -> Path:
     return Path(settings.vault_path)
 
@@ -500,7 +541,7 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
             tags=meta.get("tags") or [],
             source=meta.get("source"),
             created_at=meta.get("created_at") or utcnow_iso(),
-            updated_at=meta.get("updated_at"),
+            updated_at=effective_updated_at(path, meta),
             expires_at=meta.get("expires_at"),
         )
     await _load_tag_config(db)

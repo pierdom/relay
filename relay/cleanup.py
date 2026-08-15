@@ -5,7 +5,7 @@ import logging
 
 import aiosqlite
 
-from . import ingest, metrics, vault
+from . import events, ingest, metrics, vault
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -17,10 +17,12 @@ async def _ids_where(db: aiosqlite.Connection, clause: str, params: list) -> set
 
 
 async def _delete_expired(db: aiosqlite.Connection) -> int:
-    """Collect every expired post id, unlink its file, then drop the index rows.
+    """Collect every expired post id, unlink its file, drop the index rows, then
+    publish an SSE ``delete`` for each.
 
     Files are canonical, so expiry deletes the file too (the watcher ignores it
-    via self-delete suppression).
+    via self-delete suppression — which is why this path has to emit the events
+    itself).
     """
     async with db.execute("SELECT tag, ttl_hours, expires_at FROM tag_config") as cur:
         tag_configs = {
@@ -73,16 +75,22 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
 
     # Unlink the canonical files, then drop the index rows.
     async with db.execute(
-        f"SELECT path FROM posts WHERE id IN ({','.join('?' * len(to_delete))})",
+        f"SELECT id, path, tags FROM posts WHERE id IN ({','.join('?' * len(to_delete))})",
         list(to_delete),
     ) as cur:
-        paths = [row["path"] for row in await cur.fetchall()]
-    for rel in paths:
+        expired = [(row["id"], row["path"], row["tags"]) for row in await cur.fetchall()]
+    for _id, rel, _tags in expired:
         vault.delete_file(vault.abspath(rel))
     await db.execute(
         f"DELETE FROM posts WHERE id IN ({','.join('?' * len(to_delete))})", list(to_delete)
     )
     await db.commit()
+    # Tell live clients. The file unlink is self-delete-suppressed, so the watcher
+    # won't emit for these — without this a TTL'd post lingers in every connected
+    # UI/TUI until the next reload. Deletes stream without an SSE `id:`, so they
+    # can't rewind a client's replay cursor.
+    for post_id, _rel, tags in expired:
+        await events.publish_delete(post_id, [t for t in tags.split(",") if t])
     return len(to_delete)
 
 
