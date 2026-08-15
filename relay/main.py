@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__, history, metrics, watcher
+from . import status as app_status
 from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
 from .config import settings
@@ -24,6 +25,7 @@ from .routes.folders import router as folders_router
 from .routes.links import router as links_router
 from .routes.metrics import router as metrics_router
 from .routes.posts import router as posts_router
+from .routes.status import router as status_router
 from .routes.tags import router as tags_router
 
 logging.basicConfig(
@@ -34,6 +36,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app_status.mark_started()
     await init_db()
     # Presigned upload slots are in-memory + disk-staged; any bytes left in the
     # staging dir from a prior run belong to slots that no longer exist. Wipe them.
@@ -218,6 +221,7 @@ app.include_router(links_router)
 app.include_router(folders_router)
 app.include_router(attachments_router)
 app.include_router(metrics_router)
+app.include_router(status_router)
 
 # Remote MCP endpoint (Streamable HTTP). Any MCP client can connect to /mcp
 # with the relay bearer key; shares relay.service with the REST routes. The

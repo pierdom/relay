@@ -282,6 +282,51 @@ class TagListResponse(BaseModel):
     tags: list[TagCount]
 
 
+class VaultStatus(BaseModel):
+    path: str
+    posts: int
+    tags: int
+    folders: int
+    attachments: int
+    attachment_bytes: int
+
+
+class HistoryStatus(BaseModel):
+    enabled: bool = Field(description="RELAY_HISTORY_ENABLED")
+    git: str | None = Field(description="git version string, or null when the binary is missing")
+    effective: bool = Field(description="Whether a write would actually be recorded")
+
+
+class SearchStatus(BaseModel):
+    fts5: bool = Field(description="False means search fell back to LIKE substring matching")
+
+
+class WatcherStatus(BaseModel):
+    enabled: bool
+    running: bool
+
+
+class AuthStatus(BaseModel):
+    oidc: bool
+    mcp_oauth: bool = Field(description="True only when the flag *and* an OIDC client are set")
+
+
+class FeatureStatus(BaseModel):
+    history: HistoryStatus
+    search: SearchStatus
+    watcher: WatcherStatus
+    auth: AuthStatus
+
+
+class StatusResponse(BaseModel):
+    version: str
+    uptime_seconds: int
+    started_at: str | None
+    sse_clients: int
+    vault: VaultStatus
+    features: FeatureStatus
+
+
 class PostRevision(BaseModel):
     """One commit in a post's history."""
 

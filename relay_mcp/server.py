@@ -199,6 +199,11 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="get_status",
+            description="Report this relay's runtime status: version, uptime, which vault it is serving, counts of posts/tags/folders/attachments, and which features are actually working. Use it to confirm you are talking to the vault you think you are, and to check features that degrade silently — vault history is off when git is missing (writes would be unrecoverable), search falls back to substring matching without FTS5, and external edits are not picked up when the watcher is off.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
             name="delete_post",
             description='Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.',
             inputSchema={
@@ -547,6 +552,27 @@ async def call_tool(
             type="text",
             text=f"Restored post #{p['id']} — {p['title']} (from {arguments['sha'][:7]}).",
         )]
+
+    if name == "get_status":
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/status",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            response.raise_for_status()
+            d = response.json()
+        v, f = d["vault"], d["features"]
+        lines = [
+            f"relay {d['version']} — up {d['uptime_seconds']}s ({RELAY_BASE_URL})",
+            f"vault {v['path']}: {v['posts']} post(s), {v['tags']} tag(s), "
+            f"{v['folders']} folder(s), {v['attachments']} attachment(s)",
+            f"history: {'on' if f['history']['effective'] else 'OFF'} (git {f['history']['git'] or 'missing'})",
+            f"search: {'FTS5' if f['search']['fts5'] else 'LIKE fallback'}",
+            f"watcher: {'running' if f['watcher']['running'] else 'stopped'}",
+            f"auth: oidc={f['auth']['oidc']} mcp_oauth={f['auth']['mcp_oauth']}",
+        ]
+        return [types.TextContent(type="text", text="\n".join(lines))]
 
     if name == "delete_post":
         post_id = arguments["id"]

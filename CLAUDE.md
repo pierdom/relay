@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 249 tests
+uv run pytest -q                # 258 tests
 uv run ruff check .             # lint — config in pyproject.toml
 ```
 
@@ -42,6 +42,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 | GET | /tags | Tags with counts (incl. 0-count from tag_config) |
 | POST/PATCH | /tags/{tag}[/config] | Set per-tag expiry / rename a tag across all posts |
 | GET | /events | SSE stream (`?tag=` filter) |
+| GET | /status | Runtime diagnostics as JSON (bearer-gated): version, uptime, vault path + counts, and **effective** feature state — see [Status](#status) |
 | GET | /metrics | Prometheus/OpenMetrics text exposition (bearer-gated); see [Metrics](#metrics) |
 | POST/GET | /mcp | Streamable HTTP MCP endpoint (bearer auth) |
 
@@ -57,6 +58,21 @@ Non-`.md` files (images, PDFs, …) live in a per-folder `<Folder>/assets/` subd
 - **Presigned consumers:** the browser UI streams files ≥4 MB through a slot instead of base64; the **stdio proxy's** `add_attachment(path=…)` reads a local file on the client machine and drives the same create→PUT→finalize flow (see the parity exception in [MCP](#mcp)).
 - **Lifecycle:** deleting a post removes the attachments **that post embedded** which no other post references (shared assets kept). Scoped to its own `![[…]]` refs on purpose — a folder's `assets/` also holds files a human dropped in from Obsidian but hasn't linked yet, and sweeping every unreferenced file in the folder would delete those bystanders. Deleting an attachment reports the post ids still referencing it (now dangling).
 - `ATTACHMENT_MAX_MB` (25) caps uploads → 413 (enforced on all three transports). `get_attachment` returns images as inline image content, size-guarded.
+
+## Status
+
+`GET /status` (bearer-gated, same reasoning as `/metrics` — it reports the vault path and size) and the `get_status` MCP tool return JSON: `version`, `uptime_seconds`, `started_at`, `sse_clients`, a `vault` block (path, posts, tags, folders, attachments, attachment_bytes) and a `features` block.
+
+**The counts are the bonus; effective feature state is the point.** Relay degrades silently in ways visible only in a startup log line, and `features` reports what is *working*, not what is configured:
+
+| Field | Why it matters |
+|---|---|
+| `history.effective` | `enabled` is intent; this is false when `git` is missing, meaning writes are **not** recoverable. `history.git` carries the version or `null`. An image shipped without git once already |
+| `search.fts5` | false = search silently fell back to `LIKE` substring matching |
+| `watcher.running` | false = external Obsidian/nvim edits are never re-indexed |
+| `auth.mcp_oauth` | true only when the flag **and** an OIDC client are set — the flag alone can't broker a login |
+
+`vault.path` answers "which vault am I actually talking to", which is not obvious when a local checkout and a remote deployment are both in play. Post/tag counts come from the same helpers `/metrics` uses (`relay/status.py`), so the two surfaces can't disagree. `/health` is untouched and stays public and trivial — it is probed every 30s by the Dockerfile HEALTHCHECK and compose.
 
 ## Metrics
 
@@ -155,6 +171,7 @@ The in-process server advertises relay's logo + website in the initialize `serve
 | `list_posts` | List (tag/search/limit/offset; `summary` defaults **true** = metadata + excerpt, no bodies — call `get_post` for a full body) |
 | `add_attachment` / `create_upload` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD; `add_attachment` bytes via `data`/`source_url`/`upload_id`, `create_upload` mints a presigned slot (see [Attachments](#attachments)) |
 | `get_post_history` / `restore_post` | Read a post's revisions / roll it back to a sha (recreates a deleted post, keeping its id) |
+| `get_status` | Version, uptime, vault path + counts, and which features actually work |
 | `list_tags` / `set_tag_config` | Tags with counts / per-tag expiry |
 
 ```bash
@@ -181,7 +198,8 @@ Single-page app on the REST API + SSE.
 - **Sidebar tabs — Tags / Tree / Files:** Tags filters by tag (create/rename/⚙ expiry); Tree filters the feed by folder (`GET /folders`); **Files** swaps the feed for an attachment gallery (thumbnails/chips, folder filter, click-to-enlarge lightbox, delete). Tag and folder filters are mutually exclusive.
 - **Search:** debounced bar over the feed (title/content/source), combinable with a tag filter. The same bar holds the **sort control** (Updated/Created field + ↓/↑ direction toggle) and the list/grid view toggle; sort + view are persisted in `localStorage` (default: updated · desc).
 - **Grid tiles are the tight constraint.** A tile is fixed-height with a `1fr` inner track, and a `1fr` track's automatic minimum is its items' *min-content* width — so any child that can't shrink (a `nowrap` source, a `nowrap` table) widens the track past the card border and everything inside then paints outside the frame. Every card grid area therefore carries `min-width: 0`; the source ellipsizes; feed tables use `table-layout: fixed` with wrapping cells (the modal keeps `nowrap` + `.table-scroll`). The footer drops what a tile has no room for — the created stamp when an edit stamp is present, the button captions, the body's `Last updated:` chunk — via CSS only, since the view toggle swaps a class on `.feed` and never re-renders. **Check any new card element against a narrow tile.**
-- **Responsive:** sidebar → slide-in drawer on mobile (≤768px); on desktop a header toggle collapses it to zero width, persisted in `localStorage`.
+- **Status panel:** a header `i` button (shown once authed, alongside `+ New Post`) opens a narrow read-only modal over `GET /status` — a **Health** block with coloured dots (history `bad` when git is missing, since writes are then unrecoverable; search and watcher `warn` when degraded), then Vault and Server details. Built with `textContent`/`createElement` throughout, never `innerHTML`, since it renders server-provided strings like the vault path. Reuses `.pm-backdrop` and the `modalIn` keyframes; `fmtBytes` is shared with the attachments gallery.
+- **Responsive:** sidebar → slide-in drawer on mobile (≤768px); on desktop a header toggle collapses it to zero width, persisted in `localStorage`. The status modal becomes a bottom sheet at ≤768px like the post modal.
 
 ## Terminal UI (`uv run relay-tui`)
 
@@ -222,6 +240,7 @@ relay/
 ├── mcp_oauth/     # Remote MCP OAuth AS: store.py (hashed oauth.db) · provider.py · pocketid.py (broker) · broker.py (callback)
 ├── events.py · cleanup.py   # SSE broadcast hub · TTL cleanup loop
 ├── metrics.py     # Zero-dep Prometheus counter registry + text renderer (/metrics)
+├── status.py      # Runtime diagnostics for /status + get_status (shared counts with /metrics)
 └── routes/        # posts · tags · attachments · folders · links · events · metrics (thin — delegate to service)
 relay_mcp/server.py            # Legacy stdio MCP proxy (REST client)
 relay/static/index.html        # Browser UI (/ui)
