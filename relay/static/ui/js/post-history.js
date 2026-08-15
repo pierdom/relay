@@ -87,21 +87,36 @@ function renderRevisions(data, panes) {
   if (!data.exists) list.appendChild(note('Deleted — restoring brings it back.'));
 
   data.items.forEach((rev, i) => {
+    // Two lines: the message gets the full width, with sha/date/badge beneath.
+    // On one line the message was squeezed between them and ellipsized to a
+    // couple of characters — "post 86 update: …" became "va…", which identifies
+    // nothing, and picking a revision to restore is the entire job here.
     const row = document.createElement('button');
     row.className = 'hm-rev';
     row.type = 'button';
-    const sha = document.createElement('span');
-    sha.className = 'hm-sha';
-    sha.textContent = rev.short_sha;
+
     const msg = document.createElement('span');
     msg.className = 'hm-msg';
     msg.textContent = rev.message;
     msg.title = rev.message;
+
+    const meta = document.createElement('span');
+    meta.className = 'hm-meta';
+    const sha = document.createElement('span');
+    sha.className = 'hm-sha';
+    sha.textContent = rev.short_sha;
     const when = document.createElement('span');
     when.className = 'hm-when';
     when.textContent = rev.when.replace('T', ' ').slice(0, 16);
-    row.append(sha, msg, when);
-    if (i === 0 && data.exists) row.classList.add('hm-current');
+    meta.append(sha, when);
+    if (i === 0 && data.exists) {
+      const badge = document.createElement('span');
+      badge.className = 'hm-badge';
+      badge.textContent = 'current';
+      meta.appendChild(badge);
+    }
+
+    row.append(msg, meta);
     row.addEventListener('click', () => selectRevision(rev, row, pane));
     list.appendChild(row);
   });

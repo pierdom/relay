@@ -329,6 +329,41 @@ def test_history_panel_keeps_the_revision_list_visible_while_previewing(page):
     assert rows.first.is_visible(), "the revision list was pushed out of view by the preview"
 
 
+def test_history_revision_rows_show_the_whole_message(page, relay_server):
+    """The row put sha, message and timestamp on one line, so the message was
+    squeezed between them and ellipsized to a couple of characters — "post 86
+    update: …" rendered as "va…", which identifies nothing. Choosing which
+    revision to restore is the entire job of this list."""
+    post = _api_post(
+        relay_server,
+        {"title": "Scarif — Server Build Project", "content": "v1", "tags": ["homelab"]},
+    )
+    _api_patch(relay_server, post["id"], {"content": "v2"})
+
+    page.reload()
+    page.get_by_text("Scarif — Server Build Project").first.wait_for(timeout=10_000)
+    page.get_by_text("Scarif — Server Build Project").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmHistory").click()
+    page.locator("#historyModal.open").wait_for(timeout=10_000)
+    page.locator("#hmBody .hm-rev").first.wait_for(timeout=10_000)
+
+    rows = page.evaluate(
+        """() => [...document.querySelectorAll('.hm-msg')].map(m => ({
+            text: m.textContent,
+            // Both axes: line-clamp overflows vertically, a single-line ellipsis
+            // horizontally. Checking only one made this test pass either way.
+            clipped: m.scrollHeight > m.clientHeight + 1 || m.scrollWidth > m.clientWidth + 1,
+        }))"""
+    )
+    assert rows, "no revisions listed"
+    for row in rows:
+        assert not row["clipped"], f"message clipped in the list: {row['text']!r}"
+        assert len(row["text"]) > 12, f"suspiciously short message: {row['text']!r}"
+    # the newest is marked so the current state is identifiable at a glance
+    assert page.locator("#hmBody .hm-badge").count() == 1
+
+
 def test_history_panel_closes_on_escape(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
     page.get_by_text("Smoke Post 0").first.click()
