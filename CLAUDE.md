@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 275 tests (incl. 14 browser smokes)
+uv run pytest -q                # 280 tests (incl. 14 browser smokes)
 uv run ruff check .             # lint — config in pyproject.toml
 uv run playwright install chromium           # once, for the tests/ui browser smokes
 ```
@@ -101,6 +101,7 @@ Every write commits the vault to a git repo, so a clobbered post is recoverable.
 - **Durable, unlike its neighbour.** `.relay/index.db` is disposable and rebuilt at startup; `history.git` must never be wiped (same standing as `oauth.db`).
 - **Coverage:** every service write path (create/update/delete, attachment add/delete, tag rename), TTL expiry, **and external edits** — the watcher commits once per debounced batch, so Obsidian/nvim edits relay never saw through its API are captured too. Attachments are tracked, so the note and the assets deleted with it land in one commit and revert together.
 - **Messages:** `post <id> <verb>: <title>`, `attachment add|delete: <name>`, `tag rename: a -> b (N post(s))`, `external edit: <file>`, `ttl expiry: N post(s)`, `vault: initial import`.
+- **`core.quotePath=false` is pinned on every git call.** With git's default, a path containing any non-ASCII byte is printed quoted and octal-escaped (`"Digests/Digest mattutino \342\200\224 …"`). `--name-only` output is how the module learns a post's path, so titles with an em dash, arrow, accent or «» parsed to a path that does not exist: those posts reported **no history at all** and could not be restored. Titles are filenames, so that was most of a real vault. Test data must include non-ASCII titles — ASCII-only fixtures are exactly why this shipped.
 - **Never a gate.** Every call swallows its errors and logs; a missing `git` binary disables history after one warning and writes proceed untouched. Commits run in a worker thread (never blocking the loop) under a lock, since each stages the whole tree.
 - **Recovery, in-band:** `GET /posts/{id}/history` + `POST /posts/{id}/restore` (and the `get_post_history` / `restore_post` MCP tools) — both answer for a **deleted** post, and a restore keeps the original id so `[[links]]` and `#id` resolve again. A restore is an ordinary write, so it is itself committed and can be undone. Every revision is verified to carry the right front-matter `id` before it is listed or restored, because titles are filenames and a deleted note's path can be taken over by a different post. Only restorable revisions are listed — the delete commit itself is not, since the file has no blob there.
 - **Recovery, by hand** — plain git, no relay involved; full runbook in [docs/recovery.md](docs/recovery.md):

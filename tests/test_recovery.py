@@ -285,3 +285,57 @@ async def test_revision_preview_works_for_a_deleted_post(client):
 async def test_revision_preview_rejects_an_unknown_sha(client):
     post = await _create(client, "No Such Rev")
     assert (await client.get(f"/posts/{post['id']}/history/deadbeef", headers=AUTH)).status_code == 404
+
+
+# ── non-ASCII titles ─────────────────────────────────────────────────────────
+#
+# Titles are filenames, and git prints any path containing a non-ASCII byte
+# quoted and octal-escaped unless core.quotePath is off. Every test above uses an
+# ASCII title, which is why that shipped: in production, posts called
+# "Digest mattutino — 15 agosto" or "Citroën «Ugo» — Scheda" reported *no history
+# at all* and could not be restored.
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Digest mattutino — 15 agosto",          # em dash
+        "Photo Pipeline → iCloud → Immich",      # arrows
+        "Citroën «Ugo» — Scheda veicolo",        # accents + guillemets
+        "Ünïcödé ✅ everywhere",                  # combining marks + emoji
+    ],
+)
+@pytest.mark.asyncio
+async def test_history_works_for_non_ascii_titles(client, title):
+    post = await _create(client, title, content="body worth recovering")
+    pid = post["id"]
+    await client.patch(f"/posts/{pid}", json={"content": "clobbered"}, headers=AUTH)
+
+    items = (await _history(client, pid))["items"]
+    assert items, f"no history recorded for {title!r}"
+    # the path round-trips as real UTF-8, not an escaped literal
+    assert "\\" not in items[0]["path"], items[0]["path"]
+
+    oldest = items[-1]
+    preview = await client.get(f"/posts/{pid}/history/{oldest['sha']}", headers=AUTH)
+    assert preview.status_code == 200, preview.text
+    assert "body worth recovering" in preview.json()["content"]
+
+    restored = await client.post(f"/posts/{pid}/restore", json={"sha": oldest["sha"]}, headers=AUTH)
+    assert restored.status_code == 200, restored.text
+    assert "body worth recovering" in restored.json()["content"]
+
+
+@pytest.mark.asyncio
+async def test_deleted_post_with_a_non_ascii_title_stays_recoverable(client):
+    """The pickaxe path also has to survive the quoting."""
+    post = await _create(client, "Röckdöts — deleted", content="precious")
+    pid = post["id"]
+    await client.delete(f"/posts/{pid}", headers=AUTH)
+
+    items = (await _history(client, pid))["items"]
+    assert items, "a deleted non-ASCII post lost its history"
+    assert "\\" not in items[0]["path"]
+    back = await client.post(f"/posts/{pid}/restore", json={"sha": items[0]["sha"]}, headers=AUTH)
+    assert back.status_code == 200
+    assert "precious" in back.json()["content"]
