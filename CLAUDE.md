@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 202 tests
+uv run pytest -q                # 208 tests
 uv run ruff check .             # lint — config in pyproject.toml
 ```
 
@@ -107,7 +107,7 @@ Links are stored verbatim and resolved at **display time** (never rewritten exce
 Two credential channels, both checked by the shared `require_api_key` dependency (`relay/auth.py`):
 
 - **Bearer `API_KEY`** — machine-to-machine (REST, MCP, agents). Unchanged.
-- **`relay_session` cookie** — human web-UI sessions. A **signed, expiring** token (`itsdangerous`) carrying `{sub, email}`; verified by signature + `SESSION_MAX_AGE_HOURS`.
+- **`relay_session` cookie** — human web-UI sessions. A **signed, expiring** token (`itsdangerous`) carrying `{sub, email}`; verified by signature + `SESSION_MAX_AGE_HOURS` + a **live allowlist re-check** (`auth.still_authorized`). The re-check runs on every request, so dropping a sub from `OIDC_ALLOWED_SUBS` revokes sessions already in the wild instead of letting them coast the full 30d — the same guarantee the MCP OAuth refresh grant gives (`mcp_oauth/provider.py`). Sub-allowlist only (the session stores `email` but not `email_verified`, so email allowlists stay login-time-only), and `sub=apikey` from the paste path is exempt. **Note:** there is still no *per-token* revocation — a captured cookie stays valid until it expires; `revoke_session` is a documented no-op.
 
 The cookie is minted two ways: **OIDC login** via PocketID (`GET /auth/login` → PocketID authorize with PKCE/S256 → `GET /auth/callback` validates the ID token, enforces the allowlist — immutable `OIDC_ALLOWED_SUBS`, or `OIDC_ALLOWED_EMAILS` on **verified** emails only — sets the cookie), or the **API-key paste** break-glass (`POST /session`, synthetic `sub=apikey`). `GET /auth/me` reports session state + whether OIDC is configured (drives the UI login control); `GET /auth/logout` / `DELETE /session` clear it. Transient OAuth state (state/nonce/PKCE verifier) rides a short-lived `relay_oauth` cookie via Starlette `SessionMiddleware`.
 
