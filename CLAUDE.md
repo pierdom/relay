@@ -13,13 +13,13 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 240 tests
+uv run pytest -q                # 242 tests
 uv run ruff check .             # lint — config in pyproject.toml
 ```
 
 `GET /health` (no auth) is probed every 30s by the Dockerfile HEALTHCHECK and compose. Uses `uv` — never `pip`; add deps with `uv add <package>`.
 
-**Tests always run against a throwaway vault.** `tests/conftest.py` has an **autouse** `isolated_vault` fixture that repoints `settings.vault_path` under `tmp_path` for every test, and asserts on teardown that nothing moved it back out. This is not optional hygiene: `Settings` loads the developer's real `.env`, so an unpatched `settings.vault_path` resolves to their live Obsidian vault — a test that forgets to patch it *writes real notes* (and `rebuild_index` will stamp ids into any id-less file it finds there). Never patch `vault_path` to anything outside `tmp_path`, and never disable this fixture to "test the real thing".
+**Tests always run against a throwaway vault.** `tests/conftest.py` has an **autouse** `isolated_vault` fixture that repoints `settings.vault_path` under `tmp_path` for every test, and asserts on teardown that nothing moved it back out. This is not optional hygiene: `Settings` loads the developer's real `.env`, so an unpatched `settings.vault_path` resolves to their live Obsidian vault — a test that forgets to patch it *writes real notes* (and `rebuild_index` will stamp ids into any id-less file it finds there). Never patch `vault_path` to anything outside `tmp_path`, and never disable this fixture to "test the real thing". **conftest only covers files under `tests/`** — an ad-hoc script run from anywhere else resolves `vault_path` from the real `.env`, which has caused real writes twice — so `vault.vault_dir()` carries a backstop that raises under `PYTEST_CURRENT_TEST` when the vault isn't under the temp dir. Put throwaway test scripts in `tests/`.
 
 **CI (`.github/workflows/tests.yml`) runs `ruff check` + `pytest` on every push and PR**, so both must pass before a change lands. Ruff selects `E,F,I,UP,B,C4,SIM` at line-length 120; each ignore is documented inline in `pyproject.toml` (notably `B008` for FastAPI's `Depends()` idiom, and a per-file `E501` exemption for `relay_mcp/server.py` whose tool-description strings must stay byte-identical to `relay/mcp_server.py` under the parity rule below). `docker.yml` builds and publishes the image on pushes to `main`. Workflow actions are pinned to majors except `astral-sh/setup-uv`, which stopped publishing major tags at v8 — it needs a full release tag (`@v10.0.1`).
 

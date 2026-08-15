@@ -81,8 +81,33 @@ def effective_updated_at(path: Path, meta: dict) -> str | None:
     return meta.get("updated_at")
 
 
+def _assert_safe_under_pytest(path: Path) -> None:
+    """Refuse to touch a real vault from a test run.
+
+    ``tests/conftest.py`` repoints ``vault_path`` at ``tmp_path`` for everything it
+    covers — but conftest only applies to files *under* ``tests/``, so an ad-hoc
+    script run from elsewhere still resolves ``settings.vault_path`` from the
+    developer's ``.env``: a live Obsidian vault. That has bitten twice, writing real
+    notes both times, so the guard lives at the choke point every vault path flows
+    through rather than in a fixture that can be bypassed by where a file sits.
+
+    Inert outside pytest — ``PYTEST_CURRENT_TEST`` is set by pytest alone.
+    """
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        return
+    resolved = str(path.expanduser())
+    if not resolved.startswith(tempfile.gettempdir()):
+        raise RuntimeError(
+            f"refusing to use vault {resolved!r} from a test: it is not under "
+            f"{tempfile.gettempdir()!r}. Point settings.vault_path at tmp_path "
+            "(tests/conftest.py does this automatically for tests under tests/)."
+        )
+
+
 def vault_dir() -> Path:
-    return Path(settings.vault_path)
+    path = Path(settings.vault_path)
+    _assert_safe_under_pytest(path)
+    return path
 
 
 def relpath(path: Path) -> str:

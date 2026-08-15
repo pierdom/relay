@@ -284,7 +284,32 @@ def _revisions_sync(post_id: int, current_path: str | None, limit: int) -> list[
             break
         if _post_id_of(rev.sha, rev.path) == post_id:
             out.append(rev)
-    return out
+    return _truncate_at_creation(out, post_id)
+
+
+def _truncate_at_creation(revs: list[Revision], post_id: int) -> list[Revision]:
+    """Cut the history at this post's own creation.
+
+    ``allocate_id`` is ``MAX(id)+1``, so deleting the newest post hands its id
+    straight to the next one created. If that successor also takes the same title
+    it takes the same *path* too, and the walk runs back through the delete into
+    the previous occupant's revisions — which carry the same front-matter id, so
+    the check above cannot tell them apart. Restoring one would then overwrite the
+    live post with a stranger's body.
+
+    A post's history starts at its `post <id> create:` commit; anything older
+    belongs to a previous holder of that id. Posts that predate history, or that
+    were created externally and indexed by the watcher, have no such commit — the
+    list is then returned unchanged, which is the best that can be said about them.
+
+    The underlying id reuse is a separate defect; this keeps it from being
+    destructive here.
+    """
+    marker = f"post {post_id} create:"
+    for i, rev in enumerate(revs):
+        if rev.message.startswith(marker):
+            return revs[: i + 1]
+    return revs
 
 
 async def revisions(post_id: int, *, current_path: str | None, limit: int = 20) -> list[Revision]:
