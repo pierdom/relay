@@ -14,6 +14,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Interactive docs (Swagg
 | GET | `/posts/{id}/backlinks` | Posts linking here via `[[title]]` or `#id` |
 | GET | `/status` | Runtime diagnostics: version, uptime, vault path + counts, effective feature state |
 | GET | `/posts/{id}/history` | Revisions of a post from vault history, newest first; answers for a **deleted** post too (`exists:false`) |
+| GET | `/posts/{id}/history/{sha}` | The post as it was at that revision (preview before restoring) |
 | POST | `/posts/{id}/restore` | Roll a post back to a revision (`{"sha": …}`), recreating it if deleted |
 | GET | `/links` | `(id, title)` index for resolving `[[Title]]` wikilinks |
 | GET | `/folders` | First-level vault folders with post counts |

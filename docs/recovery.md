@@ -7,6 +7,12 @@ There are two ways in. **In-band** (below) works from anywhere you can reach the
 API and covers the common cases; **by hand with git** (the rest of this page) is
 the full-power path for anything the API doesn't express.
 
+## In the browser
+
+The post modal has a **🕑 History** button: it lists the post's revisions, previews any of them, and restores with one click. That is the quickest route for the common case — you noticed a post looks wrong and want the previous version back.
+
+It can only reach posts that still exist, though, since the modal is the way in. For a **deleted** post, use the API below or the git runbook further down.
+
 ## In-band: the API and MCP tools
 
 ```bash

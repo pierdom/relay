@@ -13,6 +13,7 @@ from ..models import (
     PostListResponse,
     PostResponse,
     PostRestore,
+    PostRevisionContent,
     PostSummaryListResponse,
     PostUpdate,
 )
@@ -124,6 +125,34 @@ async def get_post_history(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Vault history is disabled or git is unavailable",
+        ) from None
+
+
+@router.get(
+    "/{post_id}/history/{sha}",
+    response_model=PostRevisionContent,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_post_revision(
+    post_id: int,
+    sha: str,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> PostRevisionContent:
+    """The post as it was at one revision, so a restore can be previewed.
+
+    Read-only, and answers for a deleted post too. A short sha is accepted.
+    """
+    try:
+        return await service.get_post_revision(db, post_id, sha)
+    except service.HistoryUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Vault history is disabled or git is unavailable",
+        ) from None
+    except service.RevisionNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No revision '{sha}' in the history of post #{post_id}",
         ) from None
 
 

@@ -88,7 +88,7 @@ def relay_server(tmp_path_factory) -> str:
         "API_KEY": API_KEY,
         "RELAY_VAULT_PATH": str(vault),
         "SECURE_COOKIES": "false",   # plain http in tests; the cookie must still be set
-        "RELAY_HISTORY_ENABLED": "false",  # not under test here, and keeps writes fast
+        "RELAY_HISTORY_ENABLED": "true",   # the post-history panel needs real revisions
     }
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "relay.main:app", "--port", str(port), "--log-level", "warning"],

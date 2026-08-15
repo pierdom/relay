@@ -34,6 +34,7 @@ from .models import (
     PostListResponse,
     PostResponse,
     PostRevision,
+    PostRevisionContent,
     PostSummary,
     PostSummaryListResponse,
     PostUpdate,
@@ -409,14 +410,12 @@ async def get_post_history(
     )
 
 
-async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> PostResponse:
-    """Roll a post back to an earlier revision, recreating it if it was deleted.
+async def _resolve_revision(db: aiosqlite.Connection, post_id: int, sha: str):
+    """Find a revision of ``post_id`` and read its file back.
 
-    A restore is an ordinary write, so it is committed like any other — a restore
-    can itself be restored. ``history.revisions`` has already verified that every
-    revision's front-matter id matches, so a filename later reused by a different
-    post cannot smuggle that post's body in under this id; the id is re-checked
-    here anyway because this one writes.
+    Shared by the read-only preview and the restore so they can never disagree
+    about which revision a sha means, or about whether it legitimately belongs to
+    this post. Returns ``(revision, front_matter, body, current_row_or_None)``.
     """
     if not history.enabled():
         raise HistoryUnavailable
@@ -433,9 +432,47 @@ async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> Post
     if text is None:
         raise RevisionNotFound
     meta, body = frontmatter.parse(text)
+    # Titles are filenames, so a path can be reused by a different post; the id in
+    # the file is the only thing that actually proves ownership.
     if meta.get("id") != post_id:
         raise RevisionNotFound
+    return match, meta, body, row
 
+
+async def get_post_revision(
+    db: aiosqlite.Connection, post_id: int, sha: str
+) -> PostRevisionContent:
+    """A post exactly as it was at one revision — read-only.
+
+    Exists so a restore can be previewed rather than taken on faith: the history
+    listing carries only metadata, and picking a sha out of it blind is a poor way
+    to undo something. Works for a deleted post too.
+    """
+    match, meta, body, _row = await _resolve_revision(db, post_id, sha)
+    return PostRevisionContent(
+        id=post_id,
+        sha=match.sha,
+        short_sha=match.short_sha,
+        when=match.when,
+        message=match.message,
+        path=match.path,
+        title=Path(match.path).stem,
+        content=body,
+        tags=meta.get("tags") or [],
+        source=meta.get("source"),
+    )
+
+
+async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> PostResponse:
+    """Roll a post back to an earlier revision, recreating it if it was deleted.
+
+    A restore is an ordinary write, so it is committed like any other — a restore
+    can itself be restored. ``history.revisions`` has already verified that every
+    revision's front-matter id matches, so a filename later reused by a different
+    post cannot smuggle that post's body in under this id; the id is re-checked
+    here anyway because this one writes.
+    """
+    match, meta, body, row = await _resolve_revision(db, post_id, sha)
     title = Path(match.path).stem
     tags = meta.get("tags") or []
     source = meta.get("source")

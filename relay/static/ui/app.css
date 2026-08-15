@@ -933,3 +933,30 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .pm-body { padding-left: 16px; padding-right: 16px; }
   .pm-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
 }
+
+/* ── Post history panel ───────────────────────────────────── */
+/* Wider than the status panel: it shows a revision body, not a few key/values. */
+.hm-inner { max-width: 680px; }
+.hm-list { display: flex; flex-direction: column; gap: 2px; }
+.hm-rev {
+  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  background: none; border: 1px solid transparent; border-radius: 4px;
+  padding: 6px 8px; cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 12.5px; color: var(--text);
+  transition: background 0.12s, border-color 0.12s;
+}
+.hm-rev:hover { border-color: var(--border); background: var(--accent-glow); }
+.hm-rev.active { border-color: var(--accent); }
+.hm-sha { color: var(--accent); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+/* min-width:0 so a long commit subject ellipsizes instead of widening the panel. */
+.hm-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-when { color: var(--muted); font-size: 11.5px; flex-shrink: 0; }
+.hm-rev.hm-current .hm-sha::after { content: ' ·current'; color: var(--muted); }
+.hm-preview { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.hm-body-text {
+  margin: 8px 0 12px; padding: 10px; max-height: 260px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  font-family: inherit; font-size: 12px; line-height: 1.5; color: var(--text);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.hm-restore { width: 100%; }

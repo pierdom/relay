@@ -148,6 +148,18 @@
   </div>
 </div>
 
+<div class="status-modal" id="historyModal">
+  <div class="pm-backdrop" id="hmBackdrop"></div>
+  <div class="sm-inner hm-inner">
+    <div class="sm-head">
+      <span class="sm-name">History</span>
+      <span class="sm-version" id="hmTitle"></span>
+      <button class="sm-close" id="hmClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="sm-body" id="hmBody"></div>
+  </div>
+</div>
+
 <div class="status-modal" id="statusModal">
   <div class="pm-backdrop" id="smBackdrop"></div>
   <div class="sm-inner">
@@ -174,6 +186,7 @@
       <div class="pm-body-fade" id="pmBodyFade"></div>
     </div>
     <div class="pm-footer">
+      <button class="btn-edit" id="pmHistory">🕑 History</button>
       <button class="btn-edit" id="pmEdit">✏️ Edit</button>
       <button class="btn-delete" id="pmDelete">🗑️ Delete</button>
     </div>
