@@ -1033,3 +1033,27 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .hm-list { padding-right: 0; padding-bottom: 10px; }
   .hm-pane { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 12px; }
 }
+
+/* ── Edit modal ───────────────────────────────────────────── */
+/* Editing used to happen inside the post card. In grid view that meant a ~200px
+   column: the textarea was a few words wide and long notes were unusable. The
+   form is the same, it just gets the room the reading modal already had. */
+.em-inner {
+  max-width: 1100px;
+  width: 94%;
+  height: min(88vh, 940px);
+}
+#editModal .sm-body { flex: 1; min-height: 0; display: flex; padding-top: 10px; }
+#editModal .edit-form {
+  display: flex; flex-direction: column; gap: 10px;
+  flex: 1; min-height: 0; min-width: 0;
+}
+/* The content field takes whatever is left, so a long note gets the whole panel
+   rather than a fixed few rows. */
+#editModal .edit-form > .ef-content-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#editModal .edit-form textarea.ef-content { flex: 1; min-height: 140px; resize: none; }
+#editModal .edit-form .ef-attachments { max-height: 22vh; overflow-y: auto; }
+#editModal .edit-actions { margin-top: 0; flex-shrink: 0; }
+@media (max-width: 860px) {
+  .em-inner { height: 92vh; }
+}

@@ -467,3 +467,61 @@ def test_tag_row_controls_are_drawn_icons_with_labels(page):
     for control, name in ((rename, "rename"), (expiry, "expiry")):
         box = control.bounding_box()
         assert box["width"] >= 15 and box["height"] >= 15, f"{name} control is {box} — too small to hit"
+
+
+# ── editing ──────────────────────────────────────────────────────────────────
+
+
+def _edit_first_card(page, title: str):
+    card = page.locator(".feed .post", has_text=title).first
+    card.hover()
+    card.locator(".btn-edit").click()
+    page.locator("#editModal.open").wait_for(timeout=10_000)
+    page.wait_for_timeout(300)
+
+
+def test_editing_opens_a_roomy_modal_in_both_views(page, relay_server):
+    """Editing used to replace the card's contents. In grid view that is a ~200px
+    column, so the textarea was a few words wide and a long note unusable."""
+    _api_post(relay_server, {"title": "Roomy Edit", "content": "line\n" * 40, "tags": ["homelab"]})
+    page.reload()
+    page.get_by_text("Roomy Edit").first.wait_for(timeout=10_000)
+
+    for view in ("#vtGrid", "#vtList"):
+        page.locator(view).click()
+        page.wait_for_timeout(250)
+        _edit_first_card(page, "Roomy Edit")
+        box = page.locator("#emBody .ef-content").bounding_box()
+        assert box["width"] > 600, f"{view}: editor only {round(box['width'])}px wide"
+        assert box["height"] > 200, f"{view}: editor only {round(box['height'])}px tall"
+        # and nothing is being edited inside a card any more
+        assert page.locator(".feed .post .edit-form").count() == 0
+        page.locator("#emBody .btn-cancel").click()
+        page.locator("#editModal.open").wait_for(state="detached", timeout=5_000)
+
+
+def test_editing_from_the_modal_saves_and_updates_the_card(page, relay_server):
+    post = _api_post(relay_server, {"title": "Save Me", "content": "before", "tags": ["homelab"]})
+    page.reload()
+    page.get_by_text("Save Me").first.wait_for(timeout=10_000)
+    _edit_first_card(page, "Save Me")
+
+    page.locator("#emBody .ef-content").fill("after the edit")
+    page.locator("#emBody .btn-save").click()
+    page.locator("#editModal.open").wait_for(state="detached", timeout=10_000)
+
+    page.wait_for_function(
+        """(id) => {
+            const card = document.querySelector(`[data-id="${id}"]`);
+            return card && card.textContent.includes('after the edit');
+        }""",
+        arg=post["id"],
+        timeout=10_000,
+    )
+
+
+def test_cancelling_an_untouched_edit_closes_without_a_prompt(page):
+    page.locator(".feed .post").first.wait_for(timeout=10_000)
+    _edit_first_card(page, "Smoke Post 0")
+    page.locator("#emBody .btn-cancel").click()
+    page.locator("#editModal.open").wait_for(state="detached", timeout=5_000)

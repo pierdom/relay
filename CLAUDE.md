@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 294 tests (incl. 21 browser smokes)
+uv run pytest -q                # 297 tests (incl. 24 browser smokes)
 uv run ruff check .             # lint — config in pyproject.toml
 uv run playwright install chromium           # once, for the tests/ui browser smokes
 ```
@@ -198,7 +198,8 @@ claude mcp add --transport http relay https://your-relay.example.com/mcp \
 
 Single-page app on the REST API + SSE.
 
-- **Posts:** compose panel, inline edit, delete-with-confirm, `expires_at` picker; live SSE feed (new posts flash + prepend). Clicking a card opens the detail modal — **except the master doc (`#0`)**, which is an inline accordion instead: a one-line peek that expands in place (`max-height` animated from JS, released to `none` after the transition so late reflow isn't clipped).
+- **Editing happens in its own modal** (`#editModal`), not inside the card. The form is unchanged; it just gets the room the reading modal already had, with the content field flexing to fill the panel. Inside a card it inherited the card's width — in grid view a ~200px column, where the textarea was a few words wide and a long note unusable. The card is looked up by `data-id` after saving rather than held across the edit, since the feed may have re-rendered meanwhile; a dirty body confirms before discarding.
+- **Posts:** compose panel, delete-with-confirm, `expires_at` picker; live SSE feed (new posts flash + prepend). Clicking a card opens the detail modal — **except the master doc (`#0`)**, which is an inline accordion instead: a one-line peek that expands in place (`max-height` animated from JS, released to `none` after the transition so late reflow isn't clipped).
 - **Attachments:** 📎 button / drag-drop / paste (screenshots) in compose + edit forms → uploads and inserts `![[embed]]` at the cursor. Edit form lists the post-folder's files with delete (×).
 - **Tag row controls are inline SVG** (`ICON_PENCIL`, `ICON_CLOCK`), not glyphs. `✏︎` is U+270F plus a text-presentation selector and renders as a thin *horizontal* stroke at this size — read as a minus, so the rename button looked like delete. A gear was tried and rejected too: at 13px its spokes read as a brightness control, and since the button sets TTL a **clock** says what it actually does. Icons also become visible on touch (`@media (hover: none)`), where hover-only controls were unreachable.
 - **Tag editors (rename / expiry):** only **one** may be open at a time — a module-level registry closes the previous one, and the form is dismissed by Save/Cancel, Escape, or clicking away. The form replaces the row's contents, so the gear is not there to click again; the row is restored intact on close. Its inputs need `min-width: 0` (and the row drops out of flex via `.tag-editing`): `datetime-local` has a wide min-content width and a flex child's automatic minimum is min-content, so without it the form cannot shrink and spills out of the sidebar, carrying its controls off-screen — the same automatic-minimum trap as the grid tiles. **How wide that widget renders depends on browser, locale and zoom**, so the smoke forces a 150px sidebar rather than trusting the CI browser to reproduce it.
