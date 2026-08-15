@@ -574,11 +574,32 @@ function renderTags(tags) {
   tags.forEach(t => tagList.appendChild(makeTagItem(t.tag, t.tag, t.count)));
 }
 
+/* Inline SVG rather than ✏︎ / ⚙ glyphs.
+ *
+ * The pencil was U+270F with a text-presentation selector, which renders as a
+ * thin *horizontal* stroke at this size — indistinguishable from a minus, and so
+ * read as "remove tag" rather than "rename". A drawn, diagonal pencil cannot be
+ * mistaken for one. The gear follows for consistency, and both now scale with the
+ * icon size rather than the font's idea of a dingbat.
+ */
+const ICON_PENCIL = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <path d="M11.4 2.4l2.2 2.2L6 12.2l-2.9.7.7-2.9z"/><path d="M10 3.8l2.2 2.2"/></svg>`;
+
+/* A clock, not a gear. The button sets TTL/expiry, so a clock says what it does —
+ * and a gear at 13px renders as radiating spokes around a dot, which reads as a
+ * brightness control rather than settings. */
+const ICON_CLOCK = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <circle cx="8" cy="8" r="5.8"/><path d="M8 4.6V8l2.3 1.7"/></svg>`;
+
 function makeTagItem(label, value, count) {
   const el = document.createElement('div');
   el.className = 'tag-item' + (query.tag === value ? ' active' : '');
-  const renameBtn = value !== null ? `<button class="tag-rename" title="Rename">✏︎</button>` : '';
-  const configBtn = value !== null ? `<button class="tag-config-btn" title="Configure">⚙</button>` : '';
+  const renameBtn = value !== null
+    ? `<button class="tag-rename" title="Rename tag" aria-label="Rename tag">${ICON_PENCIL}</button>` : '';
+  const configBtn = value !== null
+    ? `<button class="tag-config-btn" title="Expiry settings" aria-label="Expiry settings">${ICON_CLOCK}</button>` : '';
   el.innerHTML = `<span class="tag-name">${escHtml(label)}</span>${renameBtn}${configBtn}<span class="tag-count">${count}</span>`;
   el.addEventListener('click', () => selectTag(value));
   if (value !== null) {

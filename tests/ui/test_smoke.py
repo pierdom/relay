@@ -446,3 +446,24 @@ def test_the_tag_row_is_restored_after_closing_its_config(page):
     # and it still works a second time
     _open_tag_config(page, "homelab")
     assert page.locator(".tag-config-form").count() == 1
+
+
+def test_tag_row_controls_are_drawn_icons_with_labels(page):
+    """The rename control was ✏︎ with a text-presentation selector, which renders
+    as a thin horizontal stroke at this size — read as a minus, i.e. "remove tag".
+    Drawn SVGs cannot degrade into a glyph the font happens to pick, and the
+    accessible names say what each does."""
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+    row = page.locator(".tag-item", has_text="homelab").first
+    row.hover()
+
+    rename, expiry = row.locator(".tag-rename"), row.locator(".tag-config-btn")
+    assert rename.locator("svg").count() == 1, "rename control is not a drawn icon"
+    assert expiry.locator("svg").count() == 1, "expiry control is not a drawn icon"
+    assert rename.get_attribute("aria-label") == "Rename tag"
+    assert expiry.get_attribute("aria-label") == "Expiry settings"
+
+    # a real hit area, not a 10px glyph
+    for control, name in ((rename, "rename"), (expiry, "expiry")):
+        box = control.bounding_box()
+        assert box["width"] >= 15 and box["height"] >= 15, f"{name} control is {box} — too small to hit"

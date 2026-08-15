@@ -245,13 +245,24 @@ aside.collapsed > * { min-width: 220px; }
 }
 .tag-item.active .tag-count { background: var(--accent); color: #000; }
 
-.tag-rename {
+/* Both row controls share a shape: a comfortable hit area around a 13px icon,
+   revealed on hover. They carry SVGs now, so size comes from the icon rather
+   than a font's dingbat metrics. */
+.tag-rename, .tag-config-btn {
   background: none; border: none; cursor: pointer;
-  padding: 0 1px; font-size: 10px; opacity: 0; flex-shrink: 0;
-  transition: opacity 0.12s; line-height: 1;
+  padding: 2px; opacity: 0; flex-shrink: 0; line-height: 0;
+  color: var(--muted); border-radius: 3px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: opacity 0.12s, color 0.12s;
 }
-.tag-item:hover .tag-rename { opacity: 0.6; }
-.tag-rename:hover { opacity: 1 !important; }
+.tag-item:hover .tag-rename,
+.tag-item:hover .tag-config-btn { opacity: 0.75; }
+.tag-rename:hover, .tag-config-btn:hover { opacity: 1 !important; color: var(--accent); }
+.tag-rename:focus-visible, .tag-config-btn:focus-visible { opacity: 1; color: var(--accent); }
+/* Touch devices have no hover, so the controls would never appear at all. */
+@media (hover: none) {
+  .tag-rename, .tag-config-btn { opacity: 0.55; }
+}
 
 .tag-rename-input {
   background: var(--bg); border: 1px solid var(--accent); color: var(--text);
@@ -804,13 +815,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .tc-actions button:hover { color: var(--text); border-color: var(--accent); }
 /* The rename input lives inside the row's flex layout and needs the same escape. */
 .tag-rename-input { min-width: 0; max-width: 100%; }
-.tag-config-btn {
-  background: none; border: none; cursor: pointer;
-  padding: 0 1px; font-size: 10px; opacity: 0; flex-shrink: 0;
-  transition: opacity 0.12s; line-height: 1;
-}
-.tag-item:hover .tag-config-btn { opacity: 0.6; }
-.tag-config-btn:hover { opacity: 1 !important; }
+/* .tag-config-btn is styled with .tag-rename above — same shape, same behaviour. */
 
 /* ── Card truncation ─────────────────────────────────── */
 .post:not(.editing) { cursor: pointer; }
