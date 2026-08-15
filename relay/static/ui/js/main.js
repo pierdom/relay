@@ -14,19 +14,16 @@
 
 import { apiFetch, apiSend, clearApiKey, setApiKey } from './api.js';
 import { closeStatusModal, isStatusOpen } from './status.js';   // also self-wires its own controls
+import { query, resetPaging } from './feed-query.js';
+import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
 import { escHtml, fmtBytes, relativeTime, toDatetimeLocal, toUtcIso } from './util.js';
 const LIMIT = 20;
 // The break-glass API key now lives in ./api.js (setApiKey/clearApiKey).
 let authed = false;    // true once a session exists (cookie or key) — the real "logged in" flag
-let activeTag = null;
-let activeFolder = null;
 let sidebarMode = 'tags';   // 'tags' | 'tree' | 'files'
 let attachCache = [];       // last-fetched attachment list (for the gallery)
 let attachFolder = null;    // active gallery folder filter (null = all)
-let activeSearch = null;
 let searchDebounce = null;
-let offset = 0;
-let total = 0;
 let loadingMore = false;   // guards the infinite-scroll auto-load
 let es = null;
 let sseErrorTimer = null;
@@ -64,39 +61,10 @@ const searchClear     = document.getElementById('searchClear');
 const vtList          = document.getElementById('vtList');
 const vtGrid          = document.getElementById('vtGrid');
 
-// List ⇄ grid feed layout — pure CSS (a class on the feed), persisted locally.
-let viewMode = localStorage.getItem('relay-view') === 'grid' ? 'grid' : 'list';
-function applyViewMode() {
-  feed.classList.toggle('grid', viewMode === 'grid');
-  vtList.classList.toggle('active', viewMode === 'list');
-  vtGrid.classList.toggle('active', viewMode === 'grid');
-  localStorage.setItem('relay-view', viewMode);
-}
-vtList.addEventListener('click', () => { viewMode = 'list'; applyViewMode(); });
-vtGrid.addEventListener('click', () => { viewMode = 'grid'; applyViewMode(); });
-applyViewMode();
-
-// Feed ordering — sort field (updated/created) + direction (desc/asc), persisted.
-const sortFieldEl = document.getElementById('sortField');
-const sortDirEl   = document.getElementById('sortDir');
-let sortField = localStorage.getItem('relay-sort') === 'created' ? 'created' : 'updated';
-let sortOrder = localStorage.getItem('relay-order') === 'asc' ? 'asc' : 'desc';
-function applySort() {
-  sortFieldEl.value = sortField;
-  sortDirEl.textContent = sortOrder === 'asc' ? '↑' : '↓';
-  sortDirEl.title = 'Sort direction: ' + (sortOrder === 'asc' ? 'oldest first' : 'newest first');
-  localStorage.setItem('relay-sort', sortField);
-  localStorage.setItem('relay-order', sortOrder);
-}
-function reloadSorted() { offset = 0; total = 0; applySort(); loadPosts(true); }
-sortFieldEl.addEventListener('change', () => { sortField = sortFieldEl.value; reloadSorted(); });
-sortDirEl.addEventListener('click', () => { sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'; reloadSorted(); });
-applySort();
-
-// A live post belongs at the top of the feed only under the default sort
-// (last-modified, newest first). Under any other order it would land mid-list,
-// so we surface it via the "new posts" pill instead of inserting it out of place.
-function isDefaultSort() { return sortField === 'updated' && sortOrder === 'desc'; }
+// View/sort preferences live in ./view-prefs.js; reloading on a sort change is
+// this module's job, so it is passed in.
+function reloadSorted() { resetPaging(); applySort(); loadPosts(true); }
+initViewPrefs(reloadSorted);
 
 const newPostsPill  = document.getElementById('newPostsPill');
 const newPostsLabel = document.getElementById('newPostsLabel');
@@ -210,7 +178,7 @@ disconnectBtn.addEventListener('click', async () => {
   newTagBtn.style.display = 'none';
   statusBtn.style.display = 'none';
   searchBar.style.display = 'none';
-  activeSearch = null; searchInput.value = ''; searchBar.classList.remove('active');
+  query.search = null; searchInput.value = ''; searchBar.classList.remove('active');
   connectedBar.style.display = 'none';
   collapseBtn.style.display = 'none';
   apiKeyInput.value = '';
@@ -222,7 +190,7 @@ disconnectBtn.addEventListener('click', async () => {
 
 
 async function init() {
-  offset = 0; total = 0;
+  resetPaging();
   feed.innerHTML = '';
   // Reset to the default Tags + feed view (in case we reconnect from Files/Tree mode).
   sidebarMode = 'tags'; attachFolder = null;
@@ -370,7 +338,7 @@ newPostBtn.addEventListener('click', () => {
     closeCompose();
   } else {
     composePanel.classList.add('open');
-    if (activeTag) document.getElementById('cpTags').value = activeTag;
+    if (query.tag) document.getElementById('cpTags').value = query.tag;
     document.getElementById('cpContent').focus();
   }
 });
@@ -531,9 +499,9 @@ searchInput.addEventListener('input', () => {
   clearTimeout(searchDebounce);
   searchDebounce = setTimeout(async () => {
     const q = searchInput.value.trim();
-    activeSearch = q || null;
-    searchBar.classList.toggle('active', !!activeSearch);
-    offset = 0; total = 0;
+    query.search = q || null;
+    searchBar.classList.toggle('active', !!query.search);
+    resetPaging();
     await loadPosts(true);
   }, 300);
 });
@@ -544,9 +512,9 @@ searchInput.addEventListener('keydown', e => {
 
 searchClear.addEventListener('click', async () => {
   searchInput.value = '';
-  activeSearch = null;
+  query.search = null;
   searchBar.classList.remove('active');
-  offset = 0; total = 0;
+  resetPaging();
   await loadPosts(true);
   searchInput.focus();
 });
@@ -606,7 +574,7 @@ function renderTags(tags) {
 
 function makeTagItem(label, value, count) {
   const el = document.createElement('div');
-  el.className = 'tag-item' + (activeTag === value ? ' active' : '');
+  el.className = 'tag-item' + (query.tag === value ? ' active' : '');
   const renameBtn = value !== null ? `<button class="tag-rename" title="Rename">✏︎</button>` : '';
   const configBtn = value !== null ? `<button class="tag-config-btn" title="Configure">⚙</button>` : '';
   el.innerHTML = `<span class="tag-name">${escHtml(label)}</span>${renameBtn}${configBtn}<span class="tag-count">${count}</span>`;
@@ -638,7 +606,7 @@ function setSidebarMode(mode) {
   attachmentsView.style.display = files ? '' : 'none';
   newPostBtn.style.display = files ? 'none' : '';
   if (files) loadMoreWrap.style.display = 'none';
-  else if (offset < total) loadMoreWrap.style.display = 'block';
+  else if (query.offset < query.total) loadMoreWrap.style.display = 'block';
   if (mode === 'tags') loadTags();
   else if (mode === 'tree') loadFolders();
   else loadAttachments();
@@ -654,14 +622,16 @@ async function loadFolders() {
 
 function renderFolders(folders) {
   tagList.innerHTML = '';
-  const total = folders.reduce((s, f) => s + f.count, 0);
-  tagList.appendChild(makeFolderItem('all', null, total));
+  // Local: the folder-count sum for the "all" row, unrelated to query.total
+  // (which is the feed's result count). It shadowed the old global `total`.
+  const allCount = folders.reduce((s, f) => s + f.count, 0);
+  tagList.appendChild(makeFolderItem('all', null, allCount));
   folders.forEach(f => tagList.appendChild(makeFolderItem(f.folder, f.folder, f.count)));
 }
 
 function makeFolderItem(label, value, count) {
   const el = document.createElement('div');
-  el.className = 'tag-item folder-item' + (activeFolder === value ? ' active' : '');
+  el.className = 'tag-item folder-item' + (query.folder === value ? ' active' : '');
   el.dataset.folder = value === null ? '__all__' : value;
   const ico = value === null ? '' : '<span class="folder-ico">▸</span>';
   el.innerHTML = `<span class="tag-name">${ico}${escHtml(label)}</span><span class="tag-count">${count}</span>`;
@@ -671,7 +641,7 @@ function makeFolderItem(label, value, count) {
 
 async function selectFolder(folder) {
   closeSidebar();
-  activeFolder = folder; activeTag = null; offset = 0; total = 0;
+  query.folder = folder; query.tag = null; resetPaging();
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
   const key = folder === null ? '__all__' : folder;
@@ -773,7 +743,7 @@ function startTagRename(el, oldName) {
       const data = await apiFetch(`/tags/${encodeURIComponent(oldName)}`, {
         method: 'PATCH', body: JSON.stringify({ new_name: newName }),
       });
-      if (activeTag === oldName) activeTag = newName;
+      if (query.tag === oldName) query.tag = newName;
       renderTags(data.tags);
     } catch (e) { alert(`Rename failed: ${e.message}`); cancelRename(); }
   }
@@ -842,7 +812,7 @@ function startTagConfig(el, tagName) {
 
 async function selectTag(tag) {
   closeSidebar();
-  activeTag = tag; activeFolder = null; offset = 0; total = 0;
+  query.tag = tag; query.folder = null; resetPaging();
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
   tagList.querySelectorAll('.tag-item').forEach(el => {
@@ -858,15 +828,15 @@ async function selectTag(tag) {
 async function loadPosts(replace = false) {
   if (!authed) return;
   try {
-    const params = new URLSearchParams({ limit: LIMIT, offset });
-    params.set('sort', sortField);
-    params.set('order', sortOrder);
-    if (activeTag) params.set('tag', activeTag);
-    if (activeFolder) params.set('folder', activeFolder);
-    if (activeSearch) params.set('search', activeSearch);
+    const params = new URLSearchParams({ limit: LIMIT, offset: query.offset });
+    params.set('sort', prefs.sortField);
+    params.set('order', prefs.sortOrder);
+    if (query.tag) params.set('tag', query.tag);
+    if (query.folder) params.set('folder', query.folder);
+    if (query.search) params.set('search', query.search);
     const data = await apiFetch(`/posts?${params}`);
-    total = data.total;
-    offset += data.items.length;
+    query.total = data.total;
+    query.offset += data.items.length;
 
     if (replace) { feed.innerHTML = ''; clearNewPostsPill(); }
 
@@ -876,7 +846,7 @@ async function loadPosts(replace = false) {
       feed.appendChild(pin);
     }
 
-    if (data.items.length === 0 && offset === 0 && !data.pinned) {
+    if (data.items.length === 0 && query.offset === 0 && !data.pinned) {
       feed.innerHTML = `
         <div class="empty">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -891,7 +861,7 @@ async function loadPosts(replace = false) {
         feed.appendChild(el);
       });
     }
-    loadMoreWrap.style.display = offset < total ? 'block' : 'none';
+    loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
   } catch (e) {
     if (replace) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${e.message}</p></div>`;
   }
@@ -902,7 +872,7 @@ loadMoreBtn.addEventListener('click', () => loadPosts(false));
 /* Infinite scroll: auto-load the next page as the feed bottom nears view.
    The Load more button stays as a fallback (short feeds that never scroll). */
 feed.addEventListener('scroll', () => {
-  if (loadingMore || offset >= total) return;
+  if (loadingMore || query.offset >= query.total) return;
   if (feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 300) {
     loadingMore = true;
     loadPosts(false).finally(() => { loadingMore = false; });
@@ -1017,8 +987,8 @@ function renderPost(post) {
     if (!confirm('Delete this post?')) return;
     try {
       await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
-      el.remove(); total--;
-      loadMoreWrap.style.display = offset < total ? 'block' : 'none';
+      el.remove(); query.total--;
+      loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
       refreshSidebarCounts();
     } catch {}
   });
@@ -1106,8 +1076,8 @@ function rewirePost(el, post) {
     if (!confirm('Delete this post?')) return;
     try {
       await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
-      el.remove(); total--;
-      loadMoreWrap.style.display = offset < total ? 'block' : 'none';
+      el.remove(); query.total--;
+      loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
       refreshSidebarCounts();
     } catch {}
   });
@@ -1119,7 +1089,7 @@ function connectSSE() {
   if (es) { es.close(); es = null; }
   if (!authed) return;
   const params = new URLSearchParams();
-  if (activeTag) params.set('tag', activeTag);
+  if (query.tag) params.set('tag', query.tag);
   const qs = params.toString();
   es = new EventSource(`/events${qs ? '?' + qs : ''}`);
 
@@ -1140,17 +1110,17 @@ function connectSSE() {
     el.classList.add('new');
     if (existing) {
       if (existing.classList.contains('pinned')) el.classList.add('pinned');
-      existing.replaceWith(el);   // edit: update in place (don't bump total)
+      existing.replaceWith(el);   // edit: update in place (don't bump query.total)
     } else if (isDefaultSort()) {
       const empty = feed.querySelector('.empty');
       if (empty) empty.remove();
       const pinnedEl = feed.querySelector('.post.pinned');
       if (pinnedEl) pinnedEl.after(el); else feed.prepend(el);  // keep master on top
-      total++;
+      query.total++;
     } else {
       // Non-default sort: the new post doesn't belong at the top — count it and
       // let the user pull it in via the pill rather than misplacing the card.
-      total++;
+      query.total++;
       bumpNewPostsPill();
     }
     scheduleLoadTags();
@@ -1161,7 +1131,7 @@ function connectSSE() {
     const card = feed.querySelector(`[data-id="${id}"]`);
     if (!card) return;            // idempotent: already gone (e.g. we deleted it)
     card.remove();
-    total = Math.max(0, total - 1);
+    query.total = Math.max(0, query.total - 1);
     if (_modalPost && _modalPost.id === id) closePostModal();
     scheduleLoadTags();
   });
@@ -1283,8 +1253,8 @@ pmDelete.addEventListener('click', async () => {
     await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
     closePostModal();
     const card = feed.querySelector(`[data-id="${post.id}"]`);
-    if (card) { card.remove(); total--; }
-    loadMoreWrap.style.display = offset < total ? 'block' : 'none';
+    if (card) { card.remove(); query.total--; }
+    loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
     await loadTags();
   } catch {}
 });
