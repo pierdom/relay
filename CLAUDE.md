@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 269 tests (incl. 11 browser smokes)
+uv run pytest -q                # 275 tests (incl. 14 browser smokes)
 uv run ruff check .             # lint — config in pyproject.toml
 uv run playwright install chromium           # once, for the tests/ui browser smokes
 ```
@@ -35,6 +35,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 | POST/GET | /posts | Publish / list posts (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`; master pinned on home feed). `sort` = `updated` (default, last-modified via `COALESCE(updated_at, created_at)`) or `created`; an **externally-edited** note (Obsidian/nvim leaves front-matter alone) takes its `updated_at` from the file's **mtime** — `vault.effective_updated_at`, applied by both the watcher and the startup rebuild, with a 2s slack so a fresh write never reads as an edit; `order` = `desc` (default) or `asc`; an FTS `search` ranks by bm25 first, then `sort`/`order` as tiebreak. `summary=true` → metadata-only items (`PostSummary`: id/title/tags/folder + plain-text `excerpt`, no `content`); REST default `false` (UI feed renders content inline), MCP `list_posts` default `true` |
 | GET/PATCH/DELETE | /posts/{id} | Get / update (partial) / delete a post |
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |
+| GET | /posts/{id}/history/{sha} | The post **as it was** at one revision (title/content/tags) so a restore can be previewed; works for a deleted post; short sha accepted |
 | GET/POST | /posts/{id}/history · /posts/{id}/restore | Revisions from vault history (works for a **deleted** post — `exists:false`) / roll back to a `sha`, recreating if deleted. 503 when history is off |
 | GET | /links | (id, title) index — clients resolve `[[Title]]` wikilinks with this |
 | GET | /folders | First-level folders with post counts |
@@ -205,6 +206,7 @@ Single-page app on the REST API + SSE.
 - **ES modules, no build step.** `main.js` is loaded with `<script type="module">` and imports `./util.js` (pure helpers), `./api.js`, `./status.js`. Native ESM keeps the zero-dependency, no-bundler posture — there is no `package.json` for the app itself. Two consequences to respect: **nothing is on `window` any more** (safe here only because the markup carries no inline `on*` handlers — check before adding one), and **an imported binding is read-only**, so shared mutable state cannot be an `export let`. `api.js` owns `apiKey` privately behind `setApiKey`/`clearApiKey` for exactly that reason; the remaining cross-section state (`authed`, `activeTag`, `offset`, …) is why `main.js` is still ~1,300 lines and is the next thing to untangle.
 - **Shared state is owned, not global.** `feed-query.js` exports a `query` object (`tag`, `folder`, `search`, `offset`, `total`) plus `resetPaging()`; `view-prefs.js` owns the list⇄grid mode and sort field/order together with their `localStorage` keys, and takes a reload callback so it knows *when* to reload without knowing *how*. These were six top-level `let`s reachable from every section — naming the concept (the query the feed is showing) is what removed the coupling. State rides on an exported **object** because an imported binding is read-only; `api.js` uses private state + setters for the same reason.
 - **Splitting further:** extract along the section markers in `main.js`, one module per PR, and run `tests/ui` after each. A module that owns DOM should wire its own controls and export only what another module genuinely calls (`status.js` exports `closeStatusModal`/`isStatusOpen` purely so the single Escape handler keeps its original priority over the post modal). **Renaming a global into a property is not safe as a blind find-and-replace** — a local `const total` shadowed one and became `const query.total`, and an object shorthand `{ limit, offset }` became invalid syntax. Reverse the renames and diff against the original to prove nothing else moved. Still un-owned in `main.js`: `authed`, `sidebarMode`, `attachFolder`, `es`.
+- **History panel:** a 🕑 History button in the post modal opens a revision list over `GET /posts/{id}/history`. **Preview then restore** — selecting a revision fetches its body via `/history/{sha}` and only then offers Restore, because the listing is metadata-only and picking a sha blind is a poor way to undo something. Restore confirms, then reloads the feed. Bodies render with `textContent`, never `innerHTML`. **Limitation:** the entry point is the post modal, so the UI can only reach history for a post that still *exists* — recovering a **deleted** post remains a REST/MCP job (or `docs/recovery.md`).
 - **Status panel:** a header `i` button (shown once authed, alongside `+ New Post`) opens a narrow read-only modal over `GET /status` — a **Health** block with coloured dots (history `bad` when git is missing, since writes are then unrecoverable; search and watcher `warn` when degraded), then Vault and Server details. Built with `textContent`/`createElement` throughout, never `innerHTML`, since it renders server-provided strings like the vault path. Reuses `.pm-backdrop` and the `modalIn` keyframes; `fmtBytes` is shared with the attachments gallery.
 - **Responsive:** sidebar → slide-in drawer on mobile (≤768px); on desktop a header toggle collapses it to zero width, persisted in `localStorage`. The status modal becomes a bottom sheet at ≤768px like the post modal.
 
@@ -253,7 +255,7 @@ relay_mcp/server.py            # Legacy stdio MCP proxy (REST client)
 relay/static/index.html        # Browser UI — markup only (185 lines)
 relay/static/ui/app.css        # UI stylesheet          → /static/app.css
 relay/static/ui/js/main.js     # App entry point (ES module) → /static/js/main.js
-relay/static/ui/js/{util,api,status,feed-query,view-prefs}.js   # Extracted modules
+relay/static/ui/js/{util,api,status,feed-query,view-prefs,post-history}.js   # Extracted modules
 relay_tui/                      # Textual TUI — app.py · api.py · sse.py · theme.py · palettes/ · widgets/
 scripts/export_vault.py        # Operator tool: pull a live relay into a fresh vault (see below)
 ```

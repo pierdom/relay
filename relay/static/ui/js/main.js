@@ -15,6 +15,7 @@
 import { apiFetch, apiSend, clearApiKey, setApiKey } from './api.js';
 import { closeStatusModal, isStatusOpen } from './status.js';   // also self-wires its own controls
 import { query, resetPaging } from './feed-query.js';
+import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
 import { escHtml, fmtBytes, relativeTime, toDatetimeLocal, toUtcIso } from './util.js';
 const LIMIT = 20;
@@ -1240,6 +1241,15 @@ pmHeader.addEventListener('touchend', () => {
   pmInner.style.transform = '';
   if (_swipeDeltaY > 72) closePostModal();
 });
+// History opens over the post modal (which stays behind it), so returning from a
+// revision leaves you where you were.
+const pmHistory = document.getElementById('pmHistory');
+pmHistory.addEventListener('click', () => {
+  const post = _modalPost; if (!post) return;
+  openPostHistory(post.id, post.title);
+});
+initPostHistory(() => { resetPaging(); loadPosts(true); });
+
 pmEdit.addEventListener('click', () => {
   const post = _modalPost; if (!post) return;
   closePostModal();
@@ -1260,6 +1270,7 @@ pmDelete.addEventListener('click', async () => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && isStatusOpen()) { closeStatusModal(); return; }
+  if (e.key === 'Escape' && isHistoryOpen()) { closeHistoryModal(); return; }
   if (e.key === 'Escape' && postModal.classList.contains('open')) closePostModal();
 });
 

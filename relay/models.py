@@ -337,6 +337,21 @@ class PostRevision(BaseModel):
     path: str
 
 
+class PostRevisionContent(BaseModel):
+    """A post as it was at one revision — the payload behind a restore preview."""
+
+    id: int
+    sha: str
+    short_sha: str
+    when: str
+    message: str
+    path: str
+    title: str
+    content: str
+    tags: list[str]
+    source: str | None
+
+
 class PostHistoryResponse(BaseModel):
     id: int
     exists: bool = Field(description="False when the post is deleted but recoverable")

@@ -129,8 +129,12 @@ def test_status_panel_reports_version_and_health(page):
     text = body.inner_text()
     for label in ("Vault history", "Full-text search", "External edits", "Posts", "Uptime"):
         assert label in text, f"status panel missing {label!r}"
-    # history is off in this deployment, so its dot must read as a fault
-    assert body.locator(".sm-dot.bad").count() == 1
+    # The suite runs with RELAY_HISTORY_ENABLED=true (the post-history panel needs
+    # real revisions) and CI installs git, so all three health dots should be green.
+    # A `bad` dot here means the server genuinely lost a capability.
+    assert body.locator(".sm-dot").count() == 3
+    assert body.locator(".sm-dot.bad").count() == 0, "a health check regressed"
+    assert body.locator(".sm-dot.ok").count() == 3
     page.locator("#smClose").click()
     page.locator("#statusModal.open").wait_for(state="detached", timeout=5_000)
 
@@ -192,3 +196,79 @@ def test_stylesheet_is_served_and_applied(page, relay_server):
     )
     assert "Plex" in applied["font"] or "mono" in applied["font"].lower(), applied["font"]
     assert applied["radius"] and applied["radius"] != "0px", "cards lost their border radius"
+
+
+# ── post history panel ───────────────────────────────────────────────────────
+
+
+def test_history_panel_lists_revisions_and_previews_one(page, relay_server):
+    post = _api_post(relay_server, {"title": "Revised Note", "content": "first draft", "tags": ["homelab"]})
+    page.reload()
+    page.get_by_text("Revised Note").first.wait_for(timeout=10_000)
+    page.get_by_text("Revised Note").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmHistory").click()
+
+    page.locator("#historyModal.open").wait_for(timeout=10_000)
+    rows = page.locator("#hmBody .hm-rev")
+    rows.first.wait_for(timeout=10_000)
+    assert rows.count() >= 1
+    assert f"#{post['id']}" in page.locator("#hmTitle").inner_text()
+
+    rows.first.click()
+    page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
+    assert "first draft" in page.locator("#hmBody .hm-body-text").inner_text()
+    assert page.locator(".hm-restore").is_visible()
+
+
+def test_restoring_from_the_panel_undoes_a_clobber(page, relay_server):
+    """The whole point, end to end and through the browser."""
+    post = _api_post(relay_server, {"title": "Clobbered Note", "content": "THE GOOD VERSION", "tags": ["homelab"]})
+    pid = post["id"]
+    req = urllib.request.Request(
+        f"{relay_server}/posts/{pid}",
+        data=json.dumps({"content": "ruined by a bad rewrite"}).encode(),
+        headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+        method="PATCH",
+    )
+    urllib.request.urlopen(req, timeout=10)
+
+    page.reload()
+    page.get_by_text("Clobbered Note").first.wait_for(timeout=10_000)
+    page.get_by_text("Clobbered Note").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmHistory").click()
+    page.locator("#historyModal.open").wait_for(timeout=10_000)
+
+    # oldest revision = the create, before the clobber
+    rows = page.locator("#hmBody .hm-rev")
+    rows.first.wait_for(timeout=10_000)
+    rows.last.click()
+    page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
+    assert "THE GOOD VERSION" in page.locator("#hmBody .hm-body-text").inner_text()
+
+    page.on("dialog", lambda d: d.accept())
+    page.locator(".hm-restore").click()
+    page.locator("#historyModal.open").wait_for(state="detached", timeout=10_000)
+
+    # the feed reloads, and the good body is back
+    page.wait_for_function(
+        """(id) => {
+            const card = document.querySelector(`[data-id="${id}"]`);
+            return card && card.textContent.includes('THE GOOD VERSION');
+        }""",
+        arg=pid,
+        timeout=15_000,
+    )
+
+
+def test_history_panel_closes_on_escape(page):
+    page.locator(".feed .post").first.wait_for(timeout=10_000)
+    page.get_by_text("Smoke Post 0").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmHistory").click()
+    page.locator("#historyModal.open").wait_for(timeout=10_000)
+    page.keyboard.press("Escape")
+    page.locator("#historyModal.open").wait_for(state="detached", timeout=5_000)
+    # the post modal it opened over is still there
+    assert page.locator("#postModal.open").count() == 1

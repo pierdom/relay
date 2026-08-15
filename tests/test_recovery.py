@@ -248,3 +248,40 @@ async def test_a_new_post_can_no_longer_inherit_a_deleted_posts_id(client):
     )
     assert back.status_code == 200
     assert "OLD POST CONTENT" in back.json()["content"]
+
+
+# ── previewing a revision ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_revision_preview_returns_the_body_at_that_point(client):
+    """So a restore can be inspected before it is taken on faith."""
+    post = await _create(client, "Previewable", content="the original body")
+    pid = post["id"]
+    sha = (await _history(client, pid))["items"][0]["sha"]
+    await client.patch(f"/posts/{pid}", json={"content": "replaced"}, headers=AUTH)
+
+    r = await client.get(f"/posts/{pid}/history/{sha}", headers=AUTH)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert "the original body" in d["content"]
+    assert d["title"] == "Previewable" and d["sha"] == sha and d["tags"] == ["homelab"]
+    # and the live post is untouched by looking at it
+    assert "replaced" in (await client.get(f"/posts/{pid}", headers=AUTH)).json()["content"]
+
+
+@pytest.mark.asyncio
+async def test_revision_preview_works_for_a_deleted_post(client):
+    post = await _create(client, "Preview After Delete", content="worth seeing again")
+    pid = post["id"]
+    await client.delete(f"/posts/{pid}", headers=AUTH)
+    sha = (await _history(client, pid))["items"][0]["short_sha"]
+
+    d = (await client.get(f"/posts/{pid}/history/{sha}", headers=AUTH)).json()
+    assert "worth seeing again" in d["content"]
+
+
+@pytest.mark.asyncio
+async def test_revision_preview_rejects_an_unknown_sha(client):
+    post = await _create(client, "No Such Rev")
+    assert (await client.get(f"/posts/{post['id']}/history/deadbeef", headers=AUTH)).status_code == 404
