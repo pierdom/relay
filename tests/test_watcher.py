@@ -150,3 +150,49 @@ async def test_front_matter_stamp_wins_when_file_is_untouched(client):
     path = await _path_of(client, pid)
     meta, _ = vault.read_file(path)
     assert vault.effective_updated_at(path, meta) == stamped
+
+
+# ── restoring a deleted note (the recovery path) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_byte_identical_restore_of_a_deleted_note_is_reindexed(client):
+    """Recovery must work when the restored bytes are *identical* to what relay
+    last wrote — the normal case for `git checkout` out of the history repo.
+
+    Self-write suppression keys on (path, content hash); leaving that entry behind
+    after a delete made the restore look like relay's own write, so the note came
+    back on disk but never re-entered the index.
+    """
+    r = await client.post(
+        "/posts", json={"title": "Doomed", "content": "irreplaceable", "tags": ["homelab"]}, headers=AUTH
+    )
+    pid = r.json()["id"]
+    path = await _path_of(client, pid)
+    saved = path.read_bytes()  # exactly what relay wrote
+
+    assert (await client.delete(f"/posts/{pid}", headers=AUTH)).status_code == 204
+    assert (await client.get(f"/posts/{pid}", headers=AUTH)).status_code == 404
+
+    path.write_bytes(saved)  # what `git checkout <sha> -- <path>` does
+    db = await _db()
+    try:
+        await watcher._reconcile_file(db, path)
+    finally:
+        await db.close()
+
+    got = await client.get(f"/posts/{pid}", headers=AUTH)
+    assert got.status_code == 200, "restored note never re-entered the index"
+    assert got.json()["id"] == pid, "restore did not keep the original id"
+    assert "irreplaceable" in got.json()["content"]
+
+
+@pytest.mark.asyncio
+async def test_relay_own_write_is_still_suppressed(client):
+    """The eviction above must not defeat suppression for a live file — relay's
+    own writes still have to be ignored, or every write would echo back."""
+    r = await client.post(
+        "/posts", json={"title": "Live", "content": "x", "tags": ["homelab"]}, headers=AUTH
+    )
+    path = await _path_of(client, r.json()["id"])
+    assert vault.was_self_write(path, path.read_text(encoding="utf-8")) is True
