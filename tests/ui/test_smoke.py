@@ -20,6 +20,17 @@ from .conftest import API_KEY
 pytestmark = pytest.mark.ui
 
 
+def _api_patch(base_url: str, post_id: int, payload: dict) -> dict:
+    req = urllib.request.Request(
+        f"{base_url}/posts/{post_id}",
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+        method="PATCH",
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
 def _api_post(base_url: str, payload: dict) -> dict:
     req = urllib.request.Request(
         f"{base_url}/posts",
@@ -267,6 +278,55 @@ def test_restoring_from_the_panel_undoes_a_clobber(page, relay_server):
     # a `post` event for the open modal as an in-place update.
     assert page.locator("#postModal.open").count() == 1
     assert "THE GOOD VERSION" in page.locator("#pmBody").inner_text()
+
+
+def test_history_panel_does_not_resize_when_switching_revisions(page, relay_server):
+    """The panel used to be sized by its contents, so selecting a revision
+    collapsed it to the height of the loading line and re-inflated when the body
+    arrived — a visible jump on every click. Panes now exist up front and scroll
+    internally, so the shell must not move at all."""
+    post = _api_post(relay_server, {"title": "Steady Panel", "content": "SHORT", "tags": ["homelab"]})
+    _api_patch(relay_server, post["id"], {"content": "A MUCH LONGER BODY\n" * 60})
+    _api_patch(relay_server, post["id"], {"content": "tiny again"})
+
+    page.reload()
+    page.get_by_text("Steady Panel").first.wait_for(timeout=10_000)
+    page.get_by_text("Steady Panel").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmHistory").click()
+    page.locator("#historyModal.open").wait_for(timeout=10_000)
+    page.locator("#hmBody .hm-rev").first.wait_for(timeout=10_000)
+    page.wait_for_timeout(400)  # let the 0.18s modalIn entry animation settle
+
+    def size():
+        box = page.locator(".hm-inner").bounding_box()
+        return (round(box["width"]), round(box["height"]))
+
+    seen = {size()}
+    rows = page.locator("#hmBody .hm-rev")
+    assert rows.count() >= 3, "need several revisions of differing length"
+    for i in range(rows.count()):
+        rows.nth(i).click()
+        page.wait_for_timeout(120)   # catch it mid-load, where the collapse used to happen
+        seen.add(size())
+        page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
+        seen.add(size())
+    assert len(seen) == 1, f"panel changed size while switching revisions: {sorted(seen)}"
+
+
+def test_history_panel_keeps_the_revision_list_visible_while_previewing(page):
+    """Two panes, not a stacked list-then-preview: the list has to stay on screen
+    so versions can actually be compared."""
+    page.locator(".feed .post").first.wait_for(timeout=10_000)
+    page.get_by_text("Smoke Post 0").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmHistory").click()
+    page.locator("#historyModal.open").wait_for(timeout=10_000)
+    rows = page.locator("#hmBody .hm-rev")
+    rows.first.wait_for(timeout=10_000)
+    rows.first.click()
+    page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
+    assert rows.first.is_visible(), "the revision list was pushed out of view by the preview"
 
 
 def test_history_panel_closes_on_escape(page):
