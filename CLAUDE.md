@@ -2,7 +2,7 @@
 
 Personal knowledge base kept as a plain-Markdown, **Obsidian-compatible vault** with an AI-integration layer on top. AI agents publish/query/subscribe over MCP, REST, and SSE; humans edit the *same* files in Obsidian/nvim or the browser/terminal UIs. Posts are tagged, filed into first-level folders, cross-linked (`[[wikilinks]]`/`#id`), and can expire via configurable TTL.
 
-**Storage** (`RELAY_VAULT_PATH`): one `.md` file per post — the title *is* the filename, metadata in YAML front-matter (`id`, `tags`, `source`, timestamps, `expires_at`; **no `title`**). Files are canonical; a disposable **SQLite index** at `<vault>/.relay/index.db` mirrors them for fast queries and is rebuilt from files at startup. A `watchdog` watcher live-reindexes external edits (Obsidian/nvim) and pushes them via SSE. `id` in front-matter is authoritative and survives renames; `title` is required; everything is Markdown (no `format` field).
+**Storage** (`RELAY_VAULT_PATH`): one `.md` file per post — the title *is* the filename, metadata in YAML front-matter (`id`, `tags`, `source`, timestamps, `expires_at`; **no `title`**). Files are canonical; a disposable **SQLite index** at `<vault>/.relay/index.db` mirrors them for fast queries and is rebuilt from files at startup. A `watchdog` watcher live-reindexes external edits (Obsidian/nvim) and pushes them via SSE. `id` in front-matter is authoritative and survives renames; `title` is required; everything is Markdown (no `format` field). **Ids are monotonic and never reused:** a high-water mark in `<vault>/.relay/last_id` (durable, like `oauth.db`/`history.git`) is maxed with the live table on every allocation. Without it `MAX(id)+1` handed a deleted post's id straight to the next one created, silently repointing every `#id` cross-link at unrelated content and making a post's history ambiguous. Seeded from the files present when the counter is absent, so existing vaults upgrade cleanly; a failed create burns an id rather than risking reuse, so ids are not contiguous.
 
 **Folders** (`relay/folders.py`): one folder per domain (`Homelab/`, `Radio/`, `Finance/`, … plus `Meta/`, `Digests/`, `Inbox/`); master doc (#0) at the root. Folders are a browse aid — **tags stay primary for navigation**. Placement is *derived* from the **first domain tag** at creation, not stored, and never auto-moved on retag — **except** a tag-less note in `Inbox` (the unfiled bucket): when it gains its first domain tag, relay moves it (and its own attachments) into that domain folder. Moves only ever go *out of* Inbox; real folders stay human-owned (move a file in Obsidian and relay preserves it). Scans are recursive; nesting is one level.
 
@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 242 tests
+uv run pytest -q                # 249 tests
 uv run ruff check .             # lint — config in pyproject.toml
 ```
 
@@ -213,7 +213,7 @@ relay/
 ├── frontmatter.py # YAML front-matter + Obsidian filename rules (sanitize, collision suffix)
 ├── folders.py     # Folder placement policy (primary domain tag → folder)
 ├── links.py       # Wikilink/#id resolver + rename rewrite
-├── vault.py       # Canonical file layer: posts + attachments, id allocation, index rebuild, tags.yml
+├── vault.py       # Canonical file layer: posts + attachments, monotonic id allocation, index rebuild, tags.yml
 ├── watcher.py     # watchdog: external edits → reindex + SSE (self-write suppressed)
 ├── history.py     # git commit per write → <vault>/.relay/history.git (detached git-dir, vault as work-tree)
 ├── service.py     # Shared post/tag/attachment logic — file-first via vault, then mirror to index

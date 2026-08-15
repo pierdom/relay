@@ -215,3 +215,36 @@ async def test_restoring_into_a_taken_filename_does_not_clobber_the_occupant(cli
     kept = await client.get(f"/posts/{squatter['id']}", headers=AUTH)
     assert kept.status_code == 200, "restore deleted the post that had taken the filename"
     assert "moved in afterwards" in kept.json()["content"]
+
+
+@pytest.mark.asyncio
+async def test_a_new_post_can_no_longer_inherit_a_deleted_posts_id(client):
+    """The root fix for the hazard `_truncate_at_creation` guards against.
+
+    Ids are monotonic now, so a successor can't take a deleted post's id even when
+    it takes the same title — which is what previously let a restore write a
+    previous holder's body into the live post. The truncation guard stays as
+    defence in depth for a vault whose counter is lost.
+    """
+    old = await _create(client, "Shared Name", content="OLD POST CONTENT")
+    await client.delete(f"/posts/{old['id']}", headers=AUTH)
+    new = await _create(client, "Shared Name", content="NEW POST CONTENT")
+    assert new["id"] != old["id"], "successor inherited the deleted post's id"
+
+    # the live post's history holds only its own revisions
+    items = (await _history(client, new["id"]))["items"]
+    assert items
+    restored = await client.post(
+        f"/posts/{new['id']}/restore", json={"sha": items[-1]["sha"]}, headers=AUTH
+    )
+    assert "NEW POST CONTENT" in restored.json()["content"]
+    assert "OLD POST CONTENT" not in restored.json()["content"]
+
+    # and the deleted post's own history is still intact and separately restorable
+    old_items = (await _history(client, old["id"]))["items"]
+    assert old_items, "the deleted post lost its history"
+    back = await client.post(
+        f"/posts/{old['id']}/restore", json={"sha": old_items[0]["sha"]}, headers=AUTH
+    )
+    assert back.status_code == 200
+    assert "OLD POST CONTENT" in back.json()["content"]
