@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 268 tests (incl. 10 browser smokes)
+uv run pytest -q                # 269 tests (incl. 11 browser smokes)
 uv run ruff check .             # lint — config in pyproject.toml
 uv run playwright install chromium           # once, for the tests/ui browser smokes
 ```
@@ -201,7 +201,9 @@ Single-page app on the REST API + SSE.
 - **Sidebar tabs — Tags / Tree / Files:** Tags filters by tag (create/rename/⚙ expiry); Tree filters the feed by folder (`GET /folders`); **Files** swaps the feed for an attachment gallery (thumbnails/chips, folder filter, click-to-enlarge lightbox, delete). Tag and folder filters are mutually exclusive.
 - **Search:** debounced bar over the feed (title/content/source), combinable with a tag filter. The same bar holds the **sort control** (Updated/Created field + ↓/↑ direction toggle) and the list/grid view toggle; sort + view are persisted in `localStorage` (default: updated · desc).
 - **Grid tiles are the tight constraint.** A tile is fixed-height with a `1fr` inner track, and a `1fr` track's automatic minimum is its items' *min-content* width — so any child that can't shrink (a `nowrap` source, a `nowrap` table) widens the track past the card border and everything inside then paints outside the frame. Every card grid area therefore carries `min-width: 0`; the source ellipsizes; feed tables use `table-layout: fixed` with wrapping cells (the modal keeps `nowrap` + `.table-scroll`). The footer drops what a tile has no room for — the created stamp when an edit stamp is present, the button captions, the body's `Last updated:` chunk — via CSS only, since the view toggle swaps a class on `.feed` and never re-renders. **Check any new card element against a narrow tile.**
-- **File layout.** The UI is being split up incrementally. `relay/static/ui/` is mounted at `/static` (public, like `/assets`, which stays brand-marks-only); the stylesheet lives there as `app.css` and JS modules will follow. `index.html` keeps the markup, the app script, and the **before-paint theme script**, which must stay inline — it sets `data-theme` before the first paint and cannot move to an external file without a flash.
+- **File layout.** `index.html` is now **185 lines of markup**; everything else lives under `relay/static/ui/`, mounted at `/static` (public, like `/assets`, which stays brand-marks-only). The only inline script left is the **before-paint theme script**, which sets `data-theme` before the first paint and cannot move without a flash.
+- **ES modules, no build step.** `main.js` is loaded with `<script type="module">` and imports `./util.js` (pure helpers), `./api.js`, `./status.js`. Native ESM keeps the zero-dependency, no-bundler posture — there is no `package.json` for the app itself. Two consequences to respect: **nothing is on `window` any more** (safe here only because the markup carries no inline `on*` handlers — check before adding one), and **an imported binding is read-only**, so shared mutable state cannot be an `export let`. `api.js` owns `apiKey` privately behind `setApiKey`/`clearApiKey` for exactly that reason; the remaining cross-section state (`authed`, `activeTag`, `offset`, …) is why `main.js` is still ~1,300 lines and is the next thing to untangle.
+- **Splitting further:** extract along the section markers in `main.js`, one module per PR, and run `tests/ui` after each. A module that owns DOM should wire its own controls and export only what another module genuinely calls (`status.js` exports `closeStatusModal`/`isStatusOpen` purely so the single Escape handler keeps its original priority over the post modal).
 - **Status panel:** a header `i` button (shown once authed, alongside `+ New Post`) opens a narrow read-only modal over `GET /status` — a **Health** block with coloured dots (history `bad` when git is missing, since writes are then unrecoverable; search and watcher `warn` when degraded), then Vault and Server details. Built with `textContent`/`createElement` throughout, never `innerHTML`, since it renders server-provided strings like the vault path. Reuses `.pm-backdrop` and the `modalIn` keyframes; `fmtBytes` is shared with the attachments gallery.
 - **Responsive:** sidebar → slide-in drawer on mobile (≤768px); on desktop a header toggle collapses it to zero width, persisted in `localStorage`. The status modal becomes a bottom sheet at ≤768px like the post modal.
 
@@ -247,8 +249,10 @@ relay/
 ├── status.py      # Runtime diagnostics for /status + get_status (shared counts with /metrics)
 └── routes/        # posts · tags · attachments · folders · links · events · metrics (thin — delegate to service)
 relay_mcp/server.py            # Legacy stdio MCP proxy (REST client)
-relay/static/index.html        # Browser UI (markup + app JS)
-relay/static/ui/app.css        # UI stylesheet, served at /static/app.css
+relay/static/index.html        # Browser UI — markup only (185 lines)
+relay/static/ui/app.css        # UI stylesheet          → /static/app.css
+relay/static/ui/js/main.js     # App entry point (ES module) → /static/js/main.js
+relay/static/ui/js/{util,api,status}.js   # Extracted modules
 relay_tui/                      # Textual TUI — app.py · api.py · sse.py · theme.py · palettes/ · widgets/
 scripts/export_vault.py        # Operator tool: pull a live relay into a fresh vault (see below)
 ```

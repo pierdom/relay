@@ -135,6 +135,22 @@ def test_status_panel_reports_version_and_health(page):
     page.locator("#statusModal.open").wait_for(state="detached", timeout=5_000)
 
 
+def test_status_panel_closes_on_backdrop_and_escape(page):
+    """Its close paths live in a different module from the key handler that calls
+    them, so they are worth pinning explicitly rather than assuming."""
+    page.locator("#statusBtn").click()
+    page.locator("#statusModal.open").wait_for(timeout=10_000)
+    # Near the corner: the backdrop spans the viewport but its centre sits behind
+    # the panel, so a default (centre) click is intercepted by .sm-inner.
+    page.locator("#smBackdrop").click(position={"x": 5, "y": 5})
+    page.locator("#statusModal.open").wait_for(state="detached", timeout=5_000)
+
+    page.locator("#statusBtn").click()
+    page.locator("#statusModal.open").wait_for(timeout=10_000)
+    page.keyboard.press("Escape")
+    page.locator("#statusModal.open").wait_for(state="detached", timeout=5_000)
+
+
 def test_sidebar_tabs_switch_views(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
     page.locator("#tabTree").click()

@@ -87,7 +87,7 @@ Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the work
 
 ```bash
 uv sync --all-extras --dev   # install (uv only — never pip)
-uv run pytest -q             # 268 tests (incl. 10 browser smokes)
+uv run pytest -q             # 269 tests (incl. 11 browser smokes)
 uv run ruff check .          # lint (config in pyproject.toml)
 ```
 
