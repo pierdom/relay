@@ -765,15 +765,45 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 }
 
 /* ── Tag config inline form ──────────────────────────── */
+/* The row is a flex container, so its child's automatic minimum is min-content —
+   and `datetime-local` has a wide one (the mm/dd/yyyy, --:-- -- placeholder plus
+   the picker icon). Without min-width:0 the form refused to shrink and spilled
+   out of the sidebar, taking its controls off-screen with it: the same automatic
+   minimum that bites the grid tiles. `tag-editing` drops the row out of flex
+   layout entirely while a form is in it. */
+/* Last-resort clip: even if some future control has an intrinsic minimum wider
+   than the sidebar, it is scrolled rather than painted over the feed. */
+.tag-list { overflow-x: hidden; }
+.tag-item.tag-editing {
+  display: block; padding: 4px 12px 10px; cursor: default;
+  background: rgba(255,255,255,0.02);
+}
 .tag-config-form {
-  padding: 4px 12px 8px;
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 5px;
+  min-width: 0; max-width: 100%;
+}
+.tc-label {
+  font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .tag-config-form input {
   background: var(--bg); border: 1px solid var(--accent); color: var(--text);
-  border-radius: 3px; font-size: 11px; padding: 3px 6px; width: 100%;
+  border-radius: 3px; font-size: 11px; padding: 4px 6px;
+  width: 100%; min-width: 0; max-width: 100%;
   outline: none; font-family: inherit;
 }
+.tc-actions { display: flex; gap: 6px; min-width: 0; }
+.tc-actions button {
+  flex: 1; min-width: 0;
+  background: none; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--muted); font-family: inherit; font-size: 10px;
+  padding: 4px 6px; cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.tc-actions .tc-save { color: var(--accent); border-color: var(--accent-dim); }
+.tc-actions button:hover { color: var(--text); border-color: var(--accent); }
+/* The rename input lives inside the row's flex layout and needs the same escape. */
+.tag-rename-input { min-width: 0; max-width: 100%; }
 .tag-config-btn {
   background: none; border: none; cursor: pointer;
   padding: 0 1px; font-size: 10px; opacity: 0; flex-shrink: 0;

@@ -339,3 +339,110 @@ def test_history_panel_closes_on_escape(page):
     page.locator("#historyModal.open").wait_for(state="detached", timeout=5_000)
     # the post modal it opened over is still there
     assert page.locator("#postModal.open").count() == 1
+
+
+# ── tag config form (sidebar) ────────────────────────────────────────────────
+
+
+def _open_tag_config(page, tag: str):
+    row = page.locator(".tag-item", has_text=tag).first
+    row.hover()
+    row.locator(".tag-config-btn").click()
+    page.wait_for_timeout(150)
+
+
+def test_tag_config_form_stays_inside_the_sidebar(page):
+    """It used to spill out of the sidebar, taking its controls off-screen with it
+    — the row could then only be closed by reloading the page.
+
+    `datetime-local` has a wide min-content width, and a flex child's automatic
+    minimum is min-content unless `min-width: 0` says otherwise. How wide that
+    widget renders depends on browser, locale and zoom, so the sidebar is forced
+    narrow here rather than trusting this browser to reproduce it: without the
+    fix the form measures ~196px inside a 149px sidebar, with it ~123px. A test
+    that only ran at the default width passed either way and proved nothing.
+    """
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+    page.add_style_tag(
+        content="#sidebarEl, .sidebar { width: 150px !important; min-width: 150px !important; }"
+    )
+    _open_tag_config(page, "homelab")
+    page.locator(".tag-config-form").wait_for(timeout=5_000)
+
+    fits = page.evaluate(
+        """() => {
+            const bar = document.getElementById('sidebarEl');
+            const form = document.querySelector('.tag-config-form');
+            return { available: bar.clientWidth, needed: form.scrollWidth };
+        }"""
+    )
+    assert fits["needed"] <= fits["available"], (
+        f"form needs {fits['needed']}px in a {fits['available']}px sidebar — it will spill out"
+    )
+
+    overflowing = page.evaluate(
+        """() => {
+            const bar = document.getElementById('sidebarEl').getBoundingClientRect();
+            const bad = [];
+            for (const el of document.querySelectorAll('.tag-config-form, .tag-config-form *')) {
+                const r = el.getBoundingClientRect();
+                if (r.width && (r.right > bar.right + 1 || r.left < bar.left - 1)) {
+                    bad.push(`${el.className || el.tagName}: ${Math.round(r.left)}..${Math.round(r.right)}`);
+                }
+            }
+            return bad;
+        }"""
+    )
+    assert not overflowing, "tag config form spilled outside the sidebar:\n  " + "\n  ".join(overflowing)
+    assert page.locator(".tc-save").is_visible()
+    assert page.locator(".tc-cancel").is_visible()
+
+
+def test_only_one_tag_config_form_can_be_open(page):
+    """Opening a second used to stack another form over the tag list."""
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+    _open_tag_config(page, "homelab")
+    assert page.locator(".tag-config-form").count() == 1
+    _open_tag_config(page, "radio")
+    assert page.locator(".tag-config-form").count() == 1, "a second form stayed open"
+
+
+def test_tag_config_form_can_be_dismissed(page):
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+
+    _open_tag_config(page, "homelab")
+    page.locator(".tc-cancel").click()
+    page.wait_for_timeout(150)
+    assert page.locator(".tag-config-form").count() == 0, "Cancel did not close it"
+
+    _open_tag_config(page, "homelab")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(150)
+    assert page.locator(".tag-config-form").count() == 0, "Escape did not close it"
+
+    _open_tag_config(page, "homelab")
+    page.locator("#feed").click(position={"x": 5, "y": 5})
+    page.wait_for_timeout(200)
+    assert page.locator(".tag-config-form").count() == 0, "clicking away did not close it"
+
+
+def test_the_tag_row_is_restored_after_closing_its_config(page):
+    """The form replaces the row's contents, so the gear is gone while it is open
+    — that is why closing is done with Cancel/Escape/click-away rather than by
+    clicking the gear again. The row must come back intact afterwards, or the tag
+    becomes unusable until a reload."""
+    page.locator(".tag-item").first.wait_for(timeout=10_000)
+    row = page.locator(".tag-item", has_text="homelab").first
+
+    _open_tag_config(page, "homelab")
+    assert row.locator(".tag-config-btn").count() == 0, "the gear survived inside the form"
+
+    page.locator(".tc-cancel").click()
+    page.wait_for_timeout(150)
+    assert row.locator(".tag-name").inner_text() == "homelab"
+    assert row.locator(".tag-config-btn").count() == 1, "the gear did not come back"
+    assert row.locator(".tag-rename").count() == 1, "the rename control did not come back"
+
+    # and it still works a second time
+    _open_tag_config(page, "homelab")
+    assert page.locator(".tag-config-form").count() == 1

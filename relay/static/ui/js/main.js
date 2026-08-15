@@ -568,6 +568,7 @@ function scheduleLoadTags() {
 }
 
 function renderTags(tags) {
+  openTagEditor = null;   // the DOM these forms lived in is about to be replaced
   tagList.innerHTML = '';
   tagList.appendChild(makeTagItem('all', null, tags.reduce((s, t) => s + t.count, 0)));
   tags.forEach(t => tagList.appendChild(makeTagItem(t.tag, t.tag, t.count)));
@@ -727,13 +728,57 @@ function closeLightbox() { lightbox.style.display = 'none'; document.getElementB
 lightbox.addEventListener('click', closeLightbox);
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && lightbox.style.display === 'flex') closeLightbox(); });
 
+/* Only one tag editor may be open at a time.
+ *
+ * Both the rename and the TTL form replace a row's contents in place, and nothing
+ * previously closed the last one — so a second click left two forms stacked over
+ * the tag list, and the tag they belonged to was no longer readable. This tracks
+ * the open one so opening another (or clicking away, or pressing Escape) closes
+ * it first. Re-clicking the same control toggles it shut.
+ */
+let openTagEditor = null;   // { el, kind, cancel }
+
+function closeTagEditor() {
+  if (!openTagEditor) return;
+  const { cancel } = openTagEditor;
+  openTagEditor = null;
+  cancel();
+}
+
+/** True when this control was already open, meaning the click should just close it. */
+function toggledTagEditor(el, kind) {
+  if (openTagEditor && openTagEditor.el === el && openTagEditor.kind === kind) {
+    closeTagEditor();
+    return true;
+  }
+  closeTagEditor();
+  return false;
+}
+
+// Clicking anywhere outside the open editor dismisses it. Without this the only
+// way out of a form was Escape while it still had focus — click elsewhere first
+// and the row was stuck open until a page reload.
+//
+// Tag controls are exempt: closing on mousedown collapses the open row, which
+// shifts every row below it *between* mousedown and mouseup, so the click landed
+// somewhere other than the gear that was pressed and appeared to do nothing.
+// Those buttons close the previous editor themselves, after the click resolves.
+document.addEventListener('mousedown', e => {
+  if (!openTagEditor) return;
+  if (openTagEditor.el.contains(e.target)) return;
+  if (e.target.closest?.('.tag-config-btn, .tag-rename')) return;
+  closeTagEditor();
+});
+
 function startTagRename(el, oldName) {
+  if (toggledTagEditor(el, 'rename')) return;
   const nameSpan = el.querySelector('.tag-name');
   const input = document.createElement('input');
   input.className = 'tag-rename-input';
   input.value = oldName;
   nameSpan.replaceWith(input);
   input.focus(); input.select();
+  openTagEditor = { el, kind: 'rename', cancel: () => cancelRename() };
 
   let committed = false;
   async function commit() {
@@ -750,7 +795,9 @@ function startTagRename(el, oldName) {
   }
 
   function cancelRename() {
+    if (committed) return;
     committed = true;
+    if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
     const span = document.createElement('span');
     span.className = 'tag-name'; span.textContent = oldName;
     input.replaceWith(span);
@@ -764,18 +811,29 @@ function startTagRename(el, oldName) {
 }
 
 function startTagConfig(el, tagName) {
+  if (toggledTagEditor(el, 'config')) return;
   const savedHtml = el.innerHTML;
   const form = document.createElement('div');
   form.className = 'tag-config-form';
+  // Explicit Save/Cancel, not just Enter/Escape: the keyboard-only version was
+  // undiscoverable, and unreachable once focus had left the inputs.
   form.innerHTML = `
+    <div class="tc-label"></div>
     <input type="number" class="tc-ttl" placeholder="TTL hours (optional)" min="1">
-    <input type="datetime-local" class="tc-expires">`;
+    <input type="datetime-local" class="tc-expires">
+    <div class="tc-actions">
+      <button type="button" class="tc-save">Save</button>
+      <button type="button" class="tc-cancel">Cancel</button>
+    </div>`;
+  form.querySelector('.tc-label').textContent = `expiry for #${tagName}`;
   el.innerHTML = '';
+  el.classList.add('tag-editing');
   el.appendChild(form);
 
   const ttlInput = form.querySelector('.tc-ttl');
   const expiresInput = form.querySelector('.tc-expires');
   ttlInput.focus();
+  openTagEditor = { el, kind: 'config', cancel: () => cancel() };
 
   let committed = false;
   async function commit() {
@@ -795,7 +853,10 @@ function startTagConfig(el, tagName) {
   }
 
   function cancel() {
+    if (committed) return;
     committed = true;
+    if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
+    el.classList.remove('tag-editing');
     el.innerHTML = savedHtml;
     el.querySelector('.tag-rename')?.addEventListener('click', ev => {
       ev.stopPropagation(); startTagRename(el, tagName);
@@ -805,9 +866,13 @@ function startTagConfig(el, tagName) {
     });
   }
 
+  form.querySelector('.tc-save').addEventListener('click', e => { e.stopPropagation(); commit(); });
+  form.querySelector('.tc-cancel').addEventListener('click', e => { e.stopPropagation(); cancel(); });
+  // The row itself filters the feed on click; a click inside the form must not.
+  form.addEventListener('click', e => e.stopPropagation());
   form.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') cancel();
+    if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
   });
 }
 
