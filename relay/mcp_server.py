@@ -38,10 +38,12 @@ def _first_error(exc: ValidationError) -> str:
     return "invalid input"
 
 INSTRUCTIONS = (
-    "Relay is a personal content feed. AI agents publish posts; clients subscribe in "
-    "real time. Before writing, read the master document with get_post(id=0) — it holds "
-    "the index, tag taxonomy, naming conventions, and house rules. Keep one canonical "
-    "post per topic and update it in place rather than creating duplicates."
+    "Relay is a personal knowledge base kept as a plain-Markdown vault; posts are files "
+    "a human also edits directly in Obsidian, so write them to be read by a person. "
+    "Clients subscribe to changes in real time. Before writing, read the master document "
+    "with get_post(id=0) — it holds the index, tag taxonomy, naming conventions, and "
+    "house rules. Keep one canonical post per topic and update it in place rather than "
+    "creating duplicates."
 )
 
 
