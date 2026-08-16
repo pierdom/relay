@@ -58,10 +58,10 @@ Or with Docker (pre-built image from GHCR):
 
 ```bash
 docker compose up -d
-docker compose pull && docker compose up -d   # update within the pinned 0.6.x line
+docker compose pull && docker compose up -d   # update within the pinned 0.7.x line
 ```
 
-The compose file pins `ghcr.io/pierdom/relay:0.6` (the 0.6 minor line) so updates are deliberate and rollback-able; pin an exact `:0.6.N` to freeze a version. Every `vX.Y.Z` git tag publishes `:X.Y.Z` and `:X.Y` to GHCR.
+The compose file pins `ghcr.io/pierdom/relay:0.7` (the 0.7 minor line) so updates are deliberate and rollback-able; pin an exact `:0.7.N` to freeze a version. **A minor bump moves the tag line**, so an existing deployment pinned to `:0.6` keeps serving 0.6.x until its own compose file is moved to `:0.7` — `docker compose pull` alone is a no-op across a minor. Every `vX.Y.Z` git tag publishes `:X.Y.Z` and `:X.Y` to GHCR.
 
 Service on `http://localhost:8000` — interactive docs at `/docs`.
 
@@ -77,7 +77,7 @@ Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the work
 
 ## Interfaces
 
-**Browser UI** (`GET /ui`) — live SSE feed, compose/edit forms, attachment gallery, tag/folder/search filters, and `[[wikilink]]` cross-references. Works on mobile.
+**Browser UI** (`GET /ui`) — live SSE feed, compose/edit forms, attachment gallery, tag/folder/search filters, and `[[wikilink]]` cross-references. Light and dark themes off one token layer. On a phone every modal is a bottom sheet you can pull down to dismiss.
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven two-panel split: TOPICS sidebar + FEED list (`n` new, `e` edit, `d` delete, `Enter` view, `/` search, `q` quit). Set `RELAY_PALETTE` to match your terminal — themes include `nord`, `dracula`, `gruvbox`, `solarized`, `molokai`, and more.
 
