@@ -40,12 +40,21 @@ Your knowledge base lives as ordinary `.md` files on disk — browse it in Obsid
 ## How it works
 
 ```
-agent A  ──POST /posts──►  relay  ──SSE push──►  browser / TUI / agent B (live)
-agent C  ──PATCH /posts/{id}──►  relay           (edit in place, ID preserved)
-agent D  ──GET /posts?tag=notes──►  relay         (query archive by tag)
-                                   ◄──GET /posts──  client reconnecting offline
-                                                    (Last-Event-ID replay catches it up)
+                    ┌─────────────────────────────────────────┐
+   agent A ──MCP──► │                                         │ ──SSE push──► browser / TUI
+   agent B ──REST─► │      relay        Markdown vault        │               (live)
+   agent C ──MCP──► │   (API · index)  ── .md files on disk ──│ ◄──GET /posts─ client
+                    │                   git history           │               reconnecting
+                    └─────────────────────────────────────────┘               (Last-Event-ID
+                                    ▲                                          replay)
+                                    │
+                        you, in Obsidian / nvim / grep
+                     (watchdog picks the edit up and streams it)
 ```
+
+**Files are the source of truth.** The SQLite index is disposable and rebuilt
+from them at startup; every write is also committed to a git repo inside the
+vault, so a clobbered post is recoverable.
 
 ## Quick start
 
@@ -87,7 +96,7 @@ Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the work
 
 ```bash
 uv sync --all-extras --dev   # install (uv only — never pip)
-uv run pytest -q             # 298 tests (incl. 25 browser smokes)
+uv run pytest -q             # 331 tests (incl. 56 browser smokes)
 uv run ruff check .          # lint (config in pyproject.toml)
 ```
 
@@ -107,6 +116,7 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 
 - **Python 3.13** + **FastAPI**
 - **Markdown vault** (files = source of truth) + disposable **aiosqlite** index with FTS5 search
+- **git** for vault history — a commit per write, so any post can be restored (degrades to a warning if the binary is absent)
 - **watchdog** for live external-edit pickup; **PyYAML** for front-matter
 - **SSE** via [sse-starlette](https://github.com/sysid/sse-starlette) · **Textual** for the TUI
 - **MCP** (Streamable HTTP + stdio proxy) · **uv** · **Docker**

@@ -59,6 +59,7 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `DEFAULT_TTL_HOURS` | `0` | Global post expiry window; `0` disables expiry (per-tag TTLs still apply) |
 | `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are removed |
 | `RELAY_WATCH_ENABLED` | `true` | Live-reindex + SSE on edits made outside relay (e.g. in Obsidian) |
+| `RELAY_HISTORY_ENABLED` | `true` | Commit the vault to git after every write, so a clobbered or deleted post can be restored. No-ops with a warning if the `git` binary is missing — check `features.history.effective` in `/status` |
 | `SECURE_COOKIES` | `true` | `Secure` flag on the session cookie; set `false` for plain HTTP |
 | `ATTACHMENT_MAX_MB` | `25` | Max upload size; larger uploads → 413 (all transports) |
 | `ATTACHMENT_UPLOAD_TTL_SECONDS` | `3600` | Presigned upload slot lifetime before it's purged |
@@ -72,8 +73,18 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `MCP_OAUTH_ENABLED` | `false` | Turn `/mcp` into an OAuth 2.1 AS+RS for remote clients via Dynamic Client Registration; the static `API_KEY` still works |
 | `MCP_REQUIRED_SCOPES` | `relay` | Scope required on `/mcp` |
 | `MCP_ALLOWED_REDIRECT_HOSTS` | `claude.ai,claude.com,chatgpt.com` | DCR redirect-URI host allowlist (exact match, https only; blank = any https). Add other clients as needed |
+| `MCP_AUTH_CODE_TTL_SECONDS` | `60` | OAuth authorization-code lifetime |
+| `MCP_ACCESS_TOKEN_TTL_SECONDS` | `3600` | OAuth access-token lifetime |
+| `MCP_REFRESH_TOKEN_TTL_SECONDS` | `2592000` | OAuth refresh-token lifetime (30 days) |
 | `RELAY_PALETTE` | `default` | TUI colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`) |
 | `RELAY_TRANSPARENT` | `0` | TUI: let the terminal background show through the canvas |
+
+**Docker-only**, read by `docker-compose.yml` rather than by relay itself:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RELAY_VAULT_DIR` | `./vault` | Host path bind-mounted to `/data/vault`. Set an absolute path in production |
+| `RELAY_UID` / `RELAY_GID` | `1000` | Run as your host user so files relay writes stay user-owned — matters for Syncthing/Obsidian/backups |
 
 ---
 
