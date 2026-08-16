@@ -143,17 +143,11 @@ def seed(relay_server):
     return made
 
 
-@pytest.fixture
-def page(relay_server, seed, browser):
-    """A logged-in page.
-
-    Logs in through the **real API-key form** rather than injecting a cookie, so
-    the break-glass auth path is covered by every test that needs a session.
-    """
+def _logged_in(relay_server, browser, **context_args):
     from playwright.sync_api import Error as PlaywrightError
 
     try:
-        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        context = browser.new_context(**context_args)
     except PlaywrightError as exc:  # browsers not installed
         pytest.skip(f"playwright browser unavailable: {exc}")
     page = context.new_page()
@@ -163,5 +157,32 @@ def page(relay_server, seed, browser):
     key_input.fill(API_KEY)
     page.locator("#connectForm button[type=submit], #connectForm button").first.click()
     page.locator("#newPostBtn").wait_for(state="visible", timeout=10_000)
+    return context, page
+
+
+@pytest.fixture
+def page(relay_server, seed, browser):
+    """A logged-in page.
+
+    Logs in through the **real API-key form** rather than injecting a cookie, so
+    the break-glass auth path is covered by every test that needs a session.
+    """
+    context, page = _logged_in(relay_server, browser, viewport={"width": 1280, "height": 900})
+    yield page
+    context.close()
+
+
+@pytest.fixture
+def mobile_page(relay_server, seed, browser):
+    """A logged-in page in a phone-sized, touch-capable context.
+
+    `has_touch` is the point: the bottom-sheet gesture binds touch events, and a
+    context without touch support never dispatches them — a test would pass
+    against a completely dead handler.
+    """
+    context, page = _logged_in(
+        relay_server, browser,
+        viewport={"width": 390, "height": 780}, has_touch=True, is_mobile=False,
+    )
     yield page
     context.close()

@@ -13,6 +13,7 @@
  */
 
 import { apiFetch } from './api.js';
+import { attachSheetDismiss } from './sheet.js';
 
 const historyModal = document.getElementById('historyModal');
 const hmTitle = document.getElementById('hmTitle');
@@ -188,4 +189,11 @@ export async function openPostHistory(postId, title) {
 }
 
 document.getElementById('hmClose').onclick = closeHistoryModal;
-document.getElementById('hmBackdrop').onclick = closeHistoryModal;
+const hmBackdrop = document.getElementById('hmBackdrop');
+hmBackdrop.onclick = closeHistoryModal;
+attachSheetDismiss({
+  inner: historyModal.querySelector('.sm-inner'),
+  handle: historyModal.querySelector('.sm-head'),
+  backdrop: hmBackdrop,
+  onDismiss: closeHistoryModal,
+});

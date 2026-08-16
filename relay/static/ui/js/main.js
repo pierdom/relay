@@ -16,6 +16,7 @@ import { apiFetch, apiSend, clearApiKey, setApiKey } from './api.js';
 import { closeStatusModal, isStatusOpen } from './status.js';   // also self-wires its own controls
 import { query, resetPaging } from './feed-query.js';
 import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
+import { attachSheetDismiss } from './sheet.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
 import { escHtml, fmtBytes, relativeTime, toDatetimeLocal, toUtcIso } from './util.js';
 const LIMIT = 20;
@@ -1120,11 +1121,18 @@ function closeEditModal() {
   editingPost = null;
 }
 
-/** Close, asking first if the body was touched — the modal is easy to dismiss. */
-function tryCloseEditModal() {
+/** True unless there are unsaved changes the user declines to throw away.
+ *  Split out of tryCloseEditModal so the swipe gesture can ask *before* it
+ *  animates the sheet away — a dismissal that gets vetoed has to spring back. */
+function confirmDiscardEdit() {
   const field = emBody.querySelector('.ef-content');
   const dirty = editingPost && field && field.value !== editingPost.content;
-  if (dirty && !confirm('Discard your changes to this post?')) return;
+  return !dirty || confirm('Discard your changes to this post?');
+}
+
+/** Close, asking first if the body was touched — the modal is easy to dismiss. */
+function tryCloseEditModal() {
+  if (!confirmDiscardEdit()) return;
   closeEditModal();
 }
 
@@ -1191,6 +1199,13 @@ function enterEditMode(_el, post) {
 
 document.getElementById('emClose').onclick = tryCloseEditModal;
 document.getElementById('emBackdrop').onclick = tryCloseEditModal;
+attachSheetDismiss({
+  inner: editModal.querySelector('.sm-inner'),
+  handle: editModal.querySelector('.sm-head'),
+  backdrop: document.getElementById('emBackdrop'),
+  canDismiss: confirmDiscardEdit,
+  onDismiss: closeEditModal,
+});
 
 function rewirePost(el, post) {
   el.querySelectorAll('.tag-pill').forEach(pill =>
@@ -1352,21 +1367,13 @@ pmClose.addEventListener('click', closePostModal);
 pmBack.addEventListener('click', closePostModal);
 postModal.addEventListener('click', (e) => { if (!e.target.closest('.pm-inner')) closePostModal(); });
 
-/* Swipe-down-to-dismiss on the modal header (mobile bottom-sheet) */
-let _swipeStartY = 0, _swipeDeltaY = 0;
-pmHeader.addEventListener('touchstart', e => {
-  _swipeStartY = e.touches[0].clientY;
-  _swipeDeltaY = 0;
-  pmInner.style.transition = 'none';
-}, { passive: true });
-pmHeader.addEventListener('touchmove', e => {
-  _swipeDeltaY = e.touches[0].clientY - _swipeStartY;
-  if (_swipeDeltaY > 0) pmInner.style.transform = `translateY(${_swipeDeltaY}px)`;
-}, { passive: true });
-pmHeader.addEventListener('touchend', () => {
-  pmInner.style.transition = '';
-  pmInner.style.transform = '';
-  if (_swipeDeltaY > 72) closePostModal();
+/* Swipe-down-to-dismiss (mobile bottom-sheet) — shared with the other three
+   sheets, which had no gesture at all before. */
+attachSheetDismiss({
+  inner: pmInner,
+  handle: pmHeader,
+  backdrop: pmBackdrop,
+  onDismiss: closePostModal,
 });
 // History opens over the post modal (which stays behind it), so returning from a
 // revision leaves you where you were.

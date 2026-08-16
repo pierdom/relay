@@ -29,7 +29,20 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --red:         #f87171;
   --body:        #b8bfcc;
   --body-strong: #c4cad8;
-  --row-stripe:  rgba(255, 255, 255, 0.02);
+  --wash-raise:  rgba(255, 255, 255, 0.02);
+
+  /* Semantic tokens. Components reference these, never a literal — a theme
+     redefines this block and nothing else. Values derivable from --accent or
+     --red are not tokens at all: they are color-mix() at the point of use, so
+     they follow the accent into every theme for free. */
+  --on-accent:     #000;               /* foreground on an --accent fill */
+  --on-scrim:      #eee;               /* foreground on a dark scrim */
+  --border-hover:  #2d3348;
+  --scrim-rgb:     0, 0, 0;            /* channels, so call sites pick the alpha */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.35);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.6);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.6);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 13px;
 }
@@ -50,7 +63,16 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --red:         #c81e1e;
   --body:        #33373f;
   --body-strong: #22252c;
-  --row-stripe:  rgba(0, 0, 0, 0.03);
+  --wash-raise:  rgba(0, 0, 0, 0.03);
+
+  --on-accent:     #000;               /* 5.05:1 on #b96809 — white would be 4.16:1 */
+  --on-scrim:      #eee;
+  --border-hover:  #b8b09a;
+  --scrim-rgb:     0, 0, 0;
+  --shadow-card:   0 4px 16px rgba(0, 0, 0, 0.10);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.12);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.18);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.16);
 }
 
 body {
@@ -117,7 +139,7 @@ header {
 .key-wrap input::placeholder { color: var(--muted); }
 
 .btn-connect {
-  background: var(--accent); border: none; color: #000;
+  background: var(--accent); border: none; color: var(--on-accent);
   padding: 5px 12px; border-radius: 4px; cursor: pointer;
   font-family: inherit; font-size: 11px; font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase;
@@ -144,7 +166,7 @@ header {
 .disconnect-btn:hover { color: var(--text); border-color: var(--border); }
 
 .btn-new-post {
-  background: var(--accent); border: none; color: #000;
+  background: var(--accent); border: none; color: var(--on-accent);
   padding: 5px 12px; border-radius: 4px; cursor: pointer;
   font-family: inherit; font-size: 11px; font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase;
@@ -163,7 +185,7 @@ header {
 .login-tag { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
 .login-card .oidc-login { flex-direction: column; gap: 12px; width: 100%; }
 .btn-login-primary {
-  width: 100%; background: var(--accent); border: none; color: #000;
+  width: 100%; background: var(--accent); border: none; color: var(--on-accent);
   padding: 12px 16px; border-radius: 6px; cursor: pointer;
   font-family: inherit; font-size: 13px; font-weight: 700;
   letter-spacing: 0.08em; text-transform: uppercase; transition: background 0.15s;
@@ -233,7 +255,7 @@ aside.collapsed > * { min-width: 220px; }
   border-left: 2px solid transparent;
   transition: background 0.12s;
 }
-.tag-item:hover  { background: rgba(255,255,255,0.02); }
+.tag-item:hover  { background: var(--wash-raise); }
 .tag-item.active { background: var(--tag-active); border-left-color: var(--accent); }
 
 .tag-name  { font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -243,7 +265,7 @@ aside.collapsed > * { min-width: 220px; }
   flex-shrink: 0; font-variant-numeric: tabular-nums;
   transition: background 0.12s, color 0.12s;
 }
-.tag-item.active .tag-count { background: var(--accent); color: #000; }
+.tag-item.active .tag-count { background: var(--accent); color: var(--on-accent); }
 
 /* Both row controls share a shape: a comfortable hit area around a 13px icon,
    revealed on hover. They carry SVGs now, so size comes from the icon rather
@@ -279,7 +301,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   padding: 0 20px;
 }
 .compose-panel.open { max-height: 660px; opacity: 1; padding: 16px 20px 0; }
-.compose-panel .post { border-style: dashed; border-color: rgba(245,158,11,0.4); }
+.compose-panel .post { border-style: dashed; border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 
 .feed {
   flex: 1; overflow-y: auto; overflow-x: hidden;
@@ -311,7 +333,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.post:hover { border-color: #2d3348; box-shadow: 0 4px 24px rgba(0,0,0,0.35); }
+.post:hover { border-color: var(--border-hover); box-shadow: var(--shadow-card); }
 .post.new { animation: cardIn 0.3s ease, flash 1.4s ease; }
 @keyframes flash {
   0%   { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 24px var(--accent-glow); }
@@ -400,7 +422,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .tag-pill {
   font-size: 10px; padding: 2px 7px; border-radius: 3px;
   background: var(--tag-bg); color: var(--accent); cursor: pointer;
-  border: 1px solid rgba(245,158,11,0.2); letter-spacing: 0.02em;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); letter-spacing: 0.02em;
   transition: background 0.12s;
 }
 .tag-pill:hover { background: var(--tag-active); }
@@ -444,7 +466,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .post-body table     { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
 .post-body th, .post-body td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; white-space: nowrap; }
 .post-body th        { background: var(--bg); color: var(--text); font-weight: 600; }
-.post-body tr:nth-child(even) td { background: var(--row-stripe); }
+.post-body tr:nth-child(even) td { background: var(--wash-raise); }
 .table-scroll        { overflow-x: auto; margin: 8px 0; }
 .table-scroll table  { margin: 0; }
 /* Feed previews have no room to scroll sideways, so cells wrap to fit the
@@ -466,12 +488,12 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .post:hover .post-actions { opacity: 1; }
 
 .btn-delete {
-  background: none; border: 1px solid rgba(248,113,113,0.25); color: var(--red);
+  background: none; border: 1px solid color-mix(in srgb, var(--red) 25%, transparent); color: var(--red);
   padding: 3px 9px; border-radius: 3px; cursor: pointer;
   font-family: inherit; font-size: 11px;
   transition: background 0.15s, border-color 0.15s;
 }
-.btn-delete:hover { background: rgba(248,113,113,0.1); border-color: var(--red); }
+.btn-delete:hover { background: color-mix(in srgb, var(--red) 10%, transparent); border-color: var(--red); }
 
 .btn-edit {
   background: none; border: 1px solid var(--border); color: var(--muted);
@@ -499,7 +521,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
 
 .btn-save {
-  background: var(--accent); border: none; color: #000;
+  background: var(--accent); border: none; color: var(--on-accent);
   padding: 5px 14px; border-radius: 3px; cursor: pointer;
   font-family: inherit; font-size: 11px; font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase;
@@ -525,14 +547,14 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 }
 .btn-attach:hover { border-color: var(--accent); color: var(--accent); }
 .attach-status { font-size: 11px; color: var(--muted); }
-.attach-status.error { color: #e5534b; }
+.attach-status.error { color: var(--red); }
 .ef-attachments { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
 .ef-attach-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 2px; }
 .ef-attach-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .ef-attach-name { color: var(--text); overflow-wrap: anywhere; }
 .ef-attach-size { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
 .ef-attach-del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; }
-.ef-attach-del:hover { color: #e5534b; }
+.ef-attach-del:hover { color: var(--red); }
 
 /* ── Attachment gallery ─────────────────────────────── */
 .attachments-view { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 20px 40px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
@@ -543,7 +565,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .att-folder-head:first-child { margin-top: 4px; }
 .att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
 .att-card { position: relative; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 4%, transparent); }
-.att-thumb { height: 110px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(0,0,0,0.15); cursor: pointer; }
+.att-thumb { height: 110px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(var(--scrim-rgb), 0.15); cursor: pointer; }
 .att-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .att-thumb .att-ext { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .att-thumb .att-ext::before { content: "📄"; display: block; font-size: 26px; margin-bottom: 4px; }
@@ -551,15 +573,15 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .att-name { font-size: 12px; overflow-wrap: anywhere; color: var(--text); }
 .att-sub { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; }
 .att-del { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border: none; border-radius: 4px;
-  background: rgba(0,0,0,0.55); color: #eee; cursor: pointer; font-size: 15px; line-height: 1; opacity: 0; transition: opacity 0.15s; }
+  background: rgba(var(--scrim-rgb), 0.55); color: var(--on-scrim); cursor: pointer; font-size: 15px; line-height: 1; opacity: 0; transition: opacity 0.15s; }
 .att-card:hover .att-del { opacity: 1; }
-.att-del:hover { background: var(--red, #e5534b); color: #fff; }
+.att-del:hover { background: var(--red); color: var(--on-scrim); }
 .att-empty { color: var(--muted); font-size: 13px; padding: 20px 2px; }
 
-.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; cursor: pointer; }
+.lightbox { position: fixed; inset: 0; background: rgba(var(--scrim-rgb), 0.85); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; cursor: pointer; }
 .lightbox-inner { max-width: 92vw; max-height: 92vh; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .lightbox img { max-width: 92vw; max-height: 82vh; object-fit: contain; border-radius: 4px; }
-.lightbox-cap { color: #ddd; font-size: 12px; }
+.lightbox-cap { color: var(--on-scrim); font-size: 12px; }
 .edit-form textarea.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 
 /* ── Search bar ─────────────────────────────────────── */
@@ -597,7 +619,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 }
 .vt-btn:first-child { border-radius: 4px 0 0 4px; }
 .vt-btn:last-child  { border-radius: 0 4px 4px 0; border-left: none; }
-.vt-btn.active { color: var(--accent); border-color: rgba(245,158,11,0.4); background: var(--tag-bg); }
+.vt-btn.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--tag-bg); }
 .vt-btn:hover:not(.active) { color: var(--text); }
 
 .sort-control { display: flex; flex-shrink: 0; }
@@ -622,9 +644,9 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .new-posts-pill {
   position: sticky; top: 8px; z-index: 20;
   display: block; width: fit-content; margin: 8px auto -4px; padding: 6px 16px;
-  background: var(--accent); color: #1a1205; border: none; border-radius: 999px;
+  background: var(--accent); color: var(--on-accent); border: none; border-radius: 999px;
   font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.35); transition: opacity 0.15s, transform 0.15s;
+  box-shadow: var(--shadow-pill); transition: opacity 0.15s, transform 0.15s;
 }
 .new-posts-pill:hover { transform: translateY(-1px); }
 .new-posts-pill .np-arrow { font-weight: 700; }
@@ -673,7 +695,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 /* Sidebar overlay */
 .sidebar-overlay {
   display: none; position: fixed; inset: 0; z-index: 49;
-  background: rgba(0,0,0,0.6);
+  background: rgba(var(--scrim-rgb), 0.6);
   -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
 }
 .sidebar-overlay.visible { display: block; }
@@ -696,7 +718,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
     width: 260px;
     transform: translateX(-100%);
     transition: transform 0.24s cubic-bezier(0.4,0,0.2,1);
-    box-shadow: 8px 0 40px rgba(0,0,0,0.6);
+    box-shadow: var(--shadow-drawer);
   }
   aside.open { transform: translateX(0); }
 
@@ -733,12 +755,12 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ── Master document card ────────────────────────────── */
 .post.master-doc {
-  border-color: rgba(245,158,11,0.45);
-  background: rgba(245,158,11,0.025);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 2.5%, transparent);
 }
 .post.master-doc:hover {
   border-color: var(--accent);
-  box-shadow: 0 4px 28px rgba(245,158,11,0.12);
+  box-shadow: 0 4px 28px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .post.pinned {
   border-color: var(--accent);
@@ -747,7 +769,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .master-badge {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 9px; font-weight: 600; color: var(--accent);
-  background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   padding: 2px 8px; border-radius: 3px; letter-spacing: 0.14em;
   text-transform: uppercase; margin-bottom: 10px;
 }
@@ -787,7 +809,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .tag-list { overflow-x: hidden; }
 .tag-item.tag-editing {
   display: block; padding: 4px 12px 10px; cursor: default;
-  background: rgba(255,255,255,0.02);
+  background: var(--wash-raise);
 }
 .tag-config-form {
   display: flex; flex-direction: column; gap: 5px;
@@ -826,7 +848,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   background: linear-gradient(transparent, var(--surface));
   pointer-events: none;
 }
-.post.editing { border-color: rgba(245,158,11,0.4); background: rgba(245,158,11,0.025); }
+.post.editing { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 2.5%, transparent); }
 .post.editing .post-body-wrap { max-height: none; overflow: visible; }
 .post.editing .post-body-wrap::after { display: none; }
 /* The pinned master doc is a reference, not a read — keep its preview short. */
@@ -846,20 +868,15 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .sm-inner {
   position: relative; z-index: 1;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; width: 92%; max-width: 460px; max-height: 88vh;
+  border-radius: 8px; width: 94%; max-width: 560px; max-height: 92vh;
   display: flex; flex-direction: column; overflow: hidden;
-  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
-  animation: modalIn 0.18s ease both;
+  box-shadow: var(--shadow-modal);
+  animation: modalIn 0.18s ease backwards;
 }
 .sm-head { display: flex; align-items: baseline; gap: 8px; padding: 18px 20px 0; flex-shrink: 0; }
 .sm-name { font-size: 15px; font-weight: 600; color: var(--text); }
 .sm-version { font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
-.sm-close {
-  margin-left: auto; background: none; border: none; color: var(--muted); cursor: pointer;
-  font-size: 22px; line-height: 1; padding: 0; font-family: inherit; transition: color 0.15s;
-}
-.sm-close:hover { color: var(--text); }
-.sm-body { padding: 14px 20px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.sm-body { padding: 16px 20px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
 .sm-section-title {
   font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
   color: var(--muted); margin-bottom: 8px;
@@ -882,17 +899,17 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 .pm-backdrop {
   position: absolute; inset: 0;
-  background: rgba(0,0,0,0.72);
+  background: rgba(var(--scrim-rgb), 0.72);
   backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
   cursor: pointer;
 }
 .pm-inner {
   position: relative; z-index: 1;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; width: 92%; max-width: 1100px; max-height: 88vh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
-  animation: modalIn 0.18s ease both;
+  border-radius: 8px; width: 94%; max-width: 1320px; max-height: 92vh;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: var(--shadow-modal);
+  animation: modalIn 0.18s ease backwards;
 }
 @keyframes modalIn {
   from { opacity: 0; transform: translateY(10px) scale(0.98); }
@@ -900,7 +917,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 }
 .pm-header {
   display: flex; align-items: flex-start; gap: 12px;
-  padding: 20px 20px 0; flex-shrink: 0;
+  padding: 18px 20px 0; flex-shrink: 0;
 }
 .pm-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.4; overflow-wrap: anywhere; }
 .pm-back {
@@ -910,22 +927,46 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   padding: 0; flex-shrink: 0; transition: color 0.15s;
 }
 .pm-back:hover { color: var(--accent); }
-.pm-close {
+.pm-close, .sm-close {
   background: none; border: none; color: var(--muted); cursor: pointer;
-  font-size: 22px; line-height: 1; padding: 0; margin-top: -2px; flex-shrink: 0;
+  font-size: 22px; line-height: 1; padding: 0; flex-shrink: 0;
   font-family: inherit; transition: color 0.15s;
 }
-.pm-close:hover { color: var(--text); }
+.pm-close:hover, .sm-close:hover { color: var(--text); }
+.pm-close { margin-top: -2px; }
+.sm-close { margin-left: auto; }
 .pm-meta { padding: 12px 20px 0; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
 .pm-meta .post-tags { row-gap: 6px; }
 .pm-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
 .pm-body-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .pm-body {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px;
+}
+.pm-body, .sm-body, .hm-list, .hm-body-text {
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 }
-.pm-body::-webkit-scrollbar { width: 4px; }
-.pm-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.pm-body::-webkit-scrollbar, .sm-body::-webkit-scrollbar,
+.hm-list::-webkit-scrollbar, .hm-body-text::-webkit-scrollbar { width: 4px; }
+.pm-body::-webkit-scrollbar-thumb, .sm-body::-webkit-scrollbar-thumb,
+.hm-list::-webkit-scrollbar-thumb, .hm-body-text::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 2px;
+}
+/* The panel is wide so tables, code blocks and screenshots have room. Prose
+   does not want that room: at the full width a paragraph runs ~155 characters,
+   about double a comfortable measure, and the eye loses its place returning to
+   the next line. So text-level blocks are capped and everything that genuinely
+   needs the width — tables, `pre`, image paragraphs, the scroll wrapper — is
+   left alone. `ch` is exact here because the body is set in a monospace face. */
+/* Note the `.post-body` step: the rendered markdown is wrapped, so selectors
+   hung directly off `.pm-body` match nothing — the first version of this rule
+   was inert and only the DOM proved it. */
+.pm-body .post-body > p,
+.pm-body .post-body > ul, .pm-body .post-body > ol,
+.pm-body .post-body > blockquote,
+.pm-body .post-body > h1, .pm-body .post-body > h2, .pm-body .post-body > h3,
+.pm-body .post-body > h4, .pm-body .post-body > h5, .pm-body .post-body > h6 { max-width: 88ch; }
+.pm-body .post-body > p:has(> img) { max-width: none; }
+
 .pm-body-fade {
   position: absolute; bottom: 0; left: 0; right: 0; height: 52px;
   background: linear-gradient(to bottom, transparent, var(--surface));
@@ -938,29 +979,52 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   background: var(--surface);
 }
 @media (max-width: 768px) {
-  .pm-inner { width: 100%; max-width: 100%; max-height: 100vh; border-radius: 0; }
-  @supports (max-height: 100dvh) { .pm-inner { max-height: 100dvh; } }
   .post-modal.open { align-items: flex-end; }
   .status-modal.open { align-items: flex-end; }
-  .sm-inner { width: 100%; max-width: none; border-radius: 8px 8px 0 0; }
-  .pm-inner { animation: modalInMobile 0.22s ease both; }
+  .sm-inner { width: 100%; max-width: none; }
+  /* `backwards`, and no `to` keyframe — both deliberate, and together they are
+     what lets a drag move the sheet. A forwards fill outranks inline styles, so
+     `both` plus an explicit `to { transform: none }` pinned the panel at the
+     origin for the whole gesture: the swipe handler wrote transforms nothing
+     ever painted. An omitted `to` resolves against the element's own style,
+     which is exactly where the drag writes. */
+  .pm-inner, .sm-inner { animation: modalInMobile 0.22s ease backwards; }
   @keyframes modalInMobile {
     from { opacity: 0; transform: translateY(20px); }
-    to   { opacity: 1; transform: none; }
   }
-  /* Back on its own row at the top, clear of the status bar / notch */
+
+  /* Every sheet is draggable, so every sheet shows the same handle. It hangs
+     off the panel rather than sitting in the header's flow because .sm-head is
+     a baseline row (name · version · close) that stacking would break, while
+     .pm-header is a column — one rule has to serve both. */
+  .pm-inner, .sm-inner { border-radius: 12px 12px 0 0; }
+  .pm-inner::before, .sm-inner::before {
+    content: ""; position: absolute; z-index: 2; pointer-events: none;
+    top: 8px; left: 50%;
+    width: 40px; height: 4px; margin-left: -20px; border-radius: 999px;
+    background: var(--border);
+    transition: background-color 0.18s ease, width 0.18s ease, margin-left 0.18s ease;
+  }
+  /* The handle answers the thumb: it darkens on contact and turns accent once
+     you are past the point where letting go dismisses. Without that the only
+     feedback is distance travelled, which you cannot judge mid-gesture. */
+  .pm-inner.sheet-dragging::before, .sm-inner.sheet-dragging::before { background: var(--muted); }
+  .pm-inner.sheet-armed::before, .sm-inner.sheet-armed::before {
+    background: var(--accent); width: 56px; margin-left: -28px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pm-inner::before, .sm-inner::before { transition: none; }
+  }
+
+  /* Room for the handle above the first row of each header. */
   .pm-header {
     flex-direction: column; align-items: stretch; gap: 6px;
-    padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 0;
+    padding: 20px 16px 0;
   }
-  /* Grab handle — signals the sheet swipes down to dismiss */
-  .pm-header::before {
-    content: ""; align-self: center; width: 36px; height: 4px;
-    border-radius: 2px; background: var(--border); margin-bottom: 4px;
-  }
+  .sm-head { padding-top: 22px; }
   .pm-back {
     display: inline-flex; align-items: center; align-self: flex-start;
-    margin-left: -2px; padding: 6px 10px 6px 0; min-height: 40px;
+    margin-left: -2px; padding: 6px 10px 6px 0; min-height: 44px;
   }
   .pm-title { font-size: 18px; font-weight: 700; line-height: 1.3; }
   .pm-close { display: none; }
@@ -976,9 +1040,9 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
    exist up front and scroll internally cannot do that. The extra width is for
    reading an old version, which is the actual task here. */
 .hm-inner {
-  max-width: 1040px;
+  max-width: 1280px;
   width: 94%;
-  height: min(82vh, 860px);
+  height: min(92vh, 1000px);
 }
 #historyModal .sm-body { flex: 1; min-height: 0; overflow: hidden; }
 
@@ -1050,11 +1114,11 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
    column: the textarea was a few words wide and long notes were unusable. The
    form is the same, it just gets the room the reading modal already had. */
 .em-inner {
-  max-width: 1100px;
+  max-width: 1320px;
   width: 94%;
-  height: min(88vh, 940px);
+  height: min(92vh, 1040px);
 }
-#editModal .sm-body { flex: 1; min-height: 0; display: flex; padding-top: 10px; }
+#editModal .sm-body { flex: 1; min-height: 0; display: flex; }
 #editModal .edit-form {
   display: flex; flex-direction: column; gap: 10px;
   flex: 1; min-height: 0; min-width: 0;
@@ -1064,7 +1128,78 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 #editModal .edit-form > .ef-content-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 #editModal .edit-form textarea.ef-content { flex: 1; min-height: 140px; resize: none; }
 #editModal .edit-form .ef-attachments { max-height: 22vh; overflow-y: auto; }
-#editModal .edit-actions { margin-top: 0; flex-shrink: 0; }
+#editModal .edit-actions {
+  margin: 4px -20px -18px; padding: 12px 20px; flex-shrink: 0;
+  border-top: 1px solid var(--border); background: var(--surface);
+}
 @media (max-width: 860px) {
   .em-inner { height: 92vh; }
+}
+
+
+/* ── Mobile sheets: geometry, reach, safe areas ──────────────────────────── */
+/* This block sits at the end of the file deliberately. `.em-inner`/`.hm-inner`
+   are declared *after* the modal media block above and carry equal specificity,
+   so the `width: 100%` up there lost on source order — the edit and history
+   sheets sat 23px narrower than the post and status ones, which nobody chose.
+   Position is the entire fix: both panels also carry `.sm-inner`, so one rule
+   placed after their declarations covers them. Naming `.em-inner`/`.hm-inner`
+   here would read as though the selector were doing the work. */
+@media (max-width: 768px) {
+  .pm-inner, .sm-inner { width: 100%; max-width: none; }
+
+  /* The post modal used to be full-bleed at 100vh: its rounded top and grab
+     handle were pressed against the screen edge (under the notch on a real
+     phone) and there was no backdrop left to tap. Leaving a strip makes it read
+     as a sheet like the other three, and gives back the tap-outside dismissal. */
+  /* The inset keeps the tallest sheet clear of the notch. It belongs here,
+     on the one panel that comes close to the top, rather than on every header. */
+  .pm-inner { max-height: calc(94vh - env(safe-area-inset-top, 0px)); }
+  .em-inner { height: 92vh; }
+  .hm-inner { height: 88vh; }
+  /* dvh, not vh. `vh` is the *large* viewport and ignores the software
+     keyboard, so focusing the edit sheet's textarea pushed Save and Cancel
+     underneath the keyboard with no way to reach them. */
+  @supports (height: 100dvh) {
+    .pm-inner { max-height: calc(94dvh - env(safe-area-inset-top, 0px)); }
+    .em-inner { height: 92dvh; }
+    .hm-inner { height: 88dvh; }
+  }
+
+  /* Reaching the end of a modal's scroll handed the gesture to the page behind
+     it, which on iOS shows as the whole sheet rubber-banding. */
+  .pm-body, .sm-body, .hm-list, .hm-body-text { overscroll-behavior: contain; }
+
+  /* Touch targets. Measured before this: the close button was 13x22 on three of
+     the four sheets, the post footer's actions 22px tall, Save/Cancel 29px.
+     44px is the floor; negative margins keep each glyph optically where it was
+     so only the hit area grows. */
+  /* `.sm-close` only — the post sheet hides its "x" and dismisses via "back",
+     and a blanket `display: inline-flex` here silently un-hid it, dropping a
+     stray glyph into the middle of that header. */
+  .sm-close {
+    min-width: 44px; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-top: -10px; margin-right: -12px; margin-left: auto;
+  }
+  .pm-footer button,
+  #editModal .edit-actions button,
+  .btn-attach {
+    min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  }
+  /* Delete sits next to Edit; a wider gap is cheap insurance now that both are
+     comfortable to hit. */
+  .pm-footer, #editModal .edit-actions { gap: 12px; }
+  .sm-body { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+  #editModal .edit-actions {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    margin-bottom: calc(-18px - env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Roomier fields, and the 44px floor. Font size is deliberately not set
+     here: `@media (hover: none)` already forces 16px on every input to stop
+     iOS zooming the page on focus, and that keys on the device rather than on
+     a narrow window, which is the better test. */
+  .edit-form input, .edit-form textarea, .edit-form select { padding: 10px 12px; }
+  .edit-form input, .edit-form select { min-height: 44px; }
 }

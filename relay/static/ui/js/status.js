@@ -11,6 +11,7 @@
 
 import { apiFetch } from './api.js';
 import { fmtBytes, fmtUptime } from './util.js';
+import { attachSheetDismiss } from './sheet.js';
 
 // ── Status / about modal ─────────────────────────────────────────────────────
 const statusModal = document.getElementById('statusModal');
@@ -131,4 +132,11 @@ export function isStatusOpen() {
 
 statusBtn.onclick = openStatusModal;
 document.getElementById('smClose').onclick = closeStatusModal;
-document.getElementById('smBackdrop').onclick = closeStatusModal;
+const smBackdrop = document.getElementById('smBackdrop');
+smBackdrop.onclick = closeStatusModal;
+attachSheetDismiss({
+  inner: statusModal.querySelector('.sm-inner'),
+  handle: statusModal.querySelector('.sm-head'),
+  backdrop: smBackdrop,
+  onDismiss: closeStatusModal,
+});
