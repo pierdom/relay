@@ -560,3 +560,38 @@ def test_cancelling_an_untouched_edit_closes_without_a_prompt(page):
     _edit_first_card(page, "Smoke Post 0")
     page.locator("#emBody .btn-cancel").click()
     page.locator("#editModal.open").wait_for(state="detached", timeout=5_000)
+
+
+def test_modal_caps_the_prose_measure_but_lets_tables_use_the_width(page, relay_server):
+    """The panel is wide on purpose — tables, code blocks and screenshots need it.
+    Prose does not: at the full width a paragraph runs ~155 characters, about
+    double a comfortable measure. So text-level blocks are capped and everything
+    that genuinely wants the room is left alone.
+
+    The first version of this rule hung its selectors off `.pm-body` directly and
+    matched nothing, because the rendered markdown sits inside a `.post-body`
+    wrapper. It looked correct and did nothing, so the assertion here is on the
+    measured widths rather than on the rule existing.
+    """
+    body = (
+        "Relay keeps posts as plain Markdown files in an Obsidian-compatible vault, "
+        "and the browser UI reads them over the same REST API the agents use. " * 5
+        + "\n\n| col one | col two | col three | col four | col five |\n"
+        "|---|---|---|---|---|\n"
+        "| a fairly long cell value | another long one | and a third | and fourth | fifth |\n"
+    )
+    _api_post(relay_server, {"title": "Prose Measure", "content": body, "tags": ["homelab"]})
+
+    page.set_viewport_size({"width": 1680, "height": 1050})
+    page.reload()
+    page.get_by_text("Prose Measure").first.wait_for(timeout=10_000)
+    page.get_by_text("Prose Measure").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.wait_for_timeout(400)
+
+    panel = page.locator(".pm-inner").bounding_box()["width"]
+    para = page.locator("#pmBody .post-body > p").first.bounding_box()["width"]
+    table = page.locator("#pmBody table").first.bounding_box()["width"]
+
+    assert para < panel * 0.65, f"prose is not capped: {para}px inside a {panel}px panel"
+    assert table > panel * 0.9, f"table was capped too: {table}px inside a {panel}px panel"
