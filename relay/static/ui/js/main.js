@@ -17,6 +17,7 @@ import { closeStatusModal, isStatusOpen } from './status.js';   // also self-wir
 import { query, resetPaging } from './feed-query.js';
 import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
 import { attachSheetDismiss } from './sheet.js';
+import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
 import { escHtml, fmtBytes, relativeTime, toDatetimeLocal, toUtcIso } from './util.js';
 const LIMIT = 20;
@@ -82,22 +83,8 @@ function clearNewPostsPill() {
 }
 newPostsPill.addEventListener('click', () => { clearNewPostsPill(); reloadSorted(); });
 
-// Light ⇄ dark theme — CSS var override on <html>, persisted locally. Default: dark.
-const themeBtn = document.getElementById('themeBtn');
-const brandMark = document.querySelector('.brand-mark');
-function applyTheme() {
-  const light = document.documentElement.getAttribute('data-theme') === 'light';
-  themeBtn.textContent = light ? '☾' : '☀';
-  if (brandMark) brandMark.src = light ? '/assets/relay-mark.svg' : '/assets/relay-mark-on-dark.svg';
-}
-themeBtn.addEventListener('click', () => {
-  const light = document.documentElement.getAttribute('data-theme') === 'light';
-  if (light) document.documentElement.removeAttribute('data-theme');
-  else       document.documentElement.setAttribute('data-theme', 'light');
-  try { localStorage.setItem('relay-theme', light ? 'dark' : 'light'); } catch (e) {}
-  applyTheme();
-});
-applyTheme();
+// Themes live in ./theme.js, which self-wires its picker (see status.js for the
+// same pattern). Only the Escape handler below needs anything from it.
 
 function openSidebar()  { sidebarEl.classList.add('open'); sidebarOverlay.classList.add('visible'); menuBtn.classList.add('active'); }
 function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.classList.remove('visible'); menuBtn.classList.remove('active'); }
@@ -1404,6 +1391,8 @@ pmDelete.addEventListener('click', async () => {
   } catch {}
 });
 document.addEventListener('keydown', e => {
+  // The theme menu is the most transient thing on screen, so it goes first.
+  if (e.key === 'Escape' && isThemeMenuOpen()) { closeThemeMenu(); return; }
   if (e.key === 'Escape' && isEditOpen()) { tryCloseEditModal(); return; }
   if (e.key === 'Escape' && isStatusOpen()) { closeStatusModal(); return; }
   if (e.key === 'Escape' && isHistoryOpen()) { closeHistoryModal(); return; }

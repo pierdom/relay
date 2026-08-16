@@ -5,11 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Relay</title>
   <script>
-    // Apply saved theme before first paint to avoid a flash. Default: dark.
+    // Apply the saved theme before first paint to avoid a flash. Still the only
+    // inline script, and it must stay that way — it cannot move without a flash.
+    // 'dark' is the bare :root block, so it is represented by *no* attribute:
+    // an absent or unrecognised value then degrades to a complete theme rather
+    // than an unstyled page. The pattern guard keeps a hand-edited localStorage
+    // from stamping arbitrary text into an attribute selector.
     (function () {
       try {
-        if (localStorage.getItem('relay-theme') === 'light')
-          document.documentElement.setAttribute('data-theme', 'light');
+        var t = localStorage.getItem('relay-theme');
+        if (t && t !== 'dark' && /^[a-z0-9-]{1,32}$/.test(t))
+          document.documentElement.setAttribute('data-theme', t);
       } catch (e) {}
     })();
   </script>
@@ -43,7 +49,11 @@
     <span></span><span></span><span></span>
   </button>
   <div class="header-right">
-    <button class="theme-btn" id="themeBtn" aria-label="Toggle light/dark theme" title="Toggle theme"></button>
+    <div class="theme-picker">
+      <button class="theme-btn" id="themeBtn" aria-label="Theme" title="Theme"
+              aria-haspopup="menu" aria-expanded="false" aria-controls="themeMenu"></button>
+      <div class="theme-menu" id="themeMenu" role="menu" aria-label="Theme"></div>
+    </div>
     <button class="theme-btn" id="statusBtn" aria-label="Server status" title="Server status" style="display:none">i</button>
     <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
     <div class="connected-bar" id="connectedBar" style="display:none">

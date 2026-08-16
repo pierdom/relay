@@ -24,8 +24,40 @@ CSS = Path(__file__).resolve().parent.parent / "relay" / "static" / "ui" / "app.
 # var() reference. `rgba(var(--scrim-rgb), 0.6)` is deliberately not matched.
 LITERAL = re.compile(r"#[0-9a-fA-F]{3,8}\b|\brgba?\(\s*\d")
 
-# `:root {`  /  `:root[data-theme="light"] {`  — the blocks that may hold values.
-ROOT_BLOCK = re.compile(r"^:root(\[[^\]]*\])?\s*\{")
+# The blocks that may hold colour values. A theme is written as
+# `:root[data-theme="x"], [data-theme="x"] {` — the second selector lets a theme
+# paint a subtree, which is what makes the picker's swatches live samples rather
+# than hex values copied into a second place.
+#
+# Deliberately narrow: only `:root`, optionally with an attribute, optionally
+# followed by attribute-only selectors. `:root .thing {` must NOT match, or a
+# rule full of literals could hide behind a `:root` prefix.
+ROOT_BLOCK = re.compile(r"^:root(?:\[[^\]]*\])?(?:\s*,\s*\[[^\]]*\])*\s*\{")
+
+
+def _strip_comments(css: str) -> str:
+    """Blank out /* … */ while preserving line structure.
+
+    A comment may legitimately name a colour — the gruvbox block cites the
+    palette's own hex values to say where they came from, and the light block
+    records a contrast ratio against `#b96809`. Scanning raw lines flagged those
+    as violations, which would have made the rule "do not explain your colours".
+    Newlines are kept so reported line numbers still point at the real line.
+    """
+    out, i, n = [], 0, len(css)
+    while i < n:
+        start = css.find("/*", i)
+        if start == -1:
+            out.append(css[i:])
+            break
+        out.append(css[i:start])
+        end = css.find("*/", start + 2)
+        if end == -1:
+            out.append("\n" * css.count("\n", start))
+            break
+        out.append("\n" * css.count("\n", start, end + 2))
+        i = end + 2
+    return "".join(out)
 
 
 def _lines_outside_root_blocks(css: str) -> list[tuple[int, str]]:
@@ -43,7 +75,7 @@ def _lines_outside_root_blocks(css: str) -> list[tuple[int, str]]:
 
 
 def test_no_colour_literal_outside_the_token_blocks():
-    css = CSS.read_text(encoding="utf-8")
+    css = _strip_comments(CSS.read_text(encoding="utf-8"))
     offenders = [
         f"app.css:{n}: {line.strip()}"
         for n, line in _lines_outside_root_blocks(css)
@@ -57,10 +89,16 @@ def test_both_themes_declare_the_same_token_set():
     other theme's value — the failure is silent and looks like a design choice."""
     css = CSS.read_text(encoding="utf-8")
     blocks = {}
-    for match in re.finditer(r"^(:root(?:\[[^\]]*\])?)\s*\{(.*?)^\}", css, re.S | re.M):
-        blocks[match.group(1)] = set(re.findall(r"^\s*(--[\w-]+):", match.group(2), re.M))
+    pattern = r"^(:root(?:\[[^\]]*\])?)(?:\s*,\s*\[[^\]]*\])*\s*\{(.*?)^\}"
+    for match in re.finditer(pattern, css, re.S | re.M):
+        # Union, never overwrite: a second block under the same selector used to
+        # clobber the first, and an empty one becoming the baseline made every
+        # real theme look like it had 23 extra tokens. Properties belong on
+        # `html`; `:root` blocks are for tokens.
+        found = set(re.findall(r"^\s*(--[\w-]+):", match.group(2), re.M))
+        blocks.setdefault(match.group(1), set()).update(found)
 
-    assert len(blocks) >= 2, f"expected a dark and a light token block, found {list(blocks)}"
+    assert len(blocks) >= 3, f"expected dark, light and gruvbox token blocks, found {list(blocks)}"
     baseline = blocks[":root"]
     for selector, tokens in blocks.items():
         if selector == ":root":
