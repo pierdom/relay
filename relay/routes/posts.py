@@ -8,6 +8,7 @@ from ..auth import require_api_key
 from ..database import get_db
 from ..models import (
     BacklinksResponse,
+    DeletedPostsResponse,
     PostCreate,
     PostHistoryResponse,
     PostListResponse,
@@ -72,6 +73,35 @@ async def list_posts(
         sort=sort,
         order=order,
     )
+
+
+@router.get(
+    "/deleted",
+    response_model=DeletedPostsResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def list_deleted_posts(
+    limit: int = Query(default=50, ge=1, le=200),
+    include_expiry: bool = Query(
+        default=False,
+        description="Include posts removed by the TTL sweep. Off by default: they are "
+                    "intentional and would bury an accidental delete.",
+    ),
+    db: aiosqlite.Connection = Depends(get_db),
+) -> DeletedPostsResponse:
+    """Posts that no longer exist but can still be restored.
+
+    ⚠️ **Declared before `/{post_id}` on purpose.** FastAPI matches in
+    declaration order and `post_id` is an `int`, so with this route below it
+    `/posts/deleted` answers 422 rather than falling through to here.
+    """
+    try:
+        return await service.list_deleted_posts(db, limit=limit, include_expiry=include_expiry)
+    except service.HistoryUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Vault history is disabled or git is unavailable",
+        ) from None
 
 
 @router.get(

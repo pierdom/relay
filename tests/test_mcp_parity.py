@@ -12,6 +12,7 @@ or the mcp package's import side effects.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -111,3 +112,23 @@ def test_the_http_server_never_gains_a_local_path_parameter(surfaces):
     file read on the relay host. This exception is stdio-only, permanently."""
     http, _ = surfaces
     assert "path" not in http["add_attachment"][0]
+
+
+def test_every_advertised_proxy_tool_has_a_call_handler(surfaces):
+    """A tool in the manifest with no `if name == …` branch is dead on arrival.
+
+    This is not hypothetical: adding three tools to the proxy's tool *list* and
+    forgetting their handlers left every parity check green — names, parameters
+    and descriptions all matched, because all three live in the definition. The
+    client would have listed the tools, called one, and fallen through to
+    whatever the last branch does. The definitions and the dispatch are separate
+    halves of one file and nothing tied them together until now.
+    """
+    src = STDIO_SERVER.read_text(encoding="utf-8")
+    # Both dispatch shapes count: the `== name` branches, and the trailing
+    # `if name != "publish_post": raise` guard that makes publish the fallthrough
+    # while still rejecting an unknown tool.
+    handled = set(re.findall(r'if name [=!]= "([a-z_]+)"', src))
+    _http, stdio = surfaces
+    missing = sorted(set(stdio) - handled)
+    assert not missing, f"advertised by the stdio proxy but never dispatched: {missing}"

@@ -27,10 +27,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import frontmatter
 from .config import settings
@@ -356,6 +357,137 @@ async def revisions(post_id: int, *, current_path: str | None, limit: int = 20) 
         return await asyncio.to_thread(_revisions_sync, post_id, current_path, limit)
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("Vault history: could not read revisions — %s", exc)
+        return []
+
+
+@dataclass(frozen=True)
+class Deletion:
+    """A post's file disappearing in one commit, with the id it carried."""
+
+    post_id: int
+    title: str
+    sha: str        # the last commit where the file still existed — restorable
+    when: str       # when it was *deleted*, from the delete commit
+    message: str
+    path: str
+    reason: str     # "deleted" | "expiry" | "external"
+
+
+def _classify(message: str) -> str:
+    """Why the file went away, read off the commit relay wrote for it.
+
+    Three paths reach this, and a reader cares which: an explicit
+    `delete_post` (`post <id> delete: …`), the TTL sweep (`ttl expiry: N
+    post(s)` — note it carries **no ids**, which is why deletions are found by
+    diff rather than by parsing messages), and a human deleting the note in
+    Obsidian, which the watcher records as an external change. That last one is
+    the case a recovery view most exists for.
+    """
+    if message.startswith("ttl expiry"):
+        return "expiry"
+    if re.match(r"^post \d+ delete:", message):
+        return "deleted"
+    return "external"
+
+
+def _parse_log_paths(out: str) -> list[tuple[str, str, str, list[str]]]:
+    """Like `_parse_log`, but keeps **every** path a commit touched.
+
+    `_parse_log` deliberately keeps only the first — its callers filter by
+    pathspec, so a commit has one interesting path. A TTL sweep removes several
+    files in one commit, so here they all matter.
+    """
+    out_rows: list[tuple[str, str, str, list[str]]] = []
+    sha = when = message = ""
+    paths: list[str] = []
+    for line in out.split("\n"):
+        if line.startswith(_RS):
+            if sha:
+                out_rows.append((sha, when, message, paths))
+            parts = line[1:].split(_FS)
+            sha, when, message, paths = (*parts, [])[:4] if len(parts) == 3 else (sha, when, message, [])
+            paths = []
+            continue
+        path = line.strip()
+        if path and sha:
+            paths.append(path)
+    if sha:
+        out_rows.append((sha, when, message, paths))
+    return out_rows
+
+
+def _deletions_sync(limit: int) -> list[Deletion]:
+    """Posts whose file was removed, newest first, one entry per post.
+
+    Found by **diff**, not by commit message: the TTL sweep's message carries no
+    ids at all, and a note deleted in Obsidian is recorded as an ordinary
+    external change. `--diff-filter=D` catches all three.
+
+    The id and title come from the blob in the commit's *parent* — the last
+    state the file had before it vanished — which is also the only place a
+    deleted post's title still exists.
+
+    ⚠️ **The sha reported is not the delete commit**, which by design carries no
+    blob for the file — reporting it makes every restore 404 with "no revision in
+    the history of post #N", reading as a lookup bug rather than an off-by-one.
+
+    ⚠️ **Nor is it simply the delete commit's parent.** That parent holds the
+    right *content*, but `restore_post` resolves a sha against
+    ``revisions()``, which lists only commits that **touched** the file. Unless
+    the post happened to be deleted in the very next commit after its last edit,
+    the parent is some unrelated write and the restore 404s anyway. A
+    create-then-immediately-delete test cannot see this: it makes the parent *be*
+    the create commit. What is reported is the last commit that actually touched
+    the path before the delete — `log -1 <delete>^ -- <path>`.
+    """
+    got = _run("log", "--diff-filter=D", "--format=" + _LOG_FORMAT, "--name-only", "--", "*.md")
+    if got.returncode:
+        return []
+    found: list[Deletion] = []
+    seen: set[int] = set()
+    for sha, when, message, paths in _parse_log_paths(got.stdout):
+        reason = _classify(message)
+        parent = _run("rev-parse", f"{sha}^").stdout.strip()
+        if not parent:
+            continue   # a delete in the initial commit cannot happen, but be safe
+        for path in paths:
+            # The last commit that *touched* this path before the delete. The
+            # parent commit has the same content, but `revisions()` only lists
+            # commits that touched the file, so a parent that did not is a sha
+            # `restore_post` will refuse.
+            restorable = _run(
+                "log", "-1", "--format=%H", parent, "--", path
+            ).stdout.strip() or parent
+            text = _blob_sync(restorable, path)
+            if text is None:
+                continue
+            try:
+                meta, _ = frontmatter.parse(text)
+            except Exception:   # a half-written revision is simply not a match
+                continue
+            pid = meta.get("id")
+            if not isinstance(pid, int) or pid in seen:
+                continue
+            seen.add(pid)
+            # The title *is* the filename — front-matter deliberately has no
+            # `title` key — so it comes off the path the file occupied.
+            found.append(Deletion(
+                post_id=pid, title=PurePosixPath(path).stem,
+                sha=restorable, when=when, message=message, path=path, reason=reason,
+            ))
+            if len(found) >= limit:
+                return found
+    return found
+
+
+async def deletions(limit: int = 50) -> list[Deletion]:
+    """Every post whose file was removed and not since restored, newest first."""
+    if not _probe():
+        return []
+    try:
+        return await asyncio.to_thread(_deletions_sync, limit)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Vault history: could not list deletions — %s", exc)
         return []
 
 

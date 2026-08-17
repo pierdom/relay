@@ -12,6 +12,7 @@
 import { apiFetch } from './api.js';
 import { fmtBytes, fmtUptime } from './util.js';
 import { attachSheetDismiss } from './sheet.js';
+import { fetchDeleted, recoverableCount, renderDeleted } from './deleted.js';
 
 // ── Status / about modal ─────────────────────────────────────────────────────
 const statusModal = document.getElementById('statusModal');
@@ -43,18 +44,74 @@ function smRows(pairs) {
   return dl;
 }
 
+// `display: contents` on the row, so the dot+label and the note land in the same
+// two grid columns `.sm-rows` uses. Health used to be a flex row with the note
+// pushed right by `margin-left: auto`, which put the value at the far edge of a
+// 560px panel while Vault and Server sat their values next to the label — two
+// alignment systems in one panel, and the reason it read as unbalanced.
 function smFeature(label, state, note) {
   const row = document.createElement('div');
   row.className = 'sm-feat';
+  const name = document.createElement('span');
+  name.className = 'sm-feat-name';
   const dot = document.createElement('span');
   dot.className = `sm-dot ${state}`;
-  const name = document.createElement('span');
-  name.textContent = label;
+  const text = document.createElement('span');
+  text.textContent = label;
+  name.append(dot, text);
   const hint = document.createElement('span');
   hint.className = 'sm-feat-note';
   hint.textContent = note;
-  row.append(dot, name, hint);
+  row.append(name, hint);
   return row;
+}
+
+/* Recovery lives here because this is the panel that already answers "does
+ * vault history work". When it does not, there is nothing to recover, and this
+ * section says so rather than offering a button that cannot help. */
+function renderRecovery(historyWorks) {
+  const wrap = document.createElement('div');
+  const line = document.createElement('div');
+  line.className = 'sm-recovery-line';
+  wrap.appendChild(line);
+
+  if (!historyWorks) {
+    line.textContent = 'Vault history is off — deleted posts cannot be recovered.';
+    return smSection('Recovery', wrap);
+  }
+
+  line.textContent = 'Checking…';
+  const btn = document.createElement('button');
+  btn.className = 'btn-edit';
+  btn.id = 'smBrowseDeleted';
+  btn.textContent = 'Browse deleted →';
+  btn.disabled = true;
+  wrap.appendChild(btn);
+
+  // One request serves both the headline and the browser; the headline excludes
+  // TTL expiries, which are routine, while the browser offers them as a filter.
+  fetchDeleted().then(list => {
+    const n = recoverableCount(list);
+    line.textContent = n
+      ? `${n} deleted post${n === 1 ? '' : 's'} can be restored`
+      : 'Nothing deleted — or nothing left to recover.';
+    btn.disabled = !list.length;
+    btn.onclick = () => showDeleted();
+  }).catch(() => {
+    line.textContent = 'Could not read deleted posts.';
+  });
+
+  return smSection('Recovery', wrap);
+}
+
+/** Drill down into the recovery browser, replacing the panel's contents.
+ *
+ * The panel keeps its 560px width: the cards are built for it (the full path is
+ * dropped — the title *is* the filename, so only the folder adds anything), and
+ * a modal that changes size as you navigate inside it is the jump the history
+ * panel's fixed height exists to prevent. */
+function showDeleted() {
+  renderDeleted(smBody, { onBack: openStatusModal });
 }
 
 function renderStatus(d) {
@@ -62,6 +119,7 @@ function renderStatus(d) {
   smBody.innerHTML = '';
 
   const health = document.createElement('div');
+  health.className = 'sm-rows sm-health';
   const h = d.features.history;
   health.appendChild(smFeature(
     'Vault history',
@@ -96,6 +154,12 @@ function renderStatus(d) {
     ['OIDC login', d.features.auth.oidc ? 'enabled' : 'off'],
     ['MCP OAuth', d.features.auth.mcp_oauth ? 'enabled' : 'off'],
   ])));
+
+  // Last, and deliberately so. Health/Vault/Server are what you open this panel
+  // *for*; recovery is the one section that acts rather than reports, and it is
+  // reached on purpose rather than stumbled into. It still belongs in this panel
+  // because Health above it is what decides whether recovery is possible at all.
+  smBody.appendChild(renderRecovery(h.effective));
 }
 
 async function openStatusModal() {

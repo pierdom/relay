@@ -21,7 +21,7 @@ curl -X POST -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/j
      -d '{"sha":"ab43c1e"}' $RELAY/posts/54/restore
 ```
 
-Agents can drive the same thing with the `get_post_history` and `restore_post`
+Agents can drive the same thing with the `list_deleted_posts`, `get_post_history` and `restore_post`
 MCP tools — so "undo what you just did to #54" is one turn, with no shell.
 
 Both work for a **deleted** post (`"exists": false`), and a restore keeps the

@@ -20,6 +20,8 @@ const hmTitle = document.getElementById('hmTitle');
 const hmBody = document.getElementById('hmBody');
 
 let currentPostId = null;
+let currentBody = null;      // the live post body, for the diff
+let paneView = 'body';      // 'body' | 'diff', remembered across revisions
 let onRestored = () => {};
 
 /** main.js supplies the callback that refreshes the feed after a restore. */
@@ -124,6 +126,75 @@ function renderRevisions(data, panes) {
   setPane(pane, placeholder('Select a revision to see how the post looked.'));
 }
 
+/* A line diff, LCS, no dependency — the app has no bundler and this is the only
+ * place that needs one.
+ *
+ * Common prefix and suffix are trimmed first. That is not an optimisation for
+ * its own sake: a post is usually edited in one place, so trimming turns the
+ * O(n·m) table into something tiny for the realistic case, and the cap below
+ * only ever trips on a genuinely wholesale rewrite.
+ */
+const DIFF_CAP = 1500;   // lines per side, after trimming
+
+function diffLines(before, after) {
+  const a = before.split('\n');
+  const b = after.split('\n');
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head
+         && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+
+  const midA = a.slice(head, a.length - tail);
+  const midB = b.slice(head, b.length - tail);
+  if (!midA.length && !midB.length) return [];        // identical
+  if (midA.length > DIFF_CAP || midB.length > DIFF_CAP) return null;   // too big to diff
+
+  // Standard LCS table over the changed middle only.
+  const n = midA.length, m = midB.length;
+  const table = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      table[i][j] = midA[i] === midB[j]
+        ? table[i + 1][j + 1] + 1
+        : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+  const out = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (midA[i] === midB[j]) { out.push(['same', midA[i]]); i++; j++; }
+    else if (table[i + 1][j] >= table[i][j + 1]) { out.push(['del', midA[i]]); i++; }
+    else { out.push(['add', midB[j]]); j++; }
+  }
+  while (i < n) out.push(['del', midA[i++]]);
+  while (j < m) out.push(['add', midB[j++]]);
+  return out;
+}
+
+function renderDiff(revisionText, currentText) {
+  const rows = diffLines(revisionText, currentText);
+  const wrap = document.createElement('pre');
+  wrap.className = 'hm-body-text hm-diff';
+  if (rows === null) {
+    wrap.textContent = 'Too much changed to diff line by line — use Body to read the revision.';
+    return wrap;
+  }
+  if (!rows.length) {
+    wrap.textContent = 'No difference — this revision matches the post as it stands.';
+    return wrap;
+  }
+  for (const [kind, text] of rows) {
+    const line = document.createElement('span');
+    line.className = `hm-d hm-d-${kind}`;
+    // The marker is a pseudo-element so copying the diff yields the text, not
+    // a column of +/- that would have to be stripped before pasting it back.
+    line.textContent = text || ' ';
+    wrap.appendChild(line);
+  }
+  return wrap;
+}
+
 async function selectRevision(rev, row, pane) {
   for (const el of hmBody.querySelectorAll('.hm-rev.active')) el.classList.remove('active');
   row.classList.add('active');
@@ -132,6 +203,14 @@ async function selectRevision(rev, row, pane) {
   try {
     const d = await apiFetch(`/posts/${currentPostId}/history/${rev.sha}`);
     const head = note(`${d.title} — as of ${rev.short_sha}`, 'sm-section-title hm-pane-head');
+
+    // The current body, for the diff. Fetched once per panel: a deleted post
+    // has none, and then Diff is simply not offered.
+    if (currentBody === null) {
+      try { currentBody = (await apiFetch(`/posts/${currentPostId}`)).content ?? null; }
+      catch { currentBody = null; }
+    }
+
     const body = document.createElement('pre');
     body.className = 'hm-body-text';
     body.textContent = d.content;          // never innerHTML: this is vault content
@@ -142,7 +221,44 @@ async function selectRevision(rev, row, pane) {
     restore.textContent = `Restore this version (${rev.short_sha})`;
     restore.addEventListener('click', () => restoreRevision(rev, restore, pane));
 
-    setPane(pane, head, body, restore);
+    if (currentBody === null) {
+      setPane(pane, head, body, restore);
+      return;
+    }
+
+    /* Diff against the post *as it stands*, not against the previous revision.
+     * The question this panel answers is "what would restoring give me back",
+     * which is the one you have when you suspect something was clobbered — and
+     * that is the gap this view exists to close. */
+    const toggle = document.createElement('div');
+    toggle.className = 'hm-view-toggle';
+    const showBody = document.createElement('button');
+    showBody.type = 'button';
+    showBody.className = 'vt-btn active';
+    showBody.textContent = 'Body';
+    const showDiff = document.createElement('button');
+    showDiff.type = 'button';
+    showDiff.className = 'vt-btn';
+    showDiff.textContent = 'Diff vs current';
+    toggle.append(showBody, showDiff);
+
+    const diff = renderDiff(d.content, currentBody);
+    diff.hidden = true;
+
+    const pick = wantDiff => {
+      showDiff.classList.toggle('active', wantDiff);
+      showBody.classList.toggle('active', !wantDiff);
+      diff.hidden = !wantDiff;
+      body.hidden = wantDiff;
+      paneView = wantDiff ? 'diff' : 'body';
+    };
+    showBody.addEventListener('click', () => pick(false));
+    showDiff.addEventListener('click', () => pick(true));
+
+    setPane(pane, head, toggle, body, diff, restore);
+    // Sticky across revisions: comparing several in a row is the actual task,
+    // and having it snap back to Body on every click makes that tedious.
+    if (paneView === 'diff') pick(true);
   } catch (err) {
     setPane(pane, placeholder(`Could not load that revision: ${err.message}`));
   }
@@ -168,6 +284,8 @@ async function restoreRevision(rev, button, pane) {
 
 export async function openPostHistory(postId, title) {
   currentPostId = postId;
+  currentBody = null;
+  paneView = 'body';
   historyModal.classList.add('open');
   document.body.style.overflow = 'hidden';
   hmTitle.textContent = `#${postId}${title ? ' · ' + title : ''}`;

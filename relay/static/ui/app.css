@@ -837,15 +837,27 @@ aside.collapsed > * { min-width: 220px; }
   text-transform: uppercase; letter-spacing: 0.18em;
   display: flex; align-items: center; justify-content: space-between;
 }
-.sidebar-tabs { display: flex; gap: 3px; }
+/* Three tabs and the `+` button fit a 220px sidebar with room. A fourth did
+   not — `tests/ui/test_sidebar_tabs.py` measures the strip against the header's
+   content box, so the next attempt to add one fails loudly instead of pushing
+   the add button off the edge. */
+.sidebar-tabs { display: flex; gap: 3px; min-width: 0; }
 .sb-tab {
   background: none; border: none; color: var(--muted); cursor: pointer;
   font: inherit; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
-  padding: 3px 8px; border-radius: 4px;
+  padding: 3px 8px; border-radius: 4px; white-space: nowrap;
 }
 .sb-tab.active { color: var(--accent); background: var(--tag-active); }
 .sb-tab:hover:not(.active) { color: var(--text); }
-.folder-item .folder-ico { color: var(--accent); margin-right: 4px; }
+/* A fixed gutter, so the "all" row (which carries an empty one) lines its label
+   up with the folder rows instead of hanging left of them. The icon is drawn
+   (`ICON_FOLDER`) and strokes in `currentColor`, so `--accent` reaches it —
+   which the U+1F4C1 emoji that shipped here first could never do. */
+.folder-item .folder-ico {
+  display: inline-flex; align-items: center; justify-content: flex-start;
+  width: 1.25em; margin-right: 4px; color: var(--accent);
+}
+.folder-item .folder-ico svg { display: block; }
 .sidebar-add-btn {
   background: none; border: 1px solid var(--border); color: var(--muted);
   cursor: pointer; font-size: 14px; line-height: 1; padding: 1px 6px;
@@ -1213,6 +1225,69 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .lightbox-cap { color: var(--on-scrim); font-size: 12px; }
 .edit-form textarea.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 
+/* ── Recovery browser (inside the status panel) ───────── */
+/* Not a sidebar view: Tags/Tree/Files are ways to browse what *exists*, and
+   this is a different corpus. It renders into `.sm-body`, so it inherits the
+   panel's scroll shell and 560px measure rather than owning either. */
+.sm-back {
+  align-self: flex-start; background: none; border: none; cursor: pointer;
+  font: inherit; font-size: 11px; color: var(--muted); padding: 0;
+  transition: color 0.15s;
+}
+.sm-back:hover { color: var(--accent); }
+.del-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.del-filter {
+  background: none; cursor: pointer; font: inherit; font-size: 10px;
+  letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
+  transition: color 0.15s, border-color 0.15s;
+}
+.del-filter:hover { color: var(--text); }
+.del-filter.active { color: var(--accent); border-color: var(--accent); }
+.del-card {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px 14px; margin-bottom: 10px;
+  background: color-mix(in srgb, var(--red) 4%, transparent);
+}
+.del-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.del-title { font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+/* The reason a post went away decides how alarming it should look: a TTL sweep
+   is routine, a delete is deliberate, and an editor removing the file is the
+   case this view exists for. */
+.del-reason {
+  font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 1px 7px; border-radius: 3px; flex-shrink: 0;
+  color: var(--accent-3); background: color-mix(in srgb, var(--accent-3) 10%, transparent);
+}
+.del-reason-deleted { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+.del-reason-external { color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 10%, transparent); }
+.del-meta { font-size: 10px; color: var(--muted); overflow-wrap: anywhere; margin-bottom: 8px; }
+.del-actions { display: flex; gap: 6px; }
+.del-failed { color: var(--red); margin: 8px 0 0; }
+.btn-restore {
+  background: none; border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
+  color: var(--green); padding: 3px 9px; border-radius: 3px; cursor: pointer;
+  font-family: inherit; font-size: 11px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-restore:hover:not(:disabled) { background: color-mix(in srgb, var(--green) 12%, transparent); border-color: var(--green); }
+.btn-restore:disabled { opacity: 0.6; cursor: default; }
+.del-body {
+  margin: 10px 0 0; padding: 10px 12px; max-height: 260px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  font-family: inherit; font-size: 12px; line-height: 1.55; color: var(--body);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+@media (max-width: 768px) {
+  /* `.sm-body .btn-edit` reaches the Recovery section's own button too — it is
+     not inside `.del-actions`, and the sheet touch-floor smoke caught it at
+     132x23 rather than my noticing. */
+  .del-actions button, .del-filter, .sm-back, .sm-body .btn-edit {
+    min-height: 44px; display: inline-flex; align-items: center;
+  }
+}
+
 /* ── Search bar ─────────────────────────────────────── */
 .search-bar {
   display: flex; align-items: center; gap: 8px;
@@ -1507,22 +1582,39 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .sm-head { display: flex; align-items: baseline; gap: 8px; padding: 18px 20px 0; flex-shrink: 0; }
 .sm-name { font-size: 15px; font-weight: 600; color: var(--text); }
 .sm-version { font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
-.sm-body { padding: 16px 20px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.sm-body {
+  padding: 16px 20px 18px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 18px;
+  /* One label column for the whole panel. Every section used to size its own —
+     `auto 1fr` per grid — so Vault's values started at one x and Server's at
+     another, while Health pushed its values to the far right edge entirely.
+     Three alignments down one 560px panel is what "unbalanced" was. Widest
+     label is "Full-text search" at ~120px plus the 15px status-dot gutter. */
+  --sm-label: 150px;
+}
 .sm-section-title {
   font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
   color: var(--accent-3); margin-bottom: 8px;
 }
-/* auto 1fr, and the value column may wrap — a long vault path must not widen
-   the panel (same min-width:0 lesson as the grid tiles). */
-.sm-rows { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; margin: 0; }
+/* The value column may wrap — a long vault path must not widen the panel (same
+   min-width:0 lesson as the grid tiles). */
+.sm-rows {
+  display: grid; grid-template-columns: minmax(0, var(--sm-label)) 1fr;
+  gap: 6px 14px; font-size: 12.5px; margin: 0;
+}
 .sm-rows dt { color: var(--muted); }
 .sm-rows dd { margin: 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.sm-feat { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 3px 0; }
+/* Health is the same grid; the row is `contents` so the dot+label pair and the
+   note fall into those two columns rather than forming a flex row of their own. */
+.sm-health { gap: 7px 14px; }
+.sm-feat { display: contents; }
+.sm-feat-name { display: flex; align-items: center; gap: 8px; color: var(--muted); min-width: 0; }
 .sm-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .sm-dot.ok   { background: var(--green); }
 .sm-dot.warn { background: var(--accent); }
 .sm-dot.bad  { background: var(--red); }
-.sm-feat-note { margin-left: auto; color: var(--muted); font-size: 11.5px; text-align: right; }
+.sm-feat-note { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.sm-recovery-line { font-size: 12.5px; color: var(--text); margin-bottom: 10px; }
 .sm-error { font-size: 12.5px; color: var(--red); }
 
 .post-modal { display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; }
@@ -1753,6 +1845,20 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   font-family: inherit; font-size: 12.5px; line-height: 1.55; color: var(--text);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+.hm-view-toggle { display: flex; flex-shrink: 0; margin-bottom: 8px; }
+.hm-view-toggle .vt-btn { font-size: 10px; padding: 3px 9px; }
+/* Diff lines are `display: block` inside the same `pre` shell the body uses, so
+   both panes measure identically and switching between them cannot resize the
+   panel — the fixed-height rule the whole panel depends on. */
+.hm-diff .hm-d { display: block; padding: 0 6px; margin: 0 -6px; }
+.hm-d-add { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--text); }
+.hm-d-del { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--text); }
+.hm-d-same { color: var(--muted); }
+/* Markers are pseudo-elements so a copied diff yields the text itself, with no
+   column of +/- to strip before pasting it back into a note. */
+.hm-d-add::before { content: "+ "; color: var(--green); }
+.hm-d-del::before { content: "− "; color: var(--red); }
+.hm-d-same::before { content: "  "; }
 .hm-restore { width: 100%; margin-top: 10px; flex-shrink: 0; }
 /* Placeholder and loading share the pane's centre so neither changes its size. */
 .hm-placeholder {
@@ -1796,6 +1902,16 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 
 /* ── Mobile sheets: geometry, reach, safe areas ──────────────────────────── */
+/* ⚠️ `--sm-label` belongs in *this* block, not the ≤768px one further up: the
+   base `.sm-body` rule is declared after that media query at equal specificity,
+   so the override lost on source order and the phone sheet kept the full 150px
+   column — measured, not noticed. Same trap as `.em-inner`/`.hm-inner` below.
+   A 150px label column of a ~350px sheet leaves the vault path wrapping every
+   few characters. */
+@media (max-width: 768px) {
+  .sm-body { --sm-label: 108px; }
+}
+
 /* This block sits at the end of the file deliberately. `.em-inner`/`.hm-inner`
    are declared *after* the modal media block above and carry equal specificity,
    so the `width: 100%` up there lost on source order — the edit and history
@@ -1860,4 +1976,15 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
      a narrow window, which is the better test. */
   .edit-form input, .edit-form textarea, .edit-form select { padding: 10px 12px; }
   .edit-form input, .edit-form select { min-height: 44px; }
+
+  /* The attachment list's delete × was 17x15 — the touch floor never reached it
+     because it only exists when the post *has* an attachment, and no test had
+     ever created one. It surfaced the moment a fixture did. Negative margins
+     grow the hit area without stretching the row, the same shape the sidebar's
+     tag controls use. */
+  .ef-attach-del {
+    min-width: 44px; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin: -12px -8px -12px 0;
+  }
 }

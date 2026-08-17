@@ -42,6 +42,16 @@ def _api_post(base_url: str, payload: dict) -> dict:
         return json.loads(r.read())
 
 
+def _api_delete(base_url: str, post_id: int) -> None:
+    req = urllib.request.Request(
+        f"{base_url}/posts/{post_id}",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        method="DELETE",
+    )
+    with urllib.request.urlopen(req, timeout=10):
+        pass
+
+
 def test_feed_renders_seeded_posts(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
     assert page.locator(".feed .post").count() >= 4
@@ -227,8 +237,10 @@ def test_history_panel_lists_revisions_and_previews_one(page, relay_server):
     assert f"#{post['id']}" in page.locator("#hmTitle").inner_text()
 
     rows.first.click()
-    page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
-    assert "first draft" in page.locator("#hmBody .hm-body-text").inner_text()
+    # `:not(.hm-diff)` — the diff pane shares `.hm-body-text` on purpose, so both
+    # panes measure identically and switching cannot resize the panel.
+    page.locator("#hmBody .hm-body-text:not(.hm-diff)").wait_for(timeout=10_000)
+    assert "first draft" in page.locator("#hmBody .hm-body-text:not(.hm-diff)").inner_text()
     assert page.locator(".hm-restore").is_visible()
 
 
@@ -255,8 +267,8 @@ def test_restoring_from_the_panel_undoes_a_clobber(page, relay_server):
     rows = page.locator("#hmBody .hm-rev")
     rows.first.wait_for(timeout=10_000)
     rows.last.click()
-    page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
-    assert "THE GOOD VERSION" in page.locator("#hmBody .hm-body-text").inner_text()
+    page.locator("#hmBody .hm-body-text:not(.hm-diff)").wait_for(timeout=10_000)
+    assert "THE GOOD VERSION" in page.locator("#hmBody .hm-body-text:not(.hm-diff)").inner_text()
 
     page.on("dialog", lambda d: d.accept())
     page.locator(".hm-restore").click()
@@ -309,7 +321,7 @@ def test_history_panel_does_not_resize_when_switching_revisions(page, relay_serv
         rows.nth(i).click()
         page.wait_for_timeout(120)   # catch it mid-load, where the collapse used to happen
         seen.add(size())
-        page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
+        page.locator("#hmBody .hm-body-text:not(.hm-diff)").wait_for(timeout=10_000)
         seen.add(size())
     assert len(seen) == 1, f"panel changed size while switching revisions: {sorted(seen)}"
 
@@ -325,7 +337,7 @@ def test_history_panel_keeps_the_revision_list_visible_while_previewing(page):
     rows = page.locator("#hmBody .hm-rev")
     rows.first.wait_for(timeout=10_000)
     rows.first.click()
-    page.locator("#hmBody .hm-body-text").wait_for(timeout=10_000)
+    page.locator("#hmBody .hm-body-text:not(.hm-diff)").wait_for(timeout=10_000)
     assert rows.first.is_visible(), "the revision list was pushed out of view by the preview"
 
 
