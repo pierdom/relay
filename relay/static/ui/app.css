@@ -268,9 +268,21 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
 
 /* Catppuccin — four flavours, from catppuccin.com/palette. Role mapping follows
    the project's own guidance: `mantle` is the canvas and `base` the raised
-   surface, `surface0/1/2` step up through borders, `overlay1` is muted, and
-   `mauve` is Catppuccin's default accent. Decorative accents are peach and teal
-   — a warm/cool pair well clear of `green` and `red`, which stay semantic.
+   surface, `surface0/1/2` step up through borders, `overlay1` is muted.
+
+   **The three dark flavours carry different accents on purpose.** Built to the
+   letter they were near-indistinguishable: Catppuccin varies its backgrounds
+   between flavours but barely its accents, so mauve everywhere gave #ca9ee6,
+   #c6a0f6 and #cba6f7 — the same light purple three times — over backgrounds
+   only 2.5x apart in luminance, which at that darkness reads as one theme. So
+   Frappé takes **peach** (warm), Macchiato **blue** (cool), Mocha keeps the
+   canonical **mauve**, and Mocha drops to `crust`/`mantle` so it is also
+   unmistakably the deepest — widening the spread to 3.6x and *raising* its
+   contrast from 11.3:1 to 12.1:1. Choosing an accent is what Catppuccin expects
+   a port to do; mauve is its default, not a requirement.
+
+   Frappé cannot be pushed the other way to widen the spread further: on
+   `surface0` its text falls to 6.2:1, under the accessibility floor.
 
    Latte is the exception, and the reason is worth recording because it is a
    fact about the palette rather than a choice. Measured as chip text on Latte's
@@ -325,9 +337,9 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --border:      #414559;     /* surface0 */
   --text:        #c6d0f5;     /* text */
   --muted:       #838ba7;     /* overlay1 */
-  --accent:      #ca9ee6;     /* mauve — Catppuccin's own default accent */
-  --accent-dim:  #babbf1;     /* lavender */
-  --accent-glow: rgba(202, 158, 230, 0.10);
+  --accent:      #ef9f76;     /* peach — Frappé's signature here, see note */
+  --accent-dim:  #e5c890;     /* yellow */
+  --accent-glow: rgba(239, 159, 118, 0.10);
   --tag-bg:      #414559;     /* surface0 */
   --tag-active:  #51576d;     /* surface1 */
   --green:       #a6d189;     /* green */
@@ -336,7 +348,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #c6d0f5;     /* text */
   --wash-raise:  rgba(198, 208, 245, 0.05);
 
-  --accent-2:    #ef9f76;     /* peach */
+  --accent-2:    #ca9ee6;     /* mauve */
   --accent-3:    #81c8be;     /* teal */
   --on-accent:     #232634;
   --on-scrim:      #c6d0f5;
@@ -355,9 +367,9 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --border:      #363a4f;     /* surface0 */
   --text:        #cad3f5;     /* text */
   --muted:       #8087a2;     /* overlay1 */
-  --accent:      #c6a0f6;     /* mauve — Catppuccin's own default accent */
-  --accent-dim:  #b7bdf8;     /* lavender */
-  --accent-glow: rgba(198, 160, 246, 0.10);
+  --accent:      #8aadf4;     /* blue — Macchiato's signature here */
+  --accent-dim:  #7dc4e4;     /* sapphire */
+  --accent-glow: rgba(138, 173, 244, 0.10);
   --tag-bg:      #363a4f;     /* surface0 */
   --tag-active:  #494d64;     /* surface1 */
   --green:       #a6da95;     /* green */
@@ -367,7 +379,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --wash-raise:  rgba(202, 211, 245, 0.05);
 
   --accent-2:    #f5a97f;     /* peach */
-  --accent-3:    #8bd5ca;     /* teal */
+  --accent-3:    #c6a0f6;     /* mauve */
   --on-accent:     #181926;
   --on-scrim:      #cad3f5;
   --border-hover:  #5b6078;     /* surface2 */
@@ -380,12 +392,12 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
 
 :root[data-theme="catppuccin-mocha"], [data-theme="catppuccin-mocha"] {
   color-scheme: dark;
-  --bg:          #181825;     /* mantle */
-  --surface:     #1e1e2e;     /* base */
+  --bg:          #11111b;     /* crust — Mocha takes the palette's darkest step */
+  --surface:     #181825;     /* mantle */
   --border:      #313244;     /* surface0 */
   --text:        #cdd6f4;     /* text */
   --muted:       #7f849c;     /* overlay1 */
-  --accent:      #cba6f7;     /* mauve — Catppuccin's own default accent */
+  --accent:      #cba6f7;     /* mauve — the canonical default, kept for Mocha */
   --accent-dim:  #b4befe;     /* lavender */
   --accent-glow: rgba(203, 166, 247, 0.10);
   --tag-bg:      #313244;     /* surface0 */
