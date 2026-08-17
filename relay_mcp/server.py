@@ -184,6 +184,29 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="list_deleted_posts",
+            description=(
+                "List posts that no longer exist but can still be restored, newest first. This is "
+                "the discovery half of recovery: restore_post can put back any post whose id you "
+                "know, and after a delete you do not know it. Each item carries id, title, sha, "
+                "when, reason (deleted, external or expiry) and path — pass the id and sha "
+                "straight to restore_post. TTL expiries are excluded unless include_expiry is "
+                "true, since those are routine and would bury the deletion you are looking for. "
+                "Nothing is moved on delete and there is nothing to purge: this reads the vault's "
+                "git history. Returns an error if vault history is disabled."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max deletions to return (default 50)"},
+                    "include_expiry": {
+                        "type": "boolean",
+                        "description": "Include posts swept by a tag TTL (default false)",
+                    },
+                },
+            },
+        ),
+        types.Tool(
             name="restore_post",
             description=(
                 "Restore a post to an earlier revision, recreating it if it was deleted. Pass a "
@@ -530,6 +553,33 @@ async def call_tool(
         state = "exists" if data.get("exists") else "deleted — restorable"
         lines = [f"#{post_id} ({state}) — {len(items)} revision(s):"]
         lines += [f"  {r['short_sha']}  {r['when']}  {r['message']}" for r in items]
+        return [types.TextContent(type="text", text="\n".join(lines))]
+
+    if name == "list_deleted_posts":
+        params = {
+            "limit": arguments.get("limit", 50),
+            "include_expiry": arguments.get("include_expiry", False),
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/posts/deleted",
+                params=params,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            if response.status_code == 503:
+                return [types.TextContent(type="text", text="Vault history is disabled or git is unavailable.")]
+            response.raise_for_status()
+            data = response.json()
+        items = data.get("items", [])
+        if not items:
+            return [types.TextContent(type="text", text="Nothing deleted — or nothing left to recover.")]
+        lines = [f"{len(items)} restorable deletion(s):"]
+        lines += [
+            f"  #{d['id']}  {d['title']}  [{d['reason']}]  {d['when']}  sha {d['short_sha']}"
+            for d in items
+        ]
+        lines.append("Restore with restore_post(id=<id>, sha=<sha>).")
         return [types.TextContent(type="text", text="\n".join(lines))]
 
     if name == "restore_post":

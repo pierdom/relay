@@ -247,6 +247,28 @@ async def get_post_history(id: int, limit: int = 20) -> dict:
 
 @mcp.tool(
     description=(
+        "List posts that no longer exist but can still be restored, newest first. This is "
+        "the discovery half of recovery: restore_post can put back any post whose id you "
+        "know, and after a delete you do not know it. Each item carries id, title, sha, "
+        "when, reason (deleted, external or expiry) and path — pass the id and sha "
+        "straight to restore_post. TTL expiries are excluded unless include_expiry is "
+        "true, since those are routine and would bury the deletion you are looking for. "
+        "Nothing is moved on delete and there is nothing to purge: this reads the vault's "
+        "git history. Returns an error if vault history is disabled."
+    )
+)
+async def list_deleted_posts(limit: int = 50, include_expiry: bool = False) -> dict:
+    metrics.record_tool_call("list_deleted_posts")
+    async with _db() as db:
+        try:
+            result = await service.list_deleted_posts(db, limit=limit, include_expiry=include_expiry)
+        except service.HistoryUnavailable:
+            return {"error": "Vault history is disabled or git is unavailable."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
         "Restore a post to an earlier revision, recreating it if it was deleted. Pass a "
         "sha from get_post_history. The restore is itself recorded in history, so it can "
         "be undone the same way. Use this to undo a bad overwrite rather than "

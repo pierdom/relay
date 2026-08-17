@@ -1,6 +1,6 @@
 # MCP server
 
-relay exposes the full feed API as **15 MCP tools** so Claude — or any MCP-capable agent — can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
+relay exposes the full feed API as **16 MCP tools** so Claude — or any MCP-capable agent — can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
 
 ## Tools
 
@@ -13,6 +13,7 @@ relay exposes the full feed API as **15 MCP tools** so Claude — or any MCP-cap
 | `delete_post` | Delete a post by ID |
 | `get_post_history` | List a post's revisions from vault history; works for a deleted post (`exists:false`) |
 | `restore_post` | Restore a post to a revision sha, recreating it if deleted; the restore is itself recorded |
+| `list_deleted_posts` | Posts that are gone but restorable — id, title, restorable sha, and why they went |
 | `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio proxy also accepts `path` (a local file it uploads for you) |
 | `create_upload` | Mint a presigned upload slot (`upload_id` + `upload_url`); PUT the raw bytes there, then finalize with `add_attachment(upload_id=…)` |
 | `get_attachment` | Retrieve an attachment; images return as inline image content |
@@ -28,9 +29,20 @@ Every write to the vault is committed to git, so a post that was overwritten or
 deleted can be brought back without leaving the tool call.
 
 ```
+list_deleted_posts()           → [{id, title, sha, when, reason, path}, …] newest first
 get_post_history(id=54)        → [{sha, short_sha, when, message, path}, …] newest first
 restore_post(id=54, sha="a8dcc37")
 ```
+
+- **Start with `list_deleted_posts` when you do not know the id.** Everything else
+  here needs one, and after a delete nobody has one — that is the whole reason the
+  tool exists. The `sha` it reports is already a restorable revision, so it can go
+  straight to `restore_post` without a `get_post_history` round trip.
+- **It is not a trash can.** Nothing is moved on delete and there is nothing to
+  purge; this reads the git history that already records every removal. TTL
+  expiries are excluded unless you pass `include_expiry=true`, because a vault
+  with per-tag TTLs sheds routine posts constantly and they would bury the
+  deletion you are looking for.
 
 - **Works for a deleted post.** `get_post_history` answers with `exists: false` and
   still lists restorable revisions — that is the case most worth recovering, so it

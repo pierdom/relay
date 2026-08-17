@@ -13,7 +13,7 @@ cp .env.example .env            # set API_KEY
 uv run uvicorn relay.main:app --reload      # local, http://localhost:8000 (docs at /docs)
 docker compose up -d            # or Docker; update with: docker compose pull && docker compose up -d
 
-uv run pytest -q                # 389 tests (incl. 105 browser smokes)
+uv run pytest -q                # 392 tests (incl. 105 browser smokes)
 uv run ruff check .             # lint — config in pyproject.toml
 uv run playwright install chromium           # once, for the tests/ui browser smokes
 ```
@@ -163,7 +163,7 @@ The cookie is minted two ways: **OIDC login** via PocketID (`GET /auth/login` �
 Two surfaces with **identical tools**, server `instructions`, and the `relay://master-document` resource (post 0 as `text/markdown`):
 
 - **`relay/mcp_server.py`** — in-process, served over Streamable HTTP at `/mcp`; tools call `relay.service` directly. Remote-capable, **recommended**.
-- **`relay_mcp/server.py`** — legacy stdio proxy; runs on the client, proxies to REST over `RELAY_BASE_URL`. For clients that can't speak remote MCP (e.g. Claude Desktop). Full parity (same fifteen tools); `git pull` + restart the client to update.
+- **`relay_mcp/server.py`** — legacy stdio proxy; runs on the client, proxies to REST over `RELAY_BASE_URL`. For clients that can't speak remote MCP (e.g. Claude Desktop). Full parity (same sixteen tools); `git pull` + restart the client to update.
 
 **Feature parity rule:** every tool added, removed, or changed in `relay/mcp_server.py` must be reflected in `relay_mcp/server.py` and vice versa. Tool names, parameters, and descriptions must match exactly across both files. Whenever you touch either MCP server file, update the other one in the same change. **`tests/test_mcp_parity.py` enforces this in CI** — it ast-parses both files and diffs names, parameters, and descriptions. The rule previously relied on a `PostToolUse` hook nudging the agent, and the descriptions had silently drifted in 9 of 12 tools; a reminder is not a gate. (Parameter *types and defaults* aren't compared: one side is Python annotations, the other JSON Schema, and stdio documents defaults in prose.)
 
@@ -177,6 +177,7 @@ The in-process server advertises relay's logo + website in the initialize `serve
 | `list_posts` | List (tag/search/limit/offset; `summary` defaults **true** = metadata + excerpt, no bodies — call `get_post` for a full body) |
 | `add_attachment` / `create_upload` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD; `add_attachment` bytes via `data`/`source_url`/`upload_id`, `create_upload` mints a presigned slot (see [Attachments](#attachments)) |
 | `get_post_history` / `restore_post` | Read a post's revisions / roll it back to a sha (recreates a deleted post, keeping its id) |
+| `list_deleted_posts` | Posts that are gone but restorable — the *discovery* half: `restore_post` needs an id, and after a delete nobody has one. TTL expiries excluded unless `include_expiry` |
 | `get_status` | Version, uptime, vault path + counts, and which features actually work |
 | `list_tags` / `set_tag_config` | Tags with counts / per-tag expiry |
 
