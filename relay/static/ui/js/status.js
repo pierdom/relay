@@ -44,17 +44,25 @@ function smRows(pairs) {
   return dl;
 }
 
+// `display: contents` on the row, so the dot+label and the note land in the same
+// two grid columns `.sm-rows` uses. Health used to be a flex row with the note
+// pushed right by `margin-left: auto`, which put the value at the far edge of a
+// 560px panel while Vault and Server sat their values next to the label — two
+// alignment systems in one panel, and the reason it read as unbalanced.
 function smFeature(label, state, note) {
   const row = document.createElement('div');
   row.className = 'sm-feat';
+  const name = document.createElement('span');
+  name.className = 'sm-feat-name';
   const dot = document.createElement('span');
   dot.className = `sm-dot ${state}`;
-  const name = document.createElement('span');
-  name.textContent = label;
+  const text = document.createElement('span');
+  text.textContent = label;
+  name.append(dot, text);
   const hint = document.createElement('span');
   hint.className = 'sm-feat-note';
   hint.textContent = note;
-  row.append(dot, name, hint);
+  row.append(name, hint);
   return row;
 }
 
@@ -64,7 +72,7 @@ function smFeature(label, state, note) {
 function renderRecovery(historyWorks) {
   const wrap = document.createElement('div');
   const line = document.createElement('div');
-  line.className = 'sm-feat-note sm-recovery-line';
+  line.className = 'sm-recovery-line';
   wrap.appendChild(line);
 
   if (!historyWorks) {
@@ -111,6 +119,7 @@ function renderStatus(d) {
   smBody.innerHTML = '';
 
   const health = document.createElement('div');
+  health.className = 'sm-rows sm-health';
   const h = d.features.history;
   health.appendChild(smFeature(
     'Vault history',
