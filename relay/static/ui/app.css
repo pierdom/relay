@@ -10,10 +10,19 @@
  */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Form controls take `buttontext`/`fieldtext` from the UA, which `color-scheme`
+   resolves to white on a dark theme and black on a light one — a colour owned by
+   no theme. Harmless while every control that renders text sets its own colour
+   (`.menu-btn` draws bars, not glyphs), but it leaks a foreign value into the
+   page and it is what the per-theme colour audit trips over. `hr` is here for
+   the same reason: it renders as a `border-top`, so its `color` is never
+   painted, but the UA still hands it a grey belonging to no theme. The audit
+   found it the moment a fixture first contained a horizontal rule. */
+button, input, select, textarea, hr { color: inherit; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
-:root {
+:root, [data-theme="dark"] {
   color-scheme: dark;
   --bg:          #090a0d;
   --surface:     #0f1116;
@@ -35,6 +44,19 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
      redefines this block and nothing else. Values derivable from --accent or
      --red are not tokens at all: they are color-mix() at the point of use, so
      they follow the accent into every theme for free. */
+  /* Secondary and tertiary accents, for chips that are decorative rather than
+     semantic — the id pill, the tag count, the uppercase section labels, the
+     `via` source. Without them every such chip is grey in every theme, because
+     the contract had one accent and nothing else.
+
+     Violet and cyan against relay's amber: far enough round the wheel to read
+     as separate information, and clear of --green and --red, which are
+     semantic and must not be borrowed for decoration. They sit at the same
+     lightness step as the tokens already here — the bright step on dark, the
+     deep step on light — so they read as part of the same set rather than as
+     stickers on it. */
+  --accent-2:      #a78bfa;            /* violet */
+  --accent-3:      #22d3ee;            /* cyan */
   --on-accent:     #000;               /* foreground on an --accent fill */
   --on-scrim:      #eee;               /* foreground on a dark scrim */
   --border-hover:  #2d3348;
@@ -47,7 +69,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   font-size: 13px;
 }
 
-:root[data-theme="light"] {
+:root[data-theme="light"], [data-theme="light"] {
   color-scheme: light;
   --bg:          #edeae1;
   --surface:     #ffffff;
@@ -65,6 +87,8 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #22252c;
   --wash-raise:  rgba(0, 0, 0, 0.03);
 
+  --accent-2:      #6d28d9;            /* violet, deep step to match this theme */
+  --accent-3:      #0e7490;            /* cyan, deep step */
   --on-accent:     #000;               /* 5.05:1 on #b96809 — white would be 4.16:1 */
   --on-scrim:      #eee;
   --border-hover:  #b8b09a;
@@ -74,6 +98,513 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.18);
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.16);
 }
+
+/* Gruvbox classic dark (morhetz). Not invented here — these are the values from
+   the corellia desktop identity, and `relay_tui/palettes/gruvbox.toml` already
+   anchors on the same three (#fabd2f, #504945, #1d2021), so the browser UI, the
+   TUI, the terminal and the desktop agree.
+
+   This is the theme that justified two of the semantic tokens. `--on-accent` is
+   #1d2021 rather than black — gruvbox puts dark *brown* on its yellows, which is
+   what the ricing does everywhere else — and `--border-hover` maps onto bg3, a
+   colour the palette already defines for exactly that job. A theme that only
+   ever restated #000 would not have proven either token was needed. */
+:root[data-theme="gruvbox"], [data-theme="gruvbox"] {
+  color-scheme: dark;
+  --bg:          #1d2021;   /* bg0_h (hard) */
+  --surface:     #282828;   /* bg0 */
+  --border:      #504945;   /* bg2 */
+  --text:        #fbf1c7;   /* fg0 — the brightest fg, not fg1 */
+  --muted:       #928374;   /* gray */
+  --accent:      #fabd2f;   /* yellow */
+  --accent-dim:  #d79921;   /* neutral yellow */
+  --accent-glow: rgba(250, 189, 47, 0.10);
+  --tag-bg:      #32302f;   /* bg0_s — a warm step off the surface */
+  --tag-active:  #3c3836;   /* bg1 */
+  --green:       #b8bb26;
+  --red:         #fb4934;
+  --body:        #ebdbb2;   /* fg1 — fg2 left prose at 8.6:1 */
+  --body-strong: #fbf1c7;   /* fg0 */
+  --wash-raise:  rgba(235, 219, 178, 0.04);   /* lifts with fg, not pure white */
+
+  --accent-2:      #d3869b;   /* purple */
+  --accent-3:      #8ec07c;   /* aqua */
+  --on-accent:     #1d2021;
+  --on-scrim:      #ebdbb2;
+  --border-hover:  #665c54;   /* bg3 */
+  --scrim-rgb:     18, 20, 21;   /* a hair warmer than pure black, like the bg */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.40);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.40);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+/* Tokyo Night (folke/tokyonight.nvim, "night" variant). Every value below is
+   from the reference palette — the elevated surface is storm's `bg`, which is
+   what the theme itself uses for floats and panels, and the two border steps
+   are `fg_gutter` and `dark3` rather than anything mixed by hand.
+
+   This is the first *cool* theme, and that was the point of adding it: the
+   literal check cannot see a token used for the wrong role, only for the wrong
+   value. Everything shipped before it was amber or yellow, so a warm assumption
+   baked into a token's meaning would have gone unnoticed. Nothing outside this
+   block changed to accommodate it.
+
+   Two role corrections after seeing it rendered. `--body` is post prose — the
+   main reading text — so it takes `fg`; `fg_dark` is the palette's *secondary*
+   UI colour and using it here was a mis-mapping that cost 3.7 points of
+   contrast. And the canvas drops to `bg_dark` so cards sit on the theme's
+   signature `bg` rather than on storm's lighter panel tone. Together those took
+   prose from 6.9:1 to 10.6:1 — see the contrast rule in tests/test_css_tokens.py. */
+:root[data-theme="tokyo-night"], [data-theme="tokyo-night"] {
+  color-scheme: dark;
+  --bg:          #16161e;   /* bg_dark — the palette's darker canvas */
+  --surface:     #1a1b26;   /* night bg — cards sit on the theme's signature tone */
+  --border:      #3b4261;   /* fg_gutter */
+  --text:        #c0caf5;   /* fg */
+  --muted:       #565f89;   /* comment */
+  --accent:      #7aa2f7;   /* blue */
+  --accent-dim:  #3d59a1;   /* blue0 */
+  --accent-glow: rgba(122, 162, 247, 0.10);
+  --tag-bg:      #24283b;   /* storm bg */
+  --tag-active:  #414868;   /* terminal_black */
+  --green:       #9ece6a;
+  --red:         #f7768e;
+  --body:        #c0caf5;   /* fg — see note: fg_dark is secondary UI, not prose */
+  --body-strong: #c0caf5;   /* fg */
+  --wash-raise:  rgba(192, 202, 245, 0.04);   /* lifts with fg, not pure white */
+
+  --accent-2:      #bb9af7;   /* magenta */
+  --accent-3:      #7dcfff;   /* cyan */
+  --on-accent:     #1a1b26;   /* 6.8:1 on #7aa2f7 — the accent is a light blue */
+  --on-scrim:      #c0caf5;
+  --border-hover:  #545c7e;   /* dark3 */
+  --scrim-rgb:     22, 22, 30;   /* bg_dark #16161e */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.64);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.64);
+}
+
+/* ANSI Dark / ANSI Light — the IBM VGA 16-colour set, which is what a terminal
+   actually shows and where the vintage feel comes from. (The other common
+   "VGA" table is Microsoft's #800000/#c0c0c0 variant; this is the #aa/#55 one.)
+   Sourced from cli.r-lib.org's `vga` palette:
+
+     black   #000000   br_black   #555555      blue    #0000aa   br_blue    #5555ff
+     red     #aa0000   br_red     #ff5555      magenta #aa00aa   br_magenta #ff55ff
+     green   #00aa00   br_green   #55ff55      cyan    #00aaaa   br_cyan    #55ffff
+     yellow  #aa5500   br_yellow  #ffff55      white   #aaaaaa   br_white   #ffffff
+
+   Two things follow from a 16-colour palette with nothing between #aaaaaa and
+   #ffffff. **Cards are drawn, not filled**: `--surface` equals `--bg` and the
+   card is defined by its border, which is how a terminal frames anything — the
+   alternative was inventing an off-black, and no such colour exists here.
+   **There is no text hierarchy by lightness**: prose and headings are both pure
+   white (21:1), and emphasis comes from colour, again as it does in a terminal.
+   #aaaaaa would have put prose at 9.0:1, under the floor.
+
+   `--accent` is bright cyan rather than green: green is already `--green`, and
+   an accent indistinguishable from the "connected" dot is a bad trade for
+   phosphor nostalgia. The light theme takes blue so the pair reads as one
+   family, the way Relay Dark and Relay Light share amber. */
+:root[data-theme="ansi-dark"], [data-theme="ansi-dark"] {
+  color-scheme: dark;
+  --bg:          #000000;   /* black */
+  --surface:     #000000;   /* black — cards are framed, not filled */
+  --border:      #555555;   /* br_black */
+  --text:        #ffffff;   /* br_white */
+  --muted:       #aaaaaa;   /* white */
+  --accent:      #55ffff;   /* br_cyan */
+  --accent-dim:  #00aaaa;   /* cyan */
+  --accent-glow: rgba(85, 255, 255, 0.10);
+  --tag-bg:      #000000;   /* black — the pill is its accent-tinted outline */
+  --tag-active:  #555555;   /* br_black */
+  --green:       #55ff55;   /* br_green */
+  --red:         #ff5555;   /* br_red */
+  --body:        #ffffff;   /* br_white */
+  --body-strong: #ffffff;   /* br_white */
+  --wash-raise:  rgba(255, 255, 255, 0.06);
+
+  --accent-2:      #ff55ff;   /* br_magenta */
+  --accent-3:      #ffff55;   /* br_yellow */
+  --on-accent:     #000000;
+  --on-scrim:      #ffffff;
+  --border-hover:  #aaaaaa;   /* white */
+  --scrim-rgb:     0, 0, 0;
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.6);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.6);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.8);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.8);
+}
+
+:root[data-theme="ansi-light"], [data-theme="ansi-light"] {
+  color-scheme: light;
+  --bg:          #ffffff;   /* br_white */
+  --surface:     #ffffff;   /* br_white — cards are framed, not filled */
+  --border:      #aaaaaa;   /* white */
+  --text:        #000000;   /* black */
+  --muted:       #555555;   /* br_black */
+  --accent:      #0000aa;   /* blue */
+  --accent-dim:  #5555ff;   /* br_blue — the palette has nothing darker, so the
+                               hover lifts instead of deepening */
+  --accent-glow: rgba(0, 0, 170, 0.10);
+  --tag-bg:      #ffffff;   /* br_white */
+  --tag-active:  #aaaaaa;   /* white */
+  --green:       #00aa00;   /* green */
+  --red:         #aa0000;   /* red */
+  --body:        #000000;   /* black */
+  --body-strong: #000000;   /* black */
+  --wash-raise:  rgba(0, 0, 0, 0.06);
+
+  --accent-2:      #aa00aa;   /* magenta */
+  --accent-3:      #aa5500;   /* yellow/brown */
+  --on-accent:     #ffffff;
+  --on-scrim:      #ffffff;   /* scrims stay dark even under a light theme */
+  --border-hover:  #555555;   /* br_black */
+  --scrim-rgb:     0, 0, 0;
+  --shadow-card:   0 4px 16px rgba(0, 0, 0, 0.14);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.16);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.22);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.20);
+}
+
+/* Catppuccin — four flavours, from catppuccin.com/palette. Role mapping follows
+   the project's own guidance: `mantle` is the canvas and `base` the raised
+   surface, `surface0/1/2` step up through borders, `overlay1` is muted.
+
+   **The three dark flavours carry different accents on purpose.** Built to the
+   letter they were near-indistinguishable: Catppuccin varies its backgrounds
+   between flavours but barely its accents, so mauve everywhere gave #ca9ee6,
+   #c6a0f6 and #cba6f7 — the same light purple three times — over backgrounds
+   only 2.5x apart in luminance, which at that darkness reads as one theme. So
+   Frappé takes **peach** (warm), Macchiato **blue** (cool), Mocha keeps the
+   canonical **mauve**, and Mocha drops to `crust`/`mantle` so it is also
+   unmistakably the deepest — widening the spread to 3.6x and *raising* its
+   contrast from 11.3:1 to 12.1:1. Choosing an accent is what Catppuccin expects
+   a port to do; mauve is its default, not a requirement.
+
+   Frappé cannot be pushed the other way to widen the spread further: on
+   `surface0` its text falls to 6.2:1, under the accessibility floor.
+
+   Latte is the exception, and the reason is worth recording because it is a
+   fact about the palette rather than a choice. Measured as chip text on Latte's
+   own base, **every one of its fourteen accent members lands under AA** — best
+   is mauve at 4.18:1, and the ceiling with no tint at all is 4.80:1. Its warm
+   members are far worse (peach 2.38:1, yellow 2.13:1) simply because orange and
+   yellow on a near-white ground cannot do better. Dropping the chip tint to 4%
+   would have rescued mauve at 4.54:1, but a 4% tint is not a chip — that trades
+   the design in nine themes to accommodate one. So Latte's decorative chips are
+   `text`: legible, and honestly uncoloured. Its colour shows in the accent,
+   green and red instead.
+
+   Its prose also tops out at 7.06:1 — exactly WCAG AAA, and the palette has no
+   darker text than #4c4f69. See the two-tier floor in tests/test_css_tokens.py:
+   a faithful reproduction is held to the accessibility floor, not to the house
+   target relay's own themes are designed against. */
+
+:root[data-theme="catppuccin-latte"], [data-theme="catppuccin-latte"] {
+  color-scheme: light;
+  --bg:          #e6e9ef;     /* mantle */
+  --surface:     #eff1f5;     /* base */
+  --border:      #ccd0da;     /* surface0 */
+  --text:        #4c4f69;     /* text */
+  --muted:       #8c8fa1;     /* overlay1 */
+  --accent:      #8839ef;     /* mauve — Catppuccin's own default accent */
+  --accent-dim:  #7287fd;     /* lavender */
+  --accent-glow: rgba(136, 57, 239, 0.10);
+  --tag-bg:      #ccd0da;     /* surface0 */
+  --tag-active:  #bcc0cc;     /* surface1 */
+  --green:       #40a02b;     /* green */
+  --red:         #d20f39;     /* red */
+  --body:        #4c4f69;     /* text */
+  --body-strong: #4c4f69;     /* text */
+  --wash-raise:  rgba(0, 0, 0, 0.05);
+
+  --accent-2:    #4c4f69;     /* text — no member of Latte clears AA as a chip */
+  --accent-3:    #4c4f69;     /* text — see the Latte note above */
+  --on-accent:     #eff1f5;
+  --on-scrim:      #4c4f69;
+  --border-hover:  #acb0be;     /* surface2 */
+  --scrim-rgb:     220, 224, 232;   /* crust */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.12);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.14);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.2);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.18);
+}
+
+:root[data-theme="catppuccin-frappe"], [data-theme="catppuccin-frappe"] {
+  color-scheme: dark;
+  --bg:          #292c3c;     /* mantle */
+  --surface:     #303446;     /* base */
+  --border:      #414559;     /* surface0 */
+  --text:        #c6d0f5;     /* text */
+  --muted:       #838ba7;     /* overlay1 */
+  --accent:      #ef9f76;     /* peach — Frappé's signature here, see note */
+  --accent-dim:  #e5c890;     /* yellow */
+  --accent-glow: rgba(239, 159, 118, 0.10);
+  --tag-bg:      #414559;     /* surface0 */
+  --tag-active:  #51576d;     /* surface1 */
+  --green:       #a6d189;     /* green */
+  --red:         #e78284;     /* red */
+  --body:        #c6d0f5;     /* text */
+  --body-strong: #c6d0f5;     /* text */
+  --wash-raise:  rgba(198, 208, 245, 0.05);
+
+  --accent-2:    #ca9ee6;     /* mauve */
+  --accent-3:    #81c8be;     /* teal */
+  --on-accent:     #232634;
+  --on-scrim:      #c6d0f5;
+  --border-hover:  #626880;     /* surface2 */
+  --scrim-rgb:     35, 38, 52;   /* crust */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+:root[data-theme="catppuccin-macchiato"], [data-theme="catppuccin-macchiato"] {
+  color-scheme: dark;
+  --bg:          #1e2030;     /* mantle */
+  --surface:     #24273a;     /* base */
+  --border:      #363a4f;     /* surface0 */
+  --text:        #cad3f5;     /* text */
+  --muted:       #8087a2;     /* overlay1 */
+  --accent:      #8aadf4;     /* blue — Macchiato's signature here */
+  --accent-dim:  #7dc4e4;     /* sapphire */
+  --accent-glow: rgba(138, 173, 244, 0.10);
+  --tag-bg:      #363a4f;     /* surface0 */
+  --tag-active:  #494d64;     /* surface1 */
+  --green:       #a6da95;     /* green */
+  --red:         #ed8796;     /* red */
+  --body:        #cad3f5;     /* text */
+  --body-strong: #cad3f5;     /* text */
+  --wash-raise:  rgba(202, 211, 245, 0.05);
+
+  --accent-2:    #f5a97f;     /* peach */
+  --accent-3:    #c6a0f6;     /* mauve */
+  --on-accent:     #181926;
+  --on-scrim:      #cad3f5;
+  --border-hover:  #5b6078;     /* surface2 */
+  --scrim-rgb:     24, 25, 38;   /* crust */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+:root[data-theme="catppuccin-mocha"], [data-theme="catppuccin-mocha"] {
+  color-scheme: dark;
+  --bg:          #11111b;     /* crust — Mocha takes the palette's darkest step */
+  --surface:     #181825;     /* mantle */
+  --border:      #313244;     /* surface0 */
+  --text:        #cdd6f4;     /* text */
+  --muted:       #7f849c;     /* overlay1 */
+  --accent:      #cba6f7;     /* mauve — the canonical default, kept for Mocha */
+  --accent-dim:  #b4befe;     /* lavender */
+  --accent-glow: rgba(203, 166, 247, 0.10);
+  --tag-bg:      #313244;     /* surface0 */
+  --tag-active:  #45475a;     /* surface1 */
+  --green:       #a6e3a1;     /* green */
+  --red:         #f38ba8;     /* red */
+  --body:        #cdd6f4;     /* text */
+  --body-strong: #cdd6f4;     /* text */
+  --wash-raise:  rgba(205, 214, 244, 0.05);
+
+  --accent-2:    #fab387;     /* peach */
+  --accent-3:    #94e2d5;     /* teal */
+  --on-accent:     #11111b;
+  --on-scrim:      #cdd6f4;
+  --border-hover:  #585b70;     /* surface2 */
+  --scrim-rgb:     17, 17, 27;   /* crust */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+/* Dracula.
+   Dracula publishes four neutrals — Background, Current Line/Selection, Comment,
+   Foreground — and no darker shade, so cards are framed rather than filled, the
+   same answer the ANSI pair reached for the same reason. `Current Line` is
+   Dracula's own divider colour, which is exactly what a card border is. */
+:root[data-theme="dracula"], [data-theme="dracula"] {
+  color-scheme: dark;
+  --bg:          #282a36;
+  --surface:     #282a36;
+  --border:      #44475a;
+  --text:        #f8f8f2;
+  --muted:       #6272a4;
+  --accent:      #bd93f9;
+  --accent-dim:  #ff79c6;
+  --accent-glow: rgba(189, 147, 249, 0.10);
+  --tag-bg:      #44475a;
+  --tag-active:  #6272a4;
+  --green:       #50fa7b;
+  --red:         #ff5555;
+  --body:        #f8f8f2;
+  --body-strong: #f8f8f2;
+  --wash-raise:  rgba(248, 248, 242, 0.05);
+
+  --accent-2:    #ffb86c;
+  --accent-3:    #8be9fd;
+  --on-accent:     #282a36;
+  --on-scrim:      #f8f8f2;
+  --border-hover:  #6272a4;
+  --scrim-rgb:     25, 26, 33;
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+/* Everforest Dark.
+   `--green` takes **aqua** rather than green: Everforest's green is its accent,
+   and a connected-dot indistinguishable from the accent is the trade the ANSI
+   themes already refused. Aqua still reads as green, so the signal survives.
+   Cards are framed on bg0 rather than filled with bg1 — on bg1 its own
+   foreground falls to 6.40:1, under the accessibility floor. */
+:root[data-theme="everforest-dark"], [data-theme="everforest-dark"] {
+  color-scheme: dark;
+  --bg:          #2d353b;
+  --surface:     #2d353b;
+  --border:      #475258;
+  --text:        #d3c6aa;
+  --muted:       #859289;
+  --accent:      #a7c080;
+  --accent-dim:  #dbbc7f;
+  --accent-glow: rgba(167, 192, 128, 0.10);
+  --tag-bg:      #343f44;
+  --tag-active:  #3d484d;
+  --green:       #83c092;
+  --red:         #e67e80;
+  --body:        #d3c6aa;
+  --body-strong: #d3c6aa;
+  --wash-raise:  rgba(211, 198, 170, 0.05);
+
+  --accent-2:    #d699b6;
+  --accent-3:    #7fbbb3;
+  --on-accent:     #2d353b;
+  --on-scrim:      #d3c6aa;
+  --border-hover:  #56635f;
+  --scrim-rgb:     35, 42, 46;
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+/* Gruvbox Light.
+   The mirror of the Gruvbox we already ship: same roles, the light half of the
+   same palette, in the faded variants gruvbox uses on a light ground. The
+   accent is **faded_orange**, not the yellow that mirrors Gruvbox Dark's:
+   `--on-accent` on faded_yellow reaches only 3.91:1 whichever way it goes,
+   because a mid-tone yellow suits neither dark nor light text. faded_blue
+   replaces faded_aqua as the second chip for the same reason (3.89 -> 5.03). */
+:root[data-theme="gruvbox-light"], [data-theme="gruvbox-light"] {
+  color-scheme: light;
+  --bg:          #f2e5bc;
+  --surface:     #fbf1c7;
+  --border:      #d5c4a1;
+  --text:        #282828;
+  --muted:       #7c6f64;
+  --accent:      #af3a03;
+  --accent-dim:  #b57614;
+  --accent-glow: rgba(175, 58, 3, 0.10);
+  --tag-bg:      #ebdbb2;
+  --tag-active:  #d5c4a1;
+  --green:       #79740e;
+  --red:         #9d0006;
+  --body:        #3c3836;
+  --body-strong: #282828;
+  --wash-raise:  rgba(0, 0, 0, 0.05);
+
+  --accent-2:    #8f3f71;
+  --accent-3:    #076678;
+  --on-accent:     #fbf1c7;
+  --on-scrim:      #282828;
+  --border-hover:  #bdae93;
+  --scrim-rgb:     40, 40, 40;
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.12);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.14);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.2);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.18);
+}
+
+/* Molokai.
+   The accent is **cyan**, not the green the TUI palette uses as its primary:
+   Molokai has exactly one green and one red, and both are needed for `--green`
+   and `--red`. Cyan is Molokai's Type colour and collides with nothing, so all
+   six of its signature colours stay distinct on screen. */
+:root[data-theme="molokai"], [data-theme="molokai"] {
+  color-scheme: dark;
+  --bg:          #1b1d1e;
+  --surface:     #232526;
+  --border:      #465457;
+  --text:        #f8f8f2;
+  --muted:       #7e8e91;
+  --accent:      #66d9ef;
+  --accent-dim:  #ae81ff;
+  --accent-glow: rgba(102, 217, 239, 0.10);
+  --tag-bg:      #293739;
+  --tag-active:  #403d3d;
+  --green:       #a6e22e;
+  --red:         #f92672;
+  --body:        #f8f8f2;
+  --body-strong: #f8f8f2;
+  --wash-raise:  rgba(248, 248, 242, 0.05);
+
+  --accent-2:    #fd971f;
+  --accent-3:    #e6db74;
+  --on-accent:     #1b1d1e;
+  --on-scrim:      #f8f8f2;
+  --border-hover:  #7e8e91;
+  --scrim-rgb:     0, 0, 0;
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+/* Nord.
+   `--muted` is **nord9**, not nord3. Nord's comment tone sits at 1.36:1 against
+   nord1 — invisible rather than recessive — so the muted role moves up into the
+   Frost range. `--text` takes nord6 rather than nord4 for the same reason: the
+   contrast the palette can reach, not the first value that looks right. Cards
+   are framed on nord0; nord1 was light enough to flatten every chip. And the
+   decorative pair is nord13 + nord7, not the Aurora purple and orange that look
+   the part — on nord0 those reach 3.79 and 3.81, under AA. */
+:root[data-theme="nord"], [data-theme="nord"] {
+  color-scheme: dark;
+  --bg:          #2e3440;
+  --surface:     #2e3440;
+  --border:      #434c5e;
+  --text:        #eceff4;
+  --muted:       #81a1c1;
+  --accent:      #88c0d0;
+  --accent-dim:  #5e81ac;
+  --accent-glow: rgba(136, 192, 208, 0.10);
+  --tag-bg:      #3b4252;
+  --tag-active:  #434c5e;
+  --green:       #a3be8c;
+  --red:         #bf616a;
+  --body:        #e5e9f0;
+  --body-strong: #eceff4;
+  --wash-raise:  rgba(236, 239, 244, 0.05);
+
+  --accent-2:    #ebcb8b;
+  --accent-3:    #8fbcbb;
+  --on-accent:     #2e3440;
+  --on-scrim:      #eceff4;
+  --border-hover:  #4c566a;
+  --scrim-rgb:     36, 41, 51;
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+html { color: var(--text); }   /* see note in tests/test_css_tokens.py */
 
 body {
   background: var(--bg); color: var(--text);
@@ -110,13 +641,105 @@ header {
 
 .header-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
-.theme-btn {
-  background: none; border: 1px solid var(--border); color: var(--muted);
-  cursor: pointer; font-size: 14px; line-height: 1; padding: 5px 8px;
-  border-radius: 4px; display: flex; align-items: center;
-  transition: color 0.15s, border-color 0.15s;
+/* One shape for every icon control in the header. They used to be sized by
+   their contents — a text "i" and an emoji ☀ in the same padded box render at
+   different optical weights and widths, so the row read as three unrelated
+   controls. A fixed square with a drawn 15px icon makes them a set. */
+.icon-btn {
+  width: 28px; height: 28px; flex-shrink: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--muted); cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.theme-btn:hover { color: var(--accent); border-color: var(--accent); }
+.icon-btn svg { display: block; }
+.icon-btn:hover { color: var(--accent); border-color: var(--accent); }
+.icon-btn:focus-visible { color: var(--accent); border-color: var(--accent); }
+/* Open state, not hover: the picker stays lit while its menu is up. */
+.icon-btn[aria-expanded="true"] {
+  color: var(--accent); border-color: var(--accent); background: var(--wash-raise);
+}
+/* Ending the session is the one header action you cannot undo with another
+   click, so it answers in red rather than accent — the same language .btn-delete
+   already speaks. */
+.icon-btn-danger:hover, .icon-btn-danger:focus-visible {
+  color: var(--red); border-color: var(--red);
+}
+
+/* ── Theme picker ────────────────────────────────────────── */
+.theme-picker { position: relative; display: flex; }
+.theme-menu {
+  display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  /* Wide enough that the longest label — "Catppuccin Macchiato" — sits on one
+     line. It wrapped to two at 168px, which made the row taller than its
+     neighbours and the list read as broken rather than long. */
+  min-width: 236px; padding: 4px;
+  /* Fifteen themes is taller than a short window. Scroll the menu rather than
+     letting it run off the bottom of the screen. */
+  max-height: min(70vh, 560px); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: var(--shadow-modal);
+  animation: modalIn 0.14s ease backwards;
+}
+.theme-menu.open { display: block; }
+.theme-opt {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  background: none; border: none; border-radius: 4px; cursor: pointer;
+  padding: 7px 9px; font-family: inherit; font-size: 12px; color: var(--text);
+  text-align: left; transition: background 0.12s;
+}
+.theme-opt:hover { background: var(--wash-raise); }
+.theme-opt.active { color: var(--accent); }
+/* The two house themes lead; the hairline says the rest are a different kind of
+   thing without reordering anything or adding headers to a fifteen-item list. */
+.theme-sep {
+  height: 1px; margin: 4px 9px; background: var(--border);
+}
+/* The swatch carries its own `data-theme`, so the theme's token block paints it
+   — a live sample rather than a hex value copied into a second place. */
+.theme-swatch {
+  width: 15px; height: 15px; border-radius: 4px; flex-shrink: 0;
+  background: var(--bg); border: 2px solid var(--accent);
+}
+.theme-label {
+  flex: 1; min-width: 0;
+  /* Never wrap: a two-line row in a list of one-line rows looks like a bug. */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* The tick is its own element, not `::after` on the label — appended to the
+   text it joined the wrap and landed on a line of its own. Reserving the column
+   in every row also stops the labels shifting as the selection moves. */
+.theme-check {
+  flex-shrink: 0; width: 12px; text-align: center;
+  color: var(--accent); visibility: hidden;
+}
+.theme-opt.active .theme-check { visibility: visible; }
+
+@media (max-width: 768px) {
+  /* Same reasoning as the sheets' 44px floor, capped by a 48px header bar.
+     `.btn-new-post` cannot be sized here — its base rule is declared further
+     down the file and would win on source order. It is set in the mobile header
+     block instead. */
+  .icon-btn { width: 40px; height: 40px; }
+
+  /* The sidebar is a drawer on a phone, so its controls are thumb targets like
+     any other. Measured before this: the tab strip 41x22, the tag row's rename
+     and expiry icons 17x17, the add button 22x18 — all well under the floor the
+     sheets and the header already hold. The tag row itself is 29px of text; the
+     padding lifts the whole row rather than just the icons, so the tap area
+     matches what looks tappable. */
+  .sb-tab { min-width: 44px; min-height: 44px; display: inline-flex;
+            align-items: center; justify-content: center; }
+  .sidebar-add-btn { min-width: 44px; min-height: 44px; }
+  .tag-item { min-height: 44px; }
+  .tag-rename, .tag-config-btn {
+    min-width: 44px; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin: -12px -10px -12px 0;   /* grow the hit area, not the row */
+  }
+  .theme-opt { min-height: 44px; }
+  .theme-menu { min-width: 190px; }
+}
 
 /* Sidebar collapse toggle (desktop) */
 .collapse-btn {
@@ -157,17 +780,11 @@ header {
 .link-btn:hover { color: var(--text); border-color: var(--border); }
 
 .connected-bar { display: flex; align-items: center; }
-.disconnect-btn {
-  background: none; border: none; color: var(--muted); cursor: pointer;
-  font-family: inherit; font-size: 11px; letter-spacing: 0.04em;
-  padding: 3px 0; border-bottom: 1px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
-}
-.disconnect-btn:hover { color: var(--text); border-color: var(--border); }
 
 .btn-new-post {
+  height: 28px; display: inline-flex; align-items: center; flex-shrink: 0;
   background: var(--accent); border: none; color: var(--on-accent);
-  padding: 5px 12px; border-radius: 4px; cursor: pointer;
+  padding: 0 12px; border-radius: 4px; cursor: pointer;
   font-family: inherit; font-size: 11px; font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase;
   transition: background 0.15s;
@@ -260,8 +877,9 @@ aside.collapsed > * { min-width: 220px; }
 
 .tag-name  { font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-count {
-  font-size: 9px; color: var(--muted);
-  background: var(--border); padding: 1px 5px; border-radius: 8px;
+  font-size: 9px; color: var(--accent-3);
+  background: color-mix(in srgb, var(--accent-3) 10%, transparent);
+  padding: 1px 5px; border-radius: 8px;
   flex-shrink: 0; font-variant-numeric: tabular-nums;
   transition: background 0.12s, color 0.12s;
 }
@@ -429,7 +1047,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 /* A long "via …" is one unbreakable run: cap + ellipsis it so it can never
    push the header (and with it the card's 1fr track) wider than the card. */
 .post-source {
-  font-size: 10px; color: var(--muted);
+  font-size: 10px; color: var(--accent-2);
   display: inline-block; min-width: 0; max-width: 100%; vertical-align: bottom;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -453,7 +1071,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .post-body a.attachment-link::before { content: "📎 "; }
 .post-body a.attachment-link.broken { color: var(--muted); border-bottom-color: var(--muted); }
 .pm-backlinks { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
-.pm-backlinks h4 { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
+.pm-backlinks h4 { color: var(--accent-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
 .pm-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .pm-backlinks a { color: var(--accent); cursor: pointer; font-size: 12px; }
 .pm-backlinks .bl-id { color: var(--muted); margin-right: 6px; }
@@ -473,9 +1091,20 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
    card instead of being sliced off at its edge. `fixed` splits the width
    evenly and — unlike auto layout — ignores cell min-content, which would
    otherwise let a long cell squeeze its neighbours down to one character
-   per line. The modal keeps nowrap cells + .table-scroll for real reading. */
-.feed .post-body table { table-layout: fixed; }
-.feed .post-body th, .feed .post-body td { white-space: normal; overflow-wrap: break-word; }
+   per line.
+
+   The modal now does the same, and for a related reason. It kept nowrap cells
+   plus `.table-scroll` back when it was simply a wide panel — a fair trade with
+   the width to spend. As a reading column it is not: the horizontal overflow
+   carries no affordance, so a clipped column does not look clipped, it looks
+   absent, and the one that vanishes is the rightmost — in a table answering
+   "is this deployable?", the answer. Wrapping costs row height and shows every
+   cell. `.table-scroll` stays as the backstop for a table too wide even
+   wrapped. */
+.feed .post-body table,
+.pm-body .post-body table { table-layout: fixed; }
+.feed .post-body th, .feed .post-body td,
+.pm-body .post-body th, .pm-body .post-body td { white-space: normal; overflow-wrap: break-word; }
 
 .post-footer {
   display: flex; align-items: center; justify-content: space-between;
@@ -515,7 +1144,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .edit-form textarea:focus,
 .edit-form select:focus   { outline: none; border-color: var(--accent); }
 .edit-form label {
-  font-size: 9px; color: var(--muted); margin-bottom: 3px;
+  font-size: 9px; color: var(--accent-3); margin-bottom: 3px;
   display: block; text-transform: uppercase; letter-spacing: 0.12em;
 }
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
@@ -549,7 +1178,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .attach-status { font-size: 11px; color: var(--muted); }
 .attach-status.error { color: var(--red); }
 .ef-attachments { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
-.ef-attach-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 2px; }
+.ef-attach-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-3); margin-bottom: 2px; }
 .ef-attach-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .ef-attach-name { color: var(--text); overflow-wrap: anywhere; }
 .ef-attach-size { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
@@ -561,13 +1190,13 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .attachments-view::-webkit-scrollbar { width: 4px; }
 .attachments-view::-webkit-scrollbar-track { background: transparent; }
 .attachments-view::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.att-folder-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 18px 2px 8px; }
+.att-folder-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent-3); margin: 18px 2px 8px; }
 .att-folder-head:first-child { margin-top: 4px; }
 .att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
 .att-card { position: relative; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 4%, transparent); }
 .att-thumb { height: 110px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(var(--scrim-rgb), 0.15); cursor: pointer; }
 .att-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.att-thumb .att-ext { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.att-thumb .att-ext { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-2); }
 .att-thumb .att-ext::before { content: "📄"; display: block; font-size: 26px; margin-bottom: 4px; }
 .att-meta { padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
 .att-name { font-size: 12px; overflow-wrap: anywhere; color: var(--text); }
@@ -710,7 +1339,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .brand-sep { display: none; }
   .live-label { display: none; }
   .key-wrap input { width: 140px; }
-  .btn-new-post { font-size: 10px; padding: 5px 9px; letter-spacing: 0.06em; }
+  .btn-new-post { height: 40px; font-size: 10px; padding: 0 11px; letter-spacing: 0.06em; }
 
   /* Sidebar → slide-in drawer */
   aside {
@@ -743,13 +1372,15 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 @media (max-width: 400px) {
   header { gap: 8px; }
   .key-wrap input { width: 110px; font-size: 11px; }
-  .btn-connect, .btn-new-post { padding: 5px 8px; }
+  .btn-connect { padding: 5px 8px; }
+  .btn-new-post { padding: 0 9px; }
 }
 
 /* ── Post ID pill ────────────────────────────────────── */
 .post-id-pill {
-  font-size: 10px; color: var(--muted);
-  background: var(--border); padding: 1px 6px; border-radius: 3px;
+  font-size: 10px; color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent-2) 10%, transparent);
+  padding: 1px 6px; border-radius: 3px;
   letter-spacing: 0.02em; font-variant-numeric: tabular-nums; flex-shrink: 0;
 }
 
@@ -879,7 +1510,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .sm-body { padding: 16px 20px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
 .sm-section-title {
   font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--muted); margin-bottom: 8px;
+  color: var(--accent-3); margin-bottom: 8px;
 }
 /* auto 1fr, and the value column may wrap — a long vault path must not widen
    the panel (same min-width:0 lesson as the grid tiles). */
@@ -933,7 +1564,12 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   font-family: inherit; transition: color 0.15s;
 }
 .pm-close:hover, .sm-close:hover { color: var(--text); }
-.pm-close { margin-top: -2px; }
+/* Pinned to the panel, not to the header. The header is a centred column now,
+   so a close button inside its flow lands in the middle of the panel rather
+   than in its corner. `.pm-inner` is already `position: relative`. */
+.pm-close {
+  position: absolute; top: 16px; right: 18px; z-index: 3;
+}
 .sm-close { margin-left: auto; }
 .pm-meta { padding: 12px 20px 0; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
 .pm-meta .post-tags { row-gap: 6px; }
@@ -951,21 +1587,41 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .hm-list::-webkit-scrollbar-thumb, .hm-body-text::-webkit-scrollbar-thumb {
   background: var(--border); border-radius: 2px;
 }
-/* The panel is wide so tables, code blocks and screenshots have room. Prose
-   does not want that room: at the full width a paragraph runs ~155 characters,
-   about double a comfortable measure, and the eye loses its place returning to
-   the next line. So text-level blocks are capped and everything that genuinely
-   needs the width — tables, `pre`, image paragraphs, the scroll wrapper — is
-   left alone. `ch` is exact here because the body is set in a monospace face. */
-/* Note the `.post-body` step: the rendered markdown is wrapped, so selectors
-   hung directly off `.pm-body` match nothing — the first version of this rule
-   was inert and only the DOM proved it. */
-.pm-body .post-body > p,
-.pm-body .post-body > ul, .pm-body .post-body > ol,
-.pm-body .post-body > blockquote,
-.pm-body .post-body > h1, .pm-body .post-body > h2, .pm-body .post-body > h3,
-.pm-body .post-body > h4, .pm-body .post-body > h5, .pm-body .post-body > h6 { max-width: 88ch; }
-.pm-body .post-body > p:has(> img) { max-width: none; }
+/* One reading column, and everything lives in it — prose, headings, rules,
+   tables, code, images. Wide blocks used to break out of it: first centred
+   (which put a table ~300px left of every paragraph, aligned with nothing) and
+   then anchored to the column's left edge and spilling right (better, still
+   unbalanced — the panel had one ragged edge). Constraining them costs some row
+   height on a wide table and buys a page with two straight sides.
+
+   `.table-scroll` and `pre` keep their own `overflow-x`, so anything that still
+   cannot fit scrolls inside the column rather than out of it.
+
+   ⚠️ **The measure is `rem`, never `ch`.** `ch` resolves against each element's
+   *own* font, and headings render in a proportional sans-serif while the body is
+   monospace — 88ch gave paragraphs 704px and an h3 654px, so once the column was
+   centred every block landed on a different left edge and the headings appeared
+   to hang outward. `rem` resolves against the root size whatever the element is
+   set in. 64rem is 832px at the root's 13px, about 104 monospace characters. */
+.pm-inner { --measure: 64rem; }
+.pm-body .post-body > * { max-width: var(--measure); margin-inline: auto; }
+
+/* The title and meta ride the same column, or centring the prose alone just
+   moves it away from everything else — the header stays hard left and the text
+   floats in the middle, which is worse than the gap it was meant to fix. With
+   all three centred the panel reads as one article column and the wide blocks
+   break out of it on both sides. The footer is chrome, not content, so it keeps
+   the full width. */
+/* `--measure + 40px` so the *content* box is exactly the measure once the 20px
+   side padding is taken off — the same box `.pm-body`'s prose is centred in,
+   which is what makes the title and the first paragraph share a left edge.
+   Asymmetric padding here put them 16px apart, which is precisely visible
+   enough to look wrong. */
+.pm-header, .pm-meta { max-width: calc(var(--measure) + 40px); margin-inline: auto; width: 100%; }
+/* The close button is pinned to the panel, so reserve room in the title rather
+   than in the header — at narrow widths the column fills the panel and a long
+   ellipsised title would otherwise run underneath it. */
+.pm-title { padding-right: 30px; }
 
 .pm-body-fade {
   position: absolute; bottom: 0; left: 0; right: 0; height: 52px;
@@ -1026,7 +1682,9 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
     display: inline-flex; align-items: center; align-self: flex-start;
     margin-left: -2px; padding: 6px 10px 6px 0; min-height: 44px;
   }
-  .pm-title { font-size: 18px; font-weight: 700; line-height: 1.3; }
+  /* No pinned close button here — back is the dismissal — so the title needs no
+     room reserved for it, and the column cap is a no-op at this width anyway. */
+  .pm-title { font-size: 18px; font-weight: 700; line-height: 1.3; padding-right: 0; }
   .pm-close { display: none; }
   .pm-meta { padding-left: 16px; padding-right: 16px; }
   .pm-body { padding-left: 16px; padding-right: 16px; }

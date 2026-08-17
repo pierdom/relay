@@ -17,6 +17,7 @@ import { closeStatusModal, isStatusOpen } from './status.js';   // also self-wir
 import { query, resetPaging } from './feed-query.js';
 import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
 import { attachSheetDismiss } from './sheet.js';
+import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
 import { escHtml, fmtBytes, relativeTime, toDatetimeLocal, toUtcIso } from './util.js';
 const LIMIT = 20;
@@ -82,22 +83,8 @@ function clearNewPostsPill() {
 }
 newPostsPill.addEventListener('click', () => { clearNewPostsPill(); reloadSorted(); });
 
-// Light ⇄ dark theme — CSS var override on <html>, persisted locally. Default: dark.
-const themeBtn = document.getElementById('themeBtn');
-const brandMark = document.querySelector('.brand-mark');
-function applyTheme() {
-  const light = document.documentElement.getAttribute('data-theme') === 'light';
-  themeBtn.textContent = light ? '☾' : '☀';
-  if (brandMark) brandMark.src = light ? '/assets/relay-mark.svg' : '/assets/relay-mark-on-dark.svg';
-}
-themeBtn.addEventListener('click', () => {
-  const light = document.documentElement.getAttribute('data-theme') === 'light';
-  if (light) document.documentElement.removeAttribute('data-theme');
-  else       document.documentElement.setAttribute('data-theme', 'light');
-  try { localStorage.setItem('relay-theme', light ? 'dark' : 'light'); } catch (e) {}
-  applyTheme();
-});
-applyTheme();
+// Themes live in ./theme.js, which self-wires its picker (see status.js for the
+// same pattern). Only the Escape handler below needs anything from it.
 
 function openSidebar()  { sidebarEl.classList.add('open'); sidebarOverlay.classList.add('visible'); menuBtn.classList.add('active'); }
 function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.classList.remove('visible'); menuBtn.classList.remove('active'); }
@@ -1143,8 +1130,8 @@ function enterEditMode(_el, post) {
   emTitle.textContent = `#${post.id}`;
   emBody.innerHTML = `
     <div class="edit-form">
-      <div><label>Title</label><input class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
-      <div class="ef-content-wrap"><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea>
+      <div><label for="efTitle">Title</label><input id="efTitle" class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
+      <div class="ef-content-wrap"><label for="efContent">Content</label><textarea id="efContent" class="ef-content">${escHtml(post.content)}</textarea>
         <div class="attach-row">
           <input type="file" class="ef-file" multiple style="display:none">
           <button type="button" class="btn-attach ef-attach">📎 Attach</button>
@@ -1152,9 +1139,9 @@ function enterEditMode(_el, post) {
         </div>
         <div class="ef-attachments"></div>
       </div>
-      <div><label>Tags</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
-      <div><label>Source</label><input class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
-      <div><label>Expires</label><input class="ef-expires" type="datetime-local" value="${toDatetimeLocal(post.expires_at || '')}"></div>
+      <div><label for="efTags">Tags</label><input id="efTags" class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
+      <div><label for="efSource">Source</label><input id="efSource" class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
+      <div><label for="efExpires">Expires</label><input id="efExpires" class="ef-expires" type="datetime-local" value="${toDatetimeLocal(post.expires_at || '')}"></div>
       <div class="edit-actions">
         <button class="btn-cancel">Cancel</button>
         <button class="btn-save">Save</button>
@@ -1404,6 +1391,8 @@ pmDelete.addEventListener('click', async () => {
   } catch {}
 });
 document.addEventListener('keydown', e => {
+  // The theme menu is the most transient thing on screen, so it goes first.
+  if (e.key === 'Escape' && isThemeMenuOpen()) { closeThemeMenu(); return; }
   if (e.key === 'Escape' && isEditOpen()) { tryCloseEditModal(); return; }
   if (e.key === 'Escape' && isStatusOpen()) { closeStatusModal(); return; }
   if (e.key === 'Escape' && isHistoryOpen()) { closeHistoryModal(); return; }

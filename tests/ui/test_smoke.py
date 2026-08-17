@@ -562,36 +562,230 @@ def test_cancelling_an_untouched_edit_closes_without_a_prompt(page):
     page.locator("#editModal.open").wait_for(state="detached", timeout=5_000)
 
 
-def test_modal_caps_the_prose_measure_but_lets_tables_use_the_width(page, relay_server):
-    """The panel is wide on purpose — tables, code blocks and screenshots need it.
-    Prose does not: at the full width a paragraph runs ~155 characters, about
-    double a comfortable measure. So text-level blocks are capped and everything
-    that genuinely wants the room is left alone.
+# Left to right, and the order is a safety property rather than a preference:
+# "+ New Post" used to sit directly beside Disconnect, so one slipped click
+# ended the session instead of opening the composer. The two icon buttons are
+# the buffer.
+HEADER_CONTROLS = ["newPostBtn", "themeBtn", "statusBtn", "disconnectBtn"]
 
-    The first version of this rule hung its selectors off `.pm-body` directly and
-    matched nothing, because the rendered markdown sits inside a `.post-body`
-    wrapper. It looked correct and did nothing, so the assertion here is on the
-    measured widths rather than on the rule existing.
+_HEADER_BOXES = """
+(ids) => ids.map(id => {
+  const el = document.getElementById(id);
+  if (!el) return { id, missing: true };
+  const r = el.getBoundingClientRect();
+  return {
+    id,
+    w: Math.round(r.width), h: Math.round(r.height),
+    top: Math.round(r.top), left: Math.round(r.left),
+    label: el.getAttribute('aria-label') || el.textContent.trim(),
+    title: el.getAttribute('title') || '',
+    svgs: el.querySelectorAll('svg').length,
+    text: el.textContent.trim(),
+  };
+})
+"""
+
+
+def test_header_controls_are_one_visual_set(page):
+    """Every control in the header row shares a height and a baseline.
+
+    They used to be sized by their contents: a text "i", an emoji sun and the
+    word "disconnect" in the same row rendered at three different optical
+    weights, and only two of them had a box at all. Compared as a set — the
+    point is that they agree, not what they agree on, so a future restyle is
+    made in one place.
     """
-    body = (
-        "Relay keeps posts as plain Markdown files in an Obsidian-compatible vault, "
-        "and the browser UI reads them over the same REST API the agents use. " * 5
-        + "\n\n| col one | col two | col three | col four | col five |\n"
-        "|---|---|---|---|---|\n"
-        "| a fairly long cell value | another long one | and a third | and fourth | fifth |\n"
-    )
-    _api_post(relay_server, {"title": "Prose Measure", "content": body, "tags": ["homelab"]})
+    page.set_viewport_size({"width": 1200, "height": 500})
+    page.locator("#newPostBtn").wait_for(timeout=10_000)
+    boxes = page.evaluate(_HEADER_BOXES, HEADER_CONTROLS)
 
-    page.set_viewport_size({"width": 1680, "height": 1050})
+    missing = [b["id"] for b in boxes if b.get("missing")]
+    assert not missing, f"header controls absent: {missing}"
+
+    assert len({b["h"] for b in boxes}) == 1, f"heights differ: {[(b['id'], b['h']) for b in boxes]}"
+    assert len({b["top"] for b in boxes}) == 1, f"not on one baseline: {[(b['id'], b['top']) for b in boxes]}"
+
+    order = [b["id"] for b in sorted(boxes, key=lambda b: b["left"])]
+    assert order == HEADER_CONTROLS, f"header order changed: {order}"
+    # The invariant behind the order, stated separately so it survives a future
+    # rearrangement: nothing destructive may border the primary action.
+    assert abs(order.index("newPostBtn") - order.index("disconnectBtn")) > 1, (
+        "Disconnect is adjacent to + New Post — one slipped click ends the session"
+    )
+
+    icons = [b for b in boxes if b["id"] != "newPostBtn"]
+    assert all(b["w"] == b["h"] for b in icons), f"icon buttons not square: {icons}"
+    assert len({b["w"] for b in icons}) == 1, f"icon buttons differ in size: {icons}"
+
+    # Every control needs an accessible name. A tooltip is required only of the
+    # ones with no visible text — an icon with neither is a mystery, which is
+    # what "disconnect" would have become the moment it lost its word. The
+    # labelled primary action does not need one.
+    for b in boxes:
+        assert b["label"], f"{b['id']} has no accessible name"
+        if not b["text"]:
+            assert b["title"], f"{b['id']} is icon-only and has no tooltip"
+
+
+def test_the_theme_control_is_a_menu_button_not_a_toggle(page):
+    """It opens a picker, so it must not look like a two-state switch.
+
+    It shipped as ☀/☾ that swapped on click — correct when there were two themes
+    and a toggle, actively misleading once it became a three-item menu. The icon
+    is now a drawn palette that does not change with the theme; only the label
+    does, and it names the theme in use.
+    """
+    btn = page.locator("#themeBtn")
+    assert btn.get_attribute("aria-haspopup") == "menu"
+    assert page.evaluate("() => document.getElementById('themeBtn').textContent.trim()") == "", (
+        "the theme button renders text — a glyph here reads as a toggle"
+    )
+    assert page.evaluate("() => document.getElementById('themeBtn').querySelectorAll('svg').length") == 1
+
+    def icon() -> str:
+        return page.evaluate("() => document.getElementById('themeBtn').innerHTML")
+
+    before = icon()
+    btn.click()
+    page.locator('.theme-opt[data-theme-id="light"]').click()
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => document.documentElement.getAttribute('data-theme')") == "light"
+    assert icon() == before, "the icon changed with the theme — that is toggle behaviour"
+    assert "Relay Light" in (btn.get_attribute("title") or ""), "the tooltip does not name the live theme"
+
+
+def test_the_reading_column_holds_every_block(page, relay_server):
+    """One centred column: prose, headings, rules, tables — all of it.
+
+    This arrived in three wrong shapes before it was right, and each is a
+    distinct failure the assertions below cover.
+
+    * Capping the measure fixed the reading *width* and left the placement
+      wrong: in a 1320px panel the text sat 20px from the left with ~600px of
+      dead space. Hence the centring check.
+    * Centring the body alone was worse — the title, tags and id pill stayed
+      hard left while the prose floated away. Hence the title check.
+    * A measure in `ch` resolves against each element's *own* font, so
+      sans-serif headings got a wider column than the monospace prose and hung
+      out to its left. Hence the shared-edge check, and the heading in the
+      fixture: without one it cannot see that at all.
+
+    Wide blocks were then let out of the column — first centred, then anchored
+    left and spilling right — and both read as unbalanced. Everything is capped
+    now, so a table that still cannot fit scrolls *inside* the column.
+    """
+    # Deliberately hostile: a heading (different font), a rule, and a table with
+    # cells long enough to overflow if it were left to size itself. With tame
+    # content most of these assertions are vacuous.
+    body = (
+        "## A section heading\n\n"
+        + "Relay keeps posts as plain Markdown files in an Obsidian-compatible vault. " * 6
+        + "\n\n---\n\n### A smaller heading\n\nMore prose under it.\n"
+        + "\n| Conto | Rendimento lordo | Netto | Ruolo | E deployabile? |\n|---|---|---|---|---|\n"
+        "| MedioCredito liquido a scadenza | 1.90% lordo annuo | 1.41% (ritenuta IT 26%) "
+        "| eccedenza sopra la soglia dei 25k a target | Si, unica fonte di deployment corrente |\n"
+        "| Trading 212 conto remunerato | 2.20% lordo annuo | 1.78% il miglior liquido "
+        "| runway della pie piu emergenza di terzo livello | No, non si trasferisce su IBKR |\n"
+    )
+    _api_post(relay_server, {"title": "Reading Column", "content": body, "tags": ["homelab"]})
+
+    page.set_viewport_size({"width": 1800, "height": 1000})
     page.reload()
-    page.get_by_text("Prose Measure").first.wait_for(timeout=10_000)
-    page.get_by_text("Prose Measure").first.click()
+    page.get_by_text("Reading Column").first.wait_for(timeout=10_000)
+    page.get_by_text("Reading Column").first.click()
     page.locator("#postModal.open").wait_for(timeout=10_000)
     page.wait_for_timeout(400)
 
-    panel = page.locator(".pm-inner").bounding_box()["width"]
-    para = page.locator("#pmBody .post-body > p").first.bounding_box()["width"]
-    table = page.locator("#pmBody table").first.bounding_box()["width"]
+    m = page.evaluate(
+        """() => {
+          const body = document.querySelector('#pmBody').getBoundingClientRect();
+          const kids = [...document.querySelectorAll('#pmBody .post-body > *')];
+          const box = e => e.getBoundingClientRect();
+          const title = box(document.querySelector('.pm-title'));
+          const wraps = [...document.querySelectorAll('#pmBody .table-scroll, #pmBody pre')];
+          return {
+            panel: Math.round(body.width),
+            tags: kids.map(e => e.tagName),
+            edges: [...new Set(kids.map(e => Math.round(box(e).left - body.left)))],
+            widths: [...new Set(kids.map(e => Math.round(box(e).width)))],
+            rights: [...new Set(kids.map(e => Math.round(body.right - box(e).right)))],
+            titleLeft: Math.round(title.left - body.left),
+            clipped: wraps.filter(w => w.scrollWidth > w.clientWidth + 1).length,
+          };
+        }"""
+    )
 
-    assert para < panel * 0.65, f"prose is not capped: {para}px inside a {panel}px panel"
-    assert table > panel * 0.9, f"table was capped too: {table}px inside a {panel}px panel"
+    assert len(m["tags"]) >= 4, f"fixture did not render enough blocks: {m['tags']}"
+    assert len(m["edges"]) == 1, (
+        f"blocks do not share a left edge — {m['tags']} at {m['edges']}; "
+        "a font-relative measure gives each element its own column"
+    )
+    assert len(m["widths"]) == 1, f"blocks are not one column wide: {m['tags']} at {m['widths']}"
+    assert abs(m["edges"][0] - m["rights"][0]) <= 4, (
+        f"the column is not centred: {m['edges'][0]} left vs {m['rights'][0]} right"
+    )
+    assert m["edges"][0] > 60, f"no meaningful centring happened: {m}"
+    assert m["widths"][0] < m["panel"] * 0.75, (
+        f"the column is not narrower than the panel: {m['widths'][0]} of {m['panel']}"
+    )
+    assert abs(m["titleLeft"] - m["edges"][0]) <= 6, (
+        f"the title does not share the column ({m['titleLeft']} vs {m['edges'][0]}) — "
+        "centring the body alone is a failure this test exists to catch"
+    )
+    # Horizontal overflow carries no affordance, so a clipped column does not
+    # look clipped, it looks absent — and the one that goes is the rightmost.
+    assert m["clipped"] == 0, "a table or code block is clipped with nothing to say so"
+
+
+def test_every_form_control_has_an_accessible_name(page):
+    """A `<label>` next to a field is not attached to it.
+
+    The compose panel and the edit form both rendered `<label>Title</label>`
+    followed by an unassociated `<input>`: correct visually, invisible to
+    assistive tech, which then falls back to the placeholder — and the
+    placeholder disappears the moment you type. `for`/`id` on all nine, plus an
+    `aria-label` on the search field, which had no label at all.
+    """
+    page.locator("#newPostBtn").click()
+    page.wait_for_timeout(250)
+    page.locator(".post-title").nth(2).click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmEdit").click()
+    page.locator("#editModal.open").wait_for(timeout=10_000)
+    page.wait_for_timeout(250)
+
+    unnamed = page.evaluate(
+        """() => [...document.querySelectorAll('input, textarea, select')]
+             .filter(e => e.getBoundingClientRect().width > 0 && e.type !== 'hidden')
+             .filter(e => !(e.labels && e.labels.length) && !e.getAttribute('aria-label'))
+             .map(e => e.id || e.className || e.tagName)"""
+    )
+    assert not unnamed, f"controls with no accessible name (placeholder is not one): {unnamed}"
+
+
+def test_the_sidebar_is_thumb_sized_on_a_phone(mobile_page):
+    """The sidebar is a drawer on mobile, so its controls are touch targets.
+
+    Measured before this: the tab strip 41x22, the tag row's rename and expiry
+    icons 17x17, the add button 22x18 — all well under the 44px floor the sheets
+    and the header already hold. The floor was applied where it was visible and
+    not where it was behind a drawer.
+    """
+    mobile_page.wait_for_timeout(400)
+    small = mobile_page.evaluate(
+        """() => {
+          const sels = ['.sb-tab', '.sidebar-add-btn', '.tag-rename', '.tag-config-btn', '.tag-item'];
+          const out = [];
+          for (const sel of sels) {
+            for (const e of document.querySelectorAll(sel)) {
+              const r = e.getBoundingClientRect();
+              if (!r.width || !r.height) continue;
+              if (r.width < 44 || r.height < 44) {
+                out.push(sel + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+              }
+            }
+          }
+          return [...new Set(out)];
+        }"""
+    )
+    assert not small, f"sidebar controls below the 44px touch floor: {small}"
