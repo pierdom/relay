@@ -9,6 +9,7 @@ transport can connect remotely with the relay's bearer key.
 from __future__ import annotations
 
 import hmac
+import re
 from contextlib import asynccontextmanager
 
 import aiosqlite
@@ -164,23 +165,29 @@ async def publish_post(
 
 @mcp.tool(
     description=(
-        "List posts from the relay feed, optionally filtered by tag or search term. "
+        "List posts from the relay feed, optionally filtered by tag, folder or search term. "
         "Returns metadata-only summaries (id, title, tags, folder, and a short excerpt) "
         "by default — call get_post(id) for a full body. Pass summary=false to get full "
-        "content inline (heavier)."
+        "content inline (heavier). sort is 'updated' (default, last modified — includes "
+        "edits made directly in Obsidian) or 'created'; order is 'desc' (default) or 'asc'. "
+        "Sort by created + asc to read a topic's posts in the order they were written."
     )
 )
 async def list_posts(
     tag: str | None = None,
+    folder: str | None = None,
     search: str | None = None,
     limit: int = 20,
     offset: int = 0,
     summary: bool = True,
+    sort: str = "updated",
+    order: str = "desc",
 ) -> dict:
     metrics.record_tool_call("list_posts")
     async with _db() as db:
         result = await service.list_posts(
-            db, tag=tag, search=search, limit=limit, offset=offset, summary=summary
+            db, tag=tag, folder=folder, search=search, limit=limit, offset=offset,
+            summary=summary, sort=sort, order=order,
         )
     return result.model_dump()
 
@@ -264,6 +271,64 @@ async def list_deleted_posts(limit: int = 50, include_expiry: bool = False) -> d
             result = await service.list_deleted_posts(db, limit=limit, include_expiry=include_expiry)
         except service.HistoryUnavailable:
             return {"error": "Vault history is disabled or git is unavailable."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Read a post exactly as it was at one revision — title, content and tags. Use this "
+        "to see what a restore would give back before calling restore_post: the history "
+        "listing carries only metadata, and picking a sha out of it blind is a poor way to "
+        "undo something. Works for a deleted post too, and accepts a short sha. Read-only; "
+        "it changes nothing. Returns an error if vault history is disabled."
+    )
+)
+async def get_post_revision(id: int, sha: str) -> dict:
+    metrics.record_tool_call("get_post_revision")
+    async with _db() as db:
+        try:
+            result = await service.get_post_revision(db, id, sha)
+        except service.HistoryUnavailable:
+            return {"error": "Vault history is disabled or git is unavailable."}
+        except service.RevisionNotFound:
+            return {"error": f"No revision '{sha}' in the history of post #{id}."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "List the posts that link to this one via [[Title]] or #id — its linked mentions. "
+        "Check this before rewriting or deleting a post: relay keeps one canonical post per "
+        "topic and cross-links by id, so the posts listed here are the ones that break if it "
+        "goes away or is renamed. Returns an error if the post does not exist."
+    )
+)
+async def get_backlinks(id: int) -> dict:
+    metrics.record_tool_call("get_backlinks")
+    async with _db() as db:
+        try:
+            result = await service.get_backlinks(db, id)
+        except service.PostNotFound:
+            return {"error": f"Post #{id} not found."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Rename a tag across every post that carries it, in one atomic pass. Use this to fix "
+        "taxonomy rather than retagging posts one at a time — that is slower and leaves the "
+        "vault half-migrated if it stops partway. The new name is normalised the same way "
+        "tags always are (lowercased; only letters, digits, hyphen and underscore survive). "
+        "Renaming to a tag that already exists merges the two. Returns the full tag list."
+    )
+)
+async def rename_tag(tag: str, new_name: str) -> dict:
+    metrics.record_tool_call("rename_tag")
+    cleaned = re.sub(r"[^a-z0-9_-]", "", new_name.strip().lower())
+    if not cleaned:
+        return {"error": "new_name must contain at least one letter, digit, hyphen or underscore."}
+    async with _db() as db:
+        result = await service.rename_tag(db, tag, cleaned)
     return result.model_dump()
 
 

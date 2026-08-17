@@ -1,6 +1,6 @@
 # MCP server
 
-relay exposes the full feed API as **16 MCP tools** so Claude — or any MCP-capable agent — can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
+relay exposes the full feed API as **19 MCP tools** so Claude — or any MCP-capable agent — can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
 
 ## Tools
 
@@ -9,10 +9,12 @@ relay exposes the full feed API as **16 MCP tools** so Claude — or any MCP-cap
 | `publish_post` | Publish a post (title, content, tags, source, expires_at) |
 | `update_post` | Partially update a post by ID — only provided fields change |
 | `get_post` | Get a post by ID (`id=0` for the master document) |
-| `list_posts` | List posts with tag/search/limit/offset filters; returns metadata + excerpt by default |
+| `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default |
 | `delete_post` | Delete a post by ID |
 | `get_post_history` | List a post's revisions from vault history; works for a deleted post (`exists:false`) |
+| `get_post_revision` | Read a post exactly as it was at one revision — preview before restoring |
 | `restore_post` | Restore a post to a revision sha, recreating it if deleted; the restore is itself recorded |
+| `get_backlinks` | Posts that link here via `[[Title]]` or `#id` (linked mentions) |
 | `list_deleted_posts` | Posts that are gone but restorable — id, title, restorable sha, and why they went |
 | `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio proxy also accepts `path` (a local file it uploads for you) |
 | `create_upload` | Mint a presigned upload slot (`upload_id` + `upload_url`); PUT the raw bytes there, then finalize with `add_attachment(upload_id=…)` |
@@ -22,6 +24,7 @@ relay exposes the full feed API as **16 MCP tools** so Claude — or any MCP-cap
 | `get_status` | Version, uptime, which vault is served, counts, and which features actually work |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`) |
+| `rename_tag` | Rename a tag across every post that carries it, in one atomic pass |
 
 ## Recovering a post
 
@@ -57,9 +60,11 @@ restore_post(id=54, sha="a8dcc37")
 - Posts that predate vault history show a single `vault: initial import`
   revision — their state when history was first enabled.
 
-To read a revision's *content* before restoring it, use the REST endpoint
-`GET /posts/{id}/history/{sha}`; the browser UI's History panel is built on it.
-There is no MCP tool for the preview.
+- **Preview before you restore.** `get_post_revision(id, sha)` returns that
+  revision's title, content and tags without changing anything. The history
+  listing is metadata only, so restoring straight off a sha is done blind — and
+  while a restore is itself undoable, "undo it and look" is a poor way to answer
+  "what would this give me back".
 
 ## Notes for agents
 

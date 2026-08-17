@@ -136,21 +136,32 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="list_posts",
             description=(
-                "List posts from the relay feed, optionally filtered by tag or search term. "
-                "Returns metadata-only summaries (id, title, tags, folder, and a short excerpt) "
-                "by default — call get_post(id) for a full body. Pass summary=false to get full "
-                "content inline (heavier)."
+                "List posts from the relay feed, optionally filtered by tag, folder or search term. Returns "
+                "metadata-only summaries (id, title, tags, folder, and a short excerpt) by default — call "
+                "get_post(id) for a full body. Pass summary=false to get full content inline (heavier). sort "
+                "is 'updated' (default, last modified — includes edits made directly in Obsidian) or "
+                "'created'; order is 'desc' (default) or 'asc'. Sort by created + asc to read a topic's posts "
+                "in the order they were written."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "tag": {"type": "string", "description": "Filter by tag"},
-                    "search": {"type": "string", "description": "Full-text search over title, content, source, and tags"},
-                    "limit": {"type": "integer", "description": "Max number of posts to return (default 20)"},
-                    "offset": {"type": "integer", "description": "Pagination offset (default 0)"},
+                    "folder": {"type": "string", "description": "Filter by first-level folder"},
+                    "search": {"type": "string", "description": "Search title, content and source"},
+                    "limit": {"type": "integer", "description": "Max posts to return (default 20)"},
+                    "offset": {"type": "integer", "description": "Offset for pagination (default 0)"},
                     "summary": {
                         "type": "boolean",
-                        "description": "Return metadata + excerpt only (default true); set false for full content inline",
+                        "description": "Metadata + excerpt only, no bodies (default true)",
+                    },
+                    "sort": {
+                        "type": "string",
+                        "description": "'updated' (default) or 'created'",
+                    },
+                    "order": {
+                        "type": "string",
+                        "description": "'desc' (default) or 'asc'",
                     },
                 },
             },
@@ -203,6 +214,58 @@ async def list_tools() -> list[types.Tool]:
                         "type": "boolean",
                         "description": "Include posts swept by a tag TTL (default false)",
                     },
+                },
+            },
+        ),
+        types.Tool(
+            name="get_post_revision",
+            description=(
+                "Read a post exactly as it was at one revision — title, content and tags. Use this to see "
+                "what a restore would give back before calling restore_post: the history listing carries only "
+                "metadata, and picking a sha out of it blind is a poor way to undo something. Works for a "
+                "deleted post too, and accepts a short sha. Read-only; it changes nothing. Returns an error "
+                "if vault history is disabled."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["id", "sha"],
+                "properties": {
+                    "id": {"type": "integer", "description": "Post ID"},
+                    "sha": {"type": "string", "description": "Revision sha from get_post_history"},
+                },
+            },
+        ),
+        types.Tool(
+            name="get_backlinks",
+            description=(
+                "List the posts that link to this one via [[Title]] or #id — its linked mentions. Check this "
+                "before rewriting or deleting a post: relay keeps one canonical post per topic and "
+                "cross-links by id, so the posts listed here are the ones that break if it goes away or is "
+                "renamed. Returns an error if the post does not exist."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "integer", "description": "Post ID"},
+                },
+            },
+        ),
+        types.Tool(
+            name="rename_tag",
+            description=(
+                "Rename a tag across every post that carries it, in one atomic pass. Use this to fix taxonomy "
+                "rather than retagging posts one at a time — that is slower and leaves the vault "
+                "half-migrated if it stops partway. The new name is normalised the same way tags always are "
+                "(lowercased; only letters, digits, hyphen and underscore survive). Renaming to a tag that "
+                "already exists merges the two. Returns the full tag list."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["tag", "new_name"],
+                "properties": {
+                    "tag": {"type": "string", "description": "Tag to rename"},
+                    "new_name": {"type": "string", "description": "New tag name"},
                 },
             },
         ),
@@ -488,7 +551,10 @@ async def call_tool(
 
     if name == "list_posts":
         summary = arguments.get("summary", True)
-        params = {k: v for k, v in arguments.items() if k in ("tag", "search", "limit", "offset")}
+        params = {
+            k: v for k, v in arguments.items()
+            if k in ("tag", "folder", "search", "limit", "offset", "sort", "order")
+        }
         params["summary"] = "true" if summary else "false"
         async with httpx.AsyncClient() as client:
             response = await client.get(
@@ -581,6 +647,66 @@ async def call_tool(
         ]
         lines.append("Restore with restore_post(id=<id>, sha=<sha>).")
         return [types.TextContent(type="text", text="\n".join(lines))]
+
+    if name == "get_post_revision":
+        post_id, sha = arguments["id"], arguments["sha"]
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/posts/{post_id}/history/{sha}",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            if response.status_code == 503:
+                return [types.TextContent(type="text", text="Vault history is disabled or git is unavailable.")]
+            if response.status_code == 404:
+                return [types.TextContent(
+                    type="text", text=f"No revision '{sha}' in the history of post #{post_id}.")]
+            response.raise_for_status()
+            d = response.json()
+        head = f"#{post_id} at {d['short_sha']} ({d['when']}) — {d['message']}"
+        tags = d.get("tags") or []
+        return [types.TextContent(
+            type="text",
+            text=f"{head}\ntitle: {d['title']}\ntags: {', '.join(tags) or 'none'}\n\n{d['content']}",
+        )]
+
+    if name == "get_backlinks":
+        post_id = arguments["id"]
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/posts/{post_id}/backlinks",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 404:
+                return [types.TextContent(type="text", text=f"Post #{post_id} not found.")]
+            response.raise_for_status()
+            items = response.json().get("items", [])
+        if not items:
+            return [types.TextContent(type="text", text=f"Nothing links to post #{post_id}.")]
+        lines = [f"{len(items)} post(s) link to #{post_id}:"]
+        lines += [f"  #{i['id']}  {i['title']}" for i in items]
+        return [types.TextContent(type="text", text="\n".join(lines))]
+
+    if name == "rename_tag":
+        tag, new_name = arguments["tag"], arguments["new_name"]
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                f"{RELAY_BASE_URL}/tags/{tag}",
+                json={"new_name": new_name},
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=30,
+            )
+            if response.status_code == 422:
+                return [types.TextContent(
+                    type="text",
+                    text="new_name must contain at least one letter, digit, hyphen or underscore.")]
+            response.raise_for_status()
+            # The key is `tags`, not `items` — TagListResponse does not follow the
+            # `items` convention the post/attachment listings use.
+            tags = response.json().get("tags", [])
+        listing = ", ".join(f"{t['tag']} ({t['count']})" for t in tags) or "none"
+        return [types.TextContent(type="text", text=f"Renamed. Tags now: {listing}")]
 
     if name == "restore_post":
         post_id = arguments["id"]
