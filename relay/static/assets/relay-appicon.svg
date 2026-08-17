@@ -2,7 +2,7 @@
   <!-- Ink spans 19..81 x 26..74 (round caps add stroke-width/2 beyond every
        coordinate), so the mark is centred on 50,50. Shifting a coordinate
        without re-deriving that is how this last shipped 20% off-centre. -->
-  <rect x="0" y="0" width="100" height="100" rx="22" fill="#1A1C20"></rect>
+  <rect x="0" y="0" width="100" height="100" fill="#1A1C20"></rect>
   <polyline points="23,30 41,50 23,70" fill="none" stroke="#F5F4F1" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"></polyline>
   <polyline points="41,30 59,50 41,70" fill="none" stroke="#F5F4F1" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"></polyline>
   <polyline points="59,30 77,50 59,70" fill="none" stroke="#E8643B" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"></polyline>
