@@ -1562,7 +1562,17 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
    about double a comfortable measure, and the eye loses its place returning to
    the next line. So text-level blocks are capped and everything that genuinely
    needs the width — tables, `pre`, image paragraphs, the scroll wrapper — is
-   left alone. `ch` is exact here because the body is set in a monospace face. */
+   left alone.
+
+   ⚠️ **The measure is `rem`, not `ch`.** `ch` resolves against *each element's
+   own font*, and headings render in a proportional sans-serif while the body is
+   monospace — so 88ch gave the paragraphs 704px and an h3 654px, and once the
+   column was centred every block landed on a different left edge. Headings
+   appeared to hang outward, which is the opposite of an indent and looks like a
+   bug because it is one. `rem` resolves against the root font size regardless
+   of the element, so every block gets the same column. 54rem is 702px at the
+   root's 13px — the width 88 monospace characters used to occupy. */
+.pm-inner { --measure: 54rem; }
 /* Note the `.post-body` step: the rendered markdown is wrapped, so selectors
    hung directly off `.pm-body` match nothing — the first version of this rule
    was inert and only the DOM proved it. */
@@ -1570,7 +1580,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .pm-body .post-body > ul, .pm-body .post-body > ol,
 .pm-body .post-body > blockquote,
 .pm-body .post-body > h1, .pm-body .post-body > h2, .pm-body .post-body > h3,
-.pm-body .post-body > h4, .pm-body .post-body > h5, .pm-body .post-body > h6 { max-width: 88ch; }
+.pm-body .post-body > h4, .pm-body .post-body > h5, .pm-body .post-body > h6 { max-width: var(--measure); }
 .pm-body .post-body > p:has(> img) { max-width: none; }
 
 /* Centre the text column. Capped at 88ch inside a 1320px panel, prose sat 20px
@@ -1583,17 +1593,34 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
    for the prose. */
 .pm-body .post-body > * { margin-inline: auto; }
 
+/* Wide blocks share the column's LEFT edge and spend the slack on the right,
+   rather than breaking out symmetrically. Centred, a table began ~300px to the
+   left of every paragraph and heading — aligned with nothing, which reads as
+   misplaced rather than as emphasis, and it still clipped its last column
+   because it was wider than the panel either way. Anchored to the column it
+   starts where the prose starts and simply runs wider, which is what "this
+   block needs more room" should look like. `max()` keeps it at 0 once the panel
+   is no wider than the column. */
+.pm-body .post-body > table,
+.pm-body .post-body > pre,
+.pm-body .post-body > .table-scroll,
+.pm-body .post-body > p:has(> img) {
+  margin-left: max(0px, calc((100% - var(--measure)) / 2));
+  margin-right: 0;
+}
+
 /* The title and meta ride the same column, or centring the prose alone just
    moves it away from everything else — the header stays hard left and the text
    floats in the middle, which is worse than the gap it was meant to fix. With
    all three centred the panel reads as one article column and the wide blocks
    break out of it on both sides. The footer is chrome, not content, so it keeps
    the full width. */
-/* `88ch + 40px` so the *content* box is exactly 88ch once the 20px side padding
-   is taken off — the same box `.pm-body`'s prose is centred in, which is what
-   makes the title and the first paragraph share a left edge. Asymmetric padding
-   here put them 16px apart, which is precisely visible enough to look wrong. */
-.pm-header, .pm-meta { max-width: calc(88ch + 40px); margin-inline: auto; width: 100%; }
+/* `--measure + 40px` so the *content* box is exactly the measure once the 20px
+   side padding is taken off — the same box `.pm-body`'s prose is centred in,
+   which is what makes the title and the first paragraph share a left edge.
+   Asymmetric padding here put them 16px apart, which is precisely visible
+   enough to look wrong. */
+.pm-header, .pm-meta { max-width: calc(var(--measure) + 40px); margin-inline: auto; width: 100%; }
 /* The close button is pinned to the panel, so reserve room in the title rather
    than in the header — at narrow widths the column fills the panel and a long
    ellipsised title would otherwise run underneath it. */

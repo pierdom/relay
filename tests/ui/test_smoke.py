@@ -594,7 +594,12 @@ def test_modal_caps_the_prose_measure_but_lets_tables_use_the_width(page, relay_
     table = page.locator("#pmBody table").first.bounding_box()["width"]
 
     assert para < panel * 0.65, f"prose is not capped: {para}px inside a {panel}px panel"
-    assert table > panel * 0.9, f"table was capped too: {table}px inside a {panel}px panel"
+    # Wider than the prose, but no longer the full panel: wide blocks are
+    # anchored to the reading column's left edge and spend only the slack to
+    # their right. Where they *sit* is checked by
+    # `test_the_reading_column_is_centred_and_wide_blocks_break_out`; this one
+    # is about the measure.
+    assert table > para * 1.15, f"table was capped with the prose: {table}px vs {para}px"
 
 
 # Left to right, and the order is a safety property rather than a preference:
@@ -700,9 +705,15 @@ def test_the_reading_column_is_centred_and_wide_blocks_break_out(page, relay_ser
     against, so they still break out on both sides, which is what the panel is
     wide for.
     """
+    # Headings matter here: they render in a proportional sans-serif while the
+    # body is monospace, and a measure in `ch` therefore gave each of them a
+    # different column. Without a heading in the fixture this test cannot see
+    # the bug it exists for.
     body = (
-        "Relay keeps posts as plain Markdown files in an Obsidian-compatible vault. " * 6
-        + "\n\n| one | two | three | four | five |\n|---|---|---|---|---|\n"
+        "## A section heading\n\n"
+        + "Relay keeps posts as plain Markdown files in an Obsidian-compatible vault. " * 6
+        + "\n\n### A smaller heading\n\nMore prose under it.\n"
+        + "\n| one | two | three | four | five |\n|---|---|---|---|---|\n"
         "| a | b | c | d | e |\n"
     )
     _api_post(relay_server, {"title": "Centred Column", "content": body, "tags": ["homelab"]})
@@ -718,11 +729,19 @@ def test_the_reading_column_is_centred_and_wide_blocks_break_out(page, relay_ser
         """() => {
           const body = document.querySelector('#pmBody').getBoundingClientRect();
           const p = document.querySelector('#pmBody .post-body > p').getBoundingClientRect();
-          const t = document.querySelector('#pmBody table').getBoundingClientRect();
+          const tw = document.querySelector('#pmBody .table-scroll, #pmBody .post-body > table');
+          const t = tw.getBoundingClientRect();
           const title = document.querySelector('.pm-title').getBoundingClientRect();
+          // Every capped block, not just the first paragraph — the wide ones
+          // (table, its scroll wrapper) are meant to differ and are excluded.
+          const capped = [...document.querySelectorAll('#pmBody .post-body > *')]
+            .filter(e => !['TABLE', 'PRE'].includes(e.tagName) && !e.classList.contains('table-scroll'));
           return { left: Math.round(p.left - body.left), right: Math.round(body.right - p.right),
                    prose: Math.round(p.width), table: Math.round(t.width),
-                   panel: Math.round(body.width), titleLeft: Math.round(title.left - body.left) };
+                   panel: Math.round(body.width), titleLeft: Math.round(title.left - body.left),
+                   tableLeft: Math.round(t.left - body.left),
+                   cappedEdges: [...new Set(capped.map(e => Math.round(e.getBoundingClientRect().left)))],
+                   cappedTags: capped.map(e => e.tagName) };
         }"""
     )
 
@@ -732,4 +751,20 @@ def test_the_reading_column_is_centred_and_wide_blocks_break_out(page, relay_ser
         f"the title does not share the prose column ({m['titleLeft']} vs {m['left']}) — "
         "centring the body alone is the failure this test exists to catch"
     )
-    assert m["table"] > m["panel"] * 0.9, f"the table was capped with the prose: {m}"
+    # Wide blocks are anchored to the column's left edge and spend the slack on
+    # the right. Centred, a table began ~300px left of every paragraph — aligned
+    # with nothing, which reads as misplaced rather than as emphasis.
+    assert abs(m["tableLeft"] - m["left"]) <= 2, (
+        f"the table does not start at the column's left edge ({m['tableLeft']} vs {m['left']})"
+    )
+    assert m["table"] > m["prose"] * 1.15, (
+        f"the table was capped with the prose ({m['table']} vs {m['prose']}) — "
+        "wide blocks are meant to use the slack the panel provides"
+    )
+    # The bug this caught: `88ch` resolves against each element's own font, so
+    # sans-serif headings got a wider column than the monospace prose and hung
+    # out to the left of it. The measure is in `rem` for exactly this reason.
+    assert len(m["cappedEdges"]) == 1, (
+        f"blocks do not share a left edge — {m['cappedTags']} at {m['cappedEdges']}; "
+        "a font-relative measure gives each element its own column"
+    )
