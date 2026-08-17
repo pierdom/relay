@@ -86,11 +86,11 @@ Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the work
 
 ## Interfaces
 
-**Browser UI** (`GET /ui`) — live SSE feed, compose/edit forms, attachment gallery, tag/folder/search filters, and `[[wikilink]]` cross-references. Fifteen themes — Relay Dark/Light plus ANSI, Catppuccin, Dracula, Everforest, Gruvbox, Molokai, Nord and Tokyo Night — all off one token layer, each a single block of variable overrides. On a phone every modal is a bottom sheet you can pull down to dismiss.
+**Browser UI** (`GET /ui`) — live SSE feed, compose/edit forms, attachment gallery, tag/folder/search filters, and `[[wikilink]]` cross-references. A post's history panel diffs any revision against the post as it stands, and the status panel's Recovery section finds posts that are *gone* and puts them back — which needs no id, the thing you never have after a delete. Fifteen themes — Relay Dark/Light plus ANSI, Catppuccin, Dracula, Everforest, Gruvbox, Molokai, Nord and Tokyo Night — all off one token layer, each a single block of variable overrides. On a phone every modal is a bottom sheet you can pull down to dismiss.
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven two-panel split: TOPICS sidebar + FEED list (`n` new, `e` edit, `d` delete, `Enter` view, `/` search, `q` quit). Set `RELAY_PALETTE` to match your terminal — themes include `nord`, `dracula`, `gruvbox`, `solarized`, `molokai`, and more.
 
-**MCP server** — 15 MCP tools over Streamable HTTP (`/mcp`) or the legacy stdio proxy, including reading a post's revision history and restoring it. See [docs/mcp.md](docs/mcp.md).
+**MCP server** — 19 MCP tools over Streamable HTTP (`/mcp`) or the legacy stdio proxy, including listing what was deleted, reading any revision, and restoring it. See [docs/mcp.md](docs/mcp.md).
 
 ## Development
 

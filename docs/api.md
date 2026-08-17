@@ -15,6 +15,7 @@ All endpoints require `Authorization: Bearer <API_KEY>` — **except `/health`**
 | GET | `/status` | Runtime diagnostics: version, uptime, vault path + counts, effective feature state |
 | GET | `/metrics` | Prometheus/OpenMetrics text exposition (bearer-gated — relay sits behind a public proxy, and an open `/metrics` would leak vault size and activity) |
 | GET | `/health` | Liveness probe — **no auth**, trivial by design; probed every 30 s by the Docker healthcheck |
+| GET | `/posts/deleted` | Posts whose file is gone but which history can restore — id, title, the **restorable** sha, and why it went (`deleted`/`external`/`expiry`). TTL expiries excluded unless `include_expiry=true`. ⚠️ Declared before `/{id}`, or FastAPI parses `deleted` as an int and answers 422 |
 | GET | `/posts/{id}/history` | Revisions of a post from vault history, newest first; answers for a **deleted** post too (`exists:false`) |
 | GET | `/posts/{id}/history/{sha}` | The post as it was at that revision (preview before restoring) |
 | POST | `/posts/{id}/restore` | Roll a post back to a revision (`{"sha": …}`), recreating it if deleted |

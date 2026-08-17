@@ -9,9 +9,11 @@ the full-power path for anything the API doesn't express.
 
 ## In the browser
 
-The post modal has a **🕑 History** button: it lists the post's revisions, previews any of them, and restores with one click. That is the quickest route for the common case — you noticed a post looks wrong and want the previous version back.
+The post modal has a **🕑 History** button: it lists the post's revisions, previews any of them, and restores with one click. That is the quickest route for the common case — you noticed a post looks wrong and want the previous version back. Each revision can be shown as a **diff against the post as it stands**, which is the question you actually have when you suspect a clobber: not "what did this commit do" but "what would restoring give me back".
 
-It can only reach posts that still exist, though, since the modal is the way in. For a **deleted** post, use the API below or the git runbook further down.
+For a post that is **gone**, the way in is the status panel (the header `i` button) → **Recovery**. It lists what was deleted but is still restorable, with the same preview-then-restore. It is there rather than in the sidebar because that panel already reports whether vault history works at all — when it does not, there is nothing to recover and the section says so.
+
+⚠️ **It is not a trash can.** Nothing moves on delete and there is nothing to purge; the list is a read over the git history that already records every removal. So there is no retention window to configure and nothing to empty. TTL expiries are filtered out by default, since a vault with per-tag TTLs sheds routine posts constantly and they would bury the deletion you are looking for.
 
 ## In-band: the API and MCP tools
 
