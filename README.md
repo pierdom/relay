@@ -86,7 +86,7 @@ Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the work
 
 ## Interfaces
 
-**Browser UI** (`GET /ui`) — live SSE feed, compose/edit forms, attachment gallery, tag/folder/search filters, and `[[wikilink]]` cross-references. Light and dark themes off one token layer. On a phone every modal is a bottom sheet you can pull down to dismiss.
+**Browser UI** (`GET /ui`) — live SSE feed, compose/edit forms, attachment gallery, tag/folder/search filters, and `[[wikilink]]` cross-references. Fifteen themes — Relay Dark/Light plus ANSI, Catppuccin, Dracula, Everforest, Gruvbox, Molokai, Nord and Tokyo Night — all off one token layer, each a single block of variable overrides. On a phone every modal is a bottom sheet you can pull down to dismiss.
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven two-panel split: TOPICS sidebar + FEED list (`n` new, `e` edit, `d` delete, `Enter` view, `/` search, `q` quit). Set `RELAY_PALETTE` to match your terminal — themes include `nord`, `dracula`, `gruvbox`, `solarized`, `molokai`, and more.
 
@@ -96,7 +96,7 @@ Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the work
 
 ```bash
 uv sync --all-extras --dev   # install (uv only — never pip)
-uv run pytest -q             # 331 tests (incl. 56 browser smokes)
+uv run pytest -q             # 373 tests (incl. 95 browser smokes)
 uv run ruff check .          # lint (config in pyproject.toml)
 ```
 
