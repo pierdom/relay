@@ -156,14 +156,30 @@ header {
 
 .header-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
-.theme-btn {
-  background: none; border: 1px solid var(--border); color: var(--muted);
-  cursor: pointer; font-size: 14px; line-height: 1; padding: 5px 8px;
-  border-radius: 4px; display: flex; align-items: center;
-  transition: color 0.15s, border-color 0.15s;
+/* One shape for every icon control in the header. They used to be sized by
+   their contents — a text "i" and an emoji ☀ in the same padded box render at
+   different optical weights and widths, so the row read as three unrelated
+   controls. A fixed square with a drawn 15px icon makes them a set. */
+.icon-btn {
+  width: 28px; height: 28px; flex-shrink: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--muted); cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.theme-btn:hover { color: var(--accent); border-color: var(--accent); }
-.theme-btn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.icon-btn svg { display: block; }
+.icon-btn:hover { color: var(--accent); border-color: var(--accent); }
+.icon-btn:focus-visible { color: var(--accent); border-color: var(--accent); }
+/* Open state, not hover: the picker stays lit while its menu is up. */
+.icon-btn[aria-expanded="true"] {
+  color: var(--accent); border-color: var(--accent); background: var(--wash-raise);
+}
+/* Ending the session is the one header action you cannot undo with another
+   click, so it answers in red rather than accent — the same language .btn-delete
+   already speaks. */
+.icon-btn-danger:hover, .icon-btn-danger:focus-visible {
+  color: var(--red); border-color: var(--red);
+}
 
 /* ── Theme picker ────────────────────────────────────────── */
 .theme-picker { position: relative; display: flex; }
@@ -193,7 +209,11 @@ header {
 .theme-opt.active .theme-label::after { content: " ✓"; color: var(--accent); }
 
 @media (max-width: 768px) {
-  /* Same 44px floor as the sheets — this is a header control on a phone. */
+  /* Same reasoning as the sheets' 44px floor, capped by a 48px header bar.
+     `.btn-new-post` cannot be sized here — its base rule is declared further
+     down the file and would win on source order. It is set in the mobile header
+     block instead. */
+  .icon-btn { width: 40px; height: 40px; }
   .theme-opt { min-height: 44px; }
   .theme-menu { min-width: 190px; }
 }
@@ -237,17 +257,11 @@ header {
 .link-btn:hover { color: var(--text); border-color: var(--border); }
 
 .connected-bar { display: flex; align-items: center; }
-.disconnect-btn {
-  background: none; border: none; color: var(--muted); cursor: pointer;
-  font-family: inherit; font-size: 11px; letter-spacing: 0.04em;
-  padding: 3px 0; border-bottom: 1px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
-}
-.disconnect-btn:hover { color: var(--text); border-color: var(--border); }
 
 .btn-new-post {
+  height: 28px; display: inline-flex; align-items: center; flex-shrink: 0;
   background: var(--accent); border: none; color: var(--on-accent);
-  padding: 5px 12px; border-radius: 4px; cursor: pointer;
+  padding: 0 12px; border-radius: 4px; cursor: pointer;
   font-family: inherit; font-size: 11px; font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase;
   transition: background 0.15s;
@@ -790,7 +804,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .brand-sep { display: none; }
   .live-label { display: none; }
   .key-wrap input { width: 140px; }
-  .btn-new-post { font-size: 10px; padding: 5px 9px; letter-spacing: 0.06em; }
+  .btn-new-post { height: 40px; font-size: 10px; padding: 0 11px; letter-spacing: 0.06em; }
 
   /* Sidebar → slide-in drawer */
   aside {
@@ -823,7 +837,8 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 @media (max-width: 400px) {
   header { gap: 8px; }
   .key-wrap input { width: 110px; font-size: 11px; }
-  .btn-connect, .btn-new-post { padding: 5px 8px; }
+  .btn-connect { padding: 5px 8px; }
+  .btn-new-post { padding: 0 9px; }
 }
 
 /* ── Post ID pill ────────────────────────────────────── */

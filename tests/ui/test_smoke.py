@@ -595,3 +595,82 @@ def test_modal_caps_the_prose_measure_but_lets_tables_use_the_width(page, relay_
 
     assert para < panel * 0.65, f"prose is not capped: {para}px inside a {panel}px panel"
     assert table > panel * 0.9, f"table was capped too: {table}px inside a {panel}px panel"
+
+
+HEADER_CONTROLS = ["themeBtn", "statusBtn", "newPostBtn", "disconnectBtn"]
+
+_HEADER_BOXES = """
+(ids) => ids.map(id => {
+  const el = document.getElementById(id);
+  if (!el) return { id, missing: true };
+  const r = el.getBoundingClientRect();
+  return {
+    id,
+    w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top),
+    label: el.getAttribute('aria-label') || el.textContent.trim(),
+    title: el.getAttribute('title') || '',
+    svgs: el.querySelectorAll('svg').length,
+    text: el.textContent.trim(),
+  };
+})
+"""
+
+
+def test_header_controls_are_one_visual_set(page):
+    """Every control in the header row shares a height and a baseline.
+
+    They used to be sized by their contents: a text "i", an emoji sun and the
+    word "disconnect" in the same row rendered at three different optical
+    weights, and only two of them had a box at all. Compared as a set — the
+    point is that they agree, not what they agree on, so a future restyle is
+    made in one place.
+    """
+    page.set_viewport_size({"width": 1200, "height": 500})
+    page.locator("#newPostBtn").wait_for(timeout=10_000)
+    boxes = page.evaluate(_HEADER_BOXES, HEADER_CONTROLS)
+
+    missing = [b["id"] for b in boxes if b.get("missing")]
+    assert not missing, f"header controls absent: {missing}"
+
+    assert len({b["h"] for b in boxes}) == 1, f"heights differ: {[(b['id'], b['h']) for b in boxes]}"
+    assert len({b["top"] for b in boxes}) == 1, f"not on one baseline: {[(b['id'], b['top']) for b in boxes]}"
+
+    icons = [b for b in boxes if b["id"] != "newPostBtn"]
+    assert all(b["w"] == b["h"] for b in icons), f"icon buttons not square: {icons}"
+    assert len({b["w"] for b in icons}) == 1, f"icon buttons differ in size: {icons}"
+
+    # Every control needs an accessible name. A tooltip is required only of the
+    # ones with no visible text — an icon with neither is a mystery, which is
+    # what "disconnect" would have become the moment it lost its word. The
+    # labelled primary action does not need one.
+    for b in boxes:
+        assert b["label"], f"{b['id']} has no accessible name"
+        if not b["text"]:
+            assert b["title"], f"{b['id']} is icon-only and has no tooltip"
+
+
+def test_the_theme_control_is_a_menu_button_not_a_toggle(page):
+    """It opens a picker, so it must not look like a two-state switch.
+
+    It shipped as ☀/☾ that swapped on click — correct when there were two themes
+    and a toggle, actively misleading once it became a three-item menu. The icon
+    is now a drawn palette that does not change with the theme; only the label
+    does, and it names the theme in use.
+    """
+    btn = page.locator("#themeBtn")
+    assert btn.get_attribute("aria-haspopup") == "menu"
+    assert page.evaluate("() => document.getElementById('themeBtn').textContent.trim()") == "", (
+        "the theme button renders text — a glyph here reads as a toggle"
+    )
+    assert page.evaluate("() => document.getElementById('themeBtn').querySelectorAll('svg').length") == 1
+
+    def icon() -> str:
+        return page.evaluate("() => document.getElementById('themeBtn').innerHTML")
+
+    before = icon()
+    btn.click()
+    page.locator('.theme-opt[data-theme-id="light"]').click()
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => document.documentElement.getAttribute('data-theme')") == "light"
+    assert icon() == before, "the icon changed with the theme — that is toggle behaviour"
+    assert "Relay Light" in (btn.get_attribute("title") or ""), "the tooltip does not name the live theme"

@@ -39,7 +39,9 @@ function reflect() {
   if (brandMark) {
     brandMark.src = theme.dark ? '/assets/relay-mark-on-dark.svg' : '/assets/relay-mark.svg';
   }
-  themeBtn.textContent = theme.dark ? '☀' : '☾';
+  // The icon is a static palette in the markup: this control opens a menu, so
+  // nothing about it should look like it flips between two states. Only the
+  // label changes, and it names the theme actually in use.
   themeBtn.setAttribute('aria-label', `Theme: ${theme.label}`);
   themeBtn.setAttribute('title', `Theme: ${theme.label}`);
   themeMenu.querySelectorAll('.theme-opt').forEach(opt => {
