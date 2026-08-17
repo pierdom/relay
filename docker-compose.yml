@@ -1,11 +1,11 @@
 services:
   relay:
     container_name: relay
-    # Pinned to the 0.7 minor line so `docker compose pull` rolls forward within
-    # 0.7.x (deliberate, rollback-able) instead of tracking whatever last hit
-    # main via :latest. Pin to an exact :0.7.N to freeze, or bump to :0.8 on the
+    # Pinned to the 0.8 minor line so `docker compose pull` rolls forward within
+    # 0.8.x (deliberate, rollback-able) instead of tracking whatever last hit
+    # main via :latest. Pin to an exact :0.8.N to freeze, or bump to :0.9 on the
     # next minor release. CI publishes :X.Y.Z + :X.Y on every vX.Y.Z tag.
-    image: ghcr.io/pierdom/relay:0.7
+    image: ghcr.io/pierdom/relay:0.8
     # Run as your host user so files relay writes into the bind-mounted vault
     # (renames, index.db) stay user-owned — good for backup/Syncthing/Obsidian.
     user: "${RELAY_UID:-1000}:${RELAY_GID:-1000}"
