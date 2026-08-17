@@ -562,46 +562,6 @@ def test_cancelling_an_untouched_edit_closes_without_a_prompt(page):
     page.locator("#editModal.open").wait_for(state="detached", timeout=5_000)
 
 
-def test_modal_caps_the_prose_measure_but_lets_tables_use_the_width(page, relay_server):
-    """The panel is wide on purpose — tables, code blocks and screenshots need it.
-    Prose does not: at the full width a paragraph runs ~155 characters, about
-    double a comfortable measure. So text-level blocks are capped and everything
-    that genuinely wants the room is left alone.
-
-    The first version of this rule hung its selectors off `.pm-body` directly and
-    matched nothing, because the rendered markdown sits inside a `.post-body`
-    wrapper. It looked correct and did nothing, so the assertion here is on the
-    measured widths rather than on the rule existing.
-    """
-    body = (
-        "Relay keeps posts as plain Markdown files in an Obsidian-compatible vault, "
-        "and the browser UI reads them over the same REST API the agents use. " * 5
-        + "\n\n| col one | col two | col three | col four | col five |\n"
-        "|---|---|---|---|---|\n"
-        "| a fairly long cell value | another long one | and a third | and fourth | fifth |\n"
-    )
-    _api_post(relay_server, {"title": "Prose Measure", "content": body, "tags": ["homelab"]})
-
-    page.set_viewport_size({"width": 1680, "height": 1050})
-    page.reload()
-    page.get_by_text("Prose Measure").first.wait_for(timeout=10_000)
-    page.get_by_text("Prose Measure").first.click()
-    page.locator("#postModal.open").wait_for(timeout=10_000)
-    page.wait_for_timeout(400)
-
-    panel = page.locator(".pm-inner").bounding_box()["width"]
-    para = page.locator("#pmBody .post-body > p").first.bounding_box()["width"]
-    table = page.locator("#pmBody table").first.bounding_box()["width"]
-
-    assert para < panel * 0.65, f"prose is not capped: {para}px inside a {panel}px panel"
-    # Wider than the prose, but no longer the full panel: wide blocks are
-    # anchored to the reading column's left edge and spend only the slack to
-    # their right. Where they *sit* is checked by
-    # `test_the_reading_column_is_centred_and_wide_blocks_break_out`; this one
-    # is about the measure.
-    assert table > para * 1.15, f"table was capped with the prose: {table}px vs {para}px"
-
-
 # Left to right, and the order is a safety property rather than a preference:
 # "+ New Post" used to sit directly beside Disconnect, so one slipped click
 # ended the session instead of opening the composer. The two icon buttons are
@@ -694,92 +654,84 @@ def test_the_theme_control_is_a_menu_button_not_a_toggle(page):
     assert "Relay Light" in (btn.get_attribute("title") or ""), "the tooltip does not name the live theme"
 
 
-def test_the_reading_column_is_centred_and_wide_blocks_break_out(page, relay_server):
-    """Prose, title and meta share one centred column; tables span the panel.
+def test_the_reading_column_holds_every_block(page, relay_server):
+    """One centred column: prose, headings, rules, tables — all of it.
 
-    Capping the measure at 88ch fixed the reading width and left the placement
-    wrong: in a 1320px panel the text sat 20px from the left with ~600px of dead
-    space on the right. Centring the body alone was worse — the title and meta
-    stayed hard left and the prose floated away from them — so the header rides
-    the same column. Wide blocks have no max-width for the auto margins to work
-    against, so they still break out on both sides, which is what the panel is
-    wide for.
+    This arrived in three wrong shapes before it was right, and each is a
+    distinct failure the assertions below cover.
+
+    * Capping the measure fixed the reading *width* and left the placement
+      wrong: in a 1320px panel the text sat 20px from the left with ~600px of
+      dead space. Hence the centring check.
+    * Centring the body alone was worse — the title, tags and id pill stayed
+      hard left while the prose floated away. Hence the title check.
+    * A measure in `ch` resolves against each element's *own* font, so
+      sans-serif headings got a wider column than the monospace prose and hung
+      out to its left. Hence the shared-edge check, and the heading in the
+      fixture: without one it cannot see that at all.
+
+    Wide blocks were then let out of the column — first centred, then anchored
+    left and spilling right — and both read as unbalanced. Everything is capped
+    now, so a table that still cannot fit scrolls *inside* the column.
     """
-    # Headings matter here: they render in a proportional sans-serif while the
-    # body is monospace, and a measure in `ch` therefore gave each of them a
-    # different column. Without a heading in the fixture this test cannot see
-    # the bug it exists for.
+    # Deliberately hostile: a heading (different font), a rule, and a table with
+    # cells long enough to overflow if it were left to size itself. With tame
+    # content most of these assertions are vacuous.
     body = (
         "## A section heading\n\n"
         + "Relay keeps posts as plain Markdown files in an Obsidian-compatible vault. " * 6
         + "\n\n---\n\n### A smaller heading\n\nMore prose under it.\n"
-        # Deliberately hostile: cells long enough that a `nowrap` table would
-        # overflow the panel. With tame content the clipping assertion below is
-        # vacuous — the same trap the grid-overflow smoke fell into.
         + "\n| Conto | Rendimento lordo | Netto | Ruolo | E deployabile? |\n|---|---|---|---|---|\n"
         "| MedioCredito liquido a scadenza | 1.90% lordo annuo | 1.41% (ritenuta IT 26%) "
         "| eccedenza sopra la soglia dei 25k a target | Si, unica fonte di deployment corrente |\n"
         "| Trading 212 conto remunerato | 2.20% lordo annuo | 1.78% il miglior liquido "
         "| runway della pie piu emergenza di terzo livello | No, non si trasferisce su IBKR |\n"
     )
-    _api_post(relay_server, {"title": "Centred Column", "content": body, "tags": ["homelab"]})
+    _api_post(relay_server, {"title": "Reading Column", "content": body, "tags": ["homelab"]})
 
     page.set_viewport_size({"width": 1800, "height": 1000})
     page.reload()
-    page.get_by_text("Centred Column").first.wait_for(timeout=10_000)
-    page.get_by_text("Centred Column").first.click()
+    page.get_by_text("Reading Column").first.wait_for(timeout=10_000)
+    page.get_by_text("Reading Column").first.click()
     page.locator("#postModal.open").wait_for(timeout=10_000)
     page.wait_for_timeout(400)
 
     m = page.evaluate(
         """() => {
           const body = document.querySelector('#pmBody').getBoundingClientRect();
-          const p = document.querySelector('#pmBody .post-body > p').getBoundingClientRect();
-          const tw = document.querySelector('#pmBody .table-scroll, #pmBody .post-body > table');
-          const t = tw.getBoundingClientRect();
-          const title = document.querySelector('.pm-title').getBoundingClientRect();
-          // Every capped block, not just the first paragraph — the wide ones
-          // (table, its scroll wrapper) are meant to differ and are excluded.
-          const capped = [...document.querySelectorAll('#pmBody .post-body > *')]
-            .filter(e => !['TABLE', 'PRE'].includes(e.tagName) && !e.classList.contains('table-scroll'));
-          const wraps = [...document.querySelectorAll('#pmBody .table-scroll')]
-            .map(w => ({ scroll: w.scrollWidth, client: w.clientWidth }));
-          return { left: Math.round(p.left - body.left), right: Math.round(body.right - p.right),
-                   prose: Math.round(p.width), table: Math.round(t.width),
-                   panel: Math.round(body.width), titleLeft: Math.round(title.left - body.left),
-                   tableLeft: Math.round(t.left - body.left),
-                   cappedEdges: [...new Set(capped.map(e => Math.round(e.getBoundingClientRect().left)))],
-                   cappedTags: capped.map(e => e.tagName),
-                   clipped: wraps.filter(w => w.scroll > w.client + 1) };
+          const kids = [...document.querySelectorAll('#pmBody .post-body > *')];
+          const box = e => e.getBoundingClientRect();
+          const title = box(document.querySelector('.pm-title'));
+          const wraps = [...document.querySelectorAll('#pmBody .table-scroll, #pmBody pre')];
+          return {
+            panel: Math.round(body.width),
+            tags: kids.map(e => e.tagName),
+            edges: [...new Set(kids.map(e => Math.round(box(e).left - body.left)))],
+            widths: [...new Set(kids.map(e => Math.round(box(e).width)))],
+            rights: [...new Set(kids.map(e => Math.round(body.right - box(e).right)))],
+            titleLeft: Math.round(title.left - body.left),
+            clipped: wraps.filter(w => w.scrollWidth > w.clientWidth + 1).length,
+          };
         }"""
     )
 
-    assert abs(m["left"] - m["right"]) <= 4, f"the column is not centred: {m['left']} vs {m['right']}"
-    assert m["left"] > 60, f"no meaningful centring happened: {m}"
-    assert abs(m["titleLeft"] - m["left"]) <= 6, (
-        f"the title does not share the prose column ({m['titleLeft']} vs {m['left']}) — "
-        "centring the body alone is the failure this test exists to catch"
-    )
-    # Wide blocks are anchored to the column's left edge and spend the slack on
-    # the right. Centred, a table began ~300px left of every paragraph — aligned
-    # with nothing, which reads as misplaced rather than as emphasis.
-    assert abs(m["tableLeft"] - m["left"]) <= 2, (
-        f"the table does not start at the column's left edge ({m['tableLeft']} vs {m['left']})"
-    )
-    assert m["table"] > m["prose"] * 1.15, (
-        f"the table was capped with the prose ({m['table']} vs {m['prose']}) — "
-        "wide blocks are meant to use the slack the panel provides"
-    )
-    # The bug this caught: `88ch` resolves against each element's own font, so
-    # sans-serif headings got a wider column than the monospace prose and hung
-    # out to the left of it. The measure is in `rem` for exactly this reason.
-    assert len(m["cappedEdges"]) == 1, (
-        f"blocks do not share a left edge — {m['cappedTags']} at {m['cappedEdges']}; "
+    assert len(m["tags"]) >= 4, f"fixture did not render enough blocks: {m['tags']}"
+    assert len(m["edges"]) == 1, (
+        f"blocks do not share a left edge — {m['tags']} at {m['edges']}; "
         "a font-relative measure gives each element its own column"
     )
-    # Horizontal overflow in the modal carries no affordance, so a clipped
-    # column does not look clipped — it looks absent, and the one that goes is
-    # the rightmost. Cells wrap here rather than scroll for that reason.
-    assert not m["clipped"], (
-        f"a table is clipped with nothing to say so: {m['clipped']}"
+    assert len(m["widths"]) == 1, f"blocks are not one column wide: {m['tags']} at {m['widths']}"
+    assert abs(m["edges"][0] - m["rights"][0]) <= 4, (
+        f"the column is not centred: {m['edges'][0]} left vs {m['rights'][0]} right"
     )
+    assert m["edges"][0] > 60, f"no meaningful centring happened: {m}"
+    assert m["widths"][0] < m["panel"] * 0.75, (
+        f"the column is not narrower than the panel: {m['widths'][0]} of {m['panel']}"
+    )
+    assert abs(m["titleLeft"] - m["edges"][0]) <= 6, (
+        f"the title does not share the column ({m['titleLeft']} vs {m['edges'][0]}) — "
+        "centring the body alone is a failure this test exists to catch"
+    )
+    # Horizontal overflow carries no affordance, so a clipped column does not
+    # look clipped, it looks absent — and the one that goes is the rightmost.
+    assert m["clipped"] == 0, "a table or code block is clipped with nothing to say so"
