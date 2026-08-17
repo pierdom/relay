@@ -837,11 +837,15 @@ aside.collapsed > * { min-width: 220px; }
   text-transform: uppercase; letter-spacing: 0.18em;
   display: flex; align-items: center; justify-content: space-between;
 }
-.sidebar-tabs { display: flex; gap: 3px; }
+/* Three tabs and the `+` button fit a 220px sidebar with room. A fourth did
+   not — `tests/ui/test_sidebar_tabs.py` measures the strip against the header's
+   content box, so the next attempt to add one fails loudly instead of pushing
+   the add button off the edge. */
+.sidebar-tabs { display: flex; gap: 3px; min-width: 0; }
 .sb-tab {
   background: none; border: none; color: var(--muted); cursor: pointer;
   font: inherit; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
-  padding: 3px 8px; border-radius: 4px;
+  padding: 3px 8px; border-radius: 4px; white-space: nowrap;
 }
 .sb-tab.active { color: var(--accent); background: var(--tag-active); }
 .sb-tab:hover:not(.active) { color: var(--text); }
@@ -1213,9 +1217,26 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .lightbox-cap { color: var(--on-scrim); font-size: 12px; }
 .edit-form textarea.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 
-/* ── Deleted view ────────────────────────────────────── */
-/* Shares `.attachments-view`'s scroll shell — both replace the feed with a
-   different listing, and giving them one container keeps the two in step. */
+/* ── Recovery browser (inside the status panel) ───────── */
+/* Not a sidebar view: Tags/Tree/Files are ways to browse what *exists*, and
+   this is a different corpus. It renders into `.sm-body`, so it inherits the
+   panel's scroll shell and 560px measure rather than owning either. */
+.sm-back {
+  align-self: flex-start; background: none; border: none; cursor: pointer;
+  font: inherit; font-size: 11px; color: var(--muted); padding: 0;
+  transition: color 0.15s;
+}
+.sm-back:hover { color: var(--accent); }
+.sm-recovery-line { margin-left: 0; text-align: left; margin-bottom: 8px; }
+.del-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.del-filter {
+  background: none; cursor: pointer; font: inherit; font-size: 10px;
+  letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
+  transition: color 0.15s, border-color 0.15s;
+}
+.del-filter:hover { color: var(--text); }
+.del-filter.active { color: var(--accent); border-color: var(--accent); }
 .del-card {
   border: 1px solid var(--border); border-radius: 6px;
   padding: 12px 14px; margin-bottom: 10px;
@@ -1252,7 +1273,12 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 }
 @media (max-width: 768px) {
-  .del-actions button { min-height: 44px; display: inline-flex; align-items: center; }
+  /* `.sm-body .btn-edit` reaches the Recovery section's own button too — it is
+     not inside `.del-actions`, and the sheet touch-floor smoke caught it at
+     132x23 rather than my noticing. */
+  .del-actions button, .del-filter, .sm-back, .sm-body .btn-edit {
+    min-height: 44px; display: inline-flex; align-items: center;
+  }
 }
 
 /* ── Search bar ─────────────────────────────────────── */

@@ -17,7 +17,7 @@ import { closeStatusModal, isStatusOpen } from './status.js';   // also self-wir
 import { query, resetPaging } from './feed-query.js';
 import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
 import { attachSheetDismiss } from './sheet.js';
-import { initDeleted, loadDeleted } from './deleted.js';
+import { initDeleted } from './deleted.js';
 import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
 import { escHtml, fmtBytes, relativeTime, toDatetimeLocal, toUtcIso } from './util.js';
@@ -187,10 +187,8 @@ async function init() {
   document.getElementById('tabTags').classList.add('active');
   document.getElementById('tabTree').classList.remove('active');
   document.getElementById('tabFiles').classList.remove('active');
-  document.getElementById('tabDeleted').classList.remove('active');
   feed.style.display = '';
   attachmentsView.style.display = 'none';
-  document.getElementById('deletedView').style.display = 'none';
   loginView.style.display = 'none';
   loadMoreWrap.style.display = 'none';
   connectForm.style.display = 'none';
@@ -608,11 +606,13 @@ function makeTagItem(label, value, count) {
 }
 
 /* ── Sidebar: Tags ⇄ Tree toggle ───────────────────────────── */
-// Two of the four tabs replace the feed with a different listing; the other two
-// filter it. Naming that split is what keeps a fourth tab from adding a fourth
-// set of near-identical toggles.
-const SIDEBAR_TABS = { tags: 'tabTags', tree: 'tabTree', files: 'tabFiles', deleted: 'tabDeleted' };
-const FEED_REPLACING = { files: 'attachmentsView', deleted: 'deletedView' };
+// One tab replaces the feed with a different listing; the other two filter it.
+// Naming that split is what keeps a new tab from adding another set of
+// near-identical toggles — and the strip has no room for one anyway
+// (`tests/ui/test_sidebar_tabs.py`), which is why recovering a deleted post
+// lives in the status panel rather than here.
+const SIDEBAR_TABS = { tags: 'tabTags', tree: 'tabTree', files: 'tabFiles' };
+const FEED_REPLACING = { files: 'attachmentsView' };
 
 function setSidebarMode(mode) {
   sidebarMode = mode;
@@ -633,13 +633,13 @@ function setSidebarMode(mode) {
 
   if (mode === 'tags') loadTags();
   else if (mode === 'tree') loadFolders();
-  else if (mode === 'files') loadAttachments();
-  else loadDeleted();
+  else loadAttachments();
 }
 for (const [name, id] of Object.entries(SIDEBAR_TABS)) {
   document.getElementById(id).addEventListener('click', () => setSidebarMode(name));
 }
 // A restore puts a post back in the feed, so the feed has to hear about it.
+// The recovery browser itself lives in the status panel (`js/status.js`).
 initDeleted(() => { resetPaging(); loadPosts(true); loadTags(); });
 
 async function loadFolders() {

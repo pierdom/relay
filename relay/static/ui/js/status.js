@@ -12,6 +12,7 @@
 import { apiFetch } from './api.js';
 import { fmtBytes, fmtUptime } from './util.js';
 import { attachSheetDismiss } from './sheet.js';
+import { fetchDeleted, recoverableCount, renderDeleted } from './deleted.js';
 
 // ── Status / about modal ─────────────────────────────────────────────────────
 const statusModal = document.getElementById('statusModal');
@@ -57,6 +58,54 @@ function smFeature(label, state, note) {
   return row;
 }
 
+/* Recovery lives here because this is the panel that already answers "does
+ * vault history work". When it does not, there is nothing to recover, and this
+ * section says so rather than offering a button that cannot help. */
+function renderRecovery(historyWorks) {
+  const wrap = document.createElement('div');
+  const line = document.createElement('div');
+  line.className = 'sm-feat-note sm-recovery-line';
+  wrap.appendChild(line);
+
+  if (!historyWorks) {
+    line.textContent = 'Vault history is off — deleted posts cannot be recovered.';
+    return smSection('Recovery', wrap);
+  }
+
+  line.textContent = 'Checking…';
+  const btn = document.createElement('button');
+  btn.className = 'btn-edit';
+  btn.id = 'smBrowseDeleted';
+  btn.textContent = 'Browse deleted →';
+  btn.disabled = true;
+  wrap.appendChild(btn);
+
+  // One request serves both the headline and the browser; the headline excludes
+  // TTL expiries, which are routine, while the browser offers them as a filter.
+  fetchDeleted().then(list => {
+    const n = recoverableCount(list);
+    line.textContent = n
+      ? `${n} deleted post${n === 1 ? '' : 's'} can be restored`
+      : 'Nothing deleted — or nothing left to recover.';
+    btn.disabled = !list.length;
+    btn.onclick = () => showDeleted();
+  }).catch(() => {
+    line.textContent = 'Could not read deleted posts.';
+  });
+
+  return smSection('Recovery', wrap);
+}
+
+/** Drill down into the recovery browser, replacing the panel's contents.
+ *
+ * The panel keeps its 560px width: the cards are built for it (the full path is
+ * dropped — the title *is* the filename, so only the folder adds anything), and
+ * a modal that changes size as you navigate inside it is the jump the history
+ * panel's fixed height exists to prevent. */
+function showDeleted() {
+  renderDeleted(smBody, { onBack: openStatusModal });
+}
+
 function renderStatus(d) {
   smVersion.textContent = d.version;
   smBody.innerHTML = '';
@@ -88,6 +137,8 @@ function renderStatus(d) {
     ['Folders', String(v.folders)],
     ['Attachments', `${v.attachments} (${fmtBytes(v.attachment_bytes)})`],
   ])));
+
+  smBody.appendChild(renderRecovery(h.effective));
 
   smBody.appendChild(smSection('Server', smRows([
     ['Uptime', fmtUptime(d.uptime_seconds)],

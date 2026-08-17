@@ -1,9 +1,17 @@
-"""Recovering things from the UI: the Deleted view, and the diff.
+"""Recovering things from the UI: the recovery browser, and the diff.
 
 Both close the same gap from opposite ends. Every recovery primitive already
 existed — list a post's revisions, read one, restore it — but the UI could only
 reach them through the post modal, so it could only recover a post that still
 existed, and it had no way to show you *what* a revision would give back.
+
+The browser lives **inside the status panel**, reached by its Recovery section.
+It was first built as a fourth sidebar tab, which was wrong twice: Tags/Tree/
+Files are ways to browse what exists and this is a different corpus, and the
+220px strip had no room for a fourth tab anyway (`test_sidebar_tabs.py`). These
+tests therefore go in through `#statusBtn`, and one of them pins the *reason*
+the section is in that panel — it reports when history is off, so recovery is
+sitting with the thing that decides whether recovery is possible at all.
 """
 from __future__ import annotations
 
@@ -12,6 +20,36 @@ import pytest
 from .test_smoke import _api_delete, _api_patch, _api_post
 
 pytestmark = pytest.mark.ui
+
+
+def _open_recovery(page):
+    """Status panel → Recovery → the browser. The only route in."""
+    page.locator("#statusBtn").click()
+    page.locator("#statusModal.open").wait_for(timeout=10_000)
+    browse = page.locator("#smBrowseDeleted")
+    browse.wait_for(timeout=10_000)
+    page.wait_for_function(
+        "() => { const b = document.getElementById('smBrowseDeleted'); return b && !b.disabled; }",
+        timeout=10_000,
+    )
+    browse.click()
+
+
+def test_recovery_sits_with_the_thing_that_decides_whether_it_is_possible(page, relay_server):
+    """The Recovery section is in the status panel because that panel already
+    answers "does vault history work" — and when it does not, there is nothing
+    to recover. This pins the pairing: both are in the same panel, and the
+    section reports a count rather than offering a button that cannot help."""
+    page.reload()
+    page.locator("#statusBtn").click()
+    page.locator("#statusModal.open").wait_for(timeout=10_000)
+    page.locator("#smBrowseDeleted").wait_for(timeout=10_000)
+
+    titles = [t.strip().lower() for t in page.locator(".sm-section-title").all_inner_texts()]
+    assert "health" in titles and "recovery" in titles, f"sections are {titles}"
+
+    line = page.locator(".sm-recovery-line").inner_text().lower()
+    assert "restor" in line or "nothing" in line, f"no headline count: {line!r}"
 
 
 def test_a_deleted_post_can_be_found_and_restored_without_leaving_the_ui(page, relay_server):
@@ -26,7 +64,7 @@ def test_a_deleted_post_can_be_found_and_restored_without_leaving_the_ui(page, r
     _api_delete(relay_server, made["id"])
 
     page.reload()
-    page.locator("#tabDeleted").click()
+    _open_recovery(page)
     card = page.locator(f'.del-card[data-id="{made["id"]}"]')
     card.wait_for(timeout=10_000)
     assert "Gone By Mistake" in card.inner_text()
@@ -43,27 +81,33 @@ def test_a_deleted_post_can_be_found_and_restored_without_leaving_the_ui(page, r
     assert page.locator(f'.del-card[data-id="{made["id"]}"]').count() == 0, (
         "the restored post is still listed as deleted"
     )
-    page.locator("#tabTags").click()
+    page.locator("#smClose").click()
     page.wait_for_timeout(600)
     assert page.get_by_text("Gone By Mistake").count() > 0, "restored post did not return to the feed"
 
 
-def test_the_deleted_view_separates_the_routine_from_the_alarming(page, relay_server):
+def test_the_recovery_browser_separates_the_routine_from_the_alarming(page, relay_server):
     """A TTL sweep and an accident both remove a post; only one is interesting.
 
-    The sidebar filters on the reason the API reports, so fourteen expired
+    The browser filters on the reason the API reports, so fourteen expired
     digests a week cannot bury the one delete that mattered.
+
+    ⚠️ Scope: this covers the badge and the filter row. The *headline* count in
+    the status panel also excludes expiries (`recoverableCount`), and that half
+    is **not** covered here — forcing a real TTL sweep needs the cleanup loop,
+    which is far too slow for a smoke. The API-side default is pinned by
+    `tests/test_deleted_posts.py::test_ttl_expiries_are_excluded_by_default`;
+    the JS filter on top of it is currently unpinned.
     """
     made = _api_post(relay_server, {"title": "Reason Shown", "tags": ["homelab"], "content": "x"})
     _api_delete(relay_server, made["id"])
 
     page.reload()
-    page.locator("#tabDeleted").click()
+    _open_recovery(page)
     card = page.locator(f'.del-card[data-id="{made["id"]}"]')
     card.wait_for(timeout=10_000)
     assert card.locator(".del-reason").inner_text().strip().lower() == "deleted"
-    # The sidebar becomes reason filters rather than tags.
-    assert page.locator("#tagList .tag-item").count() >= 2
+    assert page.locator(".del-filter").count() >= 2, "no reason filters were offered"
 
 
 def test_the_history_panel_diffs_a_revision_against_the_post_as_it_stands(page, relay_server):
