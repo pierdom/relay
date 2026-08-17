@@ -427,11 +427,18 @@ def _deletions_sync(limit: int) -> list[Deletion]:
     state the file had before it vanished — which is also the only place a
     deleted post's title still exists.
 
-    ⚠️ **The sha reported is that parent, not the delete commit.** `restore_post`
-    only accepts revisions it can read a body from, and by design the delete
-    commit is not one of them — the file has no blob there. Reporting the delete
-    sha makes every restore 404 with "no revision in the history of post #N",
-    which reads as a lookup bug rather than an off-by-one commit.
+    ⚠️ **The sha reported is not the delete commit**, which by design carries no
+    blob for the file — reporting it makes every restore 404 with "no revision in
+    the history of post #N", reading as a lookup bug rather than an off-by-one.
+
+    ⚠️ **Nor is it simply the delete commit's parent.** That parent holds the
+    right *content*, but `restore_post` resolves a sha against
+    ``revisions()``, which lists only commits that **touched** the file. Unless
+    the post happened to be deleted in the very next commit after its last edit,
+    the parent is some unrelated write and the restore 404s anyway. A
+    create-then-immediately-delete test cannot see this: it makes the parent *be*
+    the create commit. What is reported is the last commit that actually touched
+    the path before the delete — `log -1 <delete>^ -- <path>`.
     """
     got = _run("log", "--diff-filter=D", "--format=" + _LOG_FORMAT, "--name-only", "--", "*.md")
     if got.returncode:
@@ -444,7 +451,14 @@ def _deletions_sync(limit: int) -> list[Deletion]:
         if not parent:
             continue   # a delete in the initial commit cannot happen, but be safe
         for path in paths:
-            text = _blob_sync(parent, path)
+            # The last commit that *touched* this path before the delete. The
+            # parent commit has the same content, but `revisions()` only lists
+            # commits that touched the file, so a parent that did not is a sha
+            # `restore_post` will refuse.
+            restorable = _run(
+                "log", "-1", "--format=%H", parent, "--", path
+            ).stdout.strip() or parent
+            text = _blob_sync(restorable, path)
             if text is None:
                 continue
             try:
@@ -459,7 +473,7 @@ def _deletions_sync(limit: int) -> list[Deletion]:
             # `title` key — so it comes off the path the file occupied.
             found.append(Deletion(
                 post_id=pid, title=PurePosixPath(path).stem,
-                sha=parent, when=when, message=message, path=path, reason=reason,
+                sha=restorable, when=when, message=message, path=path, reason=reason,
             ))
             if len(found) >= limit:
                 return found

@@ -56,7 +56,7 @@ async def _make(client, title, content="body", tags=None):
 @pytest.mark.asyncio
 async def test_a_deleted_post_becomes_discoverable_and_restorable(client):
     """The whole point: delete, find it without knowing anything, put it back."""
-    pid = await _make(client, "Doomed Note", "the body that must come back")
+    pid = await _make(client, "Digest mattutino — 16 agosto 2026", "the body that must come back")
     assert (await client.delete(f"/posts/{pid}", headers=HEADERS)).status_code in (200, 204)
 
     listed = await client.get("/posts/deleted", headers=HEADERS)
@@ -64,7 +64,7 @@ async def test_a_deleted_post_becomes_discoverable_and_restorable(client):
     items = listed.json()["items"]
     match = next((d for d in items if d["id"] == pid), None)
     assert match is not None, f"deleted post not discoverable: {[d['id'] for d in items]}"
-    assert match["title"] == "Doomed Note"
+    assert match["title"] == "Digest mattutino — 16 agosto 2026"
     assert match["reason"] == "deleted"
 
     # The sha it reports is the one /restore takes — that is the contract.
@@ -124,3 +124,39 @@ async def test_the_literal_route_is_not_shadowed_by_the_id_route(client):
 @pytest.mark.asyncio
 async def test_it_needs_auth(client):
     assert (await client.get("/posts/deleted")).status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_a_post_deleted_long_after_it_was_created_still_restores(client):
+    """The regression that shipped in the first cut of this feature.
+
+    `deletions()` reported the delete commit's **parent**, reasoning that it is
+    the last state the file had. It is — but `restore_post` resolves a sha
+    against `revisions()`, which lists only commits that *touched* the file.
+    Unless a post is deleted in the very next commit after its last edit, that
+    parent is some unrelated write, and the restore 404s with "No revision …"
+    — which reads as a lookup bug rather than an off-by-one commit.
+
+    ⚠️ The obvious test (create, delete, restore) **cannot catch this**: it makes
+    the parent *be* the create commit, so it passes against the broken code. The
+    unrelated writes below are the whole test.
+    """
+    pid = await _make(client, "Digest mattutino — 15 agosto 2026", "corpo da salvare",
+                      tags=["digest"])
+    for i in range(3):
+        await _make(client, f"Unrelated {i}", "x")
+
+    assert (await client.delete(f"/posts/{pid}", headers=HEADERS)).status_code in (200, 204)
+
+    listed = (await client.get("/posts/deleted", headers=HEADERS)).json()["items"]
+    entry = next(d for d in listed if d["id"] == pid)
+
+    out = await client.post(f"/posts/{pid}/restore", json={"sha": entry["sha"]}, headers=HEADERS)
+    assert out.status_code == 200, f"restore failed: {out.status_code} {out.text}"
+    assert out.json()["content"].strip() == "corpo da salvare"
+
+    # The preview the UI shows before restoring reads the same sha, so it has to
+    # resolve too — they share `_resolve_revision` precisely so they cannot
+    # disagree, and this pins that they don't.
+    prev = await client.get(f"/posts/{pid}/history/{entry['sha']}", headers=HEADERS)
+    assert prev.status_code == 200, prev.text
