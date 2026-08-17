@@ -42,13 +42,18 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
      --red are not tokens at all: they are color-mix() at the point of use, so
      they follow the accent into every theme for free. */
   /* Secondary and tertiary accents, for chips that are decorative rather than
-     semantic — the id pill, the tag count. A theme with a full palette spends
-     real colours here; Relay Dark and Relay Light are deliberately monochrome
-     amber, so theirs repeat --muted and those chips stay recessive, exactly as
-     they were. This is why they exist: without them every such chip is grey in
-     every theme, because the contract had one accent and nothing else. */
-  --accent-2:      #4a5568;            /* monochrome theme — same as --muted */
-  --accent-3:      #4a5568;
+     semantic — the id pill, the tag count, the uppercase section labels, the
+     `via` source. Without them every such chip is grey in every theme, because
+     the contract had one accent and nothing else.
+
+     Violet and cyan against relay's amber: far enough round the wheel to read
+     as separate information, and clear of --green and --red, which are
+     semantic and must not be borrowed for decoration. They sit at the same
+     lightness step as the tokens already here — the bright step on dark, the
+     deep step on light — so they read as part of the same set rather than as
+     stickers on it. */
+  --accent-2:      #a78bfa;            /* violet */
+  --accent-3:      #22d3ee;            /* cyan */
   --on-accent:     #000;               /* foreground on an --accent fill */
   --on-scrim:      #eee;               /* foreground on a dark scrim */
   --border-hover:  #2d3348;
@@ -79,8 +84,8 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #22252c;
   --wash-raise:  rgba(0, 0, 0, 0.03);
 
-  --accent-2:      #736e5d;            /* monochrome theme — same as --muted */
-  --accent-3:      #736e5d;
+  --accent-2:      #6d28d9;            /* violet, deep step to match this theme */
+  --accent-3:      #0e7490;            /* cyan, deep step */
   --on-accent:     #000;               /* 5.05:1 on #b96809 — white would be 4.16:1 */
   --on-scrim:      #eee;
   --border-hover:  #b8b09a;
@@ -259,6 +264,148 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.16);
   --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.22);
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.20);
+}
+
+/* Catppuccin — four flavours, from catppuccin.com/palette. Role mapping follows
+   the project's own guidance: `mantle` is the canvas and `base` the raised
+   surface, `surface0/1/2` step up through borders, `overlay1` is muted, and
+   `mauve` is Catppuccin's default accent. Decorative accents are peach and teal
+   — a warm/cool pair well clear of `green` and `red`, which stay semantic.
+
+   Latte is the exception, and the reason is worth recording because it is a
+   fact about the palette rather than a choice. Measured as chip text on Latte's
+   own base, **every one of its fourteen accent members lands under AA** — best
+   is mauve at 4.18:1, and the ceiling with no tint at all is 4.80:1. Its warm
+   members are far worse (peach 2.38:1, yellow 2.13:1) simply because orange and
+   yellow on a near-white ground cannot do better. Dropping the chip tint to 4%
+   would have rescued mauve at 4.54:1, but a 4% tint is not a chip — that trades
+   the design in nine themes to accommodate one. So Latte's decorative chips are
+   `text`: legible, and honestly uncoloured. Its colour shows in the accent,
+   green and red instead.
+
+   Its prose also tops out at 7.06:1 — exactly WCAG AAA, and the palette has no
+   darker text than #4c4f69. See the two-tier floor in tests/test_css_tokens.py:
+   a faithful reproduction is held to the accessibility floor, not to the house
+   target relay's own themes are designed against. */
+
+:root[data-theme="catppuccin-latte"], [data-theme="catppuccin-latte"] {
+  color-scheme: light;
+  --bg:          #e6e9ef;     /* mantle */
+  --surface:     #eff1f5;     /* base */
+  --border:      #ccd0da;     /* surface0 */
+  --text:        #4c4f69;     /* text */
+  --muted:       #8c8fa1;     /* overlay1 */
+  --accent:      #8839ef;     /* mauve — Catppuccin's own default accent */
+  --accent-dim:  #7287fd;     /* lavender */
+  --accent-glow: rgba(136, 57, 239, 0.10);
+  --tag-bg:      #ccd0da;     /* surface0 */
+  --tag-active:  #bcc0cc;     /* surface1 */
+  --green:       #40a02b;     /* green */
+  --red:         #d20f39;     /* red */
+  --body:        #4c4f69;     /* text */
+  --body-strong: #4c4f69;     /* text */
+  --wash-raise:  rgba(0, 0, 0, 0.05);
+
+  --accent-2:    #4c4f69;     /* text — no member of Latte clears AA as a chip */
+  --accent-3:    #4c4f69;     /* text — see the Latte note above */
+  --on-accent:     #eff1f5;
+  --on-scrim:      #4c4f69;
+  --border-hover:  #acb0be;     /* surface2 */
+  --scrim-rgb:     220, 224, 232;   /* crust */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.12);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.14);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.2);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.18);
+}
+
+:root[data-theme="catppuccin-frappe"], [data-theme="catppuccin-frappe"] {
+  color-scheme: dark;
+  --bg:          #292c3c;     /* mantle */
+  --surface:     #303446;     /* base */
+  --border:      #414559;     /* surface0 */
+  --text:        #c6d0f5;     /* text */
+  --muted:       #838ba7;     /* overlay1 */
+  --accent:      #ca9ee6;     /* mauve — Catppuccin's own default accent */
+  --accent-dim:  #babbf1;     /* lavender */
+  --accent-glow: rgba(202, 158, 230, 0.10);
+  --tag-bg:      #414559;     /* surface0 */
+  --tag-active:  #51576d;     /* surface1 */
+  --green:       #a6d189;     /* green */
+  --red:         #e78284;     /* red */
+  --body:        #c6d0f5;     /* text */
+  --body-strong: #c6d0f5;     /* text */
+  --wash-raise:  rgba(198, 208, 245, 0.05);
+
+  --accent-2:    #ef9f76;     /* peach */
+  --accent-3:    #81c8be;     /* teal */
+  --on-accent:     #232634;
+  --on-scrim:      #c6d0f5;
+  --border-hover:  #626880;     /* surface2 */
+  --scrim-rgb:     35, 38, 52;   /* crust */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+:root[data-theme="catppuccin-macchiato"], [data-theme="catppuccin-macchiato"] {
+  color-scheme: dark;
+  --bg:          #1e2030;     /* mantle */
+  --surface:     #24273a;     /* base */
+  --border:      #363a4f;     /* surface0 */
+  --text:        #cad3f5;     /* text */
+  --muted:       #8087a2;     /* overlay1 */
+  --accent:      #c6a0f6;     /* mauve — Catppuccin's own default accent */
+  --accent-dim:  #b7bdf8;     /* lavender */
+  --accent-glow: rgba(198, 160, 246, 0.10);
+  --tag-bg:      #363a4f;     /* surface0 */
+  --tag-active:  #494d64;     /* surface1 */
+  --green:       #a6da95;     /* green */
+  --red:         #ed8796;     /* red */
+  --body:        #cad3f5;     /* text */
+  --body-strong: #cad3f5;     /* text */
+  --wash-raise:  rgba(202, 211, 245, 0.05);
+
+  --accent-2:    #f5a97f;     /* peach */
+  --accent-3:    #8bd5ca;     /* teal */
+  --on-accent:     #181926;
+  --on-scrim:      #cad3f5;
+  --border-hover:  #5b6078;     /* surface2 */
+  --scrim-rgb:     24, 25, 38;   /* crust */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+:root[data-theme="catppuccin-mocha"], [data-theme="catppuccin-mocha"] {
+  color-scheme: dark;
+  --bg:          #181825;     /* mantle */
+  --surface:     #1e1e2e;     /* base */
+  --border:      #313244;     /* surface0 */
+  --text:        #cdd6f4;     /* text */
+  --muted:       #7f849c;     /* overlay1 */
+  --accent:      #cba6f7;     /* mauve — Catppuccin's own default accent */
+  --accent-dim:  #b4befe;     /* lavender */
+  --accent-glow: rgba(203, 166, 247, 0.10);
+  --tag-bg:      #313244;     /* surface0 */
+  --tag-active:  #45475a;     /* surface1 */
+  --green:       #a6e3a1;     /* green */
+  --red:         #f38ba8;     /* red */
+  --body:        #cdd6f4;     /* text */
+  --body-strong: #cdd6f4;     /* text */
+  --wash-raise:  rgba(205, 214, 244, 0.05);
+
+  --accent-2:    #fab387;     /* peach */
+  --accent-3:    #94e2d5;     /* teal */
+  --on-accent:     #11111b;
+  --on-scrim:      #cdd6f4;
+  --border-hover:  #585b70;     /* surface2 */
+  --scrim-rgb:     17, 17, 27;   /* crust */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
 }
 
 html { color: var(--text); }   /* see note in tests/test_css_tokens.py */
