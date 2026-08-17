@@ -41,6 +41,14 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
      redefines this block and nothing else. Values derivable from --accent or
      --red are not tokens at all: they are color-mix() at the point of use, so
      they follow the accent into every theme for free. */
+  /* Secondary and tertiary accents, for chips that are decorative rather than
+     semantic — the id pill, the tag count. A theme with a full palette spends
+     real colours here; Relay Dark and Relay Light are deliberately monochrome
+     amber, so theirs repeat --muted and those chips stay recessive, exactly as
+     they were. This is why they exist: without them every such chip is grey in
+     every theme, because the contract had one accent and nothing else. */
+  --accent-2:      #4a5568;            /* monochrome theme — same as --muted */
+  --accent-3:      #4a5568;
   --on-accent:     #000;               /* foreground on an --accent fill */
   --on-scrim:      #eee;               /* foreground on a dark scrim */
   --border-hover:  #2d3348;
@@ -71,6 +79,8 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #22252c;
   --wash-raise:  rgba(0, 0, 0, 0.03);
 
+  --accent-2:      #736e5d;            /* monochrome theme — same as --muted */
+  --accent-3:      #736e5d;
   --on-accent:     #000;               /* 5.05:1 on #b96809 — white would be 4.16:1 */
   --on-scrim:      #eee;
   --border-hover:  #b8b09a;
@@ -109,6 +119,8 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #fbf1c7;   /* fg0 */
   --wash-raise:  rgba(235, 219, 178, 0.04);   /* lifts with fg, not pure white */
 
+  --accent-2:      #d3869b;   /* purple */
+  --accent-3:      #8ec07c;   /* aqua */
   --on-accent:     #1d2021;
   --on-scrim:      #ebdbb2;
   --border-hover:  #665c54;   /* bg3 */
@@ -154,6 +166,8 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #c0caf5;   /* fg */
   --wash-raise:  rgba(192, 202, 245, 0.04);   /* lifts with fg, not pure white */
 
+  --accent-2:      #bb9af7;   /* magenta */
+  --accent-3:      #7dcfff;   /* cyan */
   --on-accent:     #1a1b26;   /* 6.8:1 on #7aa2f7 — the accent is a light blue */
   --on-scrim:      #c0caf5;
   --border-hover:  #545c7e;   /* dark3 */
@@ -204,6 +218,8 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #ffffff;   /* br_white */
   --wash-raise:  rgba(255, 255, 255, 0.06);
 
+  --accent-2:      #ff55ff;   /* br_magenta */
+  --accent-3:      #ffff55;   /* br_yellow */
   --on-accent:     #000000;
   --on-scrim:      #ffffff;
   --border-hover:  #aaaaaa;   /* white */
@@ -233,6 +249,8 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #000000;   /* black */
   --wash-raise:  rgba(0, 0, 0, 0.06);
 
+  --accent-2:      #aa00aa;   /* magenta */
+  --accent-3:      #aa5500;   /* yellow/brown */
   --on-accent:     #ffffff;
   --on-scrim:      #ffffff;   /* scrims stay dark even under a light theme */
   --border-hover:  #555555;   /* br_black */
@@ -478,8 +496,9 @@ aside.collapsed > * { min-width: 220px; }
 
 .tag-name  { font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-count {
-  font-size: 9px; color: var(--muted);
-  background: var(--border); padding: 1px 5px; border-radius: 8px;
+  font-size: 9px; color: var(--accent-3);
+  background: color-mix(in srgb, var(--accent-3) 10%, transparent);
+  padding: 1px 5px; border-radius: 8px;
   flex-shrink: 0; font-variant-numeric: tabular-nums;
   transition: background 0.12s, color 0.12s;
 }
@@ -647,7 +666,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 /* A long "via …" is one unbreakable run: cap + ellipsis it so it can never
    push the header (and with it the card's 1fr track) wider than the card. */
 .post-source {
-  font-size: 10px; color: var(--muted);
+  font-size: 10px; color: var(--accent-2);
   display: inline-block; min-width: 0; max-width: 100%; vertical-align: bottom;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -671,7 +690,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .post-body a.attachment-link::before { content: "📎 "; }
 .post-body a.attachment-link.broken { color: var(--muted); border-bottom-color: var(--muted); }
 .pm-backlinks { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
-.pm-backlinks h4 { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
+.pm-backlinks h4 { color: var(--accent-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
 .pm-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .pm-backlinks a { color: var(--accent); cursor: pointer; font-size: 12px; }
 .pm-backlinks .bl-id { color: var(--muted); margin-right: 6px; }
@@ -733,7 +752,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .edit-form textarea:focus,
 .edit-form select:focus   { outline: none; border-color: var(--accent); }
 .edit-form label {
-  font-size: 9px; color: var(--muted); margin-bottom: 3px;
+  font-size: 9px; color: var(--accent-3); margin-bottom: 3px;
   display: block; text-transform: uppercase; letter-spacing: 0.12em;
 }
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
@@ -767,7 +786,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .attach-status { font-size: 11px; color: var(--muted); }
 .attach-status.error { color: var(--red); }
 .ef-attachments { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
-.ef-attach-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 2px; }
+.ef-attach-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-3); margin-bottom: 2px; }
 .ef-attach-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .ef-attach-name { color: var(--text); overflow-wrap: anywhere; }
 .ef-attach-size { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
@@ -779,13 +798,13 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .attachments-view::-webkit-scrollbar { width: 4px; }
 .attachments-view::-webkit-scrollbar-track { background: transparent; }
 .attachments-view::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.att-folder-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 18px 2px 8px; }
+.att-folder-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent-3); margin: 18px 2px 8px; }
 .att-folder-head:first-child { margin-top: 4px; }
 .att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
 .att-card { position: relative; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 4%, transparent); }
 .att-thumb { height: 110px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(var(--scrim-rgb), 0.15); cursor: pointer; }
 .att-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.att-thumb .att-ext { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.att-thumb .att-ext { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-2); }
 .att-thumb .att-ext::before { content: "📄"; display: block; font-size: 26px; margin-bottom: 4px; }
 .att-meta { padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
 .att-name { font-size: 12px; overflow-wrap: anywhere; color: var(--text); }
@@ -967,8 +986,9 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ── Post ID pill ────────────────────────────────────── */
 .post-id-pill {
-  font-size: 10px; color: var(--muted);
-  background: var(--border); padding: 1px 6px; border-radius: 3px;
+  font-size: 10px; color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent-2) 10%, transparent);
+  padding: 1px 6px; border-radius: 3px;
   letter-spacing: 0.02em; font-variant-numeric: tabular-nums; flex-shrink: 0;
 }
 
@@ -1098,7 +1118,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .sm-body { padding: 16px 20px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
 .sm-section-title {
   font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--muted); margin-bottom: 8px;
+  color: var(--accent-3); margin-bottom: 8px;
 }
 /* auto 1fr, and the value column may wrap — a long vault path must not widen
    the panel (same min-width:0 lesson as the grid tiles). */

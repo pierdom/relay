@@ -175,3 +175,44 @@ def test_every_theme_clears_the_contrast_floor():
             failures.append(f"{theme}: --on-accent on --accent is {on_accent:.2f}:1 (floor {MIN_ON_ACCENT})")
 
     assert not failures, "themes below the contrast floor:\n  " + "\n  ".join(failures)
+
+
+# A decorative chip — the post-id pill, the tag count — is its accent's colour on
+# a 10% tint of that same accent. Same hue on both sides means the contrast can
+# never exceed the accent's contrast against the surface, and it *approaches*
+# that limit as the tint gets lighter: 18% put three themes under 4:1, so the
+# tint is deliberately faint rather than a comfortable-looking chip.
+CHIP_TINT = 0.10
+MIN_CHIP = 4.4
+
+
+def _composite(fg: str, bg: str, alpha: float) -> str:
+    def channels(h):
+        raw = h.lstrip("#")
+        if len(raw) == 3:
+            raw = "".join(c * 2 for c in raw)
+        return [int(raw[i:i + 2], 16) for i in (0, 2, 4)]
+    f, b = channels(fg), channels(bg)
+    blend = (round(f[i] * alpha + b[i] * (1 - alpha)) for i in range(3))
+    return "#" + "".join(f"{c:02x}" for c in blend)
+
+
+def test_decorative_chips_stay_legible():
+    """`--accent-2` / `--accent-3` text on their own tint.
+
+    Exempt: a theme whose secondary accents *are* `--muted`. Relay Dark and
+    Relay Light are monochrome amber by design, so these chips are deliberately
+    recessive there — Relay Dark's id pill sat at 2.1:1 long before this token
+    existed. Requiring 4.4 of them would mean redesigning two themes to satisfy
+    a rule aimed at the other four.
+    """
+    failures = []
+    for theme, tokens in sorted(_hex_tokens().items()):
+        if tokens["--accent-2"] == tokens["--muted"]:
+            continue   # monochrome theme; chips unchanged by design
+        for token in ("--accent-2", "--accent-3"):
+            chip = _composite(tokens[token], tokens["--surface"], CHIP_TINT)
+            got = _contrast(tokens[token], chip)
+            if got < MIN_CHIP:
+                failures.append(f"{theme}: {token} on its chip is {got:.2f}:1 (floor {MIN_CHIP})")
+    assert not failures, "chips below the legibility floor:\n  " + "\n  ".join(failures)
