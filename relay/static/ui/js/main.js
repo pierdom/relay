@@ -660,7 +660,10 @@ function makeFolderItem(label, value, count) {
   const el = document.createElement('div');
   el.className = 'tag-item folder-item' + (query.folder === value ? ' active' : '');
   el.dataset.folder = value === null ? '__all__' : value;
-  const ico = value === null ? '' : '<span class="folder-ico">▸</span>';
+  // Empty on the "all" row rather than absent: `.folder-ico` reserves a fixed
+  // gutter, so every label starts on the same left edge whether or not its row
+  // has an icon. With the icon simply omitted, "all" sat left of the folders.
+  const ico = `<span class="folder-ico">${value === null ? '' : '\u{1F4C1}'}</span>`;
   el.innerHTML = `<span class="tag-name">${ico}${escHtml(label)}</span><span class="tag-count">${count}</span>`;
   el.addEventListener('click', () => selectFolder(value));
   return el;
@@ -700,13 +703,13 @@ function renderAttachSidebar() {
   tagList.innerHTML = '';
   const all = document.createElement('div');
   all.className = 'tag-item folder-item' + (attachFolder === null ? ' active' : '');
-  all.innerHTML = `<span class="tag-name">All files</span><span class="tag-count">${attachCache.length}</span>`;
+  all.innerHTML = `<span class="tag-name"><span class="folder-ico"></span>All files</span><span class="tag-count">${attachCache.length}</span>`;
   all.addEventListener('click', () => selectAttachFolder(null));
   tagList.appendChild(all);
   [...counts.keys()].sort().forEach(folder => {
     const el = document.createElement('div');
     el.className = 'tag-item folder-item' + (attachFolder === folder ? ' active' : '');
-    el.innerHTML = `<span class="tag-name"><span class="folder-ico">▸</span>${escHtml(folder)}</span><span class="tag-count">${counts.get(folder)}</span>`;
+    el.innerHTML = `<span class="tag-name"><span class="folder-ico">\u{1F4C1}</span>${escHtml(folder)}</span><span class="tag-count">${counts.get(folder)}</span>`;
     el.addEventListener('click', () => selectAttachFolder(folder));
     tagList.appendChild(el);
   });

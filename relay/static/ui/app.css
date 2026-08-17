@@ -849,7 +849,14 @@ aside.collapsed > * { min-width: 220px; }
 }
 .sb-tab.active { color: var(--accent); background: var(--tag-active); }
 .sb-tab:hover:not(.active) { color: var(--text); }
-.folder-item .folder-ico { color: var(--accent); margin-right: 4px; }
+/* A fixed gutter, so the "all" row (which carries an empty one) lines its label
+   up with the folder rows instead of hanging left of them.
+   ⚠️ No `color` here: U+1F4C1 renders as a colour emoji, which ignores `color`
+   entirely — a `var(--accent)` that does nothing reads as theming that works. */
+.folder-item .folder-ico {
+  display: inline-block; width: 1.25em; margin-right: 4px;
+  font-size: 0.95em; line-height: 1;
+}
 .sidebar-add-btn {
   background: none; border: 1px solid var(--border); color: var(--muted);
   cursor: pointer; font-size: 14px; line-height: 1; padding: 1px 6px;
@@ -1968,4 +1975,15 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
      a narrow window, which is the better test. */
   .edit-form input, .edit-form textarea, .edit-form select { padding: 10px 12px; }
   .edit-form input, .edit-form select { min-height: 44px; }
+
+  /* The attachment list's delete × was 17x15 — the touch floor never reached it
+     because it only exists when the post *has* an attachment, and no test had
+     ever created one. It surfaced the moment a fixture did. Negative margins
+     grow the hit area without stretching the row, the same shape the sidebar's
+     tag controls use. */
+  .ef-attach-del {
+    min-width: 44px; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin: -12px -8px -12px 0;
+  }
 }
