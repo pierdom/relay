@@ -572,6 +572,17 @@ function renderTags(tags) {
  * mistaken for one. The gear follows for consistency, and both now scale with the
  * icon size rather than the font's idea of a dingbat.
  */
+/* A folder, drawn rather than typed. U+1F4C1 shipped here first and was the
+ * wrong answer for the same reason the ✏︎ glyph was in the tag row: it is a
+ * *colour* emoji, so it ignores `color` and paints the same manila tab in all
+ * fifteen themes — conspicuously the one thing on screen that does not answer to
+ * the palette. `currentColor` puts it back under `--accent`, and drawing it also
+ * settles its weight against the 13px monospace labels beside it, which an
+ * emoji's own metrics do not. */
+const ICON_FOLDER = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <path d="M1.9 12.6V3.4h4l1.5 1.9h6.7v7.3z"/></svg>`;
+
 const ICON_PENCIL = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
   <path d="M11.4 2.4l2.2 2.2L6 12.2l-2.9.7.7-2.9z"/><path d="M10 3.8l2.2 2.2"/></svg>`;
@@ -663,7 +674,7 @@ function makeFolderItem(label, value, count) {
   // Empty on the "all" row rather than absent: `.folder-ico` reserves a fixed
   // gutter, so every label starts on the same left edge whether or not its row
   // has an icon. With the icon simply omitted, "all" sat left of the folders.
-  const ico = `<span class="folder-ico">${value === null ? '' : '\u{1F4C1}'}</span>`;
+  const ico = `<span class="folder-ico">${value === null ? '' : ICON_FOLDER}</span>`;
   el.innerHTML = `<span class="tag-name">${ico}${escHtml(label)}</span><span class="tag-count">${count}</span>`;
   el.addEventListener('click', () => selectFolder(value));
   return el;
@@ -709,7 +720,7 @@ function renderAttachSidebar() {
   [...counts.keys()].sort().forEach(folder => {
     const el = document.createElement('div');
     el.className = 'tag-item folder-item' + (attachFolder === folder ? ' active' : '');
-    el.innerHTML = `<span class="tag-name"><span class="folder-ico">\u{1F4C1}</span>${escHtml(folder)}</span><span class="tag-count">${counts.get(folder)}</span>`;
+    el.innerHTML = `<span class="tag-name"><span class="folder-ico">${ICON_FOLDER}</span>${escHtml(folder)}</span><span class="tag-count">${counts.get(folder)}</span>`;
     el.addEventListener('click', () => selectAttachFolder(folder));
     tagList.appendChild(el);
   });

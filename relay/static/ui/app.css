@@ -850,13 +850,14 @@ aside.collapsed > * { min-width: 220px; }
 .sb-tab.active { color: var(--accent); background: var(--tag-active); }
 .sb-tab:hover:not(.active) { color: var(--text); }
 /* A fixed gutter, so the "all" row (which carries an empty one) lines its label
-   up with the folder rows instead of hanging left of them.
-   ⚠️ No `color` here: U+1F4C1 renders as a colour emoji, which ignores `color`
-   entirely — a `var(--accent)` that does nothing reads as theming that works. */
+   up with the folder rows instead of hanging left of them. The icon is drawn
+   (`ICON_FOLDER`) and strokes in `currentColor`, so `--accent` reaches it —
+   which the U+1F4C1 emoji that shipped here first could never do. */
 .folder-item .folder-ico {
-  display: inline-block; width: 1.25em; margin-right: 4px;
-  font-size: 0.95em; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: flex-start;
+  width: 1.25em; margin-right: 4px; color: var(--accent);
 }
+.folder-item .folder-ico svg { display: block; }
 .sidebar-add-btn {
   background: none; border: 1px solid var(--border); color: var(--muted);
   cursor: pointer; font-size: 14px; line-height: 1; padding: 1px 6px;
