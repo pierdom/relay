@@ -20,6 +20,8 @@ import { closeStatusModal, isStatusOpen } from './status.js';
 const CATALOGUE = [
   { id: 'dark', label: 'Relay Dark', dark: true, signature: true },
   { id: 'light', label: 'Relay Light', dark: false, signature: true },
+  { id: 'ansi-dark', label: 'ANSI Dark', dark: true },
+  { id: 'ansi-light', label: 'ANSI Light', dark: false },
   { id: 'gruvbox', label: 'Gruvbox', dark: true },
   { id: 'tokyo-night', label: 'Tokyo Night', dark: true },
 ];

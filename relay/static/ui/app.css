@@ -164,6 +164,85 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.64);
 }
 
+/* ANSI Dark / ANSI Light — the IBM VGA 16-colour set, which is what a terminal
+   actually shows and where the vintage feel comes from. (The other common
+   "VGA" table is Microsoft's #800000/#c0c0c0 variant; this is the #aa/#55 one.)
+   Sourced from cli.r-lib.org's `vga` palette:
+
+     black   #000000   br_black   #555555      blue    #0000aa   br_blue    #5555ff
+     red     #aa0000   br_red     #ff5555      magenta #aa00aa   br_magenta #ff55ff
+     green   #00aa00   br_green   #55ff55      cyan    #00aaaa   br_cyan    #55ffff
+     yellow  #aa5500   br_yellow  #ffff55      white   #aaaaaa   br_white   #ffffff
+
+   Two things follow from a 16-colour palette with nothing between #aaaaaa and
+   #ffffff. **Cards are drawn, not filled**: `--surface` equals `--bg` and the
+   card is defined by its border, which is how a terminal frames anything — the
+   alternative was inventing an off-black, and no such colour exists here.
+   **There is no text hierarchy by lightness**: prose and headings are both pure
+   white (21:1), and emphasis comes from colour, again as it does in a terminal.
+   #aaaaaa would have put prose at 9.0:1, under the floor.
+
+   `--accent` is bright cyan rather than green: green is already `--green`, and
+   an accent indistinguishable from the "connected" dot is a bad trade for
+   phosphor nostalgia. The light theme takes blue so the pair reads as one
+   family, the way Relay Dark and Relay Light share amber. */
+:root[data-theme="ansi-dark"], [data-theme="ansi-dark"] {
+  color-scheme: dark;
+  --bg:          #000000;   /* black */
+  --surface:     #000000;   /* black — cards are framed, not filled */
+  --border:      #555555;   /* br_black */
+  --text:        #ffffff;   /* br_white */
+  --muted:       #aaaaaa;   /* white */
+  --accent:      #55ffff;   /* br_cyan */
+  --accent-dim:  #00aaaa;   /* cyan */
+  --accent-glow: rgba(85, 255, 255, 0.10);
+  --tag-bg:      #000000;   /* black — the pill is its accent-tinted outline */
+  --tag-active:  #555555;   /* br_black */
+  --green:       #55ff55;   /* br_green */
+  --red:         #ff5555;   /* br_red */
+  --body:        #ffffff;   /* br_white */
+  --body-strong: #ffffff;   /* br_white */
+  --wash-raise:  rgba(255, 255, 255, 0.06);
+
+  --on-accent:     #000000;
+  --on-scrim:      #ffffff;
+  --border-hover:  #aaaaaa;   /* white */
+  --scrim-rgb:     0, 0, 0;
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.6);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.6);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.8);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.8);
+}
+
+:root[data-theme="ansi-light"], [data-theme="ansi-light"] {
+  color-scheme: light;
+  --bg:          #ffffff;   /* br_white */
+  --surface:     #ffffff;   /* br_white — cards are framed, not filled */
+  --border:      #aaaaaa;   /* white */
+  --text:        #000000;   /* black */
+  --muted:       #555555;   /* br_black */
+  --accent:      #0000aa;   /* blue */
+  --accent-dim:  #5555ff;   /* br_blue — the palette has nothing darker, so the
+                               hover lifts instead of deepening */
+  --accent-glow: rgba(0, 0, 170, 0.10);
+  --tag-bg:      #ffffff;   /* br_white */
+  --tag-active:  #aaaaaa;   /* white */
+  --green:       #00aa00;   /* green */
+  --red:         #aa0000;   /* red */
+  --body:        #000000;   /* black */
+  --body-strong: #000000;   /* black */
+  --wash-raise:  rgba(0, 0, 0, 0.06);
+
+  --on-accent:     #ffffff;
+  --on-scrim:      #ffffff;   /* scrims stay dark even under a light theme */
+  --border-hover:  #555555;   /* br_black */
+  --scrim-rgb:     0, 0, 0;
+  --shadow-card:   0 4px 16px rgba(0, 0, 0, 0.14);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.16);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.22);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.20);
+}
+
 html { color: var(--text); }   /* see note in tests/test_css_tokens.py */
 
 body {
