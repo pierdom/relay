@@ -28,8 +28,6 @@ import pytest
 
 CSS = Path(__file__).resolve().parent.parent.parent / "relay" / "static" / "ui" / "app.css"
 
-THEMES = ["dark", "light", "gruvbox"]
-
 # A theme's colour transitions have to finish before the page is sampled —
 # `.live-dot` fades over 0.3s, and reading it mid-transition yields an
 # interpolated value that belongs to no palette. That looked like a real leak
@@ -99,6 +97,12 @@ _WALK = """
 """
 
 
+# Derived from the stylesheet rather than listed here: a new theme is a token
+# block plus a registry entry, and it should not also be a test edit. Every test
+# below then covers theme #5 the moment it exists.
+THEMES = sorted(_palettes())
+
+
 def _select(page, theme: str) -> None:
     page.locator("#themeBtn").click()
     page.locator(f'.theme-opt[data-theme-id="{theme}"]').click()
@@ -154,12 +158,30 @@ def test_each_swatch_shows_its_own_theme_not_the_active_one(page):
         """() => Object.fromEntries([...document.querySelectorAll('.theme-swatch')]
              .map(s => [s.getAttribute('data-theme'), getComputedStyle(s).backgroundColor]))"""
     )
-    assert len(swatches) == 3
-    assert len(set(swatches.values())) == 3, f"swatches are not distinct: {swatches}"
+    assert len(swatches) == len(THEMES), f"expected a swatch per theme, got {sorted(swatches)}"
+    assert len(set(swatches.values())) == len(THEMES), f"swatches are not distinct: {swatches}"
 
     palettes = _palettes()
     for theme, colour in swatches.items():
         assert _rgb(colour) in palettes[theme], f"{theme} swatch painted {colour}, not its own --bg"
+
+
+def test_the_picker_orders_signature_themes_first_then_alphabetically(page):
+    """Relay Dark and Relay Light lead, in that order; the rest sort by label.
+
+    The rule is enforced by sorting in `theme.js` rather than by maintaining a
+    sequence, so a new theme lands in the right place by existing. This asserts
+    the rendered result, which is the part a reader of the menu actually sees.
+    """
+    page.locator("#themeBtn").click()
+    page.wait_for_timeout(200)
+    labels = page.evaluate(
+        "() => [...document.querySelectorAll('.theme-opt .theme-label')].map(e => e.textContent)"
+    )
+    assert labels[:2] == ["Relay Dark", "Relay Light"], f"signature themes do not lead: {labels}"
+    rest = labels[2:]
+    assert rest == sorted(rest), f"non-signature themes are not alphabetical: {rest}"
+    assert len(labels) == len(THEMES), f"picker shows {len(labels)} themes, stylesheet has {len(THEMES)}"
 
 
 def test_the_picker_closes_on_escape_and_on_a_click_away(page):

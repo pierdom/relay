@@ -13,10 +13,22 @@
 
 import { closeStatusModal, isStatusOpen } from './status.js';
 
-export const THEMES = [
-  { id: 'dark', label: 'Relay Dark', dark: true },
-  { id: 'light', label: 'Relay Light', dark: false },
+/* Order is a rule, not a list: the two signature themes lead, in that order,
+   and everything else follows alphabetically by label. Sorting here rather than
+   hand-maintaining the sequence means theme #5 lands in the right place by
+   existing — which is the same bargain the token layer makes for its colours. */
+const CATALOGUE = [
+  { id: 'dark', label: 'Relay Dark', dark: true, signature: true },
+  { id: 'light', label: 'Relay Light', dark: false, signature: true },
   { id: 'gruvbox', label: 'Gruvbox', dark: true },
+  { id: 'tokyo-night', label: 'Tokyo Night', dark: true },
+];
+
+export const THEMES = [
+  // `filter` keeps declaration order, so Relay Dark precedes Relay Light by
+  // sitting above it in the catalogue — the one place the sequence is manual.
+  ...CATALOGUE.filter(t => t.signature),
+  ...CATALOGUE.filter(t => !t.signature).sort((a, b) => a.label.localeCompare(b.label)),
 ];
 
 const STORAGE_KEY = 'relay-theme';
