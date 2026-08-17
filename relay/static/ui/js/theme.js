@@ -120,7 +120,21 @@ function buildMenu() {
     check.setAttribute('aria-hidden', 'true');
 
     opt.append(swatch, label, check);
-    opt.addEventListener('click', () => { setTheme(theme.id); closeThemeMenu(); themeBtn.focus(); });
+    opt.addEventListener('click', (e) => {
+      // Hand focus back to the trigger only for a keyboard user, who is mid-flow
+      // and needs somewhere sane to tab on from. After a tap there is nobody to
+      // hand it to, and a focused trigger paints itself `:focus-visible` (accent
+      // text, accent border — see app.css), so the theme button stayed lit after
+      // the menu closed. The focus *was* the highlight.
+      //
+      // ⚠️ "Is focus inside the menu?" is not the test, though it reads like it:
+      // tapping a <button> focuses it, so that is true after a tap as well.
+      // `detail === 0` distinguishes an Enter/Space-synthesised click from a real
+      // pointer, which is the actual question being asked.
+      setTheme(theme.id);
+      closeThemeMenu();
+      if (e.detail === 0) themeBtn.focus();
+    });
     themeMenu.appendChild(opt);
   }
 }
@@ -134,19 +148,25 @@ export function closeThemeMenu() {
   themeBtn.setAttribute('aria-expanded', 'false');
 }
 
-function openThemeMenu() {
+function openThemeMenu({ viaKeyboard = false } = {}) {
   // The status panel is the only other thing that can be open up here, and two
   // overlapping popovers in a header this tight reads as a glitch.
   if (isStatusOpen()) closeStatusModal();
   themeMenu.classList.add('open');
   themeBtn.setAttribute('aria-expanded', 'true');
-  themeMenu.querySelector('.theme-opt.active')?.focus();
+  // Moving focus into the menu is for keyboard users — it is what makes the
+  // arrow keys below land somewhere. Doing it on every open also focuses things
+  // for a tap, which is the other half of the stuck-highlight bug.
+  if (viaKeyboard) themeMenu.querySelector('.theme-opt.active')?.focus();
 }
 
 themeBtn.addEventListener('click', (e) => {
   e.stopPropagation();
+  // `detail === 0` is a click synthesised from Enter/Space rather than a real
+  // pointer — the standard way to tell a keyboard activation from a tap without
+  // guessing from media queries about the device.
   if (isThemeMenuOpen()) closeThemeMenu();
-  else openThemeMenu();
+  else openThemeMenu({ viaKeyboard: e.detail === 0 });
 });
 
 // Click-away, matching the tag editors' dismissal. Bound on document, so the
