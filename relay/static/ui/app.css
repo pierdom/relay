@@ -667,7 +667,13 @@ header {
 .theme-picker { position: relative; display: flex; }
 .theme-menu {
   display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
-  min-width: 168px; padding: 4px;
+  /* Wide enough that the longest label — "Catppuccin Macchiato" — sits on one
+     line. It wrapped to two at 168px, which made the row taller than its
+     neighbours and the list read as broken rather than long. */
+  min-width: 236px; padding: 4px;
+  /* Fifteen themes is taller than a short window. Scroll the menu rather than
+     letting it run off the bottom of the screen. */
+  max-height: min(70vh, 560px); overflow-y: auto; overscroll-behavior: contain;
   background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
   box-shadow: var(--shadow-modal);
   animation: modalIn 0.14s ease backwards;
@@ -681,14 +687,30 @@ header {
 }
 .theme-opt:hover { background: var(--wash-raise); }
 .theme-opt.active { color: var(--accent); }
+/* The two house themes lead; the hairline says the rest are a different kind of
+   thing without reordering anything or adding headers to a fifteen-item list. */
+.theme-sep {
+  height: 1px; margin: 4px 9px; background: var(--border);
+}
 /* The swatch carries its own `data-theme`, so the theme's token block paints it
    — a live sample rather than a hex value copied into a second place. */
 .theme-swatch {
   width: 15px; height: 15px; border-radius: 4px; flex-shrink: 0;
   background: var(--bg); border: 2px solid var(--accent);
 }
-.theme-label { flex: 1; min-width: 0; }
-.theme-opt.active .theme-label::after { content: " ✓"; color: var(--accent); }
+.theme-label {
+  flex: 1; min-width: 0;
+  /* Never wrap: a two-line row in a list of one-line rows looks like a bug. */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* The tick is its own element, not `::after` on the label — appended to the
+   text it joined the wrap and landed on a line of its own. Reserving the column
+   in every row also stops the labels shifting as the selection moves. */
+.theme-check {
+  flex-shrink: 0; width: 12px; text-align: center;
+  color: var(--accent); visibility: hidden;
+}
+.theme-opt.active .theme-check { visibility: visible; }
 
 @media (max-width: 768px) {
   /* Same reasoning as the sheets' 44px floor, capped by a 48px header bar.

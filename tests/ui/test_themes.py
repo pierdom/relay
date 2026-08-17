@@ -199,3 +199,64 @@ def test_the_picker_closes_on_escape_and_on_a_click_away(page):
     page.locator(".feed").click(position={"x": 5, "y": 5})
     page.wait_for_timeout(150)
     assert "open" not in (menu.get_attribute("class") or ""), "clicking away did not close the picker"
+
+
+def test_the_picker_rows_are_uniform_and_fit_on_screen(page):
+    """No wrapping, no overflow, and the tick costs no layout.
+
+    At fifteen themes and 168px the menu wrapped "Catppuccin Macchiato" onto two
+    lines, making those rows taller than their neighbours — a list of one-line
+    rows with two-line exceptions reads as broken rather than long. The tick was
+    `::after` on the label, so it joined the wrap and landed on a line of its
+    own; it is now a reserved column, present in every row and merely invisible
+    on the inactive ones, which also stops labels shifting as the selection
+    moves.
+    """
+    page.set_viewport_size({"width": 900, "height": 900})
+    page.locator("#themeBtn").click()
+    page.wait_for_timeout(250)
+
+    m = page.evaluate(
+        """() => {
+          const menu = document.getElementById('themeMenu');
+          const r = menu.getBoundingClientRect();
+          const opts = [...menu.querySelectorAll('.theme-opt')];
+          const labels = opts.map(o => {
+            const lr = o.querySelector('.theme-label').getBoundingClientRect();
+            return { left: Math.round(lr.left), width: Math.round(lr.width) };
+          });
+          return {
+            width: Math.round(r.width),
+            heights: [...new Set(opts.map(o => Math.round(o.getBoundingClientRect().height)))],
+            rows: opts.length,
+            overflows: r.bottom > window.innerHeight + 1,
+            scrollable: menu.scrollHeight > menu.clientHeight + 1,
+            labelLefts: [...new Set(labels.map(l => l.left))],
+            labelWidths: [...new Set(labels.map(l => l.width))],
+          };
+        }"""
+    )
+
+    assert m["rows"] >= 10, f"expected the full theme list, got {m['rows']}"
+    assert len(m["heights"]) == 1, f"rows are not a uniform height — a label wrapped: {m['heights']}"
+    assert not m["overflows"] or m["scrollable"], "the menu runs off the screen instead of scrolling"
+    # The tick occupies a reserved column, so every label starts and ends alike.
+    assert len(m["labelLefts"]) == 1, f"labels do not share a left edge: {m['labelLefts']}"
+    assert len(m["labelWidths"]) == 1, f"the tick is taking width from one label: {m['labelWidths']}"
+
+
+def test_the_picker_scrolls_rather_than_running_off_a_short_window(page):
+    """A window shorter than the list must not put themes out of reach."""
+    page.set_viewport_size({"width": 900, "height": 420})
+    page.locator("#themeBtn").click()
+    page.wait_for_timeout(250)
+    m = page.evaluate(
+        """() => {
+          const menu = document.getElementById('themeMenu');
+          const r = menu.getBoundingClientRect();
+          return { bottom: Math.round(r.bottom), vh: window.innerHeight,
+                   scrollable: menu.scrollHeight > menu.clientHeight + 1 };
+        }"""
+    )
+    assert m["bottom"] <= m["vh"] + 1, f"menu extends to {m['bottom']} in a {m['vh']}px window"
+    assert m["scrollable"], "the list is taller than the window but does not scroll"

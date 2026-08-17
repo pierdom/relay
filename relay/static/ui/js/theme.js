@@ -86,7 +86,18 @@ export function setTheme(id) {
 
 function buildMenu() {
   themeMenu.replaceChildren();
+  let seenSignature = false;
   for (const theme of THEMES) {
+    // One hairline where the house themes end. THEMES is already ordered
+    // signature-first, so the boundary is wherever that stops being true.
+    if (theme.signature) seenSignature = true;
+    else if (seenSignature) {
+      const sep = document.createElement('div');
+      sep.className = 'theme-sep';
+      sep.setAttribute('role', 'separator');
+      themeMenu.appendChild(sep);
+      seenSignature = false;
+    }
     const opt = document.createElement('button');
     opt.className = 'theme-opt';
     opt.dataset.themeId = theme.id;
@@ -102,7 +113,13 @@ function buildMenu() {
     label.className = 'theme-label';
     label.textContent = theme.label;
 
-    opt.append(swatch, label);
+    // Reserved in every row, shown only on the active one — see app.css.
+    const check = document.createElement('span');
+    check.className = 'theme-check';
+    check.textContent = '✓';
+    check.setAttribute('aria-hidden', 'true');
+
+    opt.append(swatch, label, check);
     opt.addEventListener('click', () => { setTheme(theme.id); closeThemeMenu(); themeBtn.focus(); });
     themeMenu.appendChild(opt);
   }
