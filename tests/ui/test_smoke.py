@@ -597,7 +597,11 @@ def test_modal_caps_the_prose_measure_but_lets_tables_use_the_width(page, relay_
     assert table > panel * 0.9, f"table was capped too: {table}px inside a {panel}px panel"
 
 
-HEADER_CONTROLS = ["themeBtn", "statusBtn", "newPostBtn", "disconnectBtn"]
+# Left to right, and the order is a safety property rather than a preference:
+# "+ New Post" used to sit directly beside Disconnect, so one slipped click
+# ended the session instead of opening the composer. The two icon buttons are
+# the buffer.
+HEADER_CONTROLS = ["newPostBtn", "themeBtn", "statusBtn", "disconnectBtn"]
 
 _HEADER_BOXES = """
 (ids) => ids.map(id => {
@@ -606,7 +610,8 @@ _HEADER_BOXES = """
   const r = el.getBoundingClientRect();
   return {
     id,
-    w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top),
+    w: Math.round(r.width), h: Math.round(r.height),
+    top: Math.round(r.top), left: Math.round(r.left),
     label: el.getAttribute('aria-label') || el.textContent.trim(),
     title: el.getAttribute('title') || '',
     svgs: el.querySelectorAll('svg').length,
@@ -634,6 +639,14 @@ def test_header_controls_are_one_visual_set(page):
 
     assert len({b["h"] for b in boxes}) == 1, f"heights differ: {[(b['id'], b['h']) for b in boxes]}"
     assert len({b["top"] for b in boxes}) == 1, f"not on one baseline: {[(b['id'], b['top']) for b in boxes]}"
+
+    order = [b["id"] for b in sorted(boxes, key=lambda b: b["left"])]
+    assert order == HEADER_CONTROLS, f"header order changed: {order}"
+    # The invariant behind the order, stated separately so it survives a future
+    # rearrangement: nothing destructive may border the primary action.
+    assert abs(order.index("newPostBtn") - order.index("disconnectBtn")) > 1, (
+        "Disconnect is adjacent to + New Post — one slipped click ends the session"
+    )
 
     icons = [b for b in boxes if b["id"] != "newPostBtn"]
     assert all(b["w"] == b["h"] for b in icons), f"icon buttons not square: {icons}"

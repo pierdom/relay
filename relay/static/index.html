@@ -49,6 +49,11 @@
     <span></span><span></span><span></span>
   </button>
   <div class="header-right">
+    <!-- Order matters: the primary action leads, and the two icon buttons sit
+         between it and Disconnect. "+ New Post" next to a one-click session
+         kill is a misfire waiting to happen — pinned by
+         test_header_controls_are_one_visual_set. -->
+    <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
     <div class="theme-picker">
       <!-- A palette, not a sun/moon: this stopped being a two-state toggle when it
            became a menu, and a glyph that flips between ☀ and ☾ promises the wrong
@@ -72,7 +77,6 @@
         <circle cx="8" cy="4.9" r=".85" fill="currentColor" stroke="none"/>
       </svg>
     </button>
-    <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
     <div class="connected-bar" id="connectedBar" style="display:none">
       <!-- Was the word "disconnect" in muted text — the only control in the row
            without a shape, so it read as a footnote rather than a button. -->
