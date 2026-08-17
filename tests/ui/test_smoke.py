@@ -687,3 +687,49 @@ def test_the_theme_control_is_a_menu_button_not_a_toggle(page):
     assert page.evaluate("() => document.documentElement.getAttribute('data-theme')") == "light"
     assert icon() == before, "the icon changed with the theme — that is toggle behaviour"
     assert "Relay Light" in (btn.get_attribute("title") or ""), "the tooltip does not name the live theme"
+
+
+def test_the_reading_column_is_centred_and_wide_blocks_break_out(page, relay_server):
+    """Prose, title and meta share one centred column; tables span the panel.
+
+    Capping the measure at 88ch fixed the reading width and left the placement
+    wrong: in a 1320px panel the text sat 20px from the left with ~600px of dead
+    space on the right. Centring the body alone was worse — the title and meta
+    stayed hard left and the prose floated away from them — so the header rides
+    the same column. Wide blocks have no max-width for the auto margins to work
+    against, so they still break out on both sides, which is what the panel is
+    wide for.
+    """
+    body = (
+        "Relay keeps posts as plain Markdown files in an Obsidian-compatible vault. " * 6
+        + "\n\n| one | two | three | four | five |\n|---|---|---|---|---|\n"
+        "| a | b | c | d | e |\n"
+    )
+    _api_post(relay_server, {"title": "Centred Column", "content": body, "tags": ["homelab"]})
+
+    page.set_viewport_size({"width": 1800, "height": 1000})
+    page.reload()
+    page.get_by_text("Centred Column").first.wait_for(timeout=10_000)
+    page.get_by_text("Centred Column").first.click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.wait_for_timeout(400)
+
+    m = page.evaluate(
+        """() => {
+          const body = document.querySelector('#pmBody').getBoundingClientRect();
+          const p = document.querySelector('#pmBody .post-body > p').getBoundingClientRect();
+          const t = document.querySelector('#pmBody table').getBoundingClientRect();
+          const title = document.querySelector('.pm-title').getBoundingClientRect();
+          return { left: Math.round(p.left - body.left), right: Math.round(body.right - p.right),
+                   prose: Math.round(p.width), table: Math.round(t.width),
+                   panel: Math.round(body.width), titleLeft: Math.round(title.left - body.left) };
+        }"""
+    )
+
+    assert abs(m["left"] - m["right"]) <= 4, f"the column is not centred: {m['left']} vs {m['right']}"
+    assert m["left"] > 60, f"no meaningful centring happened: {m}"
+    assert abs(m["titleLeft"] - m["left"]) <= 6, (
+        f"the title does not share the prose column ({m['titleLeft']} vs {m['left']}) — "
+        "centring the body alone is the failure this test exists to catch"
+    )
+    assert m["table"] > m["panel"] * 0.9, f"the table was capped with the prose: {m}"

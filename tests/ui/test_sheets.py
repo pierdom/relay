@@ -199,8 +199,8 @@ def test_the_edit_sheet_asks_before_a_swipe_throws_work_away(mobile_page):
 
 
 def test_every_desktop_modal_shares_the_same_chrome(page):
-    """Four modals, one look. They are two separate shells (`.pm-*` for the post
-    viewer, `.sm-*` for the other three) that drifted apart in the details
+    """Four modals, one shell. They are two separate implementations (`.pm-*`
+    for the post viewer, `.sm-*` for the other three) that drifted apart in the details
     nobody looks at directly but everybody feels: header padding was 20px on one
     and 18px on the other, only the post body had styled scrollbars, only the
     post modal clipped its corners, and the edit modal's buttons floated at the
@@ -227,7 +227,12 @@ def test_every_desktop_modal_shares_the_same_chrome(page):
                 cs.borderRadius, cs.overflow, cs.boxShadow, cs.backgroundColor,
                 cs.borderTopWidth + ' ' + cs.borderTopColor,
                 cs.animationName + '/' + cs.animationFillMode + '/' + cs.animationDuration,
-                getComputedStyle(head).padding,
+                // Vertical only. The post modal's header is a centred article
+                // column with its close button pinned to the panel corner, so its
+                // horizontal padding is content layout rather than chrome. The
+                // shell — radius, clipping, shadow, background, border, entry
+                // animation, body inset, scrollbars — must still agree.
+                getComputedStyle(head).paddingTop,
                 getComputedStyle(body).paddingTop,
                 getComputedStyle(body).scrollbarWidth,
               ].join(' | ');

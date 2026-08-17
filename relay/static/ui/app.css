@@ -1534,7 +1534,12 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   font-family: inherit; transition: color 0.15s;
 }
 .pm-close:hover, .sm-close:hover { color: var(--text); }
-.pm-close { margin-top: -2px; }
+/* Pinned to the panel, not to the header. The header is a centred column now,
+   so a close button inside its flow lands in the middle of the panel rather
+   than in its corner. `.pm-inner` is already `position: relative`. */
+.pm-close {
+  position: absolute; top: 16px; right: 18px; z-index: 3;
+}
 .sm-close { margin-left: auto; }
 .pm-meta { padding: 12px 20px 0; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
 .pm-meta .post-tags { row-gap: 6px; }
@@ -1567,6 +1572,32 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .pm-body .post-body > h1, .pm-body .post-body > h2, .pm-body .post-body > h3,
 .pm-body .post-body > h4, .pm-body .post-body > h5, .pm-body .post-body > h6 { max-width: 88ch; }
 .pm-body .post-body > p:has(> img) { max-width: none; }
+
+/* Centre the text column. Capped at 88ch inside a 1320px panel, prose sat 20px
+   from the left with ~600px of dead space on the right — the measure was right
+   and its placement was not. Every capped block shares the same max-width, so
+   auto margins centre them as a group and they keep a common left edge; the
+   uncapped ones (tables, `pre`, the scroll wrapper, image paragraphs) have no
+   max-width for the margins to work against, so they still span the panel and
+   break out either side. That is the point of the extra width — it was never
+   for the prose. */
+.pm-body .post-body > * { margin-inline: auto; }
+
+/* The title and meta ride the same column, or centring the prose alone just
+   moves it away from everything else — the header stays hard left and the text
+   floats in the middle, which is worse than the gap it was meant to fix. With
+   all three centred the panel reads as one article column and the wide blocks
+   break out of it on both sides. The footer is chrome, not content, so it keeps
+   the full width. */
+/* `88ch + 40px` so the *content* box is exactly 88ch once the 20px side padding
+   is taken off — the same box `.pm-body`'s prose is centred in, which is what
+   makes the title and the first paragraph share a left edge. Asymmetric padding
+   here put them 16px apart, which is precisely visible enough to look wrong. */
+.pm-header, .pm-meta { max-width: calc(88ch + 40px); margin-inline: auto; width: 100%; }
+/* The close button is pinned to the panel, so reserve room in the title rather
+   than in the header — at narrow widths the column fills the panel and a long
+   ellipsised title would otherwise run underneath it. */
+.pm-title { padding-right: 30px; }
 
 .pm-body-fade {
   position: absolute; bottom: 0; left: 0; right: 0; height: 52px;
@@ -1627,7 +1658,9 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
     display: inline-flex; align-items: center; align-self: flex-start;
     margin-left: -2px; padding: 6px 10px 6px 0; min-height: 44px;
   }
-  .pm-title { font-size: 18px; font-weight: 700; line-height: 1.3; }
+  /* No pinned close button here — back is the dismissal — so the title needs no
+     room reserved for it, and the column cap is a no-op at this width anyway. */
+  .pm-title { font-size: 18px; font-weight: 700; line-height: 1.3; padding-right: 0; }
   .pm-close { display: none; }
   .pm-meta { padding-left: 16px; padding-right: 16px; }
   .pm-body { padding-left: 16px; padding-right: 16px; }
