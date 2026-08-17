@@ -358,6 +358,22 @@ class PostHistoryResponse(BaseModel):
     items: list[PostRevision]
 
 
+class DeletedPost(BaseModel):
+    """A post whose file is gone but which history can still put back."""
+
+    id: int
+    title: str
+    sha: str = Field(description="Commit that removed it — pass to /restore")
+    short_sha: str
+    when: str
+    reason: str = Field(description='"deleted" (API/UI), "expiry" (TTL) or "external" (Obsidian)')
+    path: str
+
+
+class DeletedPostsResponse(BaseModel):
+    items: list[DeletedPost]
+
+
 class PostRestore(BaseModel):
     sha: str = Field(min_length=4, description="Revision to restore, from GET /posts/{id}/history")
 

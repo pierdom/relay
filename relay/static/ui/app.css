@@ -1213,6 +1213,48 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .lightbox-cap { color: var(--on-scrim); font-size: 12px; }
 .edit-form textarea.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 
+/* ── Deleted view ────────────────────────────────────── */
+/* Shares `.attachments-view`'s scroll shell — both replace the feed with a
+   different listing, and giving them one container keeps the two in step. */
+.del-card {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px 14px; margin-bottom: 10px;
+  background: color-mix(in srgb, var(--red) 4%, transparent);
+}
+.del-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.del-title { font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+/* The reason a post went away decides how alarming it should look: a TTL sweep
+   is routine, a delete is deliberate, and an editor removing the file is the
+   case this view exists for. */
+.del-reason {
+  font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 1px 7px; border-radius: 3px; flex-shrink: 0;
+  color: var(--accent-3); background: color-mix(in srgb, var(--accent-3) 10%, transparent);
+}
+.del-reason-deleted { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+.del-reason-external { color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 10%, transparent); }
+.del-meta { font-size: 10px; color: var(--muted); overflow-wrap: anywhere; margin-bottom: 8px; }
+.del-actions { display: flex; gap: 6px; }
+.del-failed { color: var(--red); margin: 8px 0 0; }
+.btn-restore {
+  background: none; border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
+  color: var(--green); padding: 3px 9px; border-radius: 3px; cursor: pointer;
+  font-family: inherit; font-size: 11px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-restore:hover:not(:disabled) { background: color-mix(in srgb, var(--green) 12%, transparent); border-color: var(--green); }
+.btn-restore:disabled { opacity: 0.6; cursor: default; }
+.del-body {
+  margin: 10px 0 0; padding: 10px 12px; max-height: 260px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  font-family: inherit; font-size: 12px; line-height: 1.55; color: var(--body);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+@media (max-width: 768px) {
+  .del-actions button { min-height: 44px; display: inline-flex; align-items: center; }
+}
+
 /* ── Search bar ─────────────────────────────────────── */
 .search-bar {
   display: flex; align-items: center; gap: 8px;
@@ -1753,6 +1795,20 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   font-family: inherit; font-size: 12.5px; line-height: 1.55; color: var(--text);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+.hm-view-toggle { display: flex; flex-shrink: 0; margin-bottom: 8px; }
+.hm-view-toggle .vt-btn { font-size: 10px; padding: 3px 9px; }
+/* Diff lines are `display: block` inside the same `pre` shell the body uses, so
+   both panes measure identically and switching between them cannot resize the
+   panel — the fixed-height rule the whole panel depends on. */
+.hm-diff .hm-d { display: block; padding: 0 6px; margin: 0 -6px; }
+.hm-d-add { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--text); }
+.hm-d-del { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--text); }
+.hm-d-same { color: var(--muted); }
+/* Markers are pseudo-elements so a copied diff yields the text itself, with no
+   column of +/- to strip before pasting it back into a note. */
+.hm-d-add::before { content: "+ "; color: var(--green); }
+.hm-d-del::before { content: "− "; color: var(--red); }
+.hm-d-same::before { content: "  "; }
 .hm-restore { width: 100%; margin-top: 10px; flex-shrink: 0; }
 /* Placeholder and loading share the pane's centre so neither changes its size. */
 .hm-placeholder {

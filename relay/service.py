@@ -25,6 +25,8 @@ from .models import (
     AttachmentListResponse,
     AttachmentResponse,
     BacklinksResponse,
+    DeletedPost,
+    DeletedPostsResponse,
     FolderCount,
     FolderListResponse,
     LinkIndexResponse,
@@ -437,6 +439,40 @@ async def _resolve_revision(db: aiosqlite.Connection, post_id: int, sha: str):
     if meta.get("id") != post_id:
         raise RevisionNotFound
     return match, meta, body, row
+
+
+async def list_deleted_posts(
+    db: aiosqlite.Connection, *, limit: int = 50, include_expiry: bool = False
+) -> DeletedPostsResponse:
+    """Posts that can be restored but no longer exist.
+
+    History already records every delete and `restore_post` already puts one
+    back; the only thing missing was a way to *discover* the id of something you
+    deleted. This is that, and nothing more — there is no trash folder and
+    delete still unlinks.
+
+    Ids that exist again are dropped: this is a list of what is *gone*, not a
+    log of deletions, so a restored post leaves it.
+
+    TTL expiries are excluded by default. This vault sheds fourteen digests a
+    week on a rolling schedule, and left in they bury the one accident the view
+    exists for.
+    """
+    if not history.enabled():
+        raise HistoryUnavailable()
+    found = await history.deletions(limit=limit if include_expiry else limit * 3)
+    if not include_expiry:
+        found = [d for d in found if d.reason != "expiry"]
+    live = {row[0] for row in await (await db.execute("SELECT id FROM posts")).fetchall()}
+    items = [
+        DeletedPost(
+            id=d.post_id, title=d.title, sha=d.sha, short_sha=d.sha[:7],
+            when=d.when, reason=d.reason, path=d.path,
+        )
+        for d in found
+        if d.post_id not in live
+    ][:limit]
+    return DeletedPostsResponse(items=items)
 
 
 async def get_post_revision(
