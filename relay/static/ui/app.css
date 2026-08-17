@@ -14,8 +14,11 @@
    resolves to white on a dark theme and black on a light one — a colour owned by
    no theme. Harmless while every control that renders text sets its own colour
    (`.menu-btn` draws bars, not glyphs), but it leaks a foreign value into the
-   page and it is what the per-theme colour audit trips over. */
-button, input, select, textarea { color: inherit; }
+   page and it is what the per-theme colour audit trips over. `hr` is here for
+   the same reason: it renders as a `border-top`, so its `color` is never
+   painted, but the UA still hands it a grey belonging to no theme. The audit
+   found it the moment a fixture first contained a horizontal rule. */
+button, input, select, textarea, hr { color: inherit; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
@@ -1072,9 +1075,20 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
    card instead of being sliced off at its edge. `fixed` splits the width
    evenly and — unlike auto layout — ignores cell min-content, which would
    otherwise let a long cell squeeze its neighbours down to one character
-   per line. The modal keeps nowrap cells + .table-scroll for real reading. */
-.feed .post-body table { table-layout: fixed; }
-.feed .post-body th, .feed .post-body td { white-space: normal; overflow-wrap: break-word; }
+   per line.
+
+   The modal now does the same, and for a related reason. It kept nowrap cells
+   plus `.table-scroll` back when it was simply a wide panel — a fair trade with
+   the width to spend. As a reading column it is not: the horizontal overflow
+   carries no affordance, so a clipped column does not look clipped, it looks
+   absent, and the one that vanishes is the rightmost — in a table answering
+   "is this deployable?", the answer. Wrapping costs row height and shows every
+   cell. `.table-scroll` stays as the backstop for a table too wide even
+   wrapped. */
+.feed .post-body table,
+.pm-body .post-body table { table-layout: fixed; }
+.feed .post-body th, .feed .post-body td,
+.pm-body .post-body th, .pm-body .post-body td { white-space: normal; overflow-wrap: break-word; }
 
 .post-footer {
   display: flex; align-items: center; justify-content: space-between;
@@ -1580,7 +1594,11 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .pm-body .post-body > ul, .pm-body .post-body > ol,
 .pm-body .post-body > blockquote,
 .pm-body .post-body > h1, .pm-body .post-body > h2, .pm-body .post-body > h3,
-.pm-body .post-body > h4, .pm-body .post-body > h5, .pm-body .post-body > h6 { max-width: var(--measure); }
+.pm-body .post-body > h4, .pm-body .post-body > h5, .pm-body .post-body > h6,
+/* A rule divides the column, not the panel: uncapped it drew a 1278px line
+   across a 702px column, which reads as a stray horizontal line rather than a
+   section break. */
+.pm-body .post-body > hr { max-width: var(--measure); }
 .pm-body .post-body > p:has(> img) { max-width: none; }
 
 /* Centre the text column. Capped at 88ch inside a 1320px panel, prose sat 20px

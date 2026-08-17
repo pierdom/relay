@@ -712,9 +712,15 @@ def test_the_reading_column_is_centred_and_wide_blocks_break_out(page, relay_ser
     body = (
         "## A section heading\n\n"
         + "Relay keeps posts as plain Markdown files in an Obsidian-compatible vault. " * 6
-        + "\n\n### A smaller heading\n\nMore prose under it.\n"
-        + "\n| one | two | three | four | five |\n|---|---|---|---|---|\n"
-        "| a | b | c | d | e |\n"
+        + "\n\n---\n\n### A smaller heading\n\nMore prose under it.\n"
+        # Deliberately hostile: cells long enough that a `nowrap` table would
+        # overflow the panel. With tame content the clipping assertion below is
+        # vacuous — the same trap the grid-overflow smoke fell into.
+        + "\n| Conto | Rendimento lordo | Netto | Ruolo | E deployabile? |\n|---|---|---|---|---|\n"
+        "| MedioCredito liquido a scadenza | 1.90% lordo annuo | 1.41% (ritenuta IT 26%) "
+        "| eccedenza sopra la soglia dei 25k a target | Si, unica fonte di deployment corrente |\n"
+        "| Trading 212 conto remunerato | 2.20% lordo annuo | 1.78% il miglior liquido "
+        "| runway della pie piu emergenza di terzo livello | No, non si trasferisce su IBKR |\n"
     )
     _api_post(relay_server, {"title": "Centred Column", "content": body, "tags": ["homelab"]})
 
@@ -736,12 +742,15 @@ def test_the_reading_column_is_centred_and_wide_blocks_break_out(page, relay_ser
           // (table, its scroll wrapper) are meant to differ and are excluded.
           const capped = [...document.querySelectorAll('#pmBody .post-body > *')]
             .filter(e => !['TABLE', 'PRE'].includes(e.tagName) && !e.classList.contains('table-scroll'));
+          const wraps = [...document.querySelectorAll('#pmBody .table-scroll')]
+            .map(w => ({ scroll: w.scrollWidth, client: w.clientWidth }));
           return { left: Math.round(p.left - body.left), right: Math.round(body.right - p.right),
                    prose: Math.round(p.width), table: Math.round(t.width),
                    panel: Math.round(body.width), titleLeft: Math.round(title.left - body.left),
                    tableLeft: Math.round(t.left - body.left),
                    cappedEdges: [...new Set(capped.map(e => Math.round(e.getBoundingClientRect().left)))],
-                   cappedTags: capped.map(e => e.tagName) };
+                   cappedTags: capped.map(e => e.tagName),
+                   clipped: wraps.filter(w => w.scroll > w.client + 1) };
         }"""
     )
 
@@ -767,4 +776,10 @@ def test_the_reading_column_is_centred_and_wide_blocks_break_out(page, relay_ser
     assert len(m["cappedEdges"]) == 1, (
         f"blocks do not share a left edge — {m['cappedTags']} at {m['cappedEdges']}; "
         "a font-relative measure gives each element its own column"
+    )
+    # Horizontal overflow in the modal carries no affordance, so a clipped
+    # column does not look clipped — it looks absent, and the one that goes is
+    # the rightmost. Cells wrap here rather than scroll for that reason.
+    assert not m["clipped"], (
+        f"a table is clipped with nothing to say so: {m['clipped']}"
     )
