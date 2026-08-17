@@ -47,6 +47,11 @@ def test_recovery_sits_with_the_thing_that_decides_whether_it_is_possible(page, 
 
     titles = [t.strip().lower() for t in page.locator(".sm-section-title").all_inner_texts()]
     assert "health" in titles and "recovery" in titles, f"sections are {titles}"
+    # Recovery goes last: the rest of the panel reports, this one acts, and it
+    # should be reached on purpose rather than stumbled into on the way to the
+    # vault path. Health still sits above it — that is the pairing.
+    assert titles[-1] == "recovery", f"Recovery is not the last section: {titles}"
+    assert titles.index("health") < titles.index("recovery"), f"sections are {titles}"
 
     line = page.locator(".sm-recovery-line").inner_text().lower()
     assert "restor" in line or "nothing" in line, f"no headline count: {line!r}"

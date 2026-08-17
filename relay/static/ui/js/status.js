@@ -138,8 +138,6 @@ function renderStatus(d) {
     ['Attachments', `${v.attachments} (${fmtBytes(v.attachment_bytes)})`],
   ])));
 
-  smBody.appendChild(renderRecovery(h.effective));
-
   smBody.appendChild(smSection('Server', smRows([
     ['Uptime', fmtUptime(d.uptime_seconds)],
     ['Started', d.started_at || '—'],
@@ -147,6 +145,12 @@ function renderStatus(d) {
     ['OIDC login', d.features.auth.oidc ? 'enabled' : 'off'],
     ['MCP OAuth', d.features.auth.mcp_oauth ? 'enabled' : 'off'],
   ])));
+
+  // Last, and deliberately so. Health/Vault/Server are what you open this panel
+  // *for*; recovery is the one section that acts rather than reports, and it is
+  // reached on purpose rather than stumbled into. It still belongs in this panel
+  // because Health above it is what decides whether recovery is possible at all.
+  smBody.appendChild(renderRecovery(h.effective));
 }
 
 async function openStatusModal() {
