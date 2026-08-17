@@ -1130,8 +1130,8 @@ function enterEditMode(_el, post) {
   emTitle.textContent = `#${post.id}`;
   emBody.innerHTML = `
     <div class="edit-form">
-      <div><label>Title</label><input class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
-      <div class="ef-content-wrap"><label>Content</label><textarea class="ef-content">${escHtml(post.content)}</textarea>
+      <div><label for="efTitle">Title</label><input id="efTitle" class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
+      <div class="ef-content-wrap"><label for="efContent">Content</label><textarea id="efContent" class="ef-content">${escHtml(post.content)}</textarea>
         <div class="attach-row">
           <input type="file" class="ef-file" multiple style="display:none">
           <button type="button" class="btn-attach ef-attach">📎 Attach</button>
@@ -1139,9 +1139,9 @@ function enterEditMode(_el, post) {
         </div>
         <div class="ef-attachments"></div>
       </div>
-      <div><label>Tags</label><input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
-      <div><label>Source</label><input class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
-      <div><label>Expires</label><input class="ef-expires" type="datetime-local" value="${toDatetimeLocal(post.expires_at || '')}"></div>
+      <div><label for="efTags">Tags</label><input id="efTags" class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
+      <div><label for="efSource">Source</label><input id="efSource" class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
+      <div><label for="efExpires">Expires</label><input id="efExpires" class="ef-expires" type="datetime-local" value="${toDatetimeLocal(post.expires_at || '')}"></div>
       <div class="edit-actions">
         <button class="btn-cancel">Cancel</button>
         <button class="btn-save">Save</button>

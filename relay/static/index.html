@@ -129,17 +129,17 @@
     <div class="compose-panel" id="composePanel">
       <div class="post">
         <div class="edit-form">
-          <div><label>Title</label><input type="text" id="cpTitle" placeholder="(required — becomes the filename)"></div>
-          <div><label>Content</label><textarea id="cpContent" placeholder="Write something… (drop, paste, or attach a file)"></textarea>
+          <div><label for="cpTitle">Title</label><input type="text" id="cpTitle" placeholder="(required — becomes the filename)"></div>
+          <div><label for="cpContent">Content</label><textarea id="cpContent" placeholder="Write something… (drop, paste, or attach a file)"></textarea>
             <div class="attach-row">
               <input type="file" id="cpFile" multiple style="display:none">
               <button type="button" class="btn-attach" id="cpAttach">📎 Attach</button>
               <span class="attach-status" id="cpAttachStatus"></span>
             </div>
           </div>
-          <div><label>Tags</label><input type="text" id="cpTags" placeholder="comma-separated"></div>
-          <div><label>Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
-          <div><label>Expires</label><input type="datetime-local" id="cpExpires"></div>
+          <div><label for="cpTags">Tags</label><input type="text" id="cpTags" placeholder="comma-separated"></div>
+          <div><label for="cpSource">Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
+          <div><label for="cpExpires">Expires</label><input type="datetime-local" id="cpExpires"></div>
           <div class="edit-actions">
             <button class="btn-cancel" id="cpCancel">Cancel</button>
             <button class="btn-save" id="cpPublish">Publish</button>
@@ -150,7 +150,8 @@
 
     <div class="search-bar" id="searchBar" style="display:none">
       <span class="search-label">search</span>
-      <input type="text" id="searchInput" placeholder="Search title, content, source…" autocomplete="off">
+      <input type="text" id="searchInput" aria-label="Search posts"
+             placeholder="Search title, content, source…" autocomplete="off">
       <button class="search-clear" id="searchClear" title="Clear search">×</button>
       <div class="sort-control" id="sortControl">
         <select class="sort-select" id="sortField" title="Sort by" aria-label="Sort by">

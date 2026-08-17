@@ -721,6 +721,22 @@ header {
      down the file and would win on source order. It is set in the mobile header
      block instead. */
   .icon-btn { width: 40px; height: 40px; }
+
+  /* The sidebar is a drawer on a phone, so its controls are thumb targets like
+     any other. Measured before this: the tab strip 41x22, the tag row's rename
+     and expiry icons 17x17, the add button 22x18 — all well under the floor the
+     sheets and the header already hold. The tag row itself is 29px of text; the
+     padding lifts the whole row rather than just the icons, so the tap area
+     matches what looks tappable. */
+  .sb-tab { min-width: 44px; min-height: 44px; display: inline-flex;
+            align-items: center; justify-content: center; }
+  .sidebar-add-btn { min-width: 44px; min-height: 44px; }
+  .tag-item { min-height: 44px; }
+  .tag-rename, .tag-config-btn {
+    min-width: 44px; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin: -12px -10px -12px 0;   /* grow the hit area, not the row */
+  }
   .theme-opt { min-height: 44px; }
   .theme-menu { min-width: 190px; }
 }

@@ -735,3 +735,57 @@ def test_the_reading_column_holds_every_block(page, relay_server):
     # Horizontal overflow carries no affordance, so a clipped column does not
     # look clipped, it looks absent — and the one that goes is the rightmost.
     assert m["clipped"] == 0, "a table or code block is clipped with nothing to say so"
+
+
+def test_every_form_control_has_an_accessible_name(page):
+    """A `<label>` next to a field is not attached to it.
+
+    The compose panel and the edit form both rendered `<label>Title</label>`
+    followed by an unassociated `<input>`: correct visually, invisible to
+    assistive tech, which then falls back to the placeholder — and the
+    placeholder disappears the moment you type. `for`/`id` on all nine, plus an
+    `aria-label` on the search field, which had no label at all.
+    """
+    page.locator("#newPostBtn").click()
+    page.wait_for_timeout(250)
+    page.locator(".post-title").nth(2).click()
+    page.locator("#postModal.open").wait_for(timeout=10_000)
+    page.locator("#pmEdit").click()
+    page.locator("#editModal.open").wait_for(timeout=10_000)
+    page.wait_for_timeout(250)
+
+    unnamed = page.evaluate(
+        """() => [...document.querySelectorAll('input, textarea, select')]
+             .filter(e => e.getBoundingClientRect().width > 0 && e.type !== 'hidden')
+             .filter(e => !(e.labels && e.labels.length) && !e.getAttribute('aria-label'))
+             .map(e => e.id || e.className || e.tagName)"""
+    )
+    assert not unnamed, f"controls with no accessible name (placeholder is not one): {unnamed}"
+
+
+def test_the_sidebar_is_thumb_sized_on_a_phone(mobile_page):
+    """The sidebar is a drawer on mobile, so its controls are touch targets.
+
+    Measured before this: the tab strip 41x22, the tag row's rename and expiry
+    icons 17x17, the add button 22x18 — all well under the 44px floor the sheets
+    and the header already hold. The floor was applied where it was visible and
+    not where it was behind a drawer.
+    """
+    mobile_page.wait_for_timeout(400)
+    small = mobile_page.evaluate(
+        """() => {
+          const sels = ['.sb-tab', '.sidebar-add-btn', '.tag-rename', '.tag-config-btn', '.tag-item'];
+          const out = [];
+          for (const sel of sels) {
+            for (const e of document.querySelectorAll(sel)) {
+              const r = e.getBoundingClientRect();
+              if (!r.width || !r.height) continue;
+              if (r.width < 44 || r.height < 44) {
+                out.push(sel + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+              }
+            }
+          }
+          return [...new Set(out)];
+        }"""
+    )
+    assert not small, f"sidebar controls below the 44px touch floor: {small}"
