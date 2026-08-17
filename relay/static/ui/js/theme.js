@@ -26,7 +26,12 @@ const CATALOGUE = [
   { id: 'catppuccin-frappe', label: 'Catppuccin Frappé', dark: true },
   { id: 'catppuccin-macchiato', label: 'Catppuccin Macchiato', dark: true },
   { id: 'catppuccin-mocha', label: 'Catppuccin Mocha', dark: true },
+  { id: 'dracula', label: 'Dracula', dark: true },
+  { id: 'everforest-dark', label: 'Everforest Dark', dark: true },
   { id: 'gruvbox', label: 'Gruvbox', dark: true },
+  { id: 'gruvbox-light', label: 'Gruvbox Light', dark: false },
+  { id: 'molokai', label: 'Molokai', dark: true },
+  { id: 'nord', label: 'Nord', dark: true },
   { id: 'tokyo-night', label: 'Tokyo Night', dark: true },
 ];
 

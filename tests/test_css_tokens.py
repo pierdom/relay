@@ -136,6 +136,7 @@ REPRODUCTIONS = {
     "catppuccin-latte": 7.06,
     "catppuccin-frappe": 8.06,
     "catppuccin-macchiato": 9.92,
+    "everforest-dark": 7.38,
 }
 
 
