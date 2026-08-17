@@ -96,7 +96,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --bg:          #1d2021;   /* bg0_h (hard) */
   --surface:     #282828;   /* bg0 */
   --border:      #504945;   /* bg2 */
-  --text:        #ebdbb2;   /* fg1 */
+  --text:        #fbf1c7;   /* fg0 — the brightest fg, not fg1 */
   --muted:       #928374;   /* gray */
   --accent:      #fabd2f;   /* yellow */
   --accent-dim:  #d79921;   /* neutral yellow */
@@ -105,8 +105,8 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --tag-active:  #3c3836;   /* bg1 */
   --green:       #b8bb26;
   --red:         #fb4934;
-  --body:        #d5c4a1;   /* fg2 */
-  --body-strong: #ebdbb2;   /* fg1 */
+  --body:        #ebdbb2;   /* fg1 — fg2 left prose at 8.6:1 */
+  --body-strong: #fbf1c7;   /* fg0 */
   --wash-raise:  rgba(235, 219, 178, 0.04);   /* lifts with fg, not pure white */
 
   --on-accent:     #1d2021;
@@ -128,22 +128,29 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
    literal check cannot see a token used for the wrong role, only for the wrong
    value. Everything shipped before it was amber or yellow, so a warm assumption
    baked into a token's meaning would have gone unnoticed. Nothing outside this
-   block changed to accommodate it. */
+   block changed to accommodate it.
+
+   Two role corrections after seeing it rendered. `--body` is post prose — the
+   main reading text — so it takes `fg`; `fg_dark` is the palette's *secondary*
+   UI colour and using it here was a mis-mapping that cost 3.7 points of
+   contrast. And the canvas drops to `bg_dark` so cards sit on the theme's
+   signature `bg` rather than on storm's lighter panel tone. Together those took
+   prose from 6.9:1 to 10.6:1 — see the contrast rule in tests/test_css_tokens.py. */
 :root[data-theme="tokyo-night"], [data-theme="tokyo-night"] {
   color-scheme: dark;
-  --bg:          #1a1b26;   /* night bg */
-  --surface:     #24283b;   /* storm bg — the palette's float/panel surface */
+  --bg:          #16161e;   /* bg_dark — the palette's darker canvas */
+  --surface:     #1a1b26;   /* night bg — cards sit on the theme's signature tone */
   --border:      #3b4261;   /* fg_gutter */
   --text:        #c0caf5;   /* fg */
   --muted:       #565f89;   /* comment */
   --accent:      #7aa2f7;   /* blue */
   --accent-dim:  #3d59a1;   /* blue0 */
   --accent-glow: rgba(122, 162, 247, 0.10);
-  --tag-bg:      #292e42;   /* bg_highlight */
+  --tag-bg:      #24283b;   /* storm bg */
   --tag-active:  #414868;   /* terminal_black */
   --green:       #9ece6a;
   --red:         #f7768e;
-  --body:        #a9b1d6;   /* fg_dark */
+  --body:        #c0caf5;   /* fg — see note: fg_dark is secondary UI, not prose */
   --body-strong: #c0caf5;   /* fg */
   --wash-raise:  rgba(192, 202, 245, 0.04);   /* lifts with fg, not pure white */
 

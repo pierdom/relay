@@ -107,3 +107,71 @@ def test_both_themes_declare_the_same_token_set():
             f"{selector} token set differs from :root — "
             f"missing {sorted(baseline - tokens)}, extra {sorted(tokens - baseline)}"
         )
+
+
+# ── Contrast floor ────────────────────────────────────────────────────────────
+# Gruvbox and Tokyo Night both shipped looking washed out next to Relay Dark,
+# and the reason was measurable rather than aesthetic: prose sat at 8.6:1 and
+# 6.9:1 against its own card, where Relay Dark is 10.2:1. A palette can be
+# reproduced faithfully and still read badly, because "faithful" says nothing
+# about which member of the palette a role should take.
+#
+# So the rule for every theme, present and future: pick the members of your own
+# palette that clear these floors. Never mix a new colour to get there — if the
+# palette genuinely cannot reach them, that is worth knowing before it ships.
+MIN_TEXT_ON_SURFACE = 10.0
+MIN_BODY_ON_SURFACE = 9.5
+# WCAG AA for normal text. Accents vary far more between themes than
+# backgrounds do, and `--on-accent` is what sits on every primary button.
+MIN_ON_ACCENT = 4.5
+
+
+def _luminance(hex_colour: str) -> float:
+    raw = hex_colour.lstrip("#")
+    if len(raw) == 3:   # `--on-accent: #000` is shorthand, and it is the token
+        raw = "".join(c * 2 for c in raw)   # this check most needs to read
+    channels = [int(raw[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _contrast(a: str, b: str) -> float:
+    la, lb = _luminance(a), _luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def _hex_tokens() -> dict[str, dict[str, str]]:
+    """Plain hex tokens per theme, 3- and 6-digit. Alpha forms are skipped: they
+    sit over an unknown backdrop, so a static contrast number for them would be
+    fiction. Missing `#000` shorthand is how this check first failed — silently
+    dropping the one token that decides every primary button's legibility."""
+    css = _strip_comments(CSS.read_text(encoding="utf-8"))
+    out: dict[str, dict[str, str]] = {}
+    pattern = r"^(:root(?:\[[^\]]*\])?)(?:\s*,\s*\[[^\]]*\])*\s*\{(.*?)^\}"
+    for match in re.finditer(pattern, css, re.S | re.M):
+        name = match.group(1)
+        key = "dark" if name == ":root" else re.search(r'"([^"]+)"', name).group(1)
+        found = dict(re.findall(r"^\s*(--[\w-]+):\s*(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6})\s*;", match.group(2), re.M))
+        if found:
+            out.setdefault(key, {}).update(found)
+    return out
+
+
+def test_every_theme_clears_the_contrast_floor():
+    themes = _hex_tokens()
+    assert len(themes) >= 4, f"expected every theme block to parse, got {sorted(themes)}"
+
+    failures = []
+    for theme, tokens in sorted(themes.items()):
+        surface = tokens["--surface"]
+        text = _contrast(tokens["--text"], surface)
+        body = _contrast(tokens["--body"], surface)
+        on_accent = _contrast(tokens["--on-accent"], tokens["--accent"])
+        if text < MIN_TEXT_ON_SURFACE:
+            failures.append(f"{theme}: --text on --surface is {text:.2f}:1 (floor {MIN_TEXT_ON_SURFACE})")
+        if body < MIN_BODY_ON_SURFACE:
+            failures.append(f"{theme}: --body on --surface is {body:.2f}:1 (floor {MIN_BODY_ON_SURFACE})")
+        if on_accent < MIN_ON_ACCENT:
+            failures.append(f"{theme}: --on-accent on --accent is {on_accent:.2f}:1 (floor {MIN_ON_ACCENT})")
+
+    assert not failures, "themes below the contrast floor:\n  " + "\n  ".join(failures)
