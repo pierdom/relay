@@ -1,24 +1,23 @@
-# Solarized Dark (Ethan Schoonover)
-# Matches the "Solarized Dark" theme from the web UI.
-# Select with: RELAY_PALETTE=solarized
+# Solarized Light (Ethan Schoonover)
+# Matches the "Solarized Light" theme from the web UI.
+# Select with: RELAY_PALETTE=solarized-light
 #
-# Accent is blue, not cyan: `--on-accent` (black) only clears the accessibility
-# floor at 4.5:1 or better, and blue is the brightest of Solarized's accents
-# that black text still reads well on (5.71:1) — violet, magenta and orange
-# all fall under 4.5:1 there. See app.css's Solarized block for the full
-# rationale. `border` is base01, matching the web's `--border` — base02 (the
-# old value here) is the web's `--surface`, one step lighter.
+# Same accent as Solarized Dark — Solarized's eight accent colours are
+# engineered to read on either background, so nothing about the accent set
+# changes here. Only `border`/`bg` move to the palette's light tones: `border`
+# is base01 (shared with Dark — Solarized reuses it as-is on both), `bg` is
+# base2. See app.css's Solarized Light block for the full rationale.
 
 # ── Core palette ─────────────────────────────────────────────────────────────
 primary = "#268bd2"   # blue   — border titles, clock, nav arrows, accents
 border  = "#586e75"   # base01 — widget / button borders
-bg      = "#002b36"   # base03 — header & footer background
+bg      = "#eee8d5"   # base2  — header & footer background
 
 # ── Progress bar gradient (left → right as bar fills) ────────────────────────
 bar_low  = "#859900"  # green  — 0 – 60 % of bar width
 bar_mid  = "#b58900"  # yellow — 60 – 80 % of bar width
 bar_high = "#dc322f"  # red    — 80 – 100 % of bar width
-bar_bg   = "#0a3a45"  # dim teal, between base03/base02 — unfilled bar background
+bar_bg   = "#93a1a1"  # base1  — unfilled bar background
 
 # ── Performance heatmap ───────────────────────────────────────────────────────
 perf_great    = "#859900"  # green   — > +10 %

@@ -2,16 +2,21 @@
 # Matches the "Molokai" theme from the web UI.
 # Accent is cyan (not green): green and red are both needed as semantic colours.
 # Select with: RELAY_PALETTE=molokai
+#
+# Cyan is darkened from the reference #66d9ef: 81% saturation but 67%
+# lightness read as pastel regardless of hue. Same hue and saturation at 50%
+# lightness instead. See app.css's Molokai block for the full rationale and
+# contrast numbers.
 
 # ── Core ──────────────────────────────────────────────────────────────────────
-primary = "#66d9ef"   # cyan           — accent / interactive
+primary = "#18c4e7"   # cyan, darkened — accent / interactive
 border  = "#465457"   # dark teal-grey — widget borders, badges, panel separators
 bg      = "#1b1d1e"   # background     — screen, header, footer background
 
 # ── Semantic colours ───────────────────────────────────────────────────────────
 perf_great    = "#a6e22e"  # lime green  — success / far-future expiry
 perf_good     = "#a6e22e"
-perf_flat     = "#66d9ef"  # cyan
+perf_flat     = "#18c4e7"  # cyan, darkened
 perf_bad      = "#e6db74"  # yellow      — warning / expiry within 3 days
 perf_poor     = "#f92672"  # pink-red
 perf_terrible = "#f92672"  # pink-red    — error / expired / expiry within 24h

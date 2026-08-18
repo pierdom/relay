@@ -1133,7 +1133,7 @@ function isEditOpen() {
 
 function closeEditModal() {
   editModal.classList.remove('open');
-  document.body.style.overflow = '';
+  if (!postModal.classList.contains('open')) document.body.style.overflow = '';
   emBody.innerHTML = '';
   editingPost = null;
 }
@@ -1206,6 +1206,7 @@ function enterEditMode(_el, post) {
       const card = feed.querySelector(`[data-id="${post.id}"]`);
       if (card) card.replaceWith(renderPost(updated));
       closeEditModal();
+      if (postModal.classList.contains('open')) openPostModal(updated, { pushHistory: false });
       refreshSidebarCounts();
     } catch (e) {
       alert(`Save failed: ${e.message}`);
@@ -1262,7 +1263,7 @@ function connectSSE() {
     // duplicate edit event that lands right after the user hits × can never
     // resurrect a modal they just closed.
     if (_modalPost && _modalPost.id === post.id && postModal.classList.contains('open'))
-      openPostModal(post);
+      openPostModal(post, { pushHistory: false });
     const existing = feed.querySelector(`[data-id="${post.id}"]`);
     // Don't clobber an inline edit the user has open on this card.
     if (existing && existing.classList.contains('editing')) { scheduleLoadTags(); return; }
@@ -1324,9 +1325,31 @@ const pmEdit     = document.getElementById('pmEdit');
 const pmDelete   = document.getElementById('pmDelete');
 const pmInner    = document.querySelector('.pm-inner');
 const pmHeader   = document.querySelector('.pm-header');
-let _modalPost   = null;
+let _modalPost        = null;
+let _modalStack       = [];   // entries: { post, scrollTop }
+let _historyDepth     = 0;
+let _suppressPopstate = false;
 
-function openPostModal(post) {
+function syncBackButton() {
+  if (_modalStack.length === 0) {
+    pmBack.style.display = '';
+    pmBack.textContent = '← back';
+    pmInner.classList.remove('has-back');
+    return;
+  }
+  const { post } = _modalStack[_modalStack.length - 1];
+  pmBack.textContent = `← ${post.title || `#${post.id}`}`;
+  pmBack.style.display = 'inline-flex';
+  pmInner.classList.add('has-back');
+}
+
+function openPostModal(post, { pushHistory = true } = {}) {
+  if (pushHistory && _modalPost) {
+    _modalStack.push({ post: _modalPost, scrollTop: pmBody.scrollTop });
+    history.replaceState({ postId: _modalPost.id }, '');
+    history.pushState({ postId: post.id }, '');
+    _historyDepth++;
+  }
   _modalPost = post;
   pmTitle.textContent = post.title || '';
   pmTitle.style.display = post.title ? '' : 'none';
@@ -1358,12 +1381,27 @@ function openPostModal(post) {
     t.parentNode.insertBefore(wrap, t);
     wrap.appendChild(t);
   });
+  pmBody.querySelectorAll('.post-body pre').forEach(pre => {
+    const btn = document.createElement('button');
+    btn.className = 'code-copy';
+    btn.textContent = 'copy';
+    btn.addEventListener('click', () => {
+      const text = pre.querySelector('code')?.textContent ?? pre.textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        btn.classList.add('copied'); btn.textContent = 'copied';
+        setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'copy'; }, 1500);
+      }).catch(() => {});
+    });
+    pre.appendChild(btn);
+  });
   renderBacklinks(post.id);
+  clearFeedFocus();
 
   postModal.classList.add('open');
   document.body.style.overflow = 'hidden';
   pmBody.scrollTop = 0;
   requestAnimationFrame(updateModalFade);
+  syncBackButton();
 }
 
 function updateModalFade() {
@@ -1373,15 +1411,36 @@ function updateModalFade() {
 
 
 function closePostModal() {
+  _modalStack = [];
+  if (_historyDepth > 0) {
+    _suppressPopstate = true;
+    history.go(-_historyDepth);
+    _historyDepth = 0;
+  }
   postModal.classList.remove('open');
   document.body.style.overflow = '';
   pmBody.innerHTML = '';
   _modalPost = null;
+  pmBack.style.display = '';
+  pmBack.textContent = '← back';
+  pmInner.classList.remove('has-back');
+}
+
+function popPostModal() {
+  if (_modalStack.length === 0) { closePostModal(); return; }
+  const { post, scrollTop } = _modalStack.pop();
+  if (_historyDepth > 0) {
+    _suppressPopstate = true;
+    history.back();
+    _historyDepth--;
+  }
+  openPostModal(post, { pushHistory: false });
+  requestAnimationFrame(() => { pmBody.scrollTop = scrollTop; });
 }
 
 pmBody.addEventListener('scroll', updateModalFade);
-pmClose.addEventListener('click', closePostModal);
-pmBack.addEventListener('click', closePostModal);
+pmClose.addEventListener('click', popPostModal);
+pmBack.addEventListener('click', popPostModal);
 postModal.addEventListener('click', (e) => { if (!e.target.closest('.pm-inner')) closePostModal(); });
 
 /* Swipe-down-to-dismiss (mobile bottom-sheet) — shared with the other three
@@ -1403,9 +1462,7 @@ initPostHistory(() => { resetPaging(); loadPosts(true); });
 
 pmEdit.addEventListener('click', () => {
   const post = _modalPost; if (!post) return;
-  closePostModal();
-  // No longer needs the card: the editor is its own modal, so a post that is
-  // filtered out of the current feed can still be edited from its detail view.
+  // Edit modal (z-index 110) opens over the post modal (100) — post modal stays open behind it.
   enterEditMode(null, post);
 });
 pmDelete.addEventListener('click', async () => {
@@ -1420,13 +1477,140 @@ pmDelete.addEventListener('click', async () => {
     await loadTags();
   } catch {}
 });
+/* ── Keyboard shortcuts modal ─────────────────────────────── */
+const shortcutsModal = document.getElementById('shortcutsModal');
+document.getElementById('kbClose').onclick   = () => shortcutsModal.classList.remove('open');
+document.getElementById('kbBackdrop').onclick = () => shortcutsModal.classList.remove('open');
+function isShortcutsOpen() { return shortcutsModal.classList.contains('open'); }
+
+/* ── Feed keyboard focus ──────────────────────────────────── */
+let _focusedCard = null;
+
+function getFeedCards() { return [...feed.querySelectorAll('.post:not(.editing)')]; }
+
+function setFocusedCard(card) {
+  if (_focusedCard) _focusedCard.classList.remove('card-focused');
+  _focusedCard = card;
+  if (card) { card.classList.add('card-focused'); card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+}
+
+function moveFeedFocus(delta) {
+  const cards = getFeedCards();
+  if (!cards.length) return;
+  const cur = _focusedCard ? cards.indexOf(_focusedCard) : -1;
+  const next = Math.max(0, Math.min(cards.length - 1, cur + delta));
+  setFocusedCard(cards[next === -1 ? 0 : next]);
+}
+
+function clearFeedFocus() {
+  if (_focusedCard) _focusedCard.classList.remove('card-focused');
+  _focusedCard = null;
+}
+
+/* ── Wikilink hover preview ───────────────────────────────── */
+let _previewTimer = null;
+let _previewEl    = null;
+
+function hideLinkPreview() {
+  clearTimeout(_previewTimer);
+  _previewTimer = null;
+  if (_previewEl) { _previewEl.remove(); _previewEl = null; }
+}
+
+function showLinkPreview(postId, anchor) {
+  hideLinkPreview();
+  const el = document.createElement('div');
+  el.className = 'link-preview';
+  const rect = anchor.getBoundingClientRect();
+  el.style.top  = `${rect.bottom + 8}px`;
+  el.style.left = `${Math.min(rect.left, window.innerWidth - 296)}px`;
+  el.innerHTML = '<div class="lp-body">…</div>';
+  document.body.appendChild(el);
+  _previewEl = el;
+  apiFetch(`/posts/${postId}`).then(post => {
+    if (_previewEl !== el) return;
+    const raw     = post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '');
+    const snippet = raw.replace(/[#*`_[\]]/g, '').trim();
+    const clipped = snippet.length > 150 ? snippet.slice(0, 150) + '…' : snippet;
+    el.innerHTML  =
+      `<div class="lp-title">${escHtml(post.title || `#${post.id}`)}</div>` +
+      (post.tags.length ? `<div class="lp-tags">${post.tags.map(t => `<span class="lp-tag">${escHtml(t)}</span>`).join('')}</div>` : '') +
+      (clipped ? `<div class="lp-body">${escHtml(clipped)}</div>` : '');
+  }).catch(hideLinkPreview);
+}
+
+pmBody.addEventListener('mouseover', e => {
+  const a = e.target.closest('a.wikilink[data-post-id]');
+  if (!a) return;
+  clearTimeout(_previewTimer);
+  _previewTimer = setTimeout(() => showLinkPreview(Number(a.dataset.postId), a), 350);
+});
+pmBody.addEventListener('mouseout', e => {
+  if (!e.target.closest('a.wikilink[data-post-id]')) return;
+  hideLinkPreview();
+});
+
 document.addEventListener('keydown', e => {
-  // The theme menu is the most transient thing on screen, so it goes first.
-  if (e.key === 'Escape' && isThemeMenuOpen()) { closeThemeMenu(); return; }
-  if (e.key === 'Escape' && isEditOpen()) { tryCloseEditModal(); return; }
-  if (e.key === 'Escape' && isStatusOpen()) { closeStatusModal(); return; }
-  if (e.key === 'Escape' && isHistoryOpen()) { closeHistoryModal(); return; }
-  if (e.key === 'Escape' && postModal.classList.contains('open')) closePostModal();
+  const typing = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
+
+  // Escape priority: most transient first.
+  if (e.key === 'Escape' && isThemeMenuOpen())  { closeThemeMenu(); return; }
+  if (e.key === 'Escape' && isEditOpen())        { tryCloseEditModal(); return; }
+  if (e.key === 'Escape' && isShortcutsOpen())   { shortcutsModal.classList.remove('open'); return; }
+  if (e.key === 'Escape' && isStatusOpen())      { closeStatusModal(); return; }
+  if (e.key === 'Escape' && isHistoryOpen())     { closeHistoryModal(); return; }
+  if (e.key === 'Escape' && postModal.classList.contains('open')) { popPostModal(); return; }
+  if (e.key === 'Escape' && _focusedCard)        { clearFeedFocus(); return; }
+
+  if (typing) return;
+
+  // Post modal single-key shortcuts (reading mode only).
+  if (postModal.classList.contains('open') && !isHistoryOpen() && !isEditOpen()) {
+    if (e.key === 'e') { pmEdit.click(); return; }
+    if (e.key === 'h') { pmHistory.click(); return; }
+  }
+
+  // Global.
+  if (e.key === '?') { shortcutsModal.classList.toggle('open'); return; }
+
+  // Feed navigation — only when no modal is open.
+  const noModal = !isThemeMenuOpen() && !isEditOpen() && !isStatusOpen() && !isHistoryOpen()
+               && !postModal.classList.contains('open') && !isShortcutsOpen();
+  if (noModal) {
+    if (e.key === 'j') { e.preventDefault(); moveFeedFocus(1);  return; }
+    if (e.key === 'k') { e.preventDefault(); moveFeedFocus(-1); return; }
+    if (e.key === 'Enter' && _focusedCard) {
+      e.preventDefault();
+      openPostById(Number(_focusedCard.dataset.id));
+      clearFeedFocus();
+      return;
+    }
+  }
+});
+
+window.addEventListener('popstate', e => {
+  if (_suppressPopstate) { _suppressPopstate = false; return; }
+  if (e.state?.postId) {
+    if (_modalStack.length > 0) {
+      const { post, scrollTop } = _modalStack.pop();
+      _historyDepth--;
+      openPostModal(post, { pushHistory: false });
+      requestAnimationFrame(() => { pmBody.scrollTop = scrollTop; });
+    } else {
+      _historyDepth = Math.max(0, _historyDepth - 1);
+      openPostById(e.state.postId);
+    }
+  } else {
+    _historyDepth = 0;
+    _modalStack = [];
+    postModal.classList.remove('open');
+    document.body.style.overflow = '';
+    pmBody.innerHTML = '';
+    _modalPost = null;
+    pmBack.style.display = '';
+    pmBack.textContent = '← back';
+    pmInner.classList.remove('has-back');
+  }
 });
 
 /* ── Helpers ──────────────────────────────────────────────── */

@@ -76,7 +76,7 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `MCP_AUTH_CODE_TTL_SECONDS` | `60` | OAuth authorization-code lifetime |
 | `MCP_ACCESS_TOKEN_TTL_SECONDS` | `3600` | OAuth access-token lifetime |
 | `MCP_REFRESH_TOKEN_TTL_SECONDS` | `2592000` | OAuth refresh-token lifetime (30 days) |
-| `RELAY_PALETTE` | `default` | TUI colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `molokai`, `candy`, `earthy`, `pastel`, `tango`) |
+| `RELAY_PALETTE` | `default` | TUI colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `solarized-light`, `molokai`, `candy`, `earthy`, `pastel`, `tango`, `tokyo-night`, `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`) |
 | `RELAY_TRANSPARENT` | `0` | TUI: let the terminal background show through the canvas |
 
 **Docker-only**, read by `docker-compose.yml` rather than by relay itself:

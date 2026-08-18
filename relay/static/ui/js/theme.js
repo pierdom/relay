@@ -32,6 +32,8 @@ const CATALOGUE = [
   { id: 'gruvbox-light', label: 'Gruvbox Light', dark: false },
   { id: 'molokai', label: 'Molokai', dark: true },
   { id: 'nord', label: 'Nord', dark: true },
+  { id: 'solarized-dark', label: 'Solarized Dark', dark: true },
+  { id: 'solarized-light', label: 'Solarized Light', dark: false },
   { id: 'tokyo-night', label: 'Tokyo Night', dark: true },
 ];
 
