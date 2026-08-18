@@ -543,7 +543,17 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
    The accent is **cyan**, not the green the TUI palette uses as its primary:
    Molokai has exactly one green and one red, and both are needed for `--green`
    and `--red`. Cyan is Molokai's Type colour and collides with nothing, so all
-   six of its signature colours stay distinct on screen. */
+   six of its signature colours stay distinct on screen.
+
+   Both `--accent` and `--accent-dim` shipped at the reference hex — #66d9ef and
+   #ae81ff — which read as pastel for the same reason `blue` did in Tokyo Night:
+   81%/100% saturation, but 67%/75% lightness, so the hue never gets to register
+   before the colour reads as light. Same fix, same hue, lower lightness: cyan
+   drops to 50% (7.4:1 against the surface, still 8.1:1 for `--on-accent` sitting
+   on it) and purple to 71% — pushed less far, since it is a *button-hover fill*
+   with `--on-accent` text on top, and violet's sRGB gamut is dark enough that
+   71% is already the last stop with that text still clearing AA (4.85:1; 70%
+   drops to 4.64, 65% to 3.71). */
 :root[data-theme="molokai"], [data-theme="molokai"] {
   color-scheme: dark;
   --bg:          #1b1d1e;
@@ -551,9 +561,9 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --border:      #465457;
   --text:        #f8f8f2;
   --muted:       #7e8e91;
-  --accent:      #66d9ef;
-  --accent-dim:  #ae81ff;
-  --accent-glow: rgba(102, 217, 239, 0.10);
+  --accent:      #18c4e7;   /* cyan, darkened — see block note */
+  --accent-dim:  #9f6bff;   /* purple, darkened — see block note */
+  --accent-glow: rgba(24, 196, 231, 0.10);
   --tag-bg:      #293739;
   --tag-active:  #403d3d;
   --green:       #a6e22e;
