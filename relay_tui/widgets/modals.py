@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import re
 from urllib.parse import quote
 
@@ -21,7 +22,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from .. import api
-from ..theme import ACCENT, BORDER, HEADER_BG, SCREEN_BG
+from ..theme import ACCENT, BORDER, HEADER_BG
 from .post_panel import _time_ago, _time_until
 
 # ── Wikilink preprocessing ────────────────────────────────────────────────────
@@ -113,6 +114,29 @@ def _outbound_link_ids(content: str, index: dict[str, int]) -> list[int]:
     return [p for p in ordered if not (p in seen or seen.add(p))]
 
 
+def _line_diff(current: str, revision: str) -> str:
+    """Unified diff current→revision with Rich markup. - = loses, + = gains on restore."""
+    a = current.splitlines(keepends=True)
+    b = revision.splitlines(keepends=True)
+    lines = list(difflib.unified_diff(a, b, fromfile="current", tofile="revision", lineterm=""))
+    if not lines:
+        return "[dim](identical to current version)[/dim]"
+    parts = []
+    for line in lines[:500]:
+        s = line.rstrip("\n")
+        if s.startswith(("+++", "---", "@@")):
+            parts.append(f"[dim]{escape(s)}[/dim]")
+        elif s.startswith("+"):
+            parts.append(f"[green]{escape(s)}[/green]")
+        elif s.startswith("-"):
+            parts.append(f"[red]{escape(s)}[/red]")
+        else:
+            parts.append(escape(s))
+    if len(lines) > 500:
+        parts.append("[dim]… diff truncated[/dim]")
+    return "\n".join(parts)
+
+
 # ── PostDetailModal ───────────────────────────────────────────────────────────
 
 
@@ -122,17 +146,18 @@ class PostDetailModal(ModalScreen[None]):
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
         Binding("f", "follow_link", "Follow link"),
+        Binding("h", "history", "History"),
     ]
 
     DEFAULT_CSS = f"""
     PostDetailModal {{
         align: center middle;
-        background: {SCREEN_BG};
+        background: {HEADER_BG};
     }}
     PostDetailModal > Vertical {{
         width: 92%;
         height: 92%;
-        background: {SCREEN_BG};
+        background: {HEADER_BG};
         border: solid {ACCENT};
         padding: 1 2;
     }}
@@ -281,6 +306,19 @@ class PostDetailModal(ModalScreen[None]):
         if event.button.id == "close-btn":
             self.dismiss()
 
+    def action_history(self) -> None:
+        def _on_done(restored: api.Post | None) -> None:
+            if restored is not None:
+                self._post = restored
+                self.query_one(".detail-content", Markdown).update(
+                    _linkify_markdown(restored.content, self._link_index)
+                )
+                try:
+                    self.app._reload()
+                except Exception:
+                    pass
+        self.app.push_screen(PostHistoryModal(self._post), _on_done)
+
 
 # ── LinkPickerModal ───────────────────────────────────────────────────────────
 
@@ -291,10 +329,10 @@ class LinkPickerModal(ModalScreen[int | None]):
     BINDINGS = [Binding("escape", "dismiss", "Cancel")]
 
     DEFAULT_CSS = f"""
-    LinkPickerModal {{ align: center middle; background: {SCREEN_BG}; }}
+    LinkPickerModal {{ align: center middle; background: {HEADER_BG}; }}
     LinkPickerModal > Vertical {{
         width: 64; max-width: 90%; height: auto; max-height: 80%;
-        background: {SCREEN_BG}; border: solid {ACCENT}; padding: 1 2;
+        background: {HEADER_BG}; border: solid {ACCENT}; padding: 1 2;
     }}
     LinkPickerModal .picker-title {{ text-style: bold; color: {ACCENT}; width: 1fr; }}
     LinkPickerModal Input {{ margin: 1 0; }}
@@ -847,6 +885,383 @@ class SearchModal(ModalScreen[str | None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value.strip() or "")
+
+
+# ── PostHistoryModal ──────────────────────────────────────────────────────────
+
+
+class PostHistoryModal(ModalScreen[api.Post | None]):
+    """Two-pane revision browser: list on the left, preview + diff on the right."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("r", "restore", "Restore"),
+        Binding("tab", "toggle_diff", "Body/Diff"),
+    ]
+
+    DEFAULT_CSS = f"""
+    PostHistoryModal {{
+        align: center middle;
+    }}
+    PostHistoryModal > Vertical {{
+        width: 95%;
+        height: 90%;
+        background: {HEADER_BG};
+        border: solid {ACCENT};
+    }}
+    PostHistoryModal .hist-title {{
+        color: {ACCENT};
+        text-style: bold;
+        height: 1;
+        padding: 0 1;
+        background: {BORDER};
+    }}
+    PostHistoryModal .hist-left {{
+        width: 40;
+        border-right: solid {BORDER};
+        height: 1fr;
+    }}
+    PostHistoryModal #rev-list {{
+        height: 1fr;
+        background: {HEADER_BG};
+        border: none;
+    }}
+    PostHistoryModal #rev-preview {{
+        width: 1fr;
+        height: 1fr;
+        padding: 0 1;
+        background: {HEADER_BG};
+    }}
+    PostHistoryModal #rev-body {{
+        width: 1fr;
+    }}
+    PostHistoryModal .hist-footer {{
+        height: 3;
+        border-top: solid {BORDER};
+        align: left middle;
+        padding: 0 2;
+    }}
+    PostHistoryModal .hist-hint {{
+        color: #888888;
+        width: 1fr;
+    }}
+    PostHistoryModal .hist-footer Button {{
+        margin-left: 1;
+    }}
+    """
+
+    def __init__(self, post: api.Post) -> None:
+        super().__init__()
+        self._post = post
+        self._revisions: list[api.Revision] = []
+        self._current_rev: api.RevisionContent | None = None
+        self._show_diff = False
+
+    def compose(self) -> ComposeResult:
+        title = self._post.title or f"#{self._post.id}"
+        with Vertical():
+            yield Label(
+                f" History — [bold]{escape(title)}[/bold]",
+                markup=True,
+                classes="hist-title",
+            )
+            with Horizontal():
+                with Vertical(classes="hist-left"):
+                    yield OptionList(id="rev-list")
+                with VerticalScroll(id="rev-preview"):
+                    yield Static("Loading…", id="rev-body", markup=True)
+            with Horizontal(classes="hist-footer"):
+                yield Label(
+                    "[dim]↑↓ select · tab body/diff · r restore · esc close[/dim]",
+                    markup=True,
+                    classes="hist-hint",
+                )
+                yield Button("Restore", id="restore-btn", variant="primary", disabled=True)
+
+    def on_mount(self) -> None:
+        self._load_history()
+
+    @work(thread=True)
+    def _load_history(self) -> None:
+        try:
+            revisions, _exists = api.get_post_history(self._post.id)
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.query_one("#rev-body", Static).update,
+                f"[red]Failed to load history: {escape(str(exc))}[/red]",
+            )
+            return
+        self._revisions = revisions
+        self.app.call_from_thread(self._populate_list, revisions)
+
+    def _populate_list(self, revisions: list[api.Revision]) -> None:
+        ol = self.query_one("#rev-list", OptionList)
+        ol.clear_options()
+        if not revisions:
+            self.query_one("#rev-body", Static).update("[dim]No history available.[/dim]")
+            return
+        for i, rev in enumerate(revisions):
+            msg = rev.message if len(rev.message) <= 36 else rev.message[:33] + "…"
+            badge = f"  [bold {ACCENT}]current[/]" if i == 0 else ""
+            label = (
+                f"[bold]{escape(msg)}[/bold]{badge}\n"
+                f"[dim]{rev.short_sha} · {_time_ago(rev.when)}[/dim]"
+            )
+            ol.add_option(Option(label, id=rev.sha))
+        ol.highlighted = 0
+        ol.focus()
+        self._load_revision(revisions[0].sha)
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        if event.option.id:
+            self._load_revision(event.option.id)
+
+    @work(thread=True)
+    def _load_revision(self, sha: str) -> None:
+        try:
+            rev = api.get_post_revision(self._post.id, sha)
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.query_one("#rev-body", Static).update,
+                f"[red]Failed: {escape(str(exc))}[/red]",
+            )
+            return
+        self._current_rev = rev
+        self.app.call_from_thread(self._refresh_preview)
+        self.app.call_from_thread(self._enable_restore)
+
+    def _enable_restore(self) -> None:
+        self.query_one("#restore-btn", Button).disabled = False
+
+    def _refresh_preview(self) -> None:
+        rev = self._current_rev
+        if rev is None:
+            return
+        body = self.query_one("#rev-body", Static)
+        if self._show_diff:
+            body.update(_line_diff(self._post.content, rev.content))
+        else:
+            tags_str = "  ".join(f"[{escape(t)}]" for t in rev.tags) if rev.tags else ""
+            header = (
+                f"[bold {ACCENT}]{escape(rev.title)}[/bold {ACCENT}]  "
+                f"[dim]{rev.short_sha} · {_time_ago(rev.when)}[/dim]\n"
+            )
+            if tags_str:
+                header += tags_str + "\n"
+            header += "\n"
+            body.update(header + escape(rev.content))
+
+    def action_toggle_diff(self) -> None:
+        self._show_diff = not self._show_diff
+        self._refresh_preview()
+
+    def action_restore(self) -> None:
+        rev = self._current_rev
+        if rev is None:
+            return
+
+        def _cb(ok: bool | None) -> None:
+            if ok:
+                self._do_restore(rev)
+
+        self.app.push_screen(ConfirmModal(f"Restore to {rev.short_sha}?"), _cb)
+
+    @work(thread=True)
+    def _do_restore(self, rev: api.RevisionContent) -> None:
+        try:
+            restored = api.restore_post(self._post.id, rev.sha)
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.app.notify, f"Restore failed: {exc}", severity="error"
+            )
+            return
+        self.app.call_from_thread(self.dismiss, restored)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "restore-btn":
+            self.action_restore()
+
+
+# ── DeletedPostsModal ─────────────────────────────────────────────────────────
+
+
+class DeletedPostsModal(ModalScreen[api.Post | None]):
+    """Browse deleted posts and restore them by their last restorable revision."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("r", "restore", "Restore"),
+    ]
+
+    DEFAULT_CSS = f"""
+    DeletedPostsModal {{
+        align: center middle;
+    }}
+    DeletedPostsModal > Vertical {{
+        width: 95%;
+        height: 90%;
+        background: {HEADER_BG};
+        border: solid {ACCENT};
+    }}
+    DeletedPostsModal .del-title {{
+        color: {ACCENT};
+        text-style: bold;
+        height: 1;
+        padding: 0 1;
+        background: {BORDER};
+    }}
+    DeletedPostsModal .del-left {{
+        width: 40;
+        border-right: solid {BORDER};
+        height: 1fr;
+    }}
+    DeletedPostsModal #del-list {{
+        height: 1fr;
+        background: {HEADER_BG};
+        border: none;
+    }}
+    DeletedPostsModal #del-preview {{
+        width: 1fr;
+        height: 1fr;
+        padding: 0 1;
+        background: {HEADER_BG};
+    }}
+    DeletedPostsModal #del-body {{
+        width: 1fr;
+    }}
+    DeletedPostsModal .del-footer {{
+        height: 3;
+        border-top: solid {BORDER};
+        align: left middle;
+        padding: 0 2;
+    }}
+    DeletedPostsModal .del-hint {{
+        color: #888888;
+        width: 1fr;
+    }}
+    DeletedPostsModal .del-footer Button {{
+        margin-left: 1;
+    }}
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._deleted: list[api.DeletedPost] = []
+        self._current: api.DeletedPost | None = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(" Recovery — Deleted Posts", classes="del-title")
+            with Horizontal():
+                with Vertical(classes="del-left"):
+                    yield OptionList(id="del-list")
+                with VerticalScroll(id="del-preview"):
+                    yield Static("Select a post to preview.", id="del-body", markup=True)
+            with Horizontal(classes="del-footer"):
+                yield Label(
+                    "[dim]↑↓ select · r restore · esc close[/dim]",
+                    markup=True,
+                    classes="del-hint",
+                )
+                yield Button("Restore", id="restore-btn", variant="primary", disabled=True)
+
+    def on_mount(self) -> None:
+        self._load()
+
+    @work(thread=True)
+    def _load(self) -> None:
+        try:
+            items = api.list_deleted_posts()
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.query_one("#del-body", Static).update,
+                f"[red]Failed to load: {escape(str(exc))}[/red]",
+            )
+            return
+        self._deleted = items
+        self.app.call_from_thread(self._populate, items)
+
+    def _populate(self, items: list[api.DeletedPost]) -> None:
+        ol = self.query_one("#del-list", OptionList)
+        ol.clear_options()
+        if not items:
+            self.query_one("#del-body", Static).update("[dim]Nothing to recover.[/dim]")
+            return
+        reason_colors = {"deleted": ACCENT, "external": "yellow", "expiry": "dim"}
+        for d in items:
+            title = d.title if len(d.title) <= 28 else d.title[:25] + "…"
+            rc = reason_colors.get(d.reason, "dim")
+            label = (
+                f"[bold {ACCENT}]#{d.id}[/]  {escape(title)}\n"
+                f"[{rc}]{d.reason}[/]  [dim]{d.short_sha} · {_time_ago(d.when)}[/dim]"
+            )
+            ol.add_option(Option(label, id=str(d.id)))
+        ol.highlighted = 0
+        ol.focus()
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        if not event.option.id:
+            return
+        try:
+            post_id = int(event.option.id)
+        except ValueError:
+            return
+        d = next((x for x in self._deleted if x.id == post_id), None)
+        if d:
+            self._current = d
+            self._load_preview(d)
+
+    @work(thread=True)
+    def _load_preview(self, d: api.DeletedPost) -> None:
+        try:
+            rev = api.get_post_revision(d.id, d.sha)
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.query_one("#del-body", Static).update,
+                f"[red]Failed to load preview: {escape(str(exc))}[/red]",
+            )
+            return
+        tags_str = "  ".join(f"[{escape(t)}]" for t in rev.tags) if rev.tags else ""
+        header = (
+            f"[bold {ACCENT}]{escape(rev.title)}[/bold {ACCENT}]  "
+            f"[dim]#{d.id} · {d.short_sha} · {_time_ago(d.when)}[/dim]\n"
+        )
+        if tags_str:
+            header += tags_str + "\n"
+        header += "\n"
+        self.app.call_from_thread(
+            self.query_one("#del-body", Static).update, header + escape(rev.content)
+        )
+        self.app.call_from_thread(self._enable_restore)
+
+    def _enable_restore(self) -> None:
+        self.query_one("#restore-btn", Button).disabled = False
+
+    def action_restore(self) -> None:
+        d = self._current
+        if d is None:
+            return
+
+        def _cb(ok: bool | None) -> None:
+            if ok:
+                self._do_restore(d)
+
+        self.app.push_screen(ConfirmModal(f"Restore post #{d.id}?"), _cb)
+
+    @work(thread=True)
+    def _do_restore(self, d: api.DeletedPost) -> None:
+        try:
+            restored = api.restore_post(d.id, d.sha)
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.app.notify, f"Restore failed: {exc}", severity="error"
+            )
+            return
+        self.app.call_from_thread(self.dismiss, restored)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "restore-btn":
+            self.action_restore()
 
 
 # ── AttachmentsModal ──────────────────────────────────────────────────────────

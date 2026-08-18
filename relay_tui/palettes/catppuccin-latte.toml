@@ -1,0 +1,17 @@
+# Catppuccin Latte
+# Matches the "Catppuccin Latte" theme from the web UI.
+# Light theme — bg/surface are near-white.
+# Select with: RELAY_PALETTE=catppuccin-latte
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#8839ef"   # mauve       — accent / interactive
+border  = "#ccd0da"   # surface0    — widget borders, badges, panel separators
+bg      = "#e6e9ef"   # mantle      — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#40a02b"  # green   — success / far-future expiry
+perf_good     = "#40a02b"
+perf_flat     = "#8839ef"  # mauve
+perf_bad      = "#df8e1d"  # yellow  — warning / expiry within 3 days
+perf_poor     = "#d20f39"  # red
+perf_terrible = "#d20f39"  # red     — error / expired / expiry within 24h

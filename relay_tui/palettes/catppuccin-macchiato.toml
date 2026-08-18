@@ -1,0 +1,17 @@
+# Catppuccin Macchiato
+# Matches the "Catppuccin Macchiato" theme from the web UI.
+# Accent is blue — Macchiato's signature choice in the relay port.
+# Select with: RELAY_PALETTE=catppuccin-macchiato
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#8aadf4"   # blue     — accent / interactive
+border  = "#363a4f"   # surface0 — widget borders, badges, panel separators
+bg      = "#1e2030"   # mantle   — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#a6da95"  # green   — success / far-future expiry
+perf_good     = "#a6da95"
+perf_flat     = "#8aadf4"  # blue
+perf_bad      = "#eed49f"  # yellow  — warning / expiry within 3 days
+perf_poor     = "#ed8796"  # red
+perf_terrible = "#ed8796"  # red     — error / expired / expiry within 24h

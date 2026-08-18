@@ -1,0 +1,16 @@
+# Tokyo Night
+# Matches the "Tokyo Night" theme from the web UI.
+# Select with: RELAY_PALETTE=tokyo-night
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#7aa2f7"   # blue        — accent / interactive
+border  = "#3b4261"   # fg_gutter   — widget borders, badges, panel separators
+bg      = "#16161e"   # bg_dark     — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#9ece6a"  # green   — success / far-future expiry
+perf_good     = "#9ece6a"
+perf_flat     = "#7aa2f7"  # blue
+perf_bad      = "#e0af68"  # yellow  — warning / expiry within 3 days
+perf_poor     = "#f7768e"  # red
+perf_terrible = "#f7768e"  # red     — error / expired / expiry within 24h

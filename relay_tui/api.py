@@ -50,6 +50,38 @@ class Attachment:
     ref: str
 
 
+@dataclass
+class Revision:
+    sha: str
+    short_sha: str
+    when: str
+    message: str
+    path: str
+
+
+@dataclass
+class RevisionContent:
+    sha: str
+    short_sha: str
+    when: str
+    message: str
+    title: str
+    content: str
+    tags: list[str]
+    source: str | None
+
+
+@dataclass
+class DeletedPost:
+    id: int
+    title: str
+    sha: str
+    short_sha: str
+    when: str
+    reason: str  # "deleted" | "external" | "expiry"
+    path: str
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -251,3 +283,82 @@ def set_tag_config(
         timeout=10,
     )
     resp.raise_for_status()
+
+
+def get_post_history(post_id: int, limit: int = 20) -> tuple[list[Revision], bool]:
+    resp = requests.get(
+        f"{_base()}/posts/{post_id}/history",
+        headers=_headers(),
+        params={"limit": limit},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    revisions = [
+        Revision(
+            sha=r["sha"],
+            short_sha=r["short_sha"],
+            when=r["when"],
+            message=r["message"],
+            path=r["path"],
+        )
+        for r in data.get("items", [])
+    ]
+    return revisions, data.get("exists", True)
+
+
+def get_post_revision(post_id: int, sha: str) -> RevisionContent:
+    resp = requests.get(
+        f"{_base()}/posts/{post_id}/history/{sha}",
+        headers=_headers(),
+        timeout=10,
+    )
+    resp.raise_for_status()
+    d = resp.json()
+    return RevisionContent(
+        sha=d["sha"],
+        short_sha=d["short_sha"],
+        when=d["when"],
+        message=d["message"],
+        title=d["title"],
+        content=d.get("content", ""),
+        tags=d.get("tags", []),
+        source=d.get("source"),
+    )
+
+
+def restore_post(post_id: int, sha: str) -> Post:
+    resp = requests.post(
+        f"{_base()}/posts/{post_id}/restore",
+        headers=_headers(),
+        json={"sha": sha},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return Post.from_dict(resp.json())
+
+
+def list_deleted_posts(limit: int = 50, include_expiry: bool = False) -> list[DeletedPost]:
+    params: dict[str, object] = {"limit": limit}
+    if include_expiry:
+        params["include_expiry"] = "true"
+    resp = requests.get(
+        f"{_base()}/posts/deleted",
+        headers=_headers(),
+        params=params,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return [
+        DeletedPost(
+            id=i["id"],
+            title=i["title"],
+            sha=i["sha"],
+            short_sha=i["short_sha"],
+            when=i["when"],
+            reason=i["reason"],
+            path=i["path"],
+        )
+        for i in data.get("items", [])
+    ]

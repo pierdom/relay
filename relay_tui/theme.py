@@ -46,19 +46,6 @@ ACCENT    = _c("primary", "#f59e0b")
 BORDER    = _c("border",  "#92400e")
 HEADER_BG = _c("bg",      "#1c1007")
 
-# When RELAY_TRANSPARENT is set, the base canvas (Screen, header, footer,
-# scrollbars) uses the terminal's default background (ANSI 49) instead of the
-# palette's solid colour, so terminal transparency / background images show
-# through.  HEADER_BG itself stays a real colour — it's also used as a
-# foreground (e.g. dark text on accent) and for modals, which must remain opaque.
-def _transparent() -> bool:
-    from relay.config import settings
-    return settings.relay_transparent
-
-
-TRANSPARENT = _transparent()
-SCREEN_BG   = "ansi_default" if TRANSPARENT else HEADER_BG
-
 BAR_LOW  = _c("bar_low",  "bright_green")
 BAR_MID  = _c("bar_mid",  "yellow")
 BAR_HIGH = _c("bar_high", "bright_red")

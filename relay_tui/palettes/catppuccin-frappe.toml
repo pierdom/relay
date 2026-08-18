@@ -1,0 +1,17 @@
+# Catppuccin Frappé
+# Matches the "Catppuccin Frappé" theme from the web UI.
+# Accent is peach — Frappé's signature choice in the relay port.
+# Select with: RELAY_PALETTE=catppuccin-frappe
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#ef9f76"   # peach    — accent / interactive
+border  = "#414559"   # surface0 — widget borders, badges, panel separators
+bg      = "#292c3c"   # mantle   — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#a6d189"  # green   — success / far-future expiry
+perf_good     = "#a6d189"
+perf_flat     = "#ef9f76"  # peach
+perf_bad      = "#e5c890"  # yellow  — warning / expiry within 3 days
+perf_poor     = "#e78284"  # red
+perf_terrible = "#e78284"  # red     — error / expired / expiry within 24h

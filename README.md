@@ -16,45 +16,32 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![MCP](https://img.shields.io/badge/MCP-server-6E56CF?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io)
 
-**An AI-integration layer over a plain-Markdown, Obsidian-compatible vault.**
+**A shared knowledge base for humans and AI agents — plain Markdown, Obsidian-compatible, real-time.**
 
 </div>
 
-Your knowledge base lives as ordinary `.md` files on disk — browse it in Obsidian, `grep` it, git-version it, or open it in any editor. relay wraps that same vault with what AI systems need: an **MCP server**, a **REST API**, a real-time **SSE** stream, and **browser + terminal UIs**. Agents and humans share one store, not two.
+Your notes live as ordinary `.md` files on disk. Browse them in Obsidian, `grep` them, edit them in nvim — relay wraps that same vault with a **REST API**, an **MCP server**, and a real-time **SSE** stream so AI agents can read, write, and subscribe alongside you. Every write is committed to git, so nothing is ever unrecoverable.
 
 <div align="center">
 
-<img src="docs/screenshots/ui.png" width="49%" alt="Browser UI"> <img src="docs/screenshots/tui.png" width="49%" alt="Terminal UI — nord palette">
+<img src="docs/screenshots/ui.png" width="49%" alt="Browser UI"> <img src="docs/screenshots/tui.png" width="49%" alt="Terminal UI">
 
-<sub>Browser UI &nbsp;·&nbsp; Terminal UI (nord palette — also ships dracula, gruvbox, solarized, molokai and more)</sub>
+<sub>Browser UI &nbsp;·&nbsp; Terminal UI (nord palette)</sub>
 
 </div>
-
-## Use cases
-
-- **Knowledge base** — one agent writes a research note; another reads it back to inform its next action
-- **Live digest** — a scheduled agent publishes a daily news digest; a browser tab or terminal shows it the moment it arrives
-- **Agent memory** — agents store and update working notes as tagged posts, retrieved by tag or folder
-- **Audit log** — every agent action gets POSTed as a structured entry; humans review the feed at leisure
 
 ## How it works
 
 ```
-                    ┌─────────────────────────────────────────┐
-   agent A ──MCP──► │                                         │ ──SSE push──► browser / TUI
-   agent B ──REST─► │      relay        Markdown vault        │               (live)
-   agent C ──MCP──► │   (API · index)  ── .md files on disk ──│ ◄──GET /posts─ client
-                    │                   git history           │               reconnecting
-                    └─────────────────────────────────────────┘               (Last-Event-ID
-                                    ▲                                          replay)
-                                    │
-                        you, in Obsidian / nvim / grep
-                     (watchdog picks the edit up and streams it)
+   agent A ──MCP──►  ┌────────────────────────────────────────┐
+   agent B ──REST──► │  relay (API + index)   .md files + git │ ──SSE──► browser / TUI
+   agent C ──MCP──►  └────────────────────────────────────────┘          (live push)
+                                      ▲
+                          you, in Obsidian / nvim
+                       (watchdog picks edits up and re-indexes)
 ```
 
-**Files are the source of truth.** The SQLite index is disposable and rebuilt
-from them at startup; every write is also committed to a git repo inside the
-vault, so a clobbered post is recoverable.
+Files are the source of truth. The SQLite index is disposable and rebuilt at startup. Every write is committed to a git history inside the vault, so posts can be restored — from the UI, the TUI, or the MCP tools — even after deletion.
 
 ## Quick start
 
@@ -63,41 +50,59 @@ cp .env.example .env   # set API_KEY to a strong secret
 uv run python -m uvicorn relay.main:app --reload
 ```
 
-Or with Docker (pre-built image from GHCR):
+Or with Docker:
 
 ```bash
 docker compose up -d
-docker compose pull && docker compose up -d   # update within the pinned 0.8.x line
+docker compose pull && docker compose up -d   # update
 ```
 
-The compose file pins `ghcr.io/pierdom/relay:0.8` (the 0.8 minor line) so updates are deliberate and rollback-able; pin an exact `:0.8.N` to freeze a version. **A minor bump moves the tag line**, so an existing deployment pinned to `:0.7` keeps serving 0.7.x until its own compose file is moved to `:0.8` — `docker compose pull` alone is a no-op across a minor. Every `vX.Y.Z` git tag publishes `:X.Y.Z` and `:X.Y` to GHCR.
+Service on `http://localhost:8000` — interactive docs at `/docs`. See [docs/setup.md](docs/setup.md) for configuration, OIDC login, and MCP OAuth.
 
-Service on `http://localhost:8000` — interactive docs at `/docs`.
+## Sample vault
 
-## Try the sample vault
-
-`sample_vault/` contains 8 posts across 5 folders demonstrating `[[wikilink]]` cross-linking, auto-expiring digests, the Inbox staging area, and a filled-out Master Document:
+`sample_vault/` has 8 posts across 5 folders with `[[wikilinks]]`, auto-expiring digests, and a filled-out Master Document:
 
 ```bash
 RELAY_VAULT_PATH=./sample_vault uv run python -m uvicorn relay.main:app --reload
 ```
 
-Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the workflow it demonstrates — adapt it to your own needs.
+Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the patterns it demonstrates.
+
+## How I use it
+
+relay runs on a **VPS** behind a reverse proxy ([Nginx Proxy Manager](https://nginxproxymanager.com/) handles TLS), reachable at a public URL. Authentication is via [PocketID](https://github.com/stonith404/pocket-id) (any OIDC provider works — [Authelia](https://www.authelia.com/) is another good option). This is what makes Claude.ai's remote MCP connector work: it authenticates against the OIDC provider through the OAuth 2.1 gate relay exposes at `/mcp`.
+
+The **vault** lives on the VPS, mirrored to a local desktop copy via [Syncthing](https://syncthing.net/). [Obsidian](https://obsidian.md/) points to the local copy — all editing is offline. A save in Obsidian propagates to the server in seconds; relay's watchdog picks it up, re-indexes the file, and pushes the change via SSE to every connected client immediately.
+
+Day-to-day: I use the **web UI on my phone** for quick reads and notes on the go. On the desktop I use **Obsidian** for longer writing. A handful of AI agents run on a schedule — pulling news digests, finance summaries, and other feeds — and publish their output to relay via MCP, using it as a live bulletin board. The **terminal UI** (`relay-tui`) runs on the desktop as a real-time dashboard, following the SSE stream as updates land.
+
+```
+  Obsidian (desktop) ──Syncthing──► VPS vault ◄──MCP── AI agents (news, finance…)
+                                        │
+                           watchdog re-indexes + SSE push
+                                        │
+                         ┌─────────────┼──────────────┐
+                      web UI        relay-tui       Claude.ai
+                     (phone)       (dashboard)    (remote MCP)
+```
 
 ## Interfaces
 
-**Browser UI** (`GET /ui`) — live SSE feed, compose/edit forms, attachment gallery, tag/folder/search filters, and `[[wikilink]]` cross-references. A post's history panel diffs any revision against the post as it stands, and the status panel's Recovery section finds posts that are *gone* and puts them back — which needs no id, the thing you never have after a delete. Fifteen themes — Relay Dark/Light plus ANSI, Catppuccin, Dracula, Everforest, Gruvbox, Molokai, Nord and Tokyo Night — all off one token layer, each a single block of variable overrides. On a phone every modal is a bottom sheet you can pull down to dismiss.
+**Browser UI** (`GET /ui`) — live feed with compose/edit forms, tag and folder filters, `[[wikilink]]` cross-references, attachment gallery, and fifteen themes. The history panel diffs any revision against the current post; the status panel's Recovery section finds and restores deleted posts. On mobile every modal is a bottom sheet.
 
-**Terminal UI** (`uv run relay-tui`) — keyboard-driven two-panel split: TOPICS sidebar + FEED list (`n` new, `e` edit, `d` delete, `Enter` view, `/` search, `q` quit). Set `RELAY_PALETTE` to match your terminal — themes include `nord`, `dracula`, `gruvbox`, `solarized`, `molokai`, and more.
+**Terminal UI** (`uv run relay-tui`) — keyboard-driven split: TOPICS sidebar + FEED list. `n`/`e`/`d` new/edit/delete, `Enter` view (with `h` for history), `/` search, `v` recovery, `q` quit. Set `RELAY_PALETTE` to match your terminal. See [docs/tui.md](docs/tui.md).
 
-**MCP server** — 19 MCP tools over Streamable HTTP (`/mcp`) or the legacy stdio proxy, including listing what was deleted, reading any revision, and restoring it. See [docs/mcp.md](docs/mcp.md).
+**MCP server** — 19 tools over Streamable HTTP at `/mcp` (or the legacy stdio proxy), covering full CRUD, history, restoration, and attachment management. See [docs/mcp.md](docs/mcp.md).
+
+**REST API** — every capability is also a plain HTTP endpoint. See [docs/api.md](docs/api.md).
 
 ## Development
 
 ```bash
 uv sync --all-extras --dev   # install (uv only — never pip)
 uv run pytest -q             # 419 tests (incl. 111 browser smokes)
-uv run ruff check .          # lint (config in pyproject.toml)
+uv run ruff check .          # lint
 ```
 
 Both run on every push and pull request via [`tests.yml`](.github/workflows/tests.yml).
@@ -109,14 +114,15 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 | Installation, configuration, OIDC, MCP OAuth | [docs/setup.md](docs/setup.md) |
 | REST API reference | [docs/api.md](docs/api.md) |
 | MCP tools and connection | [docs/mcp.md](docs/mcp.md) |
+| Terminal UI — keybindings, palettes, transparency | [docs/tui.md](docs/tui.md) |
 | Best practices: Master Document, tags, agents | [docs/usage.md](docs/usage.md) |
 | Recovering an overwritten or deleted post | [docs/recovery.md](docs/recovery.md) |
 
-## Stack
+## Technologies
 
-- **Python 3.13** + **FastAPI**
-- **Markdown vault** (files = source of truth) + disposable **aiosqlite** index with FTS5 search
-- **git** for vault history — a commit per write, so any post can be restored (degrades to a warning if the binary is absent)
-- **watchdog** for live external-edit pickup; **PyYAML** for front-matter
-- **SSE** via [sse-starlette](https://github.com/sysid/sse-starlette) · **Textual** for the TUI
-- **MCP** (Streamable HTTP + stdio proxy) · **uv** · **Docker**
+- **Python 3.13** + **FastAPI** + **aiosqlite** (FTS5 search) + **PyYAML**
+- **Markdown vault** — files are source of truth; SQLite index is disposable
+- **git** — a commit per write; any post is recoverable even after deletion
+- **watchdog** — live re-index of external edits (Obsidian, nvim)
+- **SSE** via [sse-starlette](https://github.com/sysid/sse-starlette); **Textual** for the TUI
+- **MCP** (Streamable HTTP + stdio proxy); **uv**; **Docker**

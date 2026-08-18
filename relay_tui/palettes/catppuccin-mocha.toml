@@ -1,0 +1,17 @@
+# Catppuccin Mocha
+# Matches the "Catppuccin Mocha" theme from the web UI.
+# Deepest Catppuccin flavour; accent is mauve (the canonical default).
+# Select with: RELAY_PALETTE=catppuccin-mocha
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#cba6f7"   # mauve    — accent / interactive
+border  = "#313244"   # surface0 — widget borders, badges, panel separators
+bg      = "#11111b"   # crust    — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#a6e3a1"  # green   — success / far-future expiry
+perf_good     = "#a6e3a1"
+perf_flat     = "#cba6f7"  # mauve
+perf_bad      = "#f9e2af"  # yellow  — warning / expiry within 3 days
+perf_poor     = "#f38ba8"  # red
+perf_terrible = "#f38ba8"  # red     — error / expired / expiry within 24h
