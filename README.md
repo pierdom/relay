@@ -26,19 +26,19 @@ Your notes live as ordinary `.md` files on disk. Browse them in Obsidian, `grep`
 
 <img src="docs/screenshots/ui.png" width="49%" alt="Browser UI"> <img src="docs/screenshots/tui.png" width="49%" alt="Terminal UI">
 
-<sub>Browser UI &nbsp;·&nbsp; Terminal UI (nord palette)</sub>
+<sub>Browser UI and Terminal UI &nbsp;·&nbsp; both support themes</sub>
 
 </div>
 
 ## How it works
 
 ```
-   agent A ──MCP──►  ┌────────────────────────────────────────┐
-   agent B ──REST──► │  relay (API + index)   .md files + git │ ──SSE──► browser / TUI
+   agent A ──MCP──►  ┌────────────────────────────────────────┐ ──REST─► agent D 
+   agent B ──REST─►  │  relay (API + index)   .md files + git │ ──SSE──► browser / TUI
    agent C ──MCP──►  └────────────────────────────────────────┘          (live push)
                                       ▲
-                          you, in Obsidian / nvim
-                       (watchdog picks edits up and re-indexes)
+                you, in Obsidian / nvim or in the included web UI
+                    (watchdog picks edits up and re-indexes)
 ```
 
 Files are the source of truth. The SQLite index is disposable and rebuilt at startup. Every write is committed to a git history inside the vault, so posts can be restored — from the UI, the TUI, or the MCP tools — even after deletion.
@@ -82,10 +82,12 @@ Day-to-day: I use the **web UI on my phone** for quick reads and notes on the go
                                         │
                            watchdog re-indexes + SSE push
                                         │
-                         ┌─────────────┼──────────────┐
-                      web UI        relay-tui       Claude.ai
-                     (phone)       (dashboard)    (remote MCP)
+                          ┌─────────────┼──────────────┐
+                       web UI        relay-tui       Claude.ai
+                      (phone)       (dashboard)    (remote MCP)
 ```
+
+The Syncthing part can be completely removed if you just interact with the server via the Web UI or the TUI (they are rather feature rich anyway, search included) and don't need a different editor like Obsidian.
 
 ## Interfaces
 
