@@ -604,6 +604,88 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
 }
 
+/* Solarized Dark / Solarized Light (Ethan Schoonover). Both draw only from the
+   official 8-tone base scale (base03…base3) plus the 8 accent hues — nothing
+   mixed in — but the scale is *reassigned*, not read off in its canonical
+   roles.
+
+   Solarized's own prose colour is base0 on dark / base00 on light, and both
+   sit below this project's 7:1 accessibility floor (4.75:1 and 4.13:1 against
+   the surfaces below) — that low contrast is the palette's whole design
+   thesis, not an oversight, but it fails the floor here regardless. So `--body`
+   and `--text` are promoted to the scale's brighter step — base2/base3 on
+   dark, base02/base03 on light — the "background highlight" tones in the
+   official spec, repurposed as foreground. Still nothing outside the 8 tones;
+   it clears the house target outright (10.6:1 / 12.1:1 body), so unlike the
+   Catppuccin flavours this needed no entry in REPRODUCTIONS.
+
+   `--accent` is the signature blue. `--on-accent` is plain black rather than
+   base03 — base03-on-blue is 4.08:1, under the floor; black reaches 5.71:1,
+   which also holds for the light block below since the accent is unchanged.
+   `--accent-2`/`--accent-3` fall back to `--text`, the same move Catppuccin
+   Latte makes: every Solarized accent lands under AA as chip text on its own
+   10% tint (orange, the best, reaches 3.75), so two illegible colourful chips
+   are not worth shipping over one legible flat one. */
+:root[data-theme="solarized-dark"], [data-theme="solarized-dark"] {
+  color-scheme: dark;
+  --bg:          #002b36;   /* base03 */
+  --surface:     #073642;   /* base02 — background highlights, raised over base03 */
+  --border:      #586e75;   /* base01 — "comments", the palette's only mid-grey */
+  --text:        #fdf6e3;   /* base3 — promoted; see block note */
+  --muted:       #657b83;   /* base00 */
+  --accent:      #268bd2;   /* blue */
+  --accent-dim:  #1b6497;   /* blue, darkened — Solarized has one step per hue */
+  --accent-glow: rgba(38, 139, 210, 0.10);
+  --tag-bg:      #093d4e;
+  --tag-active:  #0d455c;
+  --green:       #859900;
+  --red:         #dc322f;
+  --body:        #eee8d5;   /* base2 — promoted; see block note */
+  --body-strong: #fdf6e3;   /* base3 */
+  --wash-raise:  rgba(253, 246, 227, 0.03);
+
+  --accent-2:      #fdf6e3;   /* text — no Solarized accent clears AA as a chip */
+  --accent-3:      #fdf6e3;   /* text — see block note */
+  --on-accent:     #000;      /* 5.71:1 on #268bd2 — base03 only reaches 4.08:1 */
+  --on-scrim:      #fdf6e3;
+  --border-hover:  #819090;
+  --scrim-rgb:     0, 43, 54;   /* base03 */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.40);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.40);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+
+:root[data-theme="solarized-light"], [data-theme="solarized-light"] {
+  color-scheme: light;
+  --bg:          #eee8d5;   /* base2 */
+  --surface:     #fdf6e3;   /* base3 — the lightest tone, cards at the ceiling */
+  --border:      #586e75;   /* base01 — same value as Dark; Solarized reuses it as-is */
+  --text:        #002b36;   /* base03 — promoted; see block note */
+  --muted:       #657b83;   /* base00 — the palette's own "body text on light" role */
+  --accent:      #268bd2;   /* blue */
+  --accent-dim:  #1b6497;   /* blue, darkened */
+  --accent-glow: rgba(38, 139, 210, 0.10);
+  --tag-bg:      #ecede2;
+  --tag-active:  #d6e3e0;
+  --green:       #859900;
+  --red:         #dc322f;
+  --body:        #073642;   /* base02 — promoted; see block note */
+  --body-strong: #002b36;   /* base03 */
+  --wash-raise:  rgba(0, 43, 54, 0.03);
+
+  --accent-2:      #002b36;   /* text — no Solarized accent clears AA as a chip */
+  --accent-3:      #002b36;   /* text — see block note */
+  --on-accent:     #000;      /* 5.71:1 on #268bd2, same accent as Dark */
+  --on-scrim:      #fdf6e3;
+  --border-hover:  #466168;
+  --scrim-rgb:     0, 43, 54;   /* base03, matching --text like Gruvbox Light does */
+  --shadow-card:   0 4px 16px rgba(0, 0, 0, 0.12);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.14);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.18);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.16);
+}
+
 html { color: var(--text); }   /* see note in tests/test_css_tokens.py */
 
 body {

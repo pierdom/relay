@@ -91,7 +91,7 @@ The Syncthing part can be completely removed if you just interact with the serve
 
 ## Interfaces
 
-**Browser UI** (`GET /ui`) — live feed with compose/edit forms, tag and folder filters, `[[wikilink]]` cross-references, attachment gallery, and fifteen themes. The history panel diffs any revision against the current post; the status panel's Recovery section finds and restores deleted posts. On mobile every modal is a bottom sheet.
+**Browser UI** (`GET /ui`) — live feed with compose/edit forms, tag and folder filters, `[[wikilink]]` cross-references, attachment gallery, and seventeen themes. The history panel diffs any revision against the current post; the status panel's Recovery section finds and restores deleted posts. On mobile every modal is a bottom sheet.
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven split: TOPICS sidebar + FEED list. `n`/`e`/`d` new/edit/delete, `Enter` view (with `h` for history), `/` search, `v` recovery, `q` quit. Set `RELAY_PALETTE` to match your terminal. See [docs/tui.md](docs/tui.md).
 
