@@ -295,6 +295,21 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
    Frappé cannot be pushed the other way to widen the spread further: on
    `surface0` its text falls to 6.2:1, under the accessibility floor.
 
+   **The decorative chips had the same problem one layer down.** `--accent-2`/
+   `--accent-3` leaned on the same three hues as the accents themselves — peach
+   appeared in all three flavours, mauve and teal in two — so a flavour's chips
+   often just echoed a sibling's identity colour instead of having their own.
+   Every dark flavour's full accent-eligible set (all fourteen members, `--red`/
+   `--green` excluded as semantic) was ranked by contrast against its own
+   surface: the lower the number, the less pastel it reads at that flavour's
+   darkness. Frappé's own ceiling *is* peach/mauve/teal — its next-best options
+   score worse — so only the mauve echo was worth removing there, to sapphire,
+   at essentially no cost (5.60:1 → 6.25:1). Macchiato and Mocha both had real
+   headroom: peach was replacing genuinely punchier maroon in both (7.62:1 →
+   6.80:1; 9.92:1 → 8.49:1), and Mocha's teal gave way to sky for the same
+   reason (11.79:1 → 11.29:1). Every replacement still clears the 4.5:1 chip
+   floor with margin — the tightest is Frappé's new sapphire at 5.13:1.
+
    Latte is the exception, and the reason is worth recording because it is a
    fact about the palette rather than a choice. Measured as chip text on Latte's
    own base, **every one of its fourteen accent members lands under AA** — best
@@ -359,7 +374,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #c6d0f5;     /* text */
   --wash-raise:  rgba(198, 208, 245, 0.05);
 
-  --accent-2:    #ca9ee6;     /* mauve */
+  --accent-2:    #85c1dc;     /* sapphire — was mauve, which just echoed Mocha's accent */
   --accent-3:    #81c8be;     /* teal */
   --on-accent:     #232634;
   --on-scrim:      #c6d0f5;
@@ -389,7 +404,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #cad3f5;     /* text */
   --wash-raise:  rgba(202, 211, 245, 0.05);
 
-  --accent-2:    #f5a97f;     /* peach */
+  --accent-2:    #ee99a0;     /* maroon — was peach, which just echoed Frappé's accent */
   --accent-3:    #c6a0f6;     /* mauve */
   --on-accent:     #181926;
   --on-scrim:      #cad3f5;
@@ -419,8 +434,8 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --body-strong: #cdd6f4;     /* text */
   --wash-raise:  rgba(205, 214, 244, 0.05);
 
-  --accent-2:    #fab387;     /* peach */
-  --accent-3:    #94e2d5;     /* teal */
+  --accent-2:    #eba0ac;     /* maroon — was peach, which just echoed Frappé's accent */
+  --accent-3:    #89dceb;     /* sky — was teal, which just echoed Frappé's accent-3 */
   --on-accent:     #11111b;
   --on-scrim:      #cdd6f4;
   --border-hover:  #585b70;     /* surface2 */
