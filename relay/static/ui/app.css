@@ -155,7 +155,15 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
    UI colour and using it here was a mis-mapping that cost 3.7 points of
    contrast. And the canvas drops to `bg_dark` so cards sit on the theme's
    signature `bg` rather than on storm's lighter panel tone. Together those took
-   prose from 6.9:1 to 10.6:1 — see the contrast rule in tests/test_css_tokens.py. */
+   prose from 6.9:1 to 10.6:1 — see the contrast rule in tests/test_css_tokens.py.
+
+   `--accent` was `blue` (#7aa2f7) — 89% saturation, but at 72% lightness, which
+   reads as pastel next to this surface (6.8:1) no matter how saturated the hue
+   is. `blue2` keeps the same 89% saturation at 45% lightness instead: still
+   inside the reference palette, same family as `blue`/`blue0`, but it actually
+   registers as accent rather than tint (7.3:1). `--accent-dim` follows it to
+   `green2`, the palette's own hue-neighbour of `blue2` (188° vs 189°) rather
+   than staying on `blue0`, whose 223° no longer sits next to the new accent. */
 :root[data-theme="tokyo-night"], [data-theme="tokyo-night"] {
   color-scheme: dark;
   --bg:          #16161e;   /* bg_dark — the palette's darker canvas */
@@ -163,9 +171,9 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --border:      #3b4261;   /* fg_gutter */
   --text:        #c0caf5;   /* fg */
   --muted:       #565f89;   /* comment */
-  --accent:      #7aa2f7;   /* blue */
-  --accent-dim:  #3d59a1;   /* blue0 */
-  --accent-glow: rgba(122, 162, 247, 0.10);
+  --accent:      #0db9d7;   /* blue2 — see block note on why not the pastel `blue` */
+  --accent-dim:  #41a6b5;   /* green2 — blue2's hue-neighbour, not blue0 */
+  --accent-glow: rgba(13, 185, 215, 0.10);
   --tag-bg:      #24283b;   /* storm bg */
   --tag-active:  #414868;   /* terminal_black */
   --green:       #9ece6a;
@@ -176,7 +184,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
 
   --accent-2:      #bb9af7;   /* magenta */
   --accent-3:      #7dcfff;   /* cyan */
-  --on-accent:     #1a1b26;   /* 6.8:1 on #7aa2f7 — the accent is a light blue */
+  --on-accent:     #1a1b26;   /* 7.3:1 on #0db9d7 */
   --on-scrim:      #c0caf5;
   --border-hover:  #545c7e;   /* dark3 */
   --scrim-rgb:     22, 22, 30;   /* bg_dark #16161e */
