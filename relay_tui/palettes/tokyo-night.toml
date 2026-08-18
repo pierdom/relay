@@ -1,16 +1,23 @@
 # Tokyo Night
 # Matches the "Tokyo Night" theme from the web UI.
 # Select with: RELAY_PALETTE=tokyo-night
+#
+# Accent is blue2, not the reference palette's `blue`: at 89% saturation but
+# 72% lightness, `blue` (#7aa2f7) read as pastel next to this background
+# regardless of hue. blue2 keeps the same saturation at 45% lightness instead
+# — still the reference palette, same family as blue/blue0 — so it actually
+# registers as accent rather than tint. See app.css's Tokyo Night block for
+# the full rationale and contrast numbers.
 
 # ── Core ──────────────────────────────────────────────────────────────────────
-primary = "#7aa2f7"   # blue        — accent / interactive
+primary = "#0db9d7"   # blue2       — accent / interactive
 border  = "#3b4261"   # fg_gutter   — widget borders, badges, panel separators
 bg      = "#16161e"   # bg_dark     — screen, header, footer background
 
 # ── Semantic colours ───────────────────────────────────────────────────────────
 perf_great    = "#9ece6a"  # green   — success / far-future expiry
 perf_good     = "#9ece6a"
-perf_flat     = "#7aa2f7"  # blue
+perf_flat     = "#0db9d7"  # blue2
 perf_bad      = "#e0af68"  # yellow  — warning / expiry within 3 days
 perf_poor     = "#f7768e"  # red
 perf_terrible = "#f7768e"  # red     — error / expired / expiry within 24h
