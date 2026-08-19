@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import os
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -38,6 +39,13 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
+    if _concurrency > 1:
+        raise RuntimeError(
+            f"relay requires a single worker process (WEB_CONCURRENCY={_concurrency}). "
+            "Multiple workers corrupt upload-slot state and id allocation. "
+            "See docs/setup.md."
+        )
     app_status.mark_started()
     await init_db()
     # Presigned upload slots are in-memory + disk-staged; any bytes left in the

@@ -21,6 +21,16 @@ You want to connect from Claude on your phone, Claude.ai in a browser, or share 
 - **Python 3.13** + [uv](https://docs.astral.sh/uv/) — local path
 - **Docker** + **Docker Compose** — container path
 
+## Deployment constraint: single worker
+
+**relay must run as a single process.** Two things break above one worker: the in-memory upload-slot registry (a `PUT` and its finalise must reach the same process) and the id allocator (which relies on an in-process lock rather than an immediate database transaction). Running multiple workers silently corrupts upload slots and can produce duplicate post ids.
+
+relay refuses to start if `WEB_CONCURRENCY` is greater than 1. If you need to handle more load, put a reverse proxy (nginx, Caddy, Traefik) in front of a single relay process rather than scaling workers.
+
+The `--workers` flag for uvicorn and gunicorn is not supported. The Docker Compose file in this repo uses a single worker by default.
+
+---
+
 ## Installation — local
 
 ```bash
