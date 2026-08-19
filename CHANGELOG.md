@@ -6,9 +6,14 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ## [Unreleased]
 
+---
+
+## [0.9.1] — 2026-08-19
+
+### Added
 - Single-worker startup guard: relay now refuses to start if `WEB_CONCURRENCY > 1` (see `docs/setup.md`)
-- `SECURITY.md` added — private disclosure path for security issues
-- `CHANGELOG.md` added
+- `SECURITY.md` — private disclosure path for security issues
+- `CHANGELOG.md` — full release history from v0.1.0
 
 ---
 
@@ -181,7 +186,8 @@ Initial release.
 - **Live watcher** — external edits (Obsidian, nvim) trigger reindex + SSE push; controlled by `RELAY_WATCH_ENABLED`
 - **Export script** — `scripts/export_vault.py` pulls a live relay into a fresh vault over REST
 
-[Unreleased]: https://github.com/pierdom/relay/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/pierdom/relay/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/pierdom/relay/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/pierdom/relay/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/pierdom/relay/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/pierdom/relay/compare/v0.7.1...v0.7.2
