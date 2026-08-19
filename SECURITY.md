@@ -4,7 +4,7 @@
 
 Please **do not** open a public GitHub issue for security vulnerabilities.
 
-Report privately by emailing **security@geon.im**. Include:
+Report privately by emailing **security+relay@fiadino.org**. Include:
 - A description of the vulnerability and its impact
 - Steps to reproduce or a proof-of-concept (if safe to share)
 - Any suggested mitigations you've identified
