@@ -109,6 +109,15 @@ async def test_history_is_503_when_disabled(client, monkeypatch):
     assert (await client.get(f"/posts/{post_id}/history", headers=AUTH)).status_code == 503
 
 
+@pytest.mark.asyncio
+async def test_get_revision_is_503_when_disabled(client, monkeypatch):
+    post = await _create(client, "RevDisabled")
+    monkeypatch.setattr(settings, "history_enabled", False)
+    history.reset_state_for_tests()
+    r = await client.get(f"/posts/{post['id']}/history/deadbeef", headers=AUTH)
+    assert r.status_code == 503
+
+
 # ── restoring ────────────────────────────────────────────────────────────────
 
 

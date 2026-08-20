@@ -233,3 +233,25 @@ async def test_auth_me_reports_deauthorized_session_as_logged_out(monkeypatch):
         assert (await c.get("/auth/me")).json()["authenticated"] is True
         monkeypatch.setattr(settings, "oidc_allowed_subs", "somebody-else")
         assert (await c.get("/auth/me")).json()["authenticated"] is False
+
+
+@pytest.mark.asyncio
+async def test_missing_authorization_header_is_401(tmp_path, monkeypatch):
+    from relay import database
+
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    await database.init_db()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/posts")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_wrong_api_key_is_401(tmp_path, monkeypatch):
+    from relay import database
+
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    await database.init_db()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/posts", headers={"Authorization": "Bearer wrong-key"})
+    assert r.status_code == 401

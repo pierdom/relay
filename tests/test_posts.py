@@ -225,3 +225,28 @@ async def test_list_sort_and_order(client, monkeypatch):
 async def test_list_rejects_bad_sort_params(client):
     assert (await client.get("/posts", params={"sort": "bogus"}, headers=AUTH)).status_code == 422
     assert (await client.get("/posts", params={"order": "sideways"}, headers=AUTH)).status_code == 422
+
+
+# ── input validation ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_post_missing_title_is_422(client):
+    r = await client.post("/posts", json={"content": "body"}, headers=AUTH)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_post_blank_title_is_422(client):
+    r = await client.post("/posts", json={"title": "   ", "content": "body"}, headers=AUTH)
+    assert r.status_code == 422
+
+
+# ── /posts/deleted when history is disabled ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_deleted_posts_is_503_when_history_disabled(client):
+    # conftest sets history_enabled=False; the route must surface that as 503
+    r = await client.get("/posts/deleted", headers=AUTH)
+    assert r.status_code == 503

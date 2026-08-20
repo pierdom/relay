@@ -288,3 +288,27 @@ async def test_set_tag_config_writes_yaml(client):
     assert r.status_code == 200
     data = yaml.safe_load(Path(settings.tags_config_path).read_text(encoding="utf-8"))
     assert data["news"]["ttl_hours"] == 48
+
+
+@pytest.mark.asyncio
+async def test_set_tag_config_rejects_zero_ttl(client):
+    r = await client.post("/tags/news/config", json={"ttl_hours": 0}, headers=AUTH)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_tag_config_rejects_negative_ttl(client):
+    r = await client.post("/tags/news/config", json={"ttl_hours": -5}, headers=AUTH)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_delete_nonexistent_post_is_404(client):
+    r = await client.delete("/posts/99999", headers=AUTH)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_backlinks_nonexistent_post_is_404(client):
+    r = await client.get("/posts/99999/backlinks", headers=AUTH)
+    assert r.status_code == 404
