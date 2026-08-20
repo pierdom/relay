@@ -39,7 +39,18 @@ class _Handler(FileSystemEventHandler):
     def _relevant(self, path: str) -> bool:
         if not path.endswith(".md"):
             return False
-        return not str(Path(path).resolve()).startswith(self._relay_dir)
+        p = Path(path).resolve()
+        if str(p).startswith(self._relay_dir):
+            return False
+        # Syncthing conflict copies (.sync-conflict-YYYYMMDD-HHMMSS-DEVICEID.md)
+        # carry the original post's id: in front-matter — ingesting them would
+        # silently create a second index entry under an existing id. Skip them;
+        # the human resolves the conflict in Obsidian/Syncthing.
+        if ".sync-conflict-" in p.name:
+            return False
+        # Syncthing file versioning stores old copies under .stversions/ — same
+        # risk as conflict copies: stale ids, not canonical vault state.
+        return ".stversions" not in p.parts
 
     def on_any_event(self, event) -> None:
         if event.is_directory or event.event_type not in _CHANGE_EVENTS:
