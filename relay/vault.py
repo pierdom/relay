@@ -270,15 +270,34 @@ def resolve_attachment(name: str) -> Path | None:
         return _ok(vault / name)
     # Bare filename: look for an exact match under any ``assets/`` folder. Join the
     # literal name (never glob it — a name like ``*.png`` must not act as a pattern).
-    for assets in vault.rglob(ATTACHMENTS_DIRNAME):
-        if assets.is_dir():
-            hit = _ok(assets / name)
-            if hit is not None:
-                return hit
+    for assets in _get_assets_dirs():
+        hit = _ok(assets / name)
+        if hit is not None:
+            return hit
     return None
 
 
 ATTACHMENTS_DIRNAME = "assets"
+
+# Cache of resolved ``assets/`` directory paths. Keyed by vault path string so a
+# monkeypatched vault_path in tests invalidates the cache automatically.
+_assets_dirs_cache: tuple[str, list[Path]] | None = None
+
+
+def _get_assets_dirs() -> list[Path]:
+    global _assets_dirs_cache
+    root = vault_dir().resolve()
+    key = str(root)
+    if _assets_dirs_cache is not None and _assets_dirs_cache[0] == key:
+        return _assets_dirs_cache[1]
+    dirs = [p for p in root.rglob(ATTACHMENTS_DIRNAME) if p.is_dir()]
+    _assets_dirs_cache = (key, dirs)
+    return dirs
+
+
+def invalidate_assets_cache() -> None:
+    global _assets_dirs_cache
+    _assets_dirs_cache = None
 
 
 def attachment_dir_for(folder: str) -> Path:
@@ -324,6 +343,7 @@ def write_attachment(folder: str, filename: str, data: bytes) -> Path:
         except OSError:
             pass
         raise
+    invalidate_assets_cache()
     return path
 
 
@@ -344,9 +364,7 @@ def list_attachments(folder: str | None = None) -> list[tuple[str, str, int]]:
     """``(filename, folder, size)`` for files under ``assets/`` dirs. ``folder``
     limits the scan to that first-level folder; ``None`` scans the whole vault."""
     root = vault_dir().resolve()
-    dirs = [attachment_dir_for(folder)] if folder else [
-        p for p in root.rglob(ATTACHMENTS_DIRNAME) if p.is_dir()
-    ]
+    dirs = [attachment_dir_for(folder)] if folder else _get_assets_dirs()
     results: list[tuple[str, str, int]] = []
     for d in dirs:
         if not d.is_dir():
@@ -388,6 +406,7 @@ def delete_attachment(name: str) -> Path | None:
         path.unlink()
     except OSError:
         return None
+    invalidate_assets_cache()
     return path
 
 

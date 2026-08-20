@@ -166,12 +166,13 @@ def test_each_swatch_shows_its_own_theme_not_the_active_one(page):
         assert _rgb(colour) in palettes[theme], f"{theme} swatch painted {colour}, not its own --bg"
 
 
-def test_the_picker_orders_signature_themes_first_then_alphabetically(page):
-    """Relay Dark and Relay Light lead, in that order; the rest sort by label.
+def test_the_picker_orders_by_family_group_then_alphabetically(page):
+    """Relay Dark and Relay Light lead; named families follow in group order;
+    ungrouped singletons trail alphabetically.
 
-    The rule is enforced by sorting in `theme.js` rather than by maintaining a
-    sequence, so a new theme lands in the right place by existing. This asserts
-    the rendered result, which is the part a reader of the menu actually sees.
+    Named families: Relay → ANSI → Catppuccin → Gruvbox → Solarized.
+    Singletons (Dracula, Everforest Dark, Molokai, Nord, Tokyo Night) come last.
+    Within each group themes are alphabetical.
     """
     page.locator("#themeBtn").click()
     page.wait_for_timeout(200)
@@ -179,9 +180,37 @@ def test_the_picker_orders_signature_themes_first_then_alphabetically(page):
         "() => [...document.querySelectorAll('.theme-opt .theme-label')].map(e => e.textContent)"
     )
     assert labels[:2] == ["Relay Dark", "Relay Light"], f"signature themes do not lead: {labels}"
-    rest = labels[2:]
-    assert rest == sorted(rest), f"non-signature themes are not alphabetical: {rest}"
     assert len(labels) == len(THEMES), f"picker shows {len(labels)} themes, stylesheet has {len(THEMES)}"
+
+    # Named family blocks appear contiguously and before ungrouped singles.
+    families = {
+        'ANSI':       ['ANSI Dark', 'ANSI Light'],
+        'Catppuccin': ['Catppuccin Frappé', 'Catppuccin Latte', 'Catppuccin Macchiato', 'Catppuccin Mocha'],
+        'Gruvbox':    ['Gruvbox', 'Gruvbox Light'],
+        'Solarized':  ['Solarized Dark', 'Solarized Light'],
+    }
+    singles = sorted(['Dracula', 'Everforest Dark', 'Molokai', 'Nord', 'Tokyo Night'])
+
+    for family, members in families.items():
+        positions = [labels.index(m) for m in members]
+        assert positions == sorted(positions), f"{family} members are not in order: {positions}"
+        span = labels[min(positions):max(positions) + 1]
+        assert max(positions) - min(positions) == len(members) - 1, (
+            f"{family} members are not contiguous in the picker: {span}"
+        )
+
+    # All named-family themes come before all singles.
+    family_members = [m for members in families.values() for m in members]
+    last_family_pos = max(labels.index(m) for m in family_members)
+    first_single_pos = min(labels.index(m) for m in singles)
+    assert last_family_pos < first_single_pos, (
+        f"a named-family theme appears after a singleton: last family at {last_family_pos}, "
+        f"first single at {first_single_pos}"
+    )
+
+    # Ungrouped singles are alphabetical among themselves.
+    single_positions = [labels.index(m) for m in singles]
+    assert single_positions == sorted(single_positions), f"singles are not alphabetical: {singles}"
 
 
 def test_the_picker_closes_on_escape_and_on_a_click_away(page):

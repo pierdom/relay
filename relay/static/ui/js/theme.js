@@ -13,35 +13,41 @@
 
 import { closeStatusModal, isStatusOpen } from './status.js';
 
-/* Order is a rule, not a list: the two signature themes lead, in that order,
-   and everything else follows alphabetically by label. Sorting here rather than
-   hand-maintaining the sequence means theme #5 lands in the right place by
-   existing — which is the same bargain the token layer makes for its colours. */
+/* Families group the picker for scannability. Named groups appear in GROUP_ORDER
+   before ungrouped singletons; within each group themes sort alphabetically.
+   Signature themes (Relay) always lead regardless of group order. */
 const CATALOGUE = [
-  { id: 'dark', label: 'Relay Dark', dark: true, signature: true },
-  { id: 'light', label: 'Relay Light', dark: false, signature: true },
-  { id: 'ansi-dark', label: 'ANSI Dark', dark: true },
-  { id: 'ansi-light', label: 'ANSI Light', dark: false },
-  { id: 'catppuccin-latte', label: 'Catppuccin Latte', dark: false },
-  { id: 'catppuccin-frappe', label: 'Catppuccin Frappé', dark: true },
-  { id: 'catppuccin-macchiato', label: 'Catppuccin Macchiato', dark: true },
-  { id: 'catppuccin-mocha', label: 'Catppuccin Mocha', dark: true },
-  { id: 'dracula', label: 'Dracula', dark: true },
-  { id: 'everforest-dark', label: 'Everforest Dark', dark: true },
-  { id: 'gruvbox', label: 'Gruvbox', dark: true },
-  { id: 'gruvbox-light', label: 'Gruvbox Light', dark: false },
-  { id: 'molokai', label: 'Molokai', dark: true },
-  { id: 'nord', label: 'Nord', dark: true },
-  { id: 'solarized-dark', label: 'Solarized Dark', dark: true },
-  { id: 'solarized-light', label: 'Solarized Light', dark: false },
-  { id: 'tokyo-night', label: 'Tokyo Night', dark: true },
+  { id: 'dark',                label: 'Relay Dark',          dark: true,  signature: true, group: 'relay' },
+  { id: 'light',               label: 'Relay Light',         dark: false, signature: true, group: 'relay' },
+  { id: 'ansi-dark',           label: 'ANSI Dark',           dark: true,  group: 'ansi' },
+  { id: 'ansi-light',          label: 'ANSI Light',          dark: false, group: 'ansi' },
+  { id: 'catppuccin-latte',    label: 'Catppuccin Latte',    dark: false, group: 'catppuccin' },
+  { id: 'catppuccin-frappe',   label: 'Catppuccin Frappé',   dark: true,  group: 'catppuccin' },
+  { id: 'catppuccin-macchiato',label: 'Catppuccin Macchiato',dark: true,  group: 'catppuccin' },
+  { id: 'catppuccin-mocha',    label: 'Catppuccin Mocha',    dark: true,  group: 'catppuccin' },
+  { id: 'dracula',             label: 'Dracula',             dark: true  },
+  { id: 'everforest-dark',     label: 'Everforest Dark',     dark: true  },
+  { id: 'gruvbox',             label: 'Gruvbox',             dark: true,  group: 'gruvbox' },
+  { id: 'gruvbox-light',       label: 'Gruvbox Light',       dark: false, group: 'gruvbox' },
+  { id: 'molokai',             label: 'Molokai',             dark: true  },
+  { id: 'nord',                label: 'Nord',                dark: true  },
+  { id: 'solarized-dark',      label: 'Solarized Dark',      dark: true,  group: 'solarized' },
+  { id: 'solarized-light',     label: 'Solarized Light',     dark: false, group: 'solarized' },
+  { id: 'tokyo-night',         label: 'Tokyo Night',         dark: true  },
 ];
 
+const GROUP_ORDER = ['relay', 'ansi', 'catppuccin', 'gruvbox', 'solarized'];
+const GROUP_LABELS = { relay: 'Relay', ansi: 'ANSI', catppuccin: 'Catppuccin', gruvbox: 'Gruvbox', solarized: 'Solarized' };
+
 export const THEMES = [
-  // `filter` keeps declaration order, so Relay Dark precedes Relay Light by
-  // sitting above it in the catalogue — the one place the sequence is manual.
+  // Signature themes (Relay Dark then Relay Light) always lead in declaration order.
   ...CATALOGUE.filter(t => t.signature),
-  ...CATALOGUE.filter(t => !t.signature).sort((a, b) => a.label.localeCompare(b.label)),
+  // Named family groups in GROUP_ORDER (skipping 'relay' which already led).
+  ...GROUP_ORDER.slice(1).flatMap(g =>
+    CATALOGUE.filter(t => t.group === g).sort((a, b) => a.label.localeCompare(b.label))
+  ),
+  // Ungrouped singletons last, alphabetically.
+  ...CATALOGUE.filter(t => !t.group && !t.signature).sort((a, b) => a.label.localeCompare(b.label)),
 ];
 
 const STORAGE_KEY = 'relay-theme';
@@ -88,18 +94,27 @@ export function setTheme(id) {
 
 function buildMenu() {
   themeMenu.replaceChildren();
-  let seenSignature = false;
+  let prevGroup;
   for (const theme of THEMES) {
-    // One hairline where the house themes end. THEMES is already ordered
-    // signature-first, so the boundary is wherever that stops being true.
-    if (theme.signature) seenSignature = true;
-    else if (seenSignature) {
-      const sep = document.createElement('div');
-      sep.className = 'theme-sep';
-      sep.setAttribute('role', 'separator');
-      themeMenu.appendChild(sep);
-      seenSignature = false;
+    if (theme.group !== prevGroup) {
+      // Separator before every group boundary (but not before the very first).
+      if (prevGroup !== undefined) {
+        const sep = document.createElement('div');
+        sep.className = 'theme-sep';
+        sep.setAttribute('role', 'separator');
+        themeMenu.appendChild(sep);
+      }
+      // Named groups get a label; the ungrouped trailing section gets only the hairline.
+      if (theme.group) {
+        const gl = document.createElement('div');
+        gl.className = 'theme-group-label';
+        gl.setAttribute('aria-hidden', 'true');
+        gl.textContent = GROUP_LABELS[theme.group];
+        themeMenu.appendChild(gl);
+      }
+      prevGroup = theme.group;
     }
+
     const opt = document.createElement('button');
     opt.className = 'theme-opt';
     opt.dataset.themeId = theme.id;
