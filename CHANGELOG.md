@@ -8,6 +8,17 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [0.9.3] — 2026-08-20
+
+### Added
+- `aria-live="polite"` on the connection indicator (`#liveLabel`) so screen readers announce state changes; hidden `#a11yAnnouncer` region announces new SSE-inserted posts (`"New post: <title>"`); edits to existing cards are not announced (closes 1.0 should-do: `aria-live` gap)
+- Theme picker now groups by family with labelled separators — Relay · ANSI · Catppuccin · Gruvbox · Solarized · ungrouped — making seventeen themes scannable without scrolling
+
+### Fixed
+- `resolve_attachment` and `list_attachments` no longer `rglob` the vault on every call; assets-directory listing is now cached (keyed by vault path) and invalidated on write/delete (closes 1.0 should-do: O(vault) rglob on hot paths)
+
+---
+
 ## [0.9.2] — 2026-08-20
 
 ### Added
