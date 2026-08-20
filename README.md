@@ -20,7 +20,7 @@
 
 </div>
 
-Your notes live as ordinary `.md` files on disk. Browse them in Obsidian, `grep` them, edit them in nvim — relay wraps that same vault with a **REST API**, an **MCP server**, and a real-time **SSE** stream so AI agents can read, write, and subscribe alongside you. Every write is committed to git, so nothing is ever unrecoverable.
+Your notes live as ordinary `.md` files on disk. Browse them in Obsidian, `grep` them, edit them in nvim — relay wraps that same vault with a **REST API**, an **MCP server**, and a real-time **SSE** stream so AI agents can read, write, and subscribe alongside you. Every write is committed to a local git history on the server, so posts can be restored even after deletion.
 
 <div align="center">
 
@@ -41,7 +41,7 @@ Your notes live as ordinary `.md` files on disk. Browse them in Obsidian, `grep`
                     (watchdog picks edits up and re-indexes)
 ```
 
-Files are the source of truth. The SQLite index is disposable and rebuilt at startup. Every write is committed to a git history inside the vault, so posts can be restored — from the UI, the TUI, or the MCP tools — even after deletion.
+Files are the source of truth. The SQLite index is disposable and rebuilt at startup. Every write is committed to a local git history inside the vault on the server; posts can be restored — from the UI, the TUI, or the MCP tools — even after deletion.
 
 ## Quick start
 
