@@ -38,6 +38,7 @@ const loadMoreWrap = document.getElementById('loadMore');
 const loadMoreBtn  = document.getElementById('loadMoreBtn');
 const liveDot      = document.getElementById('liveDot');
 const liveLabel    = document.getElementById('liveLabel');
+const a11yAnnouncer = document.getElementById('a11yAnnouncer');
 const apiKeyInput  = document.getElementById('apiKeyInput');
 const connectBtn   = document.getElementById('connectBtn');
 const connectForm  = document.getElementById('connectForm');
@@ -1278,11 +1279,13 @@ function connectSSE() {
       const pinnedEl = feed.querySelector('.post.pinned');
       if (pinnedEl) pinnedEl.after(el); else feed.prepend(el);  // keep master on top
       query.total++;
+      announce(`New post: ${post.title}`);
     } else {
       // Non-default sort: the new post doesn't belong at the top — count it and
       // let the user pull it in via the pill rather than misplacing the card.
       query.total++;
       bumpNewPostsPill();
+      announce(`New post: ${post.title}`);
     }
     scheduleLoadTags();
   });
@@ -1305,6 +1308,12 @@ function connectSSE() {
     if (sseErrorTimer) clearTimeout(sseErrorTimer);
     sseErrorTimer = setTimeout(() => setDot('error'), 3000);
   };
+}
+
+function announce(msg) {
+  if (!a11yAnnouncer) return;
+  a11yAnnouncer.textContent = '';
+  requestAnimationFrame(() => { a11yAnnouncer.textContent = msg; });
 }
 
 function setDot(state) {

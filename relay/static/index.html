@@ -46,7 +46,7 @@
   <span class="brand-sep">·</span>
   <div class="live-indicator">
     <span class="live-dot" id="liveDot"></span>
-    <span class="live-label" id="liveLabel">offline</span>
+    <span class="live-label" id="liveLabel" aria-live="polite">offline</span>
   </div>
   <button class="menu-btn" id="menuBtn" aria-label="Toggle tags">
     <span></span><span></span><span></span>
@@ -275,6 +275,7 @@
   </div>
 </div>
 
+<div class="sr-only" id="a11yAnnouncer" aria-live="polite" aria-atomic="true"></div>
 <script type="module" src="/static/__ASSETS__/js/main.js"></script>
 </body>
 </html>
