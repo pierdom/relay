@@ -8,6 +8,15 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [0.9.2] — 2026-08-20
+
+### Added
+- Watcher ignores Syncthing conflict copies (`*.sync-conflict-*`) and versioned files (`.stversions/`) — both carry stale `id:` front-matter that would silently corrupt the index (closes 1.0-A)
+- `CONTRIBUTING.md` — setup, test/lint commands, MCP-parity and CSS-token invariants, PR conventions
+- Issue templates (bug report, feature request) and Dependabot config for pip and GitHub Actions
+
+---
+
 ## [0.9.1] — 2026-08-19
 
 ### Added

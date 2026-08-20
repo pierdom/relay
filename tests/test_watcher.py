@@ -20,6 +20,7 @@ from relay import database, vault, watcher
 from relay.auth import require_api_key
 from relay.config import settings
 from relay.main import app
+from relay.watcher import _Handler
 
 AUTH = {"Authorization": "Bearer test-key"}
 
@@ -196,3 +197,35 @@ async def test_relay_own_write_is_still_suppressed(client):
     )
     path = await _path_of(client, r.json()["id"])
     assert vault.was_self_write(path, path.read_text(encoding="utf-8")) is True
+
+
+# ── Syncthing conflict-copy and versioning suppression ───────────────────────
+
+
+def _make_handler(vault_path) -> _Handler:
+    import asyncio
+    loop = asyncio.new_event_loop()
+    h = _Handler(loop)
+    loop.close()
+    return h
+
+
+def test_syncthing_conflict_copy_is_ignored(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    h = _make_handler(tmp_path / "vault")
+    conflict = tmp_path / "vault" / "My Note.sync-conflict-20240101-120000-ABCDEF12.md"
+    assert h._relevant(str(conflict)) is False
+
+
+def test_syncthing_stversions_is_ignored(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    h = _make_handler(tmp_path / "vault")
+    versioned = tmp_path / "vault" / ".stversions" / "My Note~20240101-120000.md"
+    assert h._relevant(str(versioned)) is False
+
+
+def test_normal_md_is_relevant(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    h = _make_handler(tmp_path / "vault")
+    normal = tmp_path / "vault" / "Homelab" / "My Note.md"
+    assert h._relevant(str(normal)) is True
