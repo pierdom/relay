@@ -8,6 +8,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [0.9.5] — 2026-08-20
+
+### Changed
+- Dependency bumps: `fastapi` ≥0.141.1, `aiosqlite` ≥0.22.1, `textual` ≥8.2.8, `pydantic-settings` ≥2.15.0, `pytest` (dev) ≥9.1.1
+
+---
+
 ## [0.9.4] — 2026-08-20
 
 ### Added
@@ -214,7 +221,8 @@ Initial release.
 - **Live watcher** — external edits (Obsidian, nvim) trigger reindex + SSE push; controlled by `RELAY_WATCH_ENABLED`
 - **Export script** — `scripts/export_vault.py` pulls a live relay into a fresh vault over REST
 
-[Unreleased]: https://github.com/pierdom/relay/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/pierdom/relay/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/pierdom/relay/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/pierdom/relay/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/pierdom/relay/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/pierdom/relay/compare/v0.9.1...v0.9.2
