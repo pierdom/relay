@@ -8,6 +8,14 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [0.9.4] — 2026-08-20
+
+### Added
+- `docs/stability.md` — stability policy: what the version number promises (19 MCP tools + REST surface), what is explicitly out of scope (browser UI internals, SQLite index schema, `.relay/` layout), and the versioning rules for breaking vs. additive changes (closes 1.0-D)
+- Pre-1.0 surface freeze review documented: all 19 tool names and REST paths confirmed as-is; no renames needed
+
+---
+
 ## [0.9.1] — 2026-08-19
 
 ### Added
