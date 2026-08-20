@@ -95,11 +95,15 @@ def _assert_safe_under_pytest(path: Path) -> None:
     """
     if "PYTEST_CURRENT_TEST" not in os.environ:
         return
-    resolved = str(path.expanduser())
-    if not resolved.startswith(tempfile.gettempdir()):
+    # Resolve symlinks on both sides: macOS /tmp is a symlink to /private/tmp,
+    # so a plain startswith comparison between the two halves of the same path
+    # fails when one side is resolved and the other is not.
+    resolved = str(path.expanduser().resolve())
+    tmpdir = str(Path(tempfile.gettempdir()).resolve())
+    if not resolved.startswith(tmpdir):
         raise RuntimeError(
             f"refusing to use vault {resolved!r} from a test: it is not under "
-            f"{tempfile.gettempdir()!r}. Point settings.vault_path at tmp_path "
+            f"{tmpdir!r}. Point settings.vault_path at tmp_path "
             "(tests/conftest.py does this automatically for tests under tests/)."
         )
 
