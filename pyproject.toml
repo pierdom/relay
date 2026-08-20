@@ -9,13 +9,14 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "pydantic-settings>=2.14.2",
     "sse-starlette>=3.4.4",
-    "mcp>=1.28.1,<2.0.0",
+    "mcp>=1.29.0,<2.0.0",
     "textual>=8.2.5",
     "requests>=2.33.1",
     "pyyaml>=6.0.3",
     "watchdog>=6.0.0",
     "authlib>=1.7.2",
     "itsdangerous>=2.2.0",
+    "joserfc>=1.7.3",
 ]
 
 [project.scripts]

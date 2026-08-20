@@ -14,7 +14,8 @@ import secrets
 from urllib.parse import urlencode
 
 import httpx
-from authlib.jose import JsonWebKey, jwt
+from joserfc import jwt
+from joserfc.jwk import KeySet
 
 from ..config import settings
 
@@ -24,7 +25,7 @@ from ..config import settings
 # cheap on this single-user deployment; we deliberately don't refetch on a kid miss
 # to avoid an attacker forcing repeated JWKS fetches with bogus `kid`s.
 _metadata: dict | None = None
-_jwks: JsonWebKey | None = None
+_jwks: KeySet | None = None
 
 # Upstream scopes: same as Phase-1 web login.
 UPSTREAM_SCOPE = "openid email profile"
@@ -58,14 +59,14 @@ async def _load_metadata() -> dict:
     return _metadata
 
 
-async def _load_jwks() -> JsonWebKey:
+async def _load_jwks() -> KeySet:
     global _jwks
     if _jwks is None:
         meta = await _load_metadata()
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(meta["jwks_uri"])
             resp.raise_for_status()
-            _jwks = JsonWebKey.import_key_set(resp.json())
+            _jwks = KeySet.import_key_set(resp.json())
     return _jwks
 
 
@@ -112,17 +113,14 @@ async def exchange_and_validate(code: str, verifier: str, nonce: str) -> dict:
         raise ValueError("upstream token response had no id_token")
 
     jwks = await _load_jwks()
-    claims = jwt.decode(
-        id_token,
-        jwks,
-        claims_options={
-            "iss": {"essential": True, "value": meta["issuer"]},
-            "aud": {"essential": True, "value": settings.oidc_client_id},
-            "nonce": {"essential": True, "value": nonce},
-        },
+    token = jwt.decode(id_token, jwks)
+    registry = jwt.JWTClaimsRegistry(
+        iss={"essential": True, "value": meta["issuer"]},
+        aud={"essential": True, "value": settings.oidc_client_id},
+        nonce={"essential": True, "value": nonce},
     )
-    claims.validate()  # enforces exp/nbf/iat + the claims_options above
-    return dict(claims)
+    registry.validate(token.claims)  # enforces exp/nbf/iat + iss/aud/nonce
+    return dict(token.claims)
 
 
 def reset_cache() -> None:
