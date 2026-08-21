@@ -2176,4 +2176,15 @@ kbd {
     display: inline-flex; align-items: center; justify-content: center;
     margin: -12px -8px -12px 0;
   }
+
+  /* List-mode cards keep the single-row header (title + tags side by side)
+     at any width otherwise, so a handful of tags squeeze the title down to a
+     hard ellipsis of a couple characters. Grid mode already stacks the header
+     unconditionally (`.feed.grid .post-header`, above) — give list mode the
+     same treatment, but only on phones, where the row is too narrow to share. */
+  .post-header { flex-direction: column; align-items: stretch; gap: 6px; }
+  .post-title {
+    white-space: normal; overflow: hidden; text-overflow: clip;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
 }
