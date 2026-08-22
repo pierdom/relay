@@ -1563,6 +1563,15 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   }
   aside.open { transform: translateX(0); }
 
+  /* Search bar — input, sort control and view toggle used to fight for one
+     row: the input has no min-width, so under flex it never shrank past its
+     intrinsic content size and the view toggle got pushed off the right edge
+     of the screen entirely (not just visually cramped — gone). Wrapping the
+     row and giving the input its own full-width line fixes it without
+     guessing at a shrink point. */
+  .search-bar { flex-wrap: wrap; }
+  .search-bar input { flex-basis: 100%; }
+
   /* Feed — full width, tighter spacing */
   .feed { padding: 12px; gap: 8px; }
   .compose-panel { padding: 0 12px; }
