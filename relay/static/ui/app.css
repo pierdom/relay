@@ -1563,6 +1563,19 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   }
   aside.open { transform: translateX(0); }
 
+  /* Search bar — the input has no min-width, so under flex it never shrank
+     past its intrinsic content size and pushed the sort control and view
+     toggle off the right edge of the screen entirely. `min-width: 0` lets it
+     actually give up space; shrinking the two control groups' own padding
+     claims less of that space back, so a normal-width input still fits
+     alongside both on one row instead of the row wrapping. */
+  .search-bar { gap: 6px; }
+  .search-bar input { min-width: 0; }
+  .sort-select { padding: 4px 18px 4px 6px; font-size: 11px; }
+  .sort-dir { min-width: 26px; padding: 5px 6px; }
+  .vt-btn { padding: 5px 7px; font-size: 12px; }
+  .search-bar .view-toggle { margin-left: 4px; padding-left: 8px; }
+
   /* Feed — full width, tighter spacing */
   .feed { padding: 12px; gap: 8px; }
   .compose-panel { padding: 0 12px; }
@@ -2175,5 +2188,16 @@ kbd {
     min-width: 44px; min-height: 44px;
     display: inline-flex; align-items: center; justify-content: center;
     margin: -12px -8px -12px 0;
+  }
+
+  /* List-mode cards keep the single-row header (title + tags side by side)
+     at any width otherwise, so a handful of tags squeeze the title down to a
+     hard ellipsis of a couple characters. Grid mode already stacks the header
+     unconditionally (`.feed.grid .post-header`, above) — give list mode the
+     same treatment, but only on phones, where the row is too narrow to share. */
+  .post-header { flex-direction: column; align-items: stretch; gap: 6px; }
+  .post-title {
+    white-space: normal; overflow: hidden; text-overflow: clip;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   }
 }

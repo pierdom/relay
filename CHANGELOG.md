@@ -8,6 +8,15 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [0.9.6] — 2026-08-22
+
+### Fixed
+- Mobile post-header: title now stacks above its tags instead of sharing a row, so several tags no longer crush a long title down to a couple visible characters
+- Mobile search bar: the search input can now actually shrink (it had no `min-width`), and the sort control and view toggle are trimmed to fit alongside it — previously they were pushed off-screen entirely
+- `relay/__init__.py`'s `__version__` had drifted from `pyproject.toml` since the 0.9.5 release (dependency-bump commit missed it); both now read 0.9.6
+
+---
+
 ## [0.9.5] — 2026-08-20
 
 ### Changed
