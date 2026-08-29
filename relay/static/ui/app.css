@@ -1256,14 +1256,20 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .pm-body .post-body th, .pm-body .post-body td { white-space: normal; overflow-wrap: break-word; }
 /* A many-column table divides the fixed layout's width evenly, so on a narrow
    modal a wide table (10+ columns) can land each cell under 40px — headers
-   wrap one syllable per line and the table reads as noise. The modal wraps
-   every table in `.table-scroll` (see main.js), so a column floor here is
-   safe to enforce: table-layout:fixed still respects it as a hard minimum,
-   pushing the table past the scroll wrapper's width instead of past the
-   card's, exactly the backstop the comment above describes. The feed has no
-   such wrapper, so its cards keep shrinking columns to fit rather than
-   overflow. */
-.pm-body .post-body th, .pm-body .post-body td { min-width: 80px; }
+   wrap one syllable per line and the table reads as noise.
+
+   ⚠️ `min-width` on `th`/`td` cannot fix this — verified against a real
+   Chromium render, not just the spec: under `table-layout: fixed` the browser
+   computes column widths purely from the table's own resolved width and
+   ignores any per-cell min/width entirely, so a `min-width` on the cells is a
+   silent no-op (a build shipped with exactly that and the table stayed just
+   as crushed). `min-width` set on the `<table>` element itself, by contrast,
+   *is* honored as a hard floor even under fixed layout, and forces the table
+   wider than its `.table-scroll` wrapper — that's the actual backstop the
+   comment above describes. There is no column count in CSS, so main.js sets
+   it inline per table (colCount * 80px) when it wraps the table in
+   `.table-scroll`. The feed has no such wrapper, so its cards keep shrinking
+   columns to fit rather than overflow. */
 
 .post-footer {
   display: flex; align-items: center; justify-content: space-between;
