@@ -1389,6 +1389,12 @@ function openPostModal(post, { pushHistory = true } = {}) {
     wrap.className = 'table-scroll';
     t.parentNode.insertBefore(wrap, t);
     wrap.appendChild(t);
+    // `min-width` on th/td is ignored under table-layout:fixed — only a
+    // min-width on the table element itself is honored as a floor, and CSS
+    // has no column count to compute it from. See app.css around
+    // `.pm-body .post-body table`.
+    const cols = t.rows[0]?.cells.length || 0;
+    if (cols > 0) t.style.minWidth = `${cols * 80}px`;
   });
   pmBody.querySelectorAll('.post-body pre').forEach(pre => {
     const btn = document.createElement('button');

@@ -8,6 +8,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [0.10.1] — 2026-08-29
+
+### Fixed
+- The 0.10.0 fix for crushed modal tables didn't actually work: `min-width` on `th`/`td` is silently ignored by `table-layout: fixed` (verified against a real Chromium render, not just the spec — the columns stayed exactly as crushed). Moved the floor to the `<table>` element itself, set inline by `main.js` from the column count when it wraps the table in `.table-scroll` — that *is* honored as a hard minimum under fixed layout, so an over-wide table now genuinely overflows into the scroll wrapper instead of imploding to unreadable columns
+
+---
+
 ## [0.10.0] — 2026-08-29
 
 ### Fixed
