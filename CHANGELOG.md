@@ -8,6 +8,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [0.10.0] — 2026-08-29
+
+### Fixed
+- Post detail modal: many-column tables (9-10 cols) no longer crush cell text to one syllable per line on narrow/mobile widths — cells get a `min-width` floor and overflow into the existing horizontal scroll wrapper instead
+
+---
+
 ## [0.9.6] — 2026-08-22
 
 ### Fixed

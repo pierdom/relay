@@ -1254,6 +1254,16 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .pm-body .post-body table { table-layout: fixed; }
 .feed .post-body th, .feed .post-body td,
 .pm-body .post-body th, .pm-body .post-body td { white-space: normal; overflow-wrap: break-word; }
+/* A many-column table divides the fixed layout's width evenly, so on a narrow
+   modal a wide table (10+ columns) can land each cell under 40px — headers
+   wrap one syllable per line and the table reads as noise. The modal wraps
+   every table in `.table-scroll` (see main.js), so a column floor here is
+   safe to enforce: table-layout:fixed still respects it as a hard minimum,
+   pushing the table past the scroll wrapper's width instead of past the
+   card's, exactly the backstop the comment above describes. The feed has no
+   such wrapper, so its cards keep shrinking columns to fit rather than
+   overflow. */
+.pm-body .post-body th, .pm-body .post-body td { min-width: 80px; }
 
 .post-footer {
   display: flex; align-items: center; justify-content: space-between;
