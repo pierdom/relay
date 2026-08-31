@@ -25,7 +25,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import metrics, service, status, vault
+from . import database, metrics, service, status, vault, vectors
 from .config import settings
 from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
 
@@ -123,6 +123,8 @@ async def _db():
     async with aiosqlite.connect(settings.database_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA busy_timeout=5000;")
+        if database.VEC_ENABLED:
+            await vectors.load_extension(db)
         yield db
 
 

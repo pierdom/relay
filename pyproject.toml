@@ -17,6 +17,8 @@ dependencies = [
     "authlib>=1.7.2",
     "itsdangerous>=2.2.0",
     "joserfc>=1.7.4",
+    "sqlite-vec>=0.1.9",
+    "fastembed>=0.8.0",
 ]
 
 [project.scripts]

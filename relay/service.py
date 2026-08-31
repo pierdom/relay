@@ -17,7 +17,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from . import database, events, folders, frontmatter, history, ingest, links, metrics, vault
+from . import database, events, folders, frontmatter, history, ingest, links, metrics, vault, vectors
 from .config import settings
 from .models import (
     AttachmentDeleteResponse,
@@ -180,6 +180,60 @@ def _fts_query(search: str) -> str | None:
     return " OR ".join(terms) if terms else None
 
 
+async def _keyword_ranked_ids(db: aiosqlite.Connection, search: str, *, limit: int) -> list[int]:
+    """Top-``limit`` post ids by keyword relevance, ignoring tag/folder filters
+    — feeds the RRF input list for ``mode="hybrid"``. Empty if FTS5 is
+    unavailable or the query has no searchable tokens (no LIKE fallback here;
+    the semantic list still carries the search on its own in that case)."""
+    if not database.FTS_ENABLED:
+        return []
+    match = _fts_query(search)
+    if match is None:
+        return []
+    async with db.execute(
+        f"SELECT posts.id FROM posts JOIN posts_fts ON posts_fts.rowid = posts.id "
+        f"WHERE posts_fts MATCH ? ORDER BY bm25(posts_fts, {_BM25_WEIGHTS}) LIMIT ?",
+        (match, limit),
+    ) as cur:
+        return [row[0] for row in await cur.fetchall()]
+
+
+async def _list_posts_ranked(
+    db: aiosqlite.Connection, *, search: str, mode: str, limit: int, offset: int, summary: bool
+) -> PostListResponse | PostSummaryListResponse:
+    """``mode="semantic"``/``"hybrid"`` path (relay #253 phases 2-4 — proof of
+    concept). Ranks by vector similarity, RRF-fused with keyword for hybrid.
+    Python-only for now — not reachable via REST/MCP yet, the eval harness
+    calls this directly. Deliberately ignores ``tag``/``folder`` filters, unlike
+    the SQL-driven default path below: undocumented gap the eval harness
+    doesn't need closed yet, not an oversight."""
+    metrics.search_queries.inc()
+    semantic_ranked = [pid for pid, _ in await vectors.semantic_search(db, search, limit=50)]
+    if mode == "semantic":
+        ordered_ids = semantic_ranked
+    else:
+        keyword_ranked = await _keyword_ranked_ids(db, search, limit=50)
+        ordered_ids = vectors.reciprocal_rank_fusion(keyword_ranked, semantic_ranked)
+
+    page_ids = ordered_ids[offset : offset + limit]
+    rows_by_id: dict[int, aiosqlite.Row] = {}
+    if page_ids:
+        placeholders = ",".join("?" for _ in page_ids)
+        async with db.execute(f"SELECT * FROM posts WHERE id IN ({placeholders})", page_ids) as cur:
+            rows_by_id = {row["id"]: row for row in await cur.fetchall()}
+    rows = [rows_by_id[pid] for pid in page_ids if pid in rows_by_id]
+
+    if summary:
+        return PostSummaryListResponse(
+            items=[PostSummary.from_row(r) for r in rows],
+            total=len(ordered_ids), limit=limit, offset=offset, pinned=None,
+        )
+    return PostListResponse(
+        items=[PostResponse.from_row(r) for r in rows],
+        total=len(ordered_ids), limit=limit, offset=offset, pinned=None,
+    )
+
+
 async def list_posts(
     db: aiosqlite.Connection,
     *,
@@ -191,7 +245,11 @@ async def list_posts(
     summary: bool = False,
     sort: str = "updated",
     order: str = "desc",
+    mode: str = "keyword",
 ) -> PostListResponse | PostSummaryListResponse:
+    if search and mode in ("semantic", "hybrid"):
+        return await _list_posts_ranked(db, search=search, mode=mode, limit=limit, offset=offset, summary=summary)
+
     conditions: list[str] = []
     params: list[str | int] = []
     joins = ""

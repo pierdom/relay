@@ -5,7 +5,7 @@ import logging
 
 import aiosqlite
 
-from . import events, history, ingest, metrics, vault
+from . import database, events, history, ingest, metrics, vault, vectors
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,11 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         f"DELETE FROM posts WHERE id IN ({','.join('?' * len(to_delete))})", list(to_delete)
     )
     await db.commit()
+    # This path deletes via raw SQL, not vault.index_delete — chunk cleanup
+    # has to be called explicitly here too, or a TTL-expired post's chunks
+    # would silently outlive it.
+    for post_id in to_delete:
+        await vectors.delete_post_chunks(db, post_id)
     # Tell live clients. The file unlink is self-delete-suppressed, so the watcher
     # won't emit for these — without this a TTL'd post lingers in every connected
     # UI/TUI until the next reload. Deletes stream without an SSE `id:`, so they
@@ -107,6 +112,8 @@ async def cleanup_loop() -> None:
         try:
             async with aiosqlite.connect(settings.database_path) as db:
                 db.row_factory = aiosqlite.Row
+                if database.VEC_ENABLED:
+                    await vectors.load_extension(db)
                 count = await _delete_expired(db)
                 if count:
                     metrics.cleanup_deletions.inc(count)

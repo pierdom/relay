@@ -11,7 +11,7 @@ import os
 
 import aiosqlite
 
-from . import vault
+from . import vault, vectors
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 # Set by init_db: True once the FTS5 full-text index is live. When False (SQLite
 # built without FTS5), service.list_posts falls back to LIKE substring search.
 FTS_ENABLED = False
+
+# Set by init_db: True once the sqlite-vec extension + chunk/vector schema are
+# live (relay post #253, phases 2-4 — proof of concept). Semantic/hybrid search
+# and embedding sync no-op when False, exactly like FTS_ENABLED's LIKE fallback.
+VEC_ENABLED = False
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS posts (
@@ -98,7 +103,7 @@ async def _init_fts(db: aiosqlite.Connection) -> bool:
 
 
 async def init_db() -> None:
-    global FTS_ENABLED
+    global FTS_ENABLED, VEC_ENABLED
     os.makedirs(settings.relay_dir, exist_ok=True)
     async with aiosqlite.connect(settings.database_path) as db:
         db.row_factory = aiosqlite.Row
@@ -109,6 +114,10 @@ async def init_db() -> None:
         # doesn't fire stale triggers against an index they never populated.
         await db.executescript(_DROP_FTS)
         await db.commit()
+        # Vector schema must exist *before* rebuild_index: unlike FTS's post-hoc
+        # bulk rebuild, embedding sync happens per-row via the same index_upsert
+        # hook the rebuild loop uses (see relay/vault.py).
+        VEC_ENABLED = await vectors.init_vec(db)
         # Files are canonical — repopulate the index from the vault on startup.
         await vault.rebuild_index(db)
         FTS_ENABLED = await _init_fts(db)
@@ -118,4 +127,6 @@ async def get_db():
     async with aiosqlite.connect(settings.database_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA busy_timeout=5000;")
+        if VEC_ENABLED:
+            await vectors.load_extension(db)
         yield db

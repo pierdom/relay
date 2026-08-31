@@ -16,7 +16,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from . import folders, frontmatter
+from . import folders, frontmatter, vectors
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -502,6 +502,7 @@ async def index_upsert(
         (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
          created_at, updated_at, expires_at),
     )
+    await vectors.sync_post_chunks(db, post_id=id, title=title, content=content)
 
 
 async def index_insert(
@@ -532,10 +533,12 @@ async def index_insert(
         (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
          created_at, updated_at, expires_at),
     )
+    await vectors.sync_post_chunks(db, post_id=id, title=title, content=content)
 
 
 async def index_delete(db: aiosqlite.Connection, post_id: int) -> None:
     await db.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+    await vectors.delete_post_chunks(db, post_id)
 
 
 # ── startup rebuild ───────────────────────────────────────────────────────────
