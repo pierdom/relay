@@ -213,7 +213,15 @@ async def _list_posts_ranked(
         ordered_ids = semantic_ranked
     else:
         keyword_ranked = await _keyword_ranked_ids(db, search, limit=50)
-        ordered_ids = vectors.reciprocal_rank_fusion(keyword_ranked, semantic_ranked)
+        # Weighted toward semantic (2:1) — relay #253's phase 4 eval measured
+        # equal-weight RRF underperforming semantic alone (MRR 0.557 vs 0.667):
+        # a noisy keyword list for a query could drag a post semantic ranked
+        # #1 out of the top 5 entirely. Semantic also measured the stronger of
+        # the two lists overall (MRR 0.667 vs keyword's 0.414, ~1.6x) — 2:1
+        # is a first-pass value in that direction, not independently tuned.
+        ordered_ids = vectors.reciprocal_rank_fusion(
+            keyword_ranked, semantic_ranked, weight_a=1.0, weight_b=2.0
+        )
 
     page_ids = ordered_ids[offset : offset + limit]
     rows_by_id: dict[int, aiosqlite.Row] = {}

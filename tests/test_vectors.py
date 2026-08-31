@@ -207,3 +207,24 @@ def test_rrf_matches_the_sum_of_reciprocal_ranks_formula():
     fused = vectors.reciprocal_rank_fusion([5, 6], [5], k=60)
     assert fused[0] == 5
     assert fused == [5, 6]
+
+
+def test_rrf_default_weights_are_backward_compatible():
+    a, b = [1, 2], [2, 1]
+    assert (
+        vectors.reciprocal_rank_fusion(a, b, weight_a=1.0, weight_b=1.0)
+        == vectors.reciprocal_rank_fusion(a, b)
+    )
+
+
+def test_rrf_weighting_can_flip_which_list_dominates():
+    # id 8 is rank1-in-a/rank2-in-b (present in both, never best); id 9 is
+    # rank1-in-b only (absent from a) — the exact shape of relay #253's phase 4
+    # finding: a post that's mediocre-but-present-everywhere can beat one
+    # that's perfect in a single list under equal weights. k=1 (not the
+    # production k=60) so the rank1-vs-rank2 gap is large enough to flip
+    # within a small, hand-checkable weight — this tests the mechanism only,
+    # not service.py's production weight/k choice, which the eval validates.
+    list_a, list_b = [8], [9, 8]
+    assert vectors.reciprocal_rank_fusion(list_a, list_b, k=1)[0] == 8
+    assert vectors.reciprocal_rank_fusion(list_a, list_b, k=1, weight_b=4.0)[0] == 9

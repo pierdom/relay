@@ -203,12 +203,21 @@ async def semantic_search(db: aiosqlite.Connection, query: str, *, limit: int = 
     return sorted(best.items(), key=lambda kv: kv[1])[:limit]
 
 
-def reciprocal_rank_fusion(list_a: list[int], list_b: list[int], *, k: int = 60) -> list[int]:
+def reciprocal_rank_fusion(
+    list_a: list[int], list_b: list[int], *, k: int = 60, weight_a: float = 1.0, weight_b: float = 1.0
+) -> list[int]:
     """RRF over two ranked id lists — not score normalisation, since BM25 and
-    cosine distance aren't on comparable scales (relay #253). Pure function."""
+    cosine distance aren't on comparable scales (relay #253). Pure function.
+
+    Equal weights are the naive form and have a real failure mode, measured in
+    relay #253's phase 4 eval: RRF sums reciprocal ranks blind to *how good*
+    each list is for a given query, so a post that's mediocre-but-present in
+    both lists can out-accumulate one that's perfect in one list and absent
+    from the other. ``weight_a``/``weight_b`` let a caller lean the fusion
+    toward whichever list measured more reliable overall."""
     scores: dict[int, float] = {}
     for rank, post_id in enumerate(list_a, start=1):
-        scores[post_id] = scores.get(post_id, 0.0) + 1.0 / (k + rank)
+        scores[post_id] = scores.get(post_id, 0.0) + weight_a / (k + rank)
     for rank, post_id in enumerate(list_b, start=1):
-        scores[post_id] = scores.get(post_id, 0.0) + 1.0 / (k + rank)
+        scores[post_id] = scores.get(post_id, 0.0) + weight_b / (k + rank)
     return [post_id for post_id, _ in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)]
