@@ -40,6 +40,7 @@ dev = [
 [tool.pytest.ini_options]
 markers = [
     "ui: browser smokes (need `uv run playwright install chromium`; skipped without it)",
+    "eval: search-quality recall/MRR harness (needs RELAY_EVAL_URL + RELAY_EVAL_KEY; skipped without them)",
 ]
 
 [tool.ruff]

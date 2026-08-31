@@ -12,3 +12,7 @@ dist/
 # Local dev vault (pulled sample data)
 vault/
 vault.bak*/
+
+# Real recall queries + real post ids from your own vault — inherently
+# personal. Copy tests/eval/golden.example.yaml to get started.
+tests/eval/golden.yaml

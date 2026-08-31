@@ -17,11 +17,12 @@ docker compose pull && docker compose up -d # update
 uv run pytest -q                            # tests (incl. 111 browser smokes)
 uv run ruff check .                         # lint (config in pyproject.toml)
 uv run playwright install chromium          # once, for browser smokes
+RELAY_EVAL_URL=... RELAY_EVAL_KEY=... uv run pytest -m eval -s  # search-quality recall/MRR baseline (tests/eval), skipped otherwise
 ```
 
 Uses `uv` — never `pip`. Add deps with `uv add <package>`.
 
-**Tests always run against a throwaway vault.** `tests/conftest.py` has an autouse `isolated_vault` fixture that repoints `settings.vault_path` under `tmp_path`. Never patch `vault_path` outside `tmp_path` — the real `.env` points at a live Obsidian vault and `rebuild_index` stamps ids into every id-less file it finds there. Put throwaway scripts in `tests/`.
+**Tests always run against a throwaway vault.** `tests/conftest.py` has an autouse `isolated_vault` fixture that repoints `settings.vault_path` under `tmp_path`. Never patch `vault_path` outside `tmp_path` — the real `.env` points at a live Obsidian vault and `rebuild_index` stamps ids into every id-less file it finds there. Put throwaway scripts in `tests/`. **Exception:** `tests/eval` reads real vault content — read-only, over REST, via `scripts/export_vault.py` into a snapshot under `tmp_path` — because the golden query set's expected ids are real posts; it never touches `vault_path` directly and is gated behind `RELAY_EVAL_URL`/`RELAY_EVAL_KEY` so it can't fire by accident. **`tests/eval/golden.yaml` is gitignored, not committed** — real recall queries and real post ids are personal, and this repo is public; copy `golden.example.yaml` to get started, same as `.env.example` → `.env`.
 
 **CI** runs `ruff check` + `pytest` on every push/PR. Ruff: `E,F,I,UP,B,C4,SIM` at line-length 120. `docker.yml` publishes the image on pushes to `main`.
 

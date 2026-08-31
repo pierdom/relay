@@ -161,13 +161,23 @@ def _fts_query(search: str) -> str | None:
     """Turn free text into a safe FTS5 MATCH string, or ``None`` if it has no
     searchable tokens. Every token is stripped to word characters (neutralising
     ``"`` ``*`` ``:`` ``-`` ``(`` and other FTS operators that would raise a
-    syntax error), quoted as a literal, and prefix-matched; space = implicit AND,
-    so ``wireguard proton`` requires both terms."""
+    syntax error), quoted as a literal, and prefix-matched, OR-joined so any
+    term can hit — bm25 (see ``_BM25_WEIGHTS``) still ranks a post matching
+    every term above one matching only some.
+
+    Was implicit AND (every term required) until an eval harness showed that
+    fails almost all natural-language recall queries ("what did we decide
+    about the notes backend"): AND requires literal co-occurrence of every
+    word including stopwords, which is rarely true even in the right post —
+    and short tokens (single-letter Italian "e", "il", "la"…), prefix-matched,
+    are so permissive that AND still "succeeds" against irrelevant giant posts
+    that merely contain those letters somewhere, silently returning garbage
+    instead of nothing. OR-with-ranking degrades gracefully instead."""
     terms: list[str] = []
     for tok in _FTS_TOKEN_RE.split(search):
         if tok and any(c.isalnum() for c in tok):
             terms.append(f'"{tok}"*')
-    return " ".join(terms) if terms else None
+    return " OR ".join(terms) if terms else None
 
 
 async def list_posts(

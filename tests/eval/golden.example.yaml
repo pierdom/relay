@@ -1,0 +1,13 @@
+# Template for the search-quality eval harness (tests/eval/test_recall.py).
+#
+# Copy this to golden.yaml (gitignored — see .gitignore) and replace these
+# with real queries from your own recall, and the real post ids in your vault
+# that count as correct hits. golden.yaml necessarily encodes personal
+# recall patterns and real post ids, so it never gets committed — this file
+# only documents the shape. See tests/eval/conftest.py's live_snapshot
+# fixture and CLAUDE.md's "Running" section for how to run it.
+
+- query: "what did we decide about the database migration"
+  expect: [42]
+- query: "quando ho rinnovato l'assicurazione dell'auto"
+  expect: [17, 18]

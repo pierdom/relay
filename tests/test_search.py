@@ -54,12 +54,12 @@ async def _titles(client, q):
 
 
 def test_fts_query_multi_term_prefix():
-    assert _fts_query("wireguard proton") == '"wireguard"* "proton"*'
+    assert _fts_query("wireguard proton") == '"wireguard"* OR "proton"*'
 
 
 def test_fts_query_strips_operators():
     # quotes, parens, colons, stars, dashes must not reach FTS5 as syntax
-    assert _fts_query('"wire-guard": (proton*)') == '"wire"* "guard"* "proton"*'
+    assert _fts_query('"wire-guard": (proton*)') == '"wire"* OR "guard"* OR "proton"*'
 
 
 def test_fts_query_keeps_underscore_identifiers():
@@ -82,11 +82,23 @@ async def test_fts_is_enabled(vault_dir):
 
 
 @pytest.mark.asyncio
-async def test_multi_term_requires_all_terms(client):
+async def test_multi_term_ranks_full_match_first(client):
     await _create(client, "Both", "wireguard over proton VPN")
     await _create(client, "OnlyOne", "wireguard tunnel only")
     titles = await _titles(client, "wireguard proton")
-    assert titles == ["Both"]  # implicit AND — OnlyOne lacks 'proton'
+    # OR-joined, bm25-ranked: a post matching every term still outranks one
+    # matching only some, but the partial match now surfaces instead of
+    # vanishing entirely (see _fts_query's docstring for why AND was dropped).
+    assert titles[0] == "Both"
+    assert "OnlyOne" in titles
+
+
+@pytest.mark.asyncio
+async def test_or_matches_when_not_every_term_present(client):
+    await _create(client, "Proton note", "notes about proton VPN")
+    # "spaceship" appears nowhere in the vault — under the old AND semantics
+    # this would return nothing; OR still surfaces the post on 'proton'.
+    assert "Proton note" in await _titles(client, "proton spaceship")
 
 
 @pytest.mark.asyncio
