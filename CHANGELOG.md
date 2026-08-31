@@ -8,6 +8,18 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.0.0] — 2026-08-31
+
+Baseline for post #253's "Relay 2.0 — Semantic Layer" idea: no semantics shipped here, just the fix and the measurement the sequencing plan calls for before deciding whether to build it.
+
+### Fixed
+- Search: `_fts_query` implicitly AND-joined every token including stopwords, so natural-language queries ("what did we decide about the notes backend") almost always matched nothing — and worse, a short/common token's prefix match (e.g. Italian `"e"*`) could make AND accidentally "succeed" against an irrelevant giant post that merely contained it somewhere, returning garbage instead of nothing. Now OR-joined, still bm25-ranked, so a post matching more terms still outranks one matching fewer
+
+### Added
+- `tests/eval/` — a golden-query recall@5/MRR harness, scored against a real vault snapshot pulled read-only over REST (gated behind `RELAY_EVAL_URL`/`RELAY_EVAL_KEY`, skipped otherwise; `golden.yaml` itself is gitignored — real recall queries and post ids are personal, this repo is public; `golden.example.yaml` documents the shape). Measured FTS5-only baseline: recall@5=0.540, MRR=0.414 — the number future semantic-search work is measured against
+
+---
+
 ## [0.10.1] — 2026-08-29
 
 ### Fixed
