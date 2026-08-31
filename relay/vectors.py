@@ -203,6 +203,35 @@ async def semantic_search(db: aiosqlite.Connection, query: str, *, limit: int = 
     return sorted(best.items(), key=lambda kv: kv[1])[:limit]
 
 
+# Semantic's top-1 L2 distance (unit-normalized vectors, so 0=identical,
+# 2=opposite) is a per-query confidence signal — and unlike a raw bm25 score,
+# it's actually comparable *across* queries, since it doesn't depend on corpus
+# term statistics. Rough calibration from one manual check (relay #253 phase
+# 4): a clearly-relevant match landed ~1.0, clearly-irrelevant ones ~1.3-1.4.
+# Not validated against the golden set yet — the eval harness is exactly how
+# to check whether this threshold is right.
+_CONFIDENT_DISTANCE = 1.1
+_WEIGHT_WHEN_CONFIDENT = 3.0
+_WEIGHT_WHEN_UNSURE = 0.5
+
+
+def semantic_confidence_weight(results: list[tuple[int, float]]) -> float:
+    """How much to weight semantic's list in RRF fusion — based on semantic's
+    *own* top-1 distance for this query, not a fixed global ratio.
+
+    A fixed global ratio is zero-sum (relay #253 phase 4, measured): weighting
+    toward semantic fixes queries where it's strong and breaks queries where
+    keyword is strong instead — e.g. a literal multi-document cluster query
+    keyword nailed perfectly (recall@5=1.00) dropped to 0.20 under a 2:1
+    semantic weight, because semantic was confidently *wrong* about it.
+    Gating on semantic's own confidence lets it dominate only when it has a
+    real signal, and defer to keyword otherwise."""
+    if not results:
+        return _WEIGHT_WHEN_UNSURE
+    _, top_distance = results[0]
+    return _WEIGHT_WHEN_CONFIDENT if top_distance < _CONFIDENT_DISTANCE else _WEIGHT_WHEN_UNSURE
+
+
 def reciprocal_rank_fusion(
     list_a: list[int], list_b: list[int], *, k: int = 60, weight_a: float = 1.0, weight_b: float = 1.0
 ) -> list[int]:

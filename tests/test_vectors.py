@@ -189,6 +189,30 @@ async def test_semantic_search_disabled_returns_empty(db, backend, monkeypatch):
     assert await vectors.semantic_search(db, "anything") == []
 
 
+# ── semantic_confidence_weight (pure) ────────────────────────────────────────
+
+
+def test_confidence_weight_high_for_a_close_top_match():
+    weight = vectors.semantic_confidence_weight([(1, 0.2), (2, 0.9)])
+    assert weight == vectors._WEIGHT_WHEN_CONFIDENT
+
+
+def test_confidence_weight_low_for_a_distant_top_match():
+    weight = vectors.semantic_confidence_weight([(1, 1.4), (2, 1.45)])
+    assert weight == vectors._WEIGHT_WHEN_UNSURE
+
+
+def test_confidence_weight_only_looks_at_the_top_result():
+    # A weak #1 with a strong #2 is still "unsure" — the top rank is what a
+    # caller would actually trust, not the best distance anywhere in the list.
+    weight = vectors.semantic_confidence_weight([(1, 1.4), (2, 0.1)])
+    assert weight == vectors._WEIGHT_WHEN_UNSURE
+
+
+def test_confidence_weight_empty_list_is_unsure():
+    assert vectors.semantic_confidence_weight([]) == vectors._WEIGHT_WHEN_UNSURE
+
+
 # ── reciprocal_rank_fusion (pure) ────────────────────────────────────────────
 
 

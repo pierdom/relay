@@ -208,19 +208,20 @@ async def _list_posts_ranked(
     the SQL-driven default path below: undocumented gap the eval harness
     doesn't need closed yet, not an oversight."""
     metrics.search_queries.inc()
-    semantic_ranked = [pid for pid, _ in await vectors.semantic_search(db, search, limit=50)]
+    semantic_results = await vectors.semantic_search(db, search, limit=50)
+    semantic_ranked = [pid for pid, _ in semantic_results]
     if mode == "semantic":
         ordered_ids = semantic_ranked
     else:
         keyword_ranked = await _keyword_ranked_ids(db, search, limit=50)
-        # Weighted toward semantic (2:1) — relay #253's phase 4 eval measured
-        # equal-weight RRF underperforming semantic alone (MRR 0.557 vs 0.667):
-        # a noisy keyword list for a query could drag a post semantic ranked
-        # #1 out of the top 5 entirely. Semantic also measured the stronger of
-        # the two lists overall (MRR 0.667 vs keyword's 0.414, ~1.6x) — 2:1
-        # is a first-pass value in that direction, not independently tuned.
+        # Per-query adaptive weight, not a fixed ratio — a fixed global ratio
+        # measured zero-sum (relay #253 phase 4): it fixes queries where
+        # semantic is strong and breaks queries where keyword is strong
+        # instead. Weight semantic by its own top-1 confidence for *this*
+        # query so it dominates only when it actually has a signal.
+        weight_b = vectors.semantic_confidence_weight(semantic_results)
         ordered_ids = vectors.reciprocal_rank_fusion(
-            keyword_ranked, semantic_ranked, weight_a=1.0, weight_b=2.0
+            keyword_ranked, semantic_ranked, weight_a=1.0, weight_b=weight_b
         )
 
     page_ids = ordered_ids[offset : offset + limit]
