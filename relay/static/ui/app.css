@@ -1480,19 +1480,24 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .vt-btn:hover:not(.active) { color: var(--text); }
 
 .sort-control { display: flex; flex-shrink: 0; }
-.sort-select {
+.sort-select, .mode-select {
   appearance: none; -webkit-appearance: none;
   background-color: var(--bg); border: 1px solid var(--border); color: var(--text);
   cursor: pointer; font-size: 12px; font-family: inherit;
-  padding: 4px 22px 4px 8px; border-radius: 4px 0 0 4px;
+  padding: 4px 22px 4px 8px; border-radius: 4px;
   transition: border-color 0.15s;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none' stroke='%238a8a8a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 7px center;
 }
-.sort-select:hover { border-color: var(--muted); }
-.sort-select:focus { outline: none; border-color: var(--accent); }
-.sort-select option { background: var(--surface); color: var(--text); }
+.sort-select { border-radius: 4px 0 0 4px; }
+.sort-select:hover, .mode-select:hover { border-color: var(--muted); }
+.sort-select:focus, .mode-select:focus { outline: none; border-color: var(--accent); }
+.sort-select option, .mode-select option { background: var(--surface); color: var(--text); }
 .sort-dir { border-radius: 0 4px 4px 0; border-left: none; min-width: 30px; }
+/* Off (embedding_enabled=false server-side, the default) until confirmed via
+   GET /status — main.js reveals it, never CSS, so there is no theme/media
+   query to keep in sync here. */
+.mode-select { flex-shrink: 0; }
 /* Separate the sort group from the list/grid view group. */
 .search-bar .view-toggle { margin-left: 6px; padding-left: 12px; border-left: 1px solid var(--border); }
 
@@ -1587,7 +1592,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
      alongside both on one row instead of the row wrapping. */
   .search-bar { gap: 6px; }
   .search-bar input { min-width: 0; }
-  .sort-select { padding: 4px 18px 4px 6px; font-size: 11px; }
+  .sort-select, .mode-select { padding: 4px 18px 4px 6px; font-size: 11px; }
   .sort-dir { min-width: 26px; padding: 5px 6px; }
   .vt-btn { padding: 5px 7px; font-size: 12px; }
   .search-bar .view-toggle { margin-left: 4px; padding-left: 8px; }

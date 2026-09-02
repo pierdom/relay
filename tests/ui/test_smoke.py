@@ -163,6 +163,16 @@ def test_status_panel_reports_version_and_health(page):
     page.locator("#statusModal.open").wait_for(state="detached", timeout=5_000)
 
 
+def test_search_mode_select_stays_hidden_without_embeddings(page):
+    """Same off-by-default gate as the status panel's 'Semantic search' dot above
+    (relay #253) — main.js checks GET /status itself before ever revealing the
+    ranking-mode control, so this suite's relay_server (embeddings never turned
+    on) must never show a mode that would just 503 if picked."""
+    page.locator(".feed .post").first.wait_for(timeout=10_000)
+    page.wait_for_timeout(300)  # let init()'s fetchEmbeddingsEnabled() resolve
+    assert not page.locator("#modeSelect").is_visible()
+
+
 def test_status_panel_closes_on_backdrop_and_escape(page):
     """Its close paths live in a different module from the key handler that calls
     them, so they are worth pinning explicitly rather than assuming."""

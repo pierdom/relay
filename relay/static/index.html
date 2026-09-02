@@ -156,6 +156,12 @@
       <input type="text" id="searchInput" aria-label="Search posts"
              placeholder="Search title, content, source…" autocomplete="off">
       <button class="search-clear" id="searchClear" title="Clear search">×</button>
+      <select class="mode-select" id="modeSelect" title="Ranking mode (semantic search, proof of concept)"
+              aria-label="Ranking mode" style="display:none">
+        <option value="keyword">Keyword</option>
+        <option value="semantic">Semantic</option>
+        <option value="hybrid">Hybrid</option>
+      </select>
       <div class="sort-control" id="sortControl">
         <select class="sort-select" id="sortField" title="Sort by" aria-label="Sort by">
           <option value="updated">Updated</option>
