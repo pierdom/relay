@@ -70,6 +70,8 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are removed |
 | `RELAY_WATCH_ENABLED` | `true` | Live-reindex + SSE on edits made outside relay (e.g. in Obsidian) |
 | `RELAY_HISTORY_ENABLED` | `true` | Commit the vault to git after every write, so a clobbered or deleted post can be restored. No-ops with a warning if the `git` binary is missing — check `features.history.effective` in `/status` |
+| `RELAY_EMBEDDING_ENABLED` | `false` | Semantic/hybrid search (relay #253, proof of concept). See [Semantic search](#semantic-search-optional-proof-of-concept) below before enabling in production |
+| `EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | fastembed model id. No `RELAY_` prefix (unlike most vars here) |
 | `SECURE_COOKIES` | `true` | `Secure` flag on the session cookie; set `false` for plain HTTP |
 | `ATTACHMENT_MAX_MB` | `25` | Max upload size; larger uploads → 413 (all transports) |
 | `ATTACHMENT_UPLOAD_TTL_SECONDS` | `3600` | Presigned upload slot lifetime before it's purged |
@@ -95,6 +97,19 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 |----------|---------|-------------|
 | `RELAY_VAULT_DIR` | `./vault` | Host path bind-mounted to `/data/vault`. Set an absolute path in production |
 | `RELAY_UID` / `RELAY_GID` | `1000` | Run as your host user so files relay writes stay user-owned — matters for Syncthing/Obsidian/backups |
+
+---
+
+## Semantic search (optional, proof of concept)
+
+`RELAY_EMBEDDING_ENABLED=true` turns on chunk-level embeddings (sqlite-vec + fastembed) and exposes `mode=semantic|hybrid` alongside the default `keyword` mode on `GET /posts`, the `list_posts` MCP tool, and a ranking-mode select in the browser UI's search bar. Off by default everywhere — relay #253's proof of concept, not a fully validated default yet.
+
+What to expect when you flip it on:
+
+- **First-run model download.** The configured `EMBEDDING_MODEL` downloads on first use into `<vault>/.relay/models` (plus `.relay/hf-home` for `huggingface_hub`'s own cache) — inside the vault dir on purpose, so it rides the same Docker volume and survives container restarts instead of re-downloading every time.
+- **Startup stays fast regardless of vault size.** Embedding every existing post runs as a background task *after* the server is already serving requests, not inline during startup — watch the logs for `Embedding backfill starting` / periodic `N/M posts checked` (every 15s) / `Embedding backfill complete`. A crash or restart mid-backfill doesn't lose progress: the embedding cache is content-addressed and survives, so the next run resumes rather than starting over.
+- **CPU and memory during the backfill.** Embedding is real local ONNX inference — expect a CPU-bound burst proportional to how much of the vault is genuinely new (not yet cached). Memory footprint on a small VPS is still being characterized; the model stays resident in memory for the process lifetime by design (so later searches don't reload it), and reducing that steady-state footprint is an open next step, not yet solved.
+- **Verify it actually came up:** check `features.search.embeddings` in `GET /status`, or the "Semantic search" row in the browser UI's status panel — both report whether embeddings are *actually* usable, not just configured.
 
 ---
 

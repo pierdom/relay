@@ -8,6 +8,21 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.1.1] — 2026-09-02
+
+Four fixes found deploying v1.1.0 to production for the first time — this path (real vault, `RELAY_EMBEDDING_ENABLED=true`, actual internet traffic) had never been exercised before. All four are internal/operational; no API or MCP surface changed.
+
+### Fixed
+- App failed to boot at all: `sqlite-vec`/`fastembed` were added to `pyproject.toml`'s dependencies (v1.1.0's own POC commit) but `uv.lock` was never regenerated to match. The Dockerfile installs via `uv sync --frozen`, which trusts the lockfile literally rather than re-resolving, so every image built from it installed a lockfile that never had those packages — `relay/vectors.py`'s unconditional `import sqlite_vec` crashed on startup regardless of `RELAY_EMBEDDING_ENABLED`. `uv lock` regenerated and committed
+- Model download failed with a permission error: relay's container runs as an arbitrary host UID with no matching `/etc/passwd` entry (`docker-compose.yml`'s `user:`, deliberate — keeps vault writes host-owned), so `$HOME` is unset and `huggingface_hub`'s default cache path resolves to an unwritable location under `/`. `FastEmbedBackend` now passes an explicit `cache_dir` (`<vault>/.relay/models`) — same pattern as `uploads_dir`/`database_path`, rides the existing vault volume
+- Same download still failed after that fix: `huggingface_hub`'s xet fast-transfer backend has its *own* cache/log path (`HF_XET_CACHE`), derived from `HF_HOME` as a plain module-level constant computed once at that module's import time — it never reads `cache_dir` at all, a completely separate mechanism. `HF_HOME` and `HF_HUB_DISABLE_XET=1` are now set at `embedding.py` module load, before anything can import `huggingface_hub` for the first time
+- The real outage: once the model actually downloaded, the whole site 502'd — including `/health` — with CPU and memory maxed, for as long as the initial embedding backlog took. `rebuild_index`'s bulk pass called `vectors.sync_post_chunks` (real, sequential, CPU-bound inference) for every post, and it ran inline in the ASGI lifespan's `await init_db()`, before the server accepts any connection. Embedding sync is now deferred to `vault.backfill_embeddings`, a background task scheduled after startup — committed per post (a crash mid-run doesn't lose progress) and logging periodic `N/M posts checked` progress
+
+### Known issue
+- Memory footprint under a small VPS climbs during the initial backfill and doesn't come back down afterward — expected in shape (the model stays resident by design, to avoid reloading per search) but the steady-state cost on constrained hardware isn't characterized yet. Tracked as the next priority; not fixed in this release. Candidate levers: capping fastembed/onnxruntime's thread pool (`TextEmbedding(threads=...)`, never set today), confirming actual MB via `docker stats` rather than reading %, unloading the model between uses at the cost of reload latency
+
+---
+
 ## [1.1.0] — 2026-09-02
 
 Relay #253 phases 2-5: sqlite-vec semantic/hybrid search moves from an internal proof of concept (Python-only, reachable solely from `tests/eval`) to something reachable from REST, MCP, and the browser UI. Still off by default everywhere (`RELAY_EMBEDDING_ENABLED=false`) — this ships the surface, not a changed default.
