@@ -206,12 +206,18 @@ async def semantic_search(db: aiosqlite.Connection, query: str, *, limit: int = 
 # Semantic's top-1 L2 distance (unit-normalized vectors, so 0=identical,
 # 2=opposite) is a per-query confidence signal — and unlike a raw bm25 score,
 # it's actually comparable *across* queries, since it doesn't depend on corpus
-# term statistics. Rough calibration from one manual check (relay #253 phase
-# 4): a clearly-relevant match landed ~1.0, clearly-irrelevant ones ~1.3-1.4.
-# Not validated against the golden set yet — the eval harness is exactly how
-# to check whether this threshold is right.
+# term statistics. Threshold 1.1 confirmed by a golden-set sweep (relay #253
+# phase 4) as the plateau peak of a 0.90-1.40 grid — 1.10/1.15 tie for best,
+# recall@5 drops on either side. _WEIGHT_WHEN_CONFIDENT was swept 2.0-100.0 at
+# that threshold: recall@5 plateaus at 0.687 from 5.0 up, MRR keeps climbing
+# to 0.714 by 25.0 then flattens — but weights that high turn the "confident"
+# branch into a near-total override of keyword rather than a blend, which
+# risks fitting the shape of this one 21-query golden set. 8.0 is the
+# conservative pick: it already clears semantic-only's own recall (0.687 vs
+# 0.659) and matches its MRR (0.667), while still meaningfully blending
+# keyword's ranking rather than discarding it.
 _CONFIDENT_DISTANCE = 1.1
-_WEIGHT_WHEN_CONFIDENT = 3.0
+_WEIGHT_WHEN_CONFIDENT = 8.0
 _WEIGHT_WHEN_UNSURE = 0.5
 
 
