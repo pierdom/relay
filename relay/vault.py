@@ -489,7 +489,13 @@ async def index_upsert(
     created_at: str,
     updated_at: str | None,
     expires_at: str | None,
+    sync_embeddings: bool = True,
 ) -> None:
+    """``sync_embeddings=False`` skips the (possibly slow, cache-missing)
+    embedding call — used by rebuild_index's bulk pass, which must stay fast
+    enough to run inline at startup. A normal single-post write leaves this
+    True; main.py's background backfill catches up whatever rebuild_index
+    skipped (see its docstring for why the split exists)."""
     await db.execute(
         """
         INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at)
@@ -502,7 +508,8 @@ async def index_upsert(
         (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
          created_at, updated_at, expires_at),
     )
-    await vectors.sync_post_chunks(db, post_id=id, title=title, content=content)
+    if sync_embeddings:
+        await vectors.sync_post_chunks(db, post_id=id, title=title, content=content)
 
 
 async def index_insert(
@@ -640,12 +647,43 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
             created_at=meta.get("created_at") or utcnow_iso(),
             updated_at=effective_updated_at(path, meta),
             expires_at=meta.get("expires_at"),
+            # Embedding sync is deliberately skipped here — see index_upsert's
+            # and backfill_embeddings's docstrings. This loop runs inline
+            # during app startup and must stay fast; main.py's lifespan kicks
+            # off backfill_embeddings as a background task once the server is
+            # already serving requests.
+            sync_embeddings=False,
         )
     write_id_counter(max(max_id, read_id_counter()))
     await _load_tag_config(db)
     await db.commit()
     logger.info("Index rebuilt from %s — %d post(s)", vault_dir(), len(parsed))
     return len(parsed)
+
+
+async def backfill_embeddings(db: aiosqlite.Connection) -> int:
+    """Catch up whatever rebuild_index's startup pass skipped (relay #253).
+
+    Content-addressed (relay.vectors._hash), so a post whose embedding is
+    already cached from a prior run costs one cheap SQL lookup, not a re-embed
+    — the expensive model call only happens for genuinely new/changed content.
+    Committed per post rather than once at the end, so a mid-run crash (OOM,
+    restart) doesn't lose progress already made; the next run resumes from
+    the cache exactly where this one stopped.
+
+    Meant to run as a background task (main.py's lifespan), never inline
+    during startup — sequentially embedding a real vault's worth of posts
+    blocked the ASGI lifespan's `await init_db()`, and with it every HTTP
+    route including /health, until the whole backlog finished. No-ops
+    immediately (no query at all) when embeddings aren't enabled."""
+    if not settings.embedding_enabled:
+        return 0
+    async with db.execute("SELECT id, title, content FROM posts") as cur:
+        rows = await cur.fetchall()
+    for row in rows:
+        await vectors.sync_post_chunks(db, post_id=row["id"], title=row["title"], content=row["content"])
+        await db.commit()
+    return len(rows)
 
 
 # ── tag config (.relay/tags.yml is canonical, mirrored to the index) ──────────
