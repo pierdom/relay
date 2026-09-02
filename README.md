@@ -103,7 +103,7 @@ The Syncthing part can be completely removed if you just interact with the serve
 
 ```bash
 uv sync --all-extras --dev   # install (uv only — never pip)
-uv run pytest -q             # 419 tests (incl. 111 browser smokes)
+uv run pytest -q             # 541 tests (incl. 116 browser smokes)
 uv run ruff check .          # lint
 ```
 
@@ -123,6 +123,7 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 ## Technologies
 
 - **Python 3.13** + **FastAPI** + **aiosqlite** (FTS5 search) + **PyYAML**
+- **sqlite-vec** + **fastembed** — optional semantic/hybrid search (`mode=semantic|hybrid`, proof of concept, off by default)
 - **Markdown vault** — files are source of truth; SQLite index is disposable
 - **git** — a commit per write; any post is recoverable even after deletion
 - **watchdog** — live re-index of external edits (Obsidian, nvim)

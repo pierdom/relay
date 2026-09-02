@@ -14,13 +14,13 @@ uv run uvicorn relay.main:app --reload      # http://localhost:8000, docs at /do
 docker compose up -d                        # or Docker
 docker compose pull && docker compose up -d # update
 
-uv run pytest -q                            # tests (incl. 111 browser smokes)
+uv run pytest -q                            # tests (incl. 116 browser smokes)
 uv run ruff check .                         # lint (config in pyproject.toml)
 uv run playwright install chromium          # once, for browser smokes
 RELAY_EVAL_URL=... RELAY_EVAL_KEY=... uv run pytest -m eval -s  # search-quality recall/MRR baseline (tests/eval), skipped otherwise
 ```
 
-Uses `uv` — never `pip`. Add deps with `uv add <package>`.
+Uses `uv` — never `pip`. Add deps with `uv add <package>` — never hand-edit `pyproject.toml`'s `dependencies` and skip `uv lock`. This caused a real production outage (v1.1.0 → v1.1.1): `sqlite-vec`/`fastembed` were added to `pyproject.toml` without a matching `uv lock`, and the Dockerfile installs via `uv sync --frozen`, which trusts the lockfile literally rather than re-resolving — so every image built from it installed a lockfile that never had those packages, and `relay/vectors.py`'s unconditional `import sqlite_vec` crashed the app on boot. `uv run` silently self-heals a stale lock locally; don't mistake that diff for noise and discard it — recognize it as the lockfile catching up to something pyproject.toml already promised, and commit it.
 
 **Tests always run against a throwaway vault.** `tests/conftest.py` has an autouse `isolated_vault` fixture that repoints `settings.vault_path` under `tmp_path`. Never patch `vault_path` outside `tmp_path` — the real `.env` points at a live Obsidian vault and `rebuild_index` stamps ids into every id-less file it finds there. Put throwaway scripts in `tests/`. **Exception:** `tests/eval` reads real vault content — read-only, over REST, via `scripts/export_vault.py` into a snapshot under `tmp_path` — because the golden query set's expected ids are real posts; it never touches `vault_path` directly and is gated behind `RELAY_EVAL_URL`/`RELAY_EVAL_KEY` so it can't fire by accident. **`tests/eval/golden.yaml` is gitignored, not committed** — real recall queries and real post ids are personal, and this repo is public; copy `golden.example.yaml` to get started, same as `.env.example` → `.env`.
 
@@ -83,6 +83,8 @@ Stored verbatim, resolved at display time. Code spans/blocks are skipped.
 | `RELAY_VAULT_PATH` | /data/vault | |
 | `RELAY_WATCH_ENABLED` | true | Live-reindex + SSE on external edits |
 | `RELAY_HISTORY_ENABLED` | true | git commit per write; no-ops with a warning if `git` missing |
+| `RELAY_EMBEDDING_ENABLED` | false | Semantic/hybrid search (relay #253, proof of concept) — see "Semantic search" below |
+| `EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | fastembed model id — no `RELAY_` prefix |
 | `SECURE_COOKIES` | true | `false` for plain HTTP |
 | `ATTACHMENT_MAX_MB` | 25 | |
 | `ATTACHMENT_UPLOAD_TTL_SECONDS` | 3600 | |
@@ -171,6 +173,15 @@ See [docs/tui.md](docs/tui.md) for keybindings, palette names, and transparency 
 - **Master doc (`id=0`):** `Master Document.md` at vault root, seeded at startup, `DELETE` blocked, TTL-exempt. Update via `update_post(id=0, …)`.
 - **TTL:** off by default. Precedence: per-post `expires_at` > per-tag > global. Shortest TTL wins for multi-tag posts.
 
+## Semantic search (proof of concept, relay #253)
+
+`RELAY_EMBEDDING_ENABLED` (off by default everywhere, including production). Adds `mode=keyword|semantic|hybrid` to `GET /posts` and `list_posts` (both MCP surfaces), and a ranking-mode select in the browser UI search bar (hidden unless `features.search.embeddings` in `/status` is true). `mode=semantic|hybrid` 503s if unavailable, 400s if combined with `tag`/`folder` (the ranked path — `service._list_posts_ranked` — doesn't apply SQL filters, and deliberately errors rather than silently ignoring them).
+
+- **Chunking** (`chunking.py`): H2/H3-aware, runt-merge, giant-split with overlap. **Embedding cache** (`vectors.py`): content-addressed by `(model_id, chunk_body)` hash — unchanged content is a cache hit, never re-embedded, and the cache survives restarts (no cascade from `posts`).
+- **`.relay/models`** — fastembed's downloaded ONNX model. **`.relay/hf-home`** — `huggingface_hub`'s cache root (xet fast-transfer disabled via `HF_HUB_DISABLE_XET=1`; its own cache/log path ignores `cache_dir` entirely and is derived from `HF_HOME` at import time, so both are set at `embedding.py` module load, before fastembed can be imported anywhere). Both under `.relay/` so they ride the vault volume in Docker and survive container restarts instead of re-downloading.
+- **Startup never blocks on embedding.** `rebuild_index`'s bulk pass runs with `index_upsert(..., sync_embeddings=False)` — SQL-only, fast, safe to run inline in the ASGI lifespan. `vault.backfill_embeddings` (the deferred work) runs as a background `asyncio.create_task` from `main.py`'s lifespan, same pattern as `cleanup_loop`, logging `Embedding backfill starting` → periodic `N/M posts checked` (15s cadence) → `Embedding backfill complete`. **This split exists because of a real production outage**: embedding every post inline at startup blocked the ASGI server from accepting *any* connection — including `/health` — until the whole backlog finished; on a real vault that's minutes of total downtime on every restart. Never reintroduce an inline bulk-embed call.
+- **Known open issue:** memory footprint under a small VPS is still being characterized — the model stays resident for the process lifetime by design (avoids reloading per request), and reducing that steady-state cost is the next priority, not yet solved. Candidate levers: `fastembed.TextEmbedding(threads=...)` to cap onnxruntime's thread pool (never set today), checking actual MB via `docker stats` rather than %, and possibly unloading the model between uses (`embedding._backend = None`) at the cost of reload latency on the next search.
+
 ## Project layout
 
 ```
@@ -185,6 +196,9 @@ relay/
 ├── history.py       # git commit per write → <vault>/.relay/history.git
 ├── service.py       # Shared post/tag/attachment logic
 ├── ingest.py        # Attachment byte transports
+├── chunking.py      # H2/H3-aware post chunking (semantic search POC)
+├── embedding.py     # Swappable embedding backend (FastEmbed / Fake for tests)
+├── vectors.py       # sqlite-vec schema, embedding cache, KNN, RRF (semantic search POC)
 ├── mcp_server.py    # In-process FastMCP server (/mcp)
 ├── mcp_oauth/       # Remote MCP OAuth AS
 ├── events.py · cleanup.py
