@@ -258,6 +258,60 @@ async def test_list_posts_hybrid_mode_fuses_via_service(db, backend):
     assert a.id in [item.id for item in result.items]
 
 
+# ── ranked-mode candidate pool sizing (relay #253 phase 5 finding #2) ───────
+
+
+@pytest.mark.asyncio
+async def test_ranked_pool_covers_offset_plus_limit(db, backend, monkeypatch):
+    """The candidate pool handed to each ranker must grow with the caller's
+    offset/limit — a pool stuck at a flat default silently dead-ends
+    pagination past it, indistinguishable from "no more results"."""
+    calls: list[int] = []
+    real_semantic_search = vectors.semantic_search
+
+    async def spy(db_, query, *, limit=50):
+        calls.append(limit)
+        return await real_semantic_search(db_, query, limit=limit)
+
+    monkeypatch.setattr(vectors, "semantic_search", spy)
+    await service.list_posts(db, search="anything", mode="semantic", limit=10, offset=60)
+    assert calls[-1] == 70  # offset + limit, comfortably under the cap
+
+
+@pytest.mark.asyncio
+async def test_ranked_pool_size_is_capped(db, backend, monkeypatch):
+    """A caller-supplied offset is unvalidated at the MCP layer — the pool must
+    not scale unbounded with it (sqlite-vec KNN cost scales with k)."""
+    calls: list[int] = []
+    real_semantic_search = vectors.semantic_search
+
+    async def spy(db_, query, *, limit=50):
+        calls.append(limit)
+        return await real_semantic_search(db_, query, limit=limit)
+
+    monkeypatch.setattr(vectors, "semantic_search", spy)
+    await service.list_posts(db, search="anything", mode="semantic", limit=50, offset=10_000)
+    assert calls[-1] == service._RANKED_POOL_CAP
+
+
+@pytest.mark.asyncio
+async def test_list_posts_semantic_pagination_reaches_past_the_old_flat_pool(db, backend):
+    """Regression test: before the fix, both rankers' pool was a flat 50
+    regardless of offset/limit, so a page starting past index 50 came back
+    empty even with far more real matches in the vault. 60 posts here, page
+    at offset=55/limit=10 must still return the tail 5."""
+    for i in range(60):
+        await service.create_post(
+            db, PostCreate(title=f"Post {i}", content=f"## S\n{LONG_SECTION} item{i}", tags=["dev"])
+        )
+
+    result = await service.list_posts(db, search="item", mode="semantic", limit=10, offset=55, summary=True)
+    # total includes the master doc (id=0) the db fixture already seeded, so
+    # don't hardcode 60 — assert against the tail the pool should now reach.
+    assert result.total > 55
+    assert len(result.items) == result.total - 55
+
+
 # ── semantic_confidence_weight (pure) ────────────────────────────────────────
 
 

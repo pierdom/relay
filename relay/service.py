@@ -206,6 +206,15 @@ async def _keyword_ranked_ids(db: aiosqlite.Connection, search: str, *, limit: i
         return [row[0] for row in await cur.fetchall()]
 
 
+# Both rankers' candidate pool must cover offset+limit or pagination silently
+# dead-ends past whatever the pool happened to hold — but sqlite-vec's KNN
+# cost scales with k, so the pool can't just track an unbounded caller-
+# supplied offset either (REST caps limit at 100 but not offset; MCP callers
+# aren't validated at all). This caps how deep semantic/hybrid pagination can
+# reach — a page past it comes back empty, same as any pagination end state.
+_RANKED_POOL_CAP = 200
+
+
 async def _list_posts_ranked(
     db: aiosqlite.Connection, *, search: str, mode: str, limit: int, offset: int, summary: bool
 ) -> PostListResponse | PostSummaryListResponse:
@@ -217,16 +226,22 @@ async def _list_posts_ranked(
 
     Raises ``SemanticSearchUnavailable`` if sqlite-vec isn't loaded or
     embeddings are off — callers must not silently fall back to keyword-only,
-    since that would look identical to "no matches" for this query."""
+    since that would look identical to "no matches" for this query.
+
+    ``total`` in the response is the size of the fused candidate pool
+    actually considered (bounded by ``_RANKED_POOL_CAP``), not an exact
+    corpus-wide match count like the keyword path's ``SELECT COUNT(*)`` —
+    "matches" isn't binary for a similarity ranking the way it is for FTS."""
     if not (database.VEC_ENABLED and settings.embedding_enabled):
         raise SemanticSearchUnavailable
     metrics.search_queries.inc()
-    semantic_results = await vectors.semantic_search(db, search, limit=50)
+    pool_size = min(max(offset + limit, 50), _RANKED_POOL_CAP)
+    semantic_results = await vectors.semantic_search(db, search, limit=pool_size)
     semantic_ranked = [pid for pid, _ in semantic_results]
     if mode == "semantic":
         ordered_ids = semantic_ranked
     else:
-        keyword_ranked = await _keyword_ranked_ids(db, search, limit=50)
+        keyword_ranked = await _keyword_ranked_ids(db, search, limit=pool_size)
         # Per-query adaptive weight, not a fixed ratio — a fixed global ratio
         # measured zero-sum (relay #253 phase 4): it fixes queries where
         # semantic is strong and breaks queries where keyword is strong
