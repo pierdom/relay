@@ -299,6 +299,12 @@ class HistoryStatus(BaseModel):
 
 class SearchStatus(BaseModel):
     fts5: bool = Field(description="False means search fell back to LIKE substring matching")
+    embeddings: bool = Field(
+        description=(
+            "Whether mode='semantic'/'hybrid' is available (relay #253, proof of concept, off by "
+            "default) — sqlite-vec loaded and RELAY_EMBEDDING_ENABLED=true"
+        )
+    )
 
 
 class WatcherStatus(BaseModel):

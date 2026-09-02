@@ -71,7 +71,9 @@ restore_post(id=54, sha="a8dcc37")
 - **`get_status` reports what is actually working**, not what is configured:
   `history.effective` is false when the git binary is missing (so writes are not
   recoverable), `search.fts5` false means search fell back to substring matching,
-  and `watcher.running` false means edits made directly to the files are not being
+  `search.embeddings` false means `list_posts(mode=...)`'s `semantic`/`hybrid`
+  ranking will error (relay #253, proof of concept, off by default), and
+  `watcher.running` false means edits made directly to the files are not being
   indexed. It also reports which vault path is being served, which settles "am I
   talking to the instance I think I am".
 - **Post ids are never reused.** Deleting the newest post does not free its id, so

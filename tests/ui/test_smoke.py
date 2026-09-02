@@ -148,14 +148,17 @@ def test_status_panel_reports_version_and_health(page):
 
     assert page.locator("#smVersion").inner_text().strip(), "no version rendered"
     text = body.inner_text()
-    for label in ("Vault history", "Full-text search", "External edits", "Posts", "Uptime"):
+    for label in ("Vault history", "Full-text search", "Semantic search", "External edits", "Posts", "Uptime"):
         assert label in text, f"status panel missing {label!r}"
     # The suite runs with RELAY_HISTORY_ENABLED=true (the post-history panel needs
-    # real revisions) and CI installs git, so all three health dots should be green.
+    # real revisions) and CI installs git, so vault history/FTS5/watcher should all
+    # be green. Semantic search is off by default everywhere (relay #253, proof of
+    # concept, not enabled in this suite) — that dot is `off`, not `ok` or `bad`.
     # A `bad` dot here means the server genuinely lost a capability.
-    assert body.locator(".sm-dot").count() == 3
+    assert body.locator(".sm-dot").count() == 4
     assert body.locator(".sm-dot.bad").count() == 0, "a health check regressed"
     assert body.locator(".sm-dot.ok").count() == 3
+    assert body.locator(".sm-dot.off").count() == 1
     page.locator("#smClose").click()
     page.locator("#statusModal.open").wait_for(state="detached", timeout=5_000)
 

@@ -1779,6 +1779,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .sm-dot.ok   { background: var(--green); }
 .sm-dot.warn { background: var(--accent); }
 .sm-dot.bad  { background: var(--red); }
+.sm-dot.off  { background: var(--muted); }
 .sm-feat-note { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
 .sm-recovery-line { font-size: 12.5px; color: var(--text); margin-bottom: 10px; }
 .sm-error { font-size: 12.5px; color: var(--red); }

@@ -132,6 +132,11 @@ function renderStatus(d) {
     d.features.search.fts5 ? 'FTS5' : 'substring fallback',
   ));
   health.appendChild(smFeature(
+    'Semantic search',
+    d.features.search.embeddings ? 'ok' : 'off',      // off by default everywhere — not a fault or a degradation
+    d.features.search.embeddings ? 'enabled' : 'disabled (proof of concept)',
+  ));
+  health.appendChild(smFeature(
     'External edits',
     d.features.watcher.running ? 'ok' : 'warn',
     d.features.watcher.running ? 'watching' : (d.features.watcher.enabled ? 'not running' : 'disabled'),
