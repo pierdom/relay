@@ -143,8 +143,8 @@ async def list_tools() -> list[types.Tool]:
                 "'created'; order is 'desc' (default) or 'asc'. Sort by created + asc to read a topic's posts "
                 "in the order they were written. mode ranks 'search' (relay #253, proof of concept): "
                 "'keyword' (default, FTS5/bm25), 'semantic' (embedding similarity), or 'hybrid' (fusion of "
-                "both) — semantic/hybrid return an error if this relay hasn't got embeddings enabled, and "
-                "ignore tag/folder."
+                "both) — semantic/hybrid return an error if this relay hasn't got embeddings enabled, or if "
+                "combined with tag/folder (the ranked path doesn't apply them)."
             ),
             inputSchema={
                 "type": "object",
@@ -572,6 +572,12 @@ async def call_tool(
             )
             if response.status_code == 503:
                 return [types.TextContent(type="text", text="Semantic search is not enabled on this relay.")]
+            if response.status_code == 400:
+                return [types.TextContent(type="text", text=response.json().get("detail", "Invalid request."))]
+            if response.status_code == 422:
+                detail = response.json().get("detail")
+                msg = detail[0]["msg"] if isinstance(detail, list) and detail else "Invalid list_posts request."
+                return [types.TextContent(type="text", text=msg.removeprefix("Value error, "))]
             response.raise_for_status()
             data = response.json()
         posts = data.get("items", [])

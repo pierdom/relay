@@ -66,7 +66,8 @@ async def list_posts(
         description=(
             "Ranking mode for 'search' (relay #253, proof of concept): 'keyword' (default, FTS5/bm25), "
             "'semantic' (embedding similarity), or 'hybrid' (RRF fusion of both). 'semantic'/'hybrid' "
-            "503 if this relay hasn't got embeddings enabled. Ignores 'tag'/'folder' filters."
+            "503 if this relay hasn't got embeddings enabled, and 400 if combined with 'tag'/'folder' "
+            "(the ranked path doesn't apply them)."
         ),
     ),
     db: aiosqlite.Connection = Depends(get_db),
@@ -88,6 +89,20 @@ async def list_posts(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Semantic search is not enabled on this relay",
+        ) from None
+    except service.RankedSearchFilterUnsupported:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'tag'/'folder' filters are not supported with mode='semantic' or 'hybrid'",
+        ) from None
+    except service.InvalidSearchMode:
+        # Defensive — Query(pattern=...) above already 422s this before the
+        # request reaches service.list_posts. Kept in sync in case that ever
+        # changes, and so this path isn't silently different from the
+        # in-process MCP server's, which has no such Query-layer validation.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="mode must be 'keyword', 'semantic', or 'hybrid'",
         ) from None
 
 

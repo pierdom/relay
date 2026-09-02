@@ -238,6 +238,31 @@ async def test_list_posts_semantic_mode_unavailable_raises(db, backend, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_list_posts_rejects_invalid_mode(db, backend):
+    # The in-process MCP server calls service.list_posts directly, with none of
+    # REST's Query(pattern=...) validation in front of it — a typo'd mode must
+    # still error here rather than silently falling back to keyword (relay
+    # #253 phase 5 finding: mode also gates SemanticSearchUnavailable, so a
+    # silent fallback would swallow both the caller's intent and that error).
+    with pytest.raises(service.InvalidSearchMode):
+        await service.list_posts(db, search="anything", mode="symantic")
+
+
+@pytest.mark.asyncio
+async def test_list_posts_ranked_mode_rejects_tag_filter(db, backend):
+    # _list_posts_ranked doesn't apply SQL filters — silently ignoring tag
+    # would return unfiltered results with no signal anything was dropped.
+    with pytest.raises(service.RankedSearchFilterUnsupported):
+        await service.list_posts(db, search="anything", mode="semantic", tag="dev")
+
+
+@pytest.mark.asyncio
+async def test_list_posts_ranked_mode_rejects_folder_filter(db, backend):
+    with pytest.raises(service.RankedSearchFilterUnsupported):
+        await service.list_posts(db, search="anything", mode="hybrid", folder="Dev")
+
+
+@pytest.mark.asyncio
 async def test_list_posts_semantic_mode_ranks_via_service(db, backend):
     a = await service.create_post(db, PostCreate(title="Alpha", content=f"## S\n{LONG_SECTION} alpha", tags=["dev"]))
     await service.create_post(db, PostCreate(title="Beta", content=f"## S\n{LONG_SECTION} beta", tags=["dev"]))

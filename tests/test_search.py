@@ -185,6 +185,23 @@ async def test_hybrid_mode_503_when_embeddings_disabled(client):
 
 
 @pytest.mark.asyncio
+async def test_semantic_mode_400_when_combined_with_tag(client):
+    # 400 (not 503) even with embeddings off here — the filter/mode shape is
+    # invalid regardless of feature availability, checked first (service.py's
+    # RankedSearchFilterUnsupported precedes the SemanticSearchUnavailable check).
+    r = await client.get("/posts", params={"search": "x", "mode": "semantic", "tag": "dev"}, headers=AUTH)
+    assert r.status_code == 400
+    assert "tag" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_mode_400_when_combined_with_folder(client):
+    r = await client.get("/posts", params={"search": "x", "mode": "hybrid", "folder": "Dev"}, headers=AUTH)
+    assert r.status_code == 400
+    assert "folder" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_like_fallback_when_fts_disabled(client, monkeypatch):
     # simulate a SQLite build without FTS5 — service must fall back to LIKE
     monkeypatch.setattr(database, "FTS_ENABLED", False)

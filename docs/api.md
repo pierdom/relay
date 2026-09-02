@@ -73,7 +73,7 @@ Key query params for `GET /posts`:
 | `search` | FTS5 full-text over title/content/source/tags; porter-stemmed, bm25-ranked |
 | `summary` | `true` returns metadata + plain-text excerpt only (default in MCP) |
 | `limit` / `offset` | Pagination |
-| `mode` | Ranking for `search`: `keyword` (default), `semantic`, or `hybrid` (relay #253, proof of concept). `semantic`/`hybrid` 503 if this relay doesn't have embeddings enabled, and ignore `tag`/`folder` |
+| `mode` | Ranking for `search`: `keyword` (default), `semantic`, or `hybrid` (relay #253, proof of concept). `semantic`/`hybrid` 503 if this relay doesn't have embeddings enabled, and 400 if combined with `tag`/`folder` (the ranked path doesn't apply them) |
 
 ---
 

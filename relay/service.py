@@ -72,6 +72,25 @@ class SemanticSearchUnavailable(Exception):
     matches" for "this relay doesn't have the feature on"."""
 
 
+class InvalidSearchMode(Exception):
+    """Raised when mode isn't one of keyword/semantic/hybrid. REST already
+    422s this at the Query(pattern=...) layer before it reaches here, but the
+    in-process MCP server calls list_posts directly with no such validation —
+    a typo'd mode there would otherwise fall back to keyword silently, the
+    same way an unrecognised sort/order value quietly defaults instead of
+    erroring. mode is worse to default silently on: it also gates
+    SemanticSearchUnavailable, so a typo skips both the caller's intended
+    ranking *and* the error that would have flagged the feature is off."""
+
+
+class RankedSearchFilterUnsupported(Exception):
+    """Raised when tag/folder is combined with mode='semantic'/'hybrid' and a
+    search term. _list_posts_ranked doesn't apply SQL filters (relay #253 —
+    an undocumented gap while this was Python-only); now that real REST/MCP
+    callers can hit it, silently ignoring a filter the caller explicitly
+    asked for is worse than telling them the combination isn't supported."""
+
+
 class AttachmentError(Exception):
     """Raised when an attachment can't be stored (e.g. too large)."""
 
@@ -284,7 +303,11 @@ async def list_posts(
     order: str = "desc",
     mode: str = "keyword",
 ) -> PostListResponse | PostSummaryListResponse:
+    if mode not in ("keyword", "semantic", "hybrid"):
+        raise InvalidSearchMode
     if search and mode in ("semantic", "hybrid"):
+        if tag or folder:
+            raise RankedSearchFilterUnsupported
         return await _list_posts_ranked(db, search=search, mode=mode, limit=limit, offset=offset, summary=summary)
 
     conditions: list[str] = []

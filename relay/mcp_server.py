@@ -175,7 +175,8 @@ async def publish_post(
         "Sort by created + asc to read a topic's posts in the order they were written. "
         "mode ranks 'search' (relay #253, proof of concept): 'keyword' (default, FTS5/bm25), "
         "'semantic' (embedding similarity), or 'hybrid' (fusion of both) — semantic/hybrid "
-        "return an error if this relay hasn't got embeddings enabled, and ignore tag/folder."
+        "return an error if this relay hasn't got embeddings enabled, or if combined with "
+        "tag/folder (the ranked path doesn't apply them)."
     )
 )
 async def list_posts(
@@ -198,6 +199,10 @@ async def list_posts(
             )
         except service.SemanticSearchUnavailable:
             return {"error": "Semantic search is not enabled on this relay."}
+        except service.RankedSearchFilterUnsupported:
+            return {"error": "'tag'/'folder' filters are not supported with mode='semantic' or 'hybrid'."}
+        except service.InvalidSearchMode:
+            return {"error": "mode must be 'keyword', 'semantic', or 'hybrid'."}
     return result.model_dump()
 
 
