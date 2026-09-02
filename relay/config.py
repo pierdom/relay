@@ -164,6 +164,19 @@ class Settings(BaseSettings):
         return str(Path(self.relay_dir) / "tags.yml")
 
     @property
+    def embedding_cache_dir(self) -> str:
+        """FastEmbed's downloaded ONNX model cache.
+
+        Under ``.relay/`` so it rides the vault dir — guaranteed writable by the
+        runtime UID the same way ``uploads_dir``/``database_path`` already are
+        (relay's container runs as an arbitrary host UID with no matching
+        ``/etc/passwd`` entry, so huggingface_hub's HOME-based default resolves
+        to an unwritable path otherwise) — and persists across container
+        restarts instead of re-downloading a few hundred MB every time.
+        """
+        return str(Path(self.relay_dir) / "models")
+
+    @property
     def mcp_oauth_db_path(self) -> str:
         """Persistent OAuth store (DCR clients, codes, tokens).
 

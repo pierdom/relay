@@ -4,6 +4,7 @@ one-line config change, and so the default test suite never has to load one.
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 from typing import Protocol
 
 from .config import settings
@@ -38,7 +39,11 @@ class FastEmbedBackend:
 
         self.model_id = settings.embedding_model
         self._e5_prefixes = "e5" in self.model_id.lower()
-        self._model = TextEmbedding(model_name=self.model_id)
+        # Explicit cache_dir — see Settings.embedding_cache_dir's docstring.
+        # Without it, huggingface_hub's snapshot_download falls back to a
+        # HOME-based default that's unwritable under relay's actual runtime UID.
+        Path(settings.embedding_cache_dir).mkdir(parents=True, exist_ok=True)
+        self._model = TextEmbedding(model_name=self.model_id, cache_dir=settings.embedding_cache_dir)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if self._e5_prefixes:
