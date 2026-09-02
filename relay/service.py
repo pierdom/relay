@@ -64,6 +64,14 @@ class HistoryUnavailable(Exception):
     """Raised when history is off or git is missing, so there is nothing to read."""
 
 
+class SemanticSearchUnavailable(Exception):
+    """Raised when mode='semantic'/'hybrid' is requested but sqlite-vec isn't
+    loaded or settings.embedding_enabled is off. Errors loud rather than
+    silently degrading to empty/keyword-only results — a caller who explicitly
+    asked for semantic ranking should not get an indistinguishable "no
+    matches" for "this relay doesn't have the feature on"."""
+
+
 class AttachmentError(Exception):
     """Raised when an attachment can't be stored (e.g. too large)."""
 
@@ -201,12 +209,17 @@ async def _keyword_ranked_ids(db: aiosqlite.Connection, search: str, *, limit: i
 async def _list_posts_ranked(
     db: aiosqlite.Connection, *, search: str, mode: str, limit: int, offset: int, summary: bool
 ) -> PostListResponse | PostSummaryListResponse:
-    """``mode="semantic"``/``"hybrid"`` path (relay #253 phases 2-4 — proof of
-    concept). Ranks by vector similarity, RRF-fused with keyword for hybrid.
-    Python-only for now — not reachable via REST/MCP yet, the eval harness
-    calls this directly. Deliberately ignores ``tag``/``folder`` filters, unlike
-    the SQL-driven default path below: undocumented gap the eval harness
-    doesn't need closed yet, not an oversight."""
+    """``mode="semantic"``/``"hybrid"`` path (relay #253 phases 2-5). Ranks by
+    vector similarity, RRF-fused with keyword for hybrid. Deliberately ignores
+    ``tag``/``folder`` filters, unlike the SQL-driven default path below:
+    undocumented gap the eval harness doesn't need closed yet, not an
+    oversight.
+
+    Raises ``SemanticSearchUnavailable`` if sqlite-vec isn't loaded or
+    embeddings are off — callers must not silently fall back to keyword-only,
+    since that would look identical to "no matches" for this query."""
+    if not (database.VEC_ENABLED and settings.embedding_enabled):
+        raise SemanticSearchUnavailable
     metrics.search_queries.inc()
     semantic_results = await vectors.semantic_search(db, search, limit=50)
     semantic_ranked = [pid for pid, _ in semantic_results]

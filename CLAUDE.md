@@ -32,7 +32,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST/GET | /posts | Publish / list (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`). `sort`=`updated`(default)/`created`; `order`=`desc`(default)/`asc`; FTS `search` ranks by bm25. `summary=true` → metadata+excerpt only |
+| POST/GET | /posts | Publish / list (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`, `mode`). `sort`=`updated`(default)/`created`; `order`=`desc`(default)/`asc`; FTS `search` ranks by bm25. `summary=true` → metadata+excerpt only. `mode`=`keyword`(default)/`semantic`/`hybrid` (relay #253, proof of concept) — 503 if embeddings aren't enabled |
 | GET/PATCH/DELETE | /posts/{id} | Get / partial update / delete |
 | GET | /posts/deleted | Gone-but-restorable posts (id, title, sha, reason). **Declared before `/{id}`** or FastAPI parses `deleted` as an int |
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |
@@ -114,7 +114,7 @@ Two surfaces, **identical tools**:
 | Tool | Description |
 |------|-------------|
 | `publish_post` / `update_post` / `get_post` / `delete_post` | CRUD (`id=0` = master doc, delete blocked) |
-| `list_posts` | List with filters; `summary` defaults true (metadata + excerpt, no bodies) |
+| `list_posts` | List with filters; `summary` defaults true (metadata + excerpt, no bodies). `mode`=`keyword`(default)/`semantic`/`hybrid` (relay #253, proof of concept) — errors if embeddings aren't enabled |
 | `add_attachment` / `create_upload` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD |
 | `get_post_history` / `get_post_revision` / `restore_post` | History browse / preview / restore |
 | `list_deleted_posts` | Restorable deleted posts (discovery — you need an id to restore) |

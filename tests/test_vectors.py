@@ -189,6 +189,42 @@ async def test_semantic_search_disabled_returns_empty(db, backend, monkeypatch):
     assert await vectors.semantic_search(db, "anything") == []
 
 
+# ── service.list_posts(mode=...) — the REST/MCP-facing entrypoint (relay #253 phase 5) ──
+
+
+@pytest.mark.asyncio
+async def test_list_posts_semantic_mode_unavailable_raises(db, backend, monkeypatch):
+    # embedding_enabled off (even with sqlite-vec loaded) must error loud, not
+    # silently return an empty/keyword-only list — see SemanticSearchUnavailable's
+    # docstring for why.
+    monkeypatch.setattr(settings, "embedding_enabled", False)
+    with pytest.raises(service.SemanticSearchUnavailable):
+        await service.list_posts(db, search="anything", mode="semantic")
+    with pytest.raises(service.SemanticSearchUnavailable):
+        await service.list_posts(db, search="anything", mode="hybrid")
+
+
+@pytest.mark.asyncio
+async def test_list_posts_semantic_mode_ranks_via_service(db, backend):
+    a = await service.create_post(db, PostCreate(title="Alpha", content=f"## S\n{LONG_SECTION} alpha", tags=["dev"]))
+    await service.create_post(db, PostCreate(title="Beta", content=f"## S\n{LONG_SECTION} beta", tags=["dev"]))
+
+    from relay.chunking import chunk_post
+    embed_text = chunk_post("Alpha", f"## S\n{LONG_SECTION} alpha")[0].embed_text
+
+    result = await service.list_posts(db, search=embed_text, mode="semantic", summary=True)
+    assert result.items[0].id == a.id
+
+
+@pytest.mark.asyncio
+async def test_list_posts_hybrid_mode_fuses_via_service(db, backend):
+    a = await service.create_post(db, PostCreate(title="Alpha", content=f"## S\n{LONG_SECTION} alpha", tags=["dev"]))
+    await service.create_post(db, PostCreate(title="Beta", content=f"## S\n{LONG_SECTION} beta", tags=["dev"]))
+
+    result = await service.list_posts(db, search="Alpha", mode="hybrid", summary=True)
+    assert a.id in [item.id for item in result.items]
+
+
 # ── semantic_confidence_weight (pure) ────────────────────────────────────────
 
 

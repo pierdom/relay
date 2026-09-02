@@ -172,7 +172,10 @@ async def publish_post(
         "by default — call get_post(id) for a full body. Pass summary=false to get full "
         "content inline (heavier). sort is 'updated' (default, last modified — includes "
         "edits made directly in Obsidian) or 'created'; order is 'desc' (default) or 'asc'. "
-        "Sort by created + asc to read a topic's posts in the order they were written."
+        "Sort by created + asc to read a topic's posts in the order they were written. "
+        "mode ranks 'search' (relay #253, proof of concept): 'keyword' (default, FTS5/bm25), "
+        "'semantic' (embedding similarity), or 'hybrid' (fusion of both) — semantic/hybrid "
+        "return an error if this relay hasn't got embeddings enabled, and ignore tag/folder."
     )
 )
 async def list_posts(
@@ -184,13 +187,17 @@ async def list_posts(
     summary: bool = True,
     sort: str = "updated",
     order: str = "desc",
+    mode: str = "keyword",
 ) -> dict:
     metrics.record_tool_call("list_posts")
     async with _db() as db:
-        result = await service.list_posts(
-            db, tag=tag, folder=folder, search=search, limit=limit, offset=offset,
-            summary=summary, sort=sort, order=order,
-        )
+        try:
+            result = await service.list_posts(
+                db, tag=tag, folder=folder, search=search, limit=limit, offset=offset,
+                summary=summary, sort=sort, order=order, mode=mode,
+            )
+        except service.SemanticSearchUnavailable:
+            return {"error": "Semantic search is not enabled on this relay."}
     return result.model_dump()
 
 

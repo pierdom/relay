@@ -60,19 +60,35 @@ async def list_posts(
         pattern="^(asc|desc)$",
         description="Sort direction: 'desc' (newest first) or 'asc'.",
     ),
+    mode: str = Query(
+        default="keyword",
+        pattern="^(keyword|semantic|hybrid)$",
+        description=(
+            "Ranking mode for 'search' (relay #253, proof of concept): 'keyword' (default, FTS5/bm25), "
+            "'semantic' (embedding similarity), or 'hybrid' (RRF fusion of both). 'semantic'/'hybrid' "
+            "503 if this relay hasn't got embeddings enabled. Ignores 'tag'/'folder' filters."
+        ),
+    ),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostListResponse | PostSummaryListResponse:
-    return await service.list_posts(
-        db,
-        tag=tag,
-        folder=folder,
-        limit=limit,
-        offset=offset,
-        search=search,
-        summary=summary,
-        sort=sort,
-        order=order,
-    )
+    try:
+        return await service.list_posts(
+            db,
+            tag=tag,
+            folder=folder,
+            limit=limit,
+            offset=offset,
+            search=search,
+            summary=summary,
+            sort=sort,
+            order=order,
+            mode=mode,
+        )
+    except service.SemanticSearchUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Semantic search is not enabled on this relay",
+        ) from None
 
 
 @router.get(

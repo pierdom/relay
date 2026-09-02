@@ -141,7 +141,10 @@ async def list_tools() -> list[types.Tool]:
                 "get_post(id) for a full body. Pass summary=false to get full content inline (heavier). sort "
                 "is 'updated' (default, last modified — includes edits made directly in Obsidian) or "
                 "'created'; order is 'desc' (default) or 'asc'. Sort by created + asc to read a topic's posts "
-                "in the order they were written."
+                "in the order they were written. mode ranks 'search' (relay #253, proof of concept): "
+                "'keyword' (default, FTS5/bm25), 'semantic' (embedding similarity), or 'hybrid' (fusion of "
+                "both) — semantic/hybrid return an error if this relay hasn't got embeddings enabled, and "
+                "ignore tag/folder."
             ),
             inputSchema={
                 "type": "object",
@@ -162,6 +165,10 @@ async def list_tools() -> list[types.Tool]:
                     "order": {
                         "type": "string",
                         "description": "'desc' (default) or 'asc'",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "'keyword' (default), 'semantic', or 'hybrid'",
                     },
                 },
             },
@@ -553,7 +560,7 @@ async def call_tool(
         summary = arguments.get("summary", True)
         params = {
             k: v for k, v in arguments.items()
-            if k in ("tag", "folder", "search", "limit", "offset", "sort", "order")
+            if k in ("tag", "folder", "search", "limit", "offset", "sort", "order", "mode")
         }
         params["summary"] = "true" if summary else "false"
         async with httpx.AsyncClient() as client:
@@ -563,6 +570,8 @@ async def call_tool(
                 headers={"Authorization": f"Bearer {settings.api_key}"},
                 timeout=10,
             )
+            if response.status_code == 503:
+                return [types.TextContent(type="text", text="Semantic search is not enabled on this relay.")]
             response.raise_for_status()
             data = response.json()
         posts = data.get("items", [])
