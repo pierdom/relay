@@ -107,7 +107,10 @@ async def build(db: aiosqlite.Connection) -> StatusResponse:
                 # whether a write would actually be recorded.
                 effective=settings.history_enabled and git is not None,
             ),
-            search=SearchStatus(fts5=database.FTS_ENABLED),
+            search=SearchStatus(
+                fts5=database.FTS_ENABLED,
+                embeddings=database.VEC_ENABLED and settings.embedding_enabled,
+            ),
             watcher=WatcherStatus(enabled=settings.watch_enabled, running=watcher.is_running()),
             auth=AuthStatus(oidc=settings.oidc_enabled, mcp_oauth=settings.mcp_oauth_active),
         ),

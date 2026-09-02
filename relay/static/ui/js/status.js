@@ -14,6 +14,20 @@ import { fmtBytes, fmtUptime } from './util.js';
 import { attachSheetDismiss } from './sheet.js';
 import { fetchDeleted, recoverableCount, renderDeleted } from './deleted.js';
 
+/** Whether mode='semantic'/'hybrid' is actually usable on this relay — main.js
+ * calls this once at startup to decide whether the search bar's mode select is
+ * worth showing at all (relay #253, proof of concept, off by default
+ * everywhere). False on any fetch failure: a control for a search mode that
+ * might not work is worse than not offering it. */
+export async function fetchEmbeddingsEnabled() {
+  try {
+    const d = await apiFetch('/status');
+    return !!d.features?.search?.embeddings;
+  } catch {
+    return false;
+  }
+}
+
 // ── Status / about modal ─────────────────────────────────────────────────────
 const statusModal = document.getElementById('statusModal');
 const statusBtn = document.getElementById('statusBtn');
@@ -130,6 +144,11 @@ function renderStatus(d) {
     'Full-text search',
     d.features.search.fts5 ? 'ok' : 'warn',           // degraded but still functional
     d.features.search.fts5 ? 'FTS5' : 'substring fallback',
+  ));
+  health.appendChild(smFeature(
+    'Semantic search',
+    d.features.search.embeddings ? 'ok' : 'off',      // off by default everywhere — not a fault or a degradation
+    d.features.search.embeddings ? 'enabled' : 'disabled (proof of concept)',
   ));
   health.appendChild(smFeature(
     'External edits',

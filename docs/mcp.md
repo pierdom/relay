@@ -9,7 +9,7 @@ relay exposes the full feed API as **19 MCP tools** so Claude — or any MCP-cap
 | `publish_post` | Publish a post (title, content, tags, source, expires_at) |
 | `update_post` | Partially update a post by ID — only provided fields change |
 | `get_post` | Get a post by ID (`id=0` for the master document) |
-| `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default |
+| `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default. `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) — errors if embeddings aren't enabled or if combined with tag/folder |
 | `delete_post` | Delete a post by ID |
 | `get_post_history` | List a post's revisions from vault history; works for a deleted post (`exists:false`) |
 | `get_post_revision` | Read a post exactly as it was at one revision — preview before restoring |
@@ -71,7 +71,9 @@ restore_post(id=54, sha="a8dcc37")
 - **`get_status` reports what is actually working**, not what is configured:
   `history.effective` is false when the git binary is missing (so writes are not
   recoverable), `search.fts5` false means search fell back to substring matching,
-  and `watcher.running` false means edits made directly to the files are not being
+  `search.embeddings` false means `list_posts(mode=...)`'s `semantic`/`hybrid`
+  ranking will error (relay #253, proof of concept, off by default), and
+  `watcher.running` false means edits made directly to the files are not being
   indexed. It also reports which vault path is being served, which settles "am I
   talking to the instance I think I am".
 - **Post ids are never reused.** Deleting the newest post does not free its id, so

@@ -13,7 +13,7 @@
  */
 
 import { apiFetch, apiSend, clearApiKey, setApiKey } from './api.js';
-import { closeStatusModal, isStatusOpen } from './status.js';   // also self-wires its own controls
+import { closeStatusModal, fetchEmbeddingsEnabled, isStatusOpen } from './status.js';   // also self-wires its own controls
 import { query, resetPaging } from './feed-query.js';
 import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
 import { attachSheetDismiss } from './sheet.js';
@@ -63,6 +63,7 @@ const attachmentsView = document.getElementById('attachmentsView');
 const lightbox        = document.getElementById('lightbox');
 const searchInput     = document.getElementById('searchInput');
 const searchClear     = document.getElementById('searchClear');
+const modeSelect      = document.getElementById('modeSelect');
 const vtList          = document.getElementById('vtList');
 const vtGrid          = document.getElementById('vtGrid');
 
@@ -200,6 +201,14 @@ async function init() {
   newTagBtn.style.display = '';
   statusBtn.style.display = '';
   searchBar.style.display = '';
+  // Reset each (re)connect — mode is meaningless without a search term and
+  // isn't persisted, same as query.search itself; a stale 'semantic' from a
+  // prior session could otherwise silently 503 the first search after a
+  // reconnect to a relay with embeddings off.
+  query.mode = 'keyword';
+  modeSelect.value = 'keyword';
+  modeSelect.style.display = 'none';
+  fetchEmbeddingsEnabled().then(on => { modeSelect.style.display = on ? '' : 'none'; });
   await Promise.all([loadTags(), loadPosts(true), loadLinkIndex()]);
   setDot('connected');
   connectSSE();
@@ -505,10 +514,24 @@ searchInput.addEventListener('keydown', e => {
 searchClear.addEventListener('click', async () => {
   searchInput.value = '';
   query.search = null;
+  query.mode = 'keyword';
+  modeSelect.value = 'keyword';
   searchBar.classList.remove('active');
   resetPaging();
   await loadPosts(true);
   searchInput.focus();
+});
+
+modeSelect.addEventListener('change', async () => {
+  query.mode = modeSelect.value;
+  // Same mutual exclusivity as tag/folder with each other (the ranked path
+  // doesn't apply either filter — the server 400s the combination). Route
+  // through selectTag/selectFolder(null) rather than clearing query fields
+  // directly so the sidebar's "all" highlight stays in sync.
+  if (query.mode !== 'keyword' && query.folder) { await selectFolder(null); return; }
+  if (query.mode !== 'keyword' && query.tag) { await selectTag(null); return; }
+  resetPaging();
+  await loadPosts(true);
 });
 
 /* ── New tag ──────────────────────────────────────────────── */
@@ -684,6 +707,9 @@ function makeFolderItem(label, value, count) {
 async function selectFolder(folder) {
   closeSidebar();
   query.folder = folder; query.tag = null; resetPaging();
+  // Mirrors modeSelect's own change handler: mode and folder are mutually
+  // exclusive, so picking a real folder drops out of a ranked mode.
+  if (folder !== null && query.mode !== 'keyword') { query.mode = 'keyword'; modeSelect.value = 'keyword'; }
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
   const key = folder === null ? '__all__' : folder;
@@ -919,6 +945,9 @@ function startTagConfig(el, tagName) {
 async function selectTag(tag) {
   closeSidebar();
   query.tag = tag; query.folder = null; resetPaging();
+  // Mirrors modeSelect's own change handler: mode and tag are mutually
+  // exclusive, so picking a real tag drops out of a ranked mode.
+  if (tag !== null && query.mode !== 'keyword') { query.mode = 'keyword'; modeSelect.value = 'keyword'; }
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
   tagList.querySelectorAll('.tag-item').forEach(el => {
@@ -940,6 +969,10 @@ async function loadPosts(replace = false) {
     if (query.tag) params.set('tag', query.tag);
     if (query.folder) params.set('folder', query.folder);
     if (query.search) params.set('search', query.search);
+    // Only meaningful alongside a search term — the server ignores mode without
+    // one anyway, but omitting it here keeps a plain listing's request obviously
+    // plain rather than carrying an inert param.
+    if (query.search && query.mode !== 'keyword') params.set('mode', query.mode);
     const data = await apiFetch(`/posts?${params}`);
     query.total = data.total;
     query.offset += data.items.length;

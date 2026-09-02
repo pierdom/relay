@@ -25,7 +25,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import metrics, service, status, vault
+from . import database, metrics, service, status, vault, vectors
 from .config import settings
 from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
 
@@ -123,6 +123,8 @@ async def _db():
     async with aiosqlite.connect(settings.database_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA busy_timeout=5000;")
+        if database.VEC_ENABLED:
+            await vectors.load_extension(db)
         yield db
 
 
@@ -170,7 +172,11 @@ async def publish_post(
         "by default — call get_post(id) for a full body. Pass summary=false to get full "
         "content inline (heavier). sort is 'updated' (default, last modified — includes "
         "edits made directly in Obsidian) or 'created'; order is 'desc' (default) or 'asc'. "
-        "Sort by created + asc to read a topic's posts in the order they were written."
+        "Sort by created + asc to read a topic's posts in the order they were written. "
+        "mode ranks 'search' (relay #253, proof of concept): 'keyword' (default, FTS5/bm25), "
+        "'semantic' (embedding similarity), or 'hybrid' (fusion of both) — semantic/hybrid "
+        "return an error if this relay hasn't got embeddings enabled, or if combined with "
+        "tag/folder (the ranked path doesn't apply them)."
     )
 )
 async def list_posts(
@@ -182,13 +188,21 @@ async def list_posts(
     summary: bool = True,
     sort: str = "updated",
     order: str = "desc",
+    mode: str = "keyword",
 ) -> dict:
     metrics.record_tool_call("list_posts")
     async with _db() as db:
-        result = await service.list_posts(
-            db, tag=tag, folder=folder, search=search, limit=limit, offset=offset,
-            summary=summary, sort=sort, order=order,
-        )
+        try:
+            result = await service.list_posts(
+                db, tag=tag, folder=folder, search=search, limit=limit, offset=offset,
+                summary=summary, sort=sort, order=order, mode=mode,
+            )
+        except service.SemanticSearchUnavailable:
+            return {"error": "Semantic search is not enabled on this relay."}
+        except service.RankedSearchFilterUnsupported:
+            return {"error": "'tag'/'folder' filters are not supported with mode='semantic' or 'hybrid'."}
+        except service.InvalidSearchMode:
+            return {"error": "mode must be 'keyword', 'semantic', or 'hybrid'."}
     return result.model_dump()
 
 

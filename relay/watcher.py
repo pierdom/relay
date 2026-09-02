@@ -15,7 +15,7 @@ import aiosqlite
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import events, frontmatter, history, service, vault
+from . import database, events, frontmatter, history, service, vault, vectors
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,8 @@ async def _reconcile(paths: list[str]) -> None:
     async with aiosqlite.connect(settings.database_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA busy_timeout=5000;")
+        if database.VEC_ENABLED:
+            await vectors.load_extension(db)
         for path in existing:
             await _reconcile_file(db, path)
         for path in missing:

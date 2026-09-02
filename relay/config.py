@@ -30,6 +30,21 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("RELAY_HISTORY_ENABLED", "HISTORY_ENABLED"),
     )
+    # Proof-of-concept semantic search (relay post #253). Off by default
+    # everywhere — including production — until phase 4's eval numbers say
+    # it's worth surfacing; only opt-in tests and the eval harness turn it on.
+    embedding_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("RELAY_EMBEDDING_ENABLED", "EMBEDDING_ENABLED"),
+    )
+    # Part of the cache key (relay.vectors._hash's model_id) — changing this
+    # alone forces a full re-embed on next sync, no migration needed. Post
+    # #253's pick, `intfloat/multilingual-e5-small`, isn't in fastembed 0.8.0's
+    # model registry (only the 1024-dim `-large` variant is) — verified in this
+    # environment. This is the same 384-dim, MIT-licensed, multilingual family
+    # the post wanted (EN/IT/ES/CA coverage) without a schema change; exactly
+    # the "cheap to change your mind about" swap the post's design allows for.
+    embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     relay_palette: str = "default"
     relay_transparent: bool = False
     secure_cookies: bool = True

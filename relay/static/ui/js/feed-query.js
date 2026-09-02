@@ -17,6 +17,9 @@ export const query = {
   tag: null,       // active tag filter, or null
   folder: null,    // active folder filter, or null
   search: null,    // active search term, or null
+  mode: 'keyword', // search ranking mode — 'keyword' (default), 'semantic', or 'hybrid'
+                    // (relay #253, proof of concept). Mutually exclusive with tag/folder,
+                    // same as tag/folder are with each other — the server 400s the combination.
   offset: 0,       // paging cursor into the current result set
   total: 0,        // result count reported by the last response
 };

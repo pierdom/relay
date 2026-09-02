@@ -1,12 +1,12 @@
-"""Search-quality baseline: recall@5 / MRR for relay's *existing* FTS5 search
-against a golden query set, scored on the real vault (see conftest.py).
+"""Search-quality: recall@5 / MRR per mode for relay's search, scored on the
+real vault (see conftest.py). ``keyword`` was relay #253 phase 1's baseline
+(v1.0.0: recall@5=0.540, MRR=0.414). ``semantic``/``hybrid`` are phases 2-4's
+proof of concept — this is the number that answers the post's own success
+criterion: did hybrid clearly beat keyword?
 
-This is a measurement tool, not a gate — relay post #253's own framing is that
-a low score is itself the useful result (evidence for building hybrid search),
-not a test failure. No threshold is asserted beyond "the run produced valid
-numbers". Report is keyed by search mode so a later phase adding
-semantic/hybrid modes extends this without a rewrite — only "keyword" exists
-today.
+This is a measurement tool, not a gate. No threshold is asserted beyond "the
+run produced valid numbers" — a hybrid mode that doesn't clearly beat keyword
+is a real result (the post's own framing), not a test failure.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from relay import service
+from relay import database, service
 
 pytestmark = pytest.mark.eval
 
@@ -34,22 +34,14 @@ def _reciprocal_rank(expected: set[int], retrieved: list[int]) -> float:
     return 0.0
 
 
-@pytest.mark.asyncio
-@pytest.mark.skipif(
-    not GOLDEN_PATH.exists(),
-    reason="tests/eval/golden.yaml missing (gitignored, personal) — copy golden.example.yaml",
-)
-async def test_fts5_baseline_recall(live_snapshot):
-    golden = yaml.safe_load(GOLDEN_PATH.read_text())
-    db = live_snapshot
-
+async def _score_mode(db, golden: list[dict], mode: str) -> tuple[float, float]:
     recalls: list[float] = []
     reciprocal_ranks: list[float] = []
-    print("\n--- eval: keyword (FTS5) mode ---")
+    print(f"\n--- eval: {mode} mode ---")
     for entry in golden:
         query = entry["query"]
         expected = set(entry["expect"])
-        result = await service.list_posts(db, search=query, limit=5, summary=True)
+        result = await service.list_posts(db, search=query, limit=5, summary=True, mode=mode)
         retrieved = [item.id for item in result.items]
 
         recall = _recall_at_5(expected, retrieved)
@@ -60,7 +52,32 @@ async def test_fts5_baseline_recall(live_snapshot):
 
     mean_recall = sum(recalls) / len(recalls)
     mrr = sum(reciprocal_ranks) / len(reciprocal_ranks)
-    print(f"--- keyword: mean recall@5={mean_recall:.3f}  MRR={mrr:.3f} over {len(golden)} queries ---")
+    print(f"--- {mode}: mean recall@5={mean_recall:.3f}  MRR={mrr:.3f} over {len(golden)} queries ---")
+    return mean_recall, mrr
 
-    assert 0.0 <= mean_recall <= 1.0
-    assert 0.0 <= mrr <= 1.0
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not GOLDEN_PATH.exists(),
+    reason="tests/eval/golden.yaml missing (gitignored, personal) — copy golden.example.yaml",
+)
+async def test_recall_per_mode(live_snapshot):
+    golden = yaml.safe_load(GOLDEN_PATH.read_text())
+    db = live_snapshot
+
+    scores: dict[str, tuple[float, float]] = {}
+    scores["keyword"] = await _score_mode(db, golden, "keyword")
+
+    if database.VEC_ENABLED:
+        scores["semantic"] = await _score_mode(db, golden, "semantic")
+        scores["hybrid"] = await _score_mode(db, golden, "hybrid")
+    else:
+        print("\n--- sqlite-vec unavailable in this environment — semantic/hybrid skipped ---")
+
+    print("\n--- summary ---")
+    for mode, (recall, mrr) in scores.items():
+        print(f"  {mode:9s} recall@5={recall:.3f}  MRR={mrr:.3f}")
+
+    for recall, mrr in scores.values():
+        assert 0.0 <= recall <= 1.0
+        assert 0.0 <= mrr <= 1.0

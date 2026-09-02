@@ -35,12 +35,15 @@ def pytest_collection_modifyitems(config, items):
 @pytest_asyncio.fixture
 async def live_snapshot(tmp_path, monkeypatch):
     """Export the live relay's posts into a throwaway vault under ``tmp_path``,
-    build its index, and hand back an open connection to query it."""
-    from relay import database, vault
+    build its index — embedding every post with the **real** backend (relay
+    #253 phases 2-4), so this is where a real model actually downloads/runs,
+    never in default CI — and hand back an open connection to query it."""
+    from relay import database, vault, vectors
     from relay.config import settings
     from scripts.export_vault import backfill_title, fetch_all
 
     monkeypatch.setattr(settings, "vault_path", str(tmp_path / "snapshot"))
+    monkeypatch.setattr(settings, "embedding_enabled", True)
 
     posts = fetch_all(EVAL_URL.rstrip("/"), EVAL_KEY)
     for p in posts:
@@ -59,4 +62,6 @@ async def live_snapshot(tmp_path, monkeypatch):
 
     async with aiosqlite.connect(settings.database_path) as db:
         db.row_factory = aiosqlite.Row
+        if database.VEC_ENABLED:
+            await vectors.load_extension(db)
         yield db

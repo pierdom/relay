@@ -8,6 +8,23 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.1.0] — 2026-09-02
+
+Relay #253 phases 2-5: sqlite-vec semantic/hybrid search moves from an internal proof of concept (Python-only, reachable solely from `tests/eval`) to something reachable from REST, MCP, and the browser UI. Still off by default everywhere (`RELAY_EMBEDDING_ENABLED=false`) — this ships the surface, not a changed default.
+
+### Added
+- Semantic and hybrid search modes alongside the existing keyword/FTS5 mode: chunk-level embeddings (H2/H3-aware chunking, runt-merge, giant-split with overlap), a content-addressed embedding cache, sqlite-vec KNN search, and reciprocal rank fusion for hybrid. Measured against a real vault (21 golden queries): keyword recall@5=0.540/MRR=0.418, semantic 0.659/0.667, hybrid 0.687/0.667 — hybrid's per-query confidence gate (RRF weighted 8:1 toward semantic only when semantic's own top-1 distance is close) beats both keyword and semantic-only on recall, and ties semantic on MRR
+- `mode=keyword|semantic|hybrid` is now a real parameter on `GET /posts` and the `list_posts` MCP tool (both the in-process and stdio proxy servers, kept in parity) — previously only reachable as a Python kwarg the eval harness called directly
+- `GET /status` reports `features.search.embeddings`: whether semantic/hybrid ranking is actually usable on this relay, not just configured
+- Browser UI: a ranking-mode select in the search bar, hidden until the client confirms via `/status` that embeddings are enabled; mutually exclusive with tag/folder filters, matching the server's own rule
+
+### Fixed
+- Semantic search ran its embedding call — and, on the very first call ever, the model load — directly on the event loop. relay is single-worker, so one semantic query would stall every other in-flight request (other API/MCP calls, SSE delivery) for the duration. Now offloaded via `asyncio.to_thread`
+- The ranked-search candidate pool was a flat 50 regardless of the caller's actual `limit`/`offset`, so pagination silently dead-ended past it and the reported `total` undercounted real matches. The pool is now sized from `offset + limit`, capped at 200 to bound sqlite-vec's KNN cost
+- `mode=semantic`/`hybrid` combined with `tag`/`folder` now 400s instead of silently ignoring the filter — the ranked path doesn't apply SQL filters. An invalid `mode` value now errors instead of silently falling back to keyword when called through the in-process MCP server, which has no query-parameter validation layer in front of it (REST already validated this)
+
+---
+
 ## [1.0.0] — 2026-08-31
 
 Baseline for post #253's "Relay 2.0 — Semantic Layer" idea: no semantics shipped here, just the fix and the measurement the sequencing plan calls for before deciding whether to build it.
