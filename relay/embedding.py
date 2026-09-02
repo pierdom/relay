@@ -4,10 +4,27 @@ one-line config change, and so the default test suite never has to load one.
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Protocol
 
 from .config import settings
+
+# Must run before huggingface_hub is imported anywhere in the process (fastembed
+# pulls it in transitively) — HF_XET_CACHE, the xet fast-transfer backend's own
+# cache/log path, is derived from HF_HOME as a plain module-level constant in
+# huggingface_hub.constants, computed once at that module's import time. Setting
+# HF_HOME later, or passing TextEmbedding(cache_dir=...) at all, has no effect on
+# it — cache_dir only redirects the actual model snapshot, a separate mechanism.
+# relay's container runs as an arbitrary host UID with no matching /etc/passwd
+# entry (docker-compose.yml's `user:`), so $HOME is unset and every HOME-derived
+# default resolves to an unwritable path under `/`. HF_HUB_DISABLE_XET sidesteps
+# the whole native xet subsystem rather than chasing every path it might derive
+# from HF_HOME — plain HTTPS downloads are plenty fast for one small model. This
+# module is imported unconditionally at app startup (relay.vectors imports it
+# regardless of embedding_enabled), so it's early enough even before any opt-in.
+os.environ.setdefault("HF_HOME", str(Path(settings.relay_dir) / "hf-home"))
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 EMBEDDING_DIM = 384  # fixed at vec0 table creation — see relay/vectors.py
 
