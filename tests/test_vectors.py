@@ -4,7 +4,9 @@ delete cleanup, semantic search ordering, RRF. All against `FakeBackend`
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 
 os.environ.setdefault("API_KEY", "test-key")
 
@@ -187,6 +189,37 @@ async def test_semantic_search_ranks_exact_match_first(db, backend):
 async def test_semantic_search_disabled_returns_empty(db, backend, monkeypatch):
     monkeypatch.setattr(settings, "embedding_enabled", False)
     assert await vectors.semantic_search(db, "anything") == []
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_does_not_block_the_event_loop(db, backend, monkeypatch):
+    """A slow embed call (real ONNX inference, in production) must not stall
+    other concurrent work — relay is single-worker, so a blocking call inline
+    would freeze every other in-flight request/SSE delivery for its duration
+    (relay #253 phase 5's event-loop-blocking finding). Regression test for
+    vectors._embed_query being run via asyncio.to_thread."""
+
+    class SlowBackend(FakeBackend):
+        def embed_query(self, text):
+            time.sleep(0.2)  # a *blocking* sleep, standing in for ONNX inference
+            return super().embed_query(text)
+
+    monkeypatch.setattr(embedding, "get_backend", lambda: SlowBackend())
+
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    ticker_task = asyncio.create_task(ticker())
+    await vectors.semantic_search(db, "anything")
+    # If embed_query ran inline on the event loop, the ticker couldn't have
+    # been scheduled at all during those 200ms — it would still read 0 here.
+    assert ticks >= 10, "ticker made no progress while semantic_search ran — embedding call is blocking the loop"
+    await ticker_task
 
 
 # ── service.list_posts(mode=...) — the REST/MCP-facing entrypoint (relay #253 phase 5) ──

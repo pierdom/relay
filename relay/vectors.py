@@ -10,6 +10,7 @@ it costs the existing test suite nothing.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 
@@ -171,6 +172,13 @@ async def delete_post_chunks(db: aiosqlite.Connection, post_id: int) -> None:
     await db.commit()
 
 
+def _embed_query(query: str) -> list[float]:
+    """Sync helper run off the event loop via asyncio.to_thread (see
+    semantic_search) — get_backend()'s lazy model construction belongs in the
+    same thread hop as the inference call, not just embed_query itself."""
+    return embedding.get_backend().embed_query(query)
+
+
 async def semantic_search(db: aiosqlite.Connection, query: str, *, limit: int = 50) -> list[tuple[int, float]]:
     """(post_id, best_distance) pairs, ascending distance (= descending
     similarity). Chunk→post aggregation uses **max similarity / min distance**,
@@ -180,8 +188,13 @@ async def semantic_search(db: aiosqlite.Connection, query: str, *, limit: int = 
     if not (database.VEC_ENABLED and settings.embedding_enabled):
         return []
 
-    backend = embedding.get_backend()
-    query_vec = sqlite_vec.serialize_float32(_normalize(backend.embed_query(query)))
+    # get_backend() + embed_query() are both synchronous CPU work (ONNX
+    # inference, plus a model load/download on the very first call ever) —
+    # relay is single-worker, so running them inline would stall every other
+    # in-flight request (other API/MCP calls, SSE delivery) for the duration.
+    # to_thread hands the whole chain to a worker thread instead.
+    query_embedding = await asyncio.to_thread(_embed_query, query)
+    query_vec = sqlite_vec.serialize_float32(_normalize(query_embedding))
     # Request more chunks than `limit` posts: several top chunks can share a
     # post, so a 1:1 chunk:post k would under-fill the post-level ranking.
     chunk_k = max(limit * 4, 100)
