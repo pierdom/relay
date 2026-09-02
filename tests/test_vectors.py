@@ -46,8 +46,12 @@ async def db(backend):
     # A fresh connection needs the extension loaded again — it's per-connection,
     # not per-database-file (relay.vectors.load_extension's docstring).
     await vectors.load_extension(conn)
-    # init_db's rebuild_index already embedded the master doc (id=0) — zero the
-    # counter so each test's assertions are about its own post, not that baseline.
+    # rebuild_index (run by init_db) deliberately never embeds — see
+    # backfill_embeddings's docstring — so seed the master doc (id=0) the same
+    # way main.py's lifespan does, then zero the counter so each test's
+    # assertions are about its own post, not that baseline.
+    from relay import vault
+    await vault.backfill_embeddings(conn)
     backend.calls = 0
     yield conn
     await conn.close()
@@ -134,7 +138,14 @@ async def test_delete_removes_chunk_and_vec_rows(db, backend):
 
 
 @pytest.mark.asyncio
-async def test_rebuild_index_on_unchanged_vault_is_all_cache_hits(db, backend):
+async def test_rebuild_index_never_calls_the_embedding_backend(db, backend):
+    """rebuild_index runs inline during app startup and must stay fast — it
+    must never touch the embedding backend at all, regardless of cache state.
+    Embedding sync is deliberately deferred to backfill_embeddings, run as a
+    background task instead (relay #253: sequentially embedding a real
+    vault's worth of posts inline blocked every HTTP route, /health included,
+    until the whole backlog finished — real production downtime, not a
+    theoretical concern)."""
     await service.create_post(db, PostCreate(title="Post A", content=f"## S\n{LONG_SECTION}", tags=["dev"]))
     calls_after_create = backend.calls
     assert calls_after_create > 0
@@ -142,7 +153,71 @@ async def test_rebuild_index_on_unchanged_vault_is_all_cache_hits(db, backend):
     from relay import vault
     await vault.rebuild_index(db)
 
+    assert backend.calls == calls_after_create  # rebuild_index must not embed at all
+
+
+@pytest.mark.asyncio
+async def test_backfill_embeddings_on_unchanged_vault_is_all_cache_hits(db, backend):
+    await service.create_post(db, PostCreate(title="Post A", content=f"## S\n{LONG_SECTION}", tags=["dev"]))
+    calls_after_create = backend.calls
+    assert calls_after_create > 0
+
+    from relay import vault
+    await vault.backfill_embeddings(db)
+
     assert backend.calls == calls_after_create  # nothing new to embed
+
+
+@pytest.mark.asyncio
+async def test_backfill_embeddings_catches_up_what_rebuild_index_skipped(db, backend):
+    """The actual promise of the startup-blocking fix: a post that only ever
+    went through rebuild_index (sync_embeddings=False) has no chunks until
+    backfill_embeddings runs — proving the split doesn't just move the
+    embedding call somewhere that never fires."""
+    from relay import vault
+
+    path = vault.write_file(
+        id=501, title="Rebuilt Only", content=f"## S\n{LONG_SECTION}", tags=["dev"],
+        source=None, created_at=vault.utcnow_iso(), updated_at=None, expires_at=None,
+    )
+    await vault.rebuild_index(db)
+    assert await _chunk_rows(db, 501) == []
+    assert backend.calls == 0
+
+    await vault.backfill_embeddings(db)
+
+    assert backend.calls > 0
+    assert await _chunk_rows(db, 501) != []
+    path.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_backfill_embeddings_logs_progress_on_a_time_based_cadence(db, backend, monkeypatch, caplog):
+    """Not count-based — a fixed post-count interval would either spam the log
+    on a cache-hit-heavy run or go silent for minutes on a cold one (see the
+    function's own docstring). Simulates the clock jumping 16s on every call
+    (past the 15s threshold every time) rather than sleeping for real."""
+    import itertools
+
+    from relay import vault
+
+    for i in range(3):
+        await service.create_post(
+            db, PostCreate(title=f"Progress {i}", content=f"## S\n{LONG_SECTION} item{i}", tags=["dev"])
+        )
+    # 3 just-created posts + the master doc the db fixture already seeded.
+    total = 4
+
+    clock = itertools.count(start=0, step=16)
+    monkeypatch.setattr(vault.time, "monotonic", lambda: next(clock))
+
+    with caplog.at_level("INFO", logger="relay.vault"):
+        await vault.backfill_embeddings(db)
+
+    progress = [r.message for r in caplog.records if r.message.startswith("Embedding backfill progress")]
+    # Every iteration's elapsed time (a constant 16s step) clears the 15s
+    # threshold, so every one of the `total` posts gets its own line.
+    assert progress == [f"Embedding backfill progress: {i}/{total} posts checked" for i in range(1, total + 1)]
 
 
 # ── watcher: same code path as the API ───────────────────────────────────────

@@ -9,12 +9,13 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 
+import aiosqlite
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, history, metrics, watcher
+from . import __version__, database, history, metrics, vault, vectors, watcher
 from . import status as app_status
 from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
@@ -35,6 +36,27 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+
+
+async def _embedding_backfill() -> None:
+    """One-shot background catch-up for posts the content-addressed cache
+    doesn't cover yet — never run inline during startup. See
+    vault.backfill_embeddings's docstring for why: sequentially embedding a
+    real vault's worth of posts blocked the ASGI lifespan's `await init_db()`
+    — and with it every HTTP route, including /health — until the whole
+    backlog finished. On a vault of any size that's real downtime on every
+    restart, not a rounding error."""
+    logger = logging.getLogger(__name__)
+    try:
+        async with aiosqlite.connect(settings.database_path) as db:
+            db.row_factory = aiosqlite.Row
+            if database.VEC_ENABLED:
+                await vectors.load_extension(db)
+            logger.info("Embedding backfill starting")
+            count = await vault.backfill_embeddings(db)
+            logger.info("Embedding backfill complete — %d post(s) checked", count)
+    except Exception:
+        logger.exception("Embedding backfill failed")
 
 
 @asynccontextmanager
@@ -70,6 +92,10 @@ async def lifespan(app: FastAPI):
     # Runs after the index rebuild, which may itself stamp ids into id-less notes.
     await history.init()
     task = asyncio.create_task(cleanup_loop())
+    # One-shot catch-up for posts the embedding cache doesn't cover yet — never
+    # inline in init_db/rebuild_index above (see _embedding_backfill's
+    # docstring). No-ops immediately if embeddings aren't enabled.
+    embedding_task = asyncio.create_task(_embedding_backfill())
     # Live vault watcher: external edits (e.g. from Obsidian) re-index + push SSE.
     watcher.start(asyncio.get_running_loop())
     # The Streamable HTTP MCP app needs its session manager running for the
@@ -79,10 +105,12 @@ async def lifespan(app: FastAPI):
         yield
     watcher.stop()
     task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    embedding_task.cancel()
+    for t in (task, embedding_task):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="relay", version=__version__, lifespan=lifespan)
