@@ -12,6 +12,7 @@ import hashlib
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 
 import aiosqlite
@@ -680,10 +681,20 @@ async def backfill_embeddings(db: aiosqlite.Connection) -> int:
         return 0
     async with db.execute("SELECT id, title, content FROM posts") as cur:
         rows = await cur.fetchall()
-    for row in rows:
+    total = len(rows)
+    last_logged = time.monotonic()
+    for i, row in enumerate(rows, start=1):
         await vectors.sync_post_chunks(db, post_id=row["id"], title=row["title"], content=row["content"])
         await db.commit()
-    return len(rows)
+        # Time-based, not count-based: a cache-hit-heavy run flies through
+        # hundreds of posts in milliseconds, while a cold run can spend real
+        # seconds on a single post — a fixed post-count interval would either
+        # spam the log or go silent for minutes depending on which.
+        now = time.monotonic()
+        if now - last_logged >= 15:
+            logger.info("Embedding backfill progress: %d/%d posts checked", i, total)
+            last_logged = now
+    return total
 
 
 # ── tag config (.relay/tags.yml is canonical, mirrored to the index) ──────────

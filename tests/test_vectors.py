@@ -191,6 +191,35 @@ async def test_backfill_embeddings_catches_up_what_rebuild_index_skipped(db, bac
     path.unlink(missing_ok=True)
 
 
+@pytest.mark.asyncio
+async def test_backfill_embeddings_logs_progress_on_a_time_based_cadence(db, backend, monkeypatch, caplog):
+    """Not count-based — a fixed post-count interval would either spam the log
+    on a cache-hit-heavy run or go silent for minutes on a cold one (see the
+    function's own docstring). Simulates the clock jumping 16s on every call
+    (past the 15s threshold every time) rather than sleeping for real."""
+    import itertools
+
+    from relay import vault
+
+    for i in range(3):
+        await service.create_post(
+            db, PostCreate(title=f"Progress {i}", content=f"## S\n{LONG_SECTION} item{i}", tags=["dev"])
+        )
+    # 3 just-created posts + the master doc the db fixture already seeded.
+    total = 4
+
+    clock = itertools.count(start=0, step=16)
+    monkeypatch.setattr(vault.time, "monotonic", lambda: next(clock))
+
+    with caplog.at_level("INFO", logger="relay.vault"):
+        await vault.backfill_embeddings(db)
+
+    progress = [r.message for r in caplog.records if r.message.startswith("Embedding backfill progress")]
+    # Every iteration's elapsed time (a constant 16s step) clears the 15s
+    # threshold, so every one of the `total` posts gets its own line.
+    assert progress == [f"Embedding backfill progress: {i}/{total} posts checked" for i in range(1, total + 1)]
+
+
 # ── watcher: same code path as the API ───────────────────────────────────────
 
 
