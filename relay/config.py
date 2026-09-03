@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     # the post wanted (EN/IT/ES/CA coverage) without a schema change; exactly
     # the "cheap to change your mind about" swap the post's design allows for.
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # onnxruntime's own default (unset intra_op_num_threads) picks a thread count
+    # from the host's CPU count, and each thread carries its own tensor-buffer
+    # overhead — real memory cost measured against a 2-CPU production VPS (relay
+    # #253's post-v1.1.1 "reduce memory footprint" priority). Embedding here is
+    # inherently sequential (one post's chunks at a time, never concurrent
+    # batches — see vault.backfill_embeddings/sync_post_chunks), so there is no
+    # cross-request parallelism to lose by pinning this low. 1 is the
+    # conservative starting point; raise it (env var, no code change) if a
+    # deployment has CPU to spare and wants faster embedding instead.
+    embedding_threads: int = 1
     relay_palette: str = "default"
     relay_transparent: bool = False
     secure_cookies: bool = True
