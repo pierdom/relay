@@ -64,6 +64,15 @@ const lightbox        = document.getElementById('lightbox');
 const searchInput     = document.getElementById('searchInput');
 const searchClear     = document.getElementById('searchClear');
 const modeSelect      = document.getElementById('modeSelect');
+// The mode a fresh search starts from — 'hybrid' once fetchEmbeddingsEnabled
+// confirms it's usable, 'keyword' otherwise (or before that check resolves).
+// Every place that resets the mode to "no particular ranking requested" reads
+// this instead of hardcoding 'keyword', so enabling embeddings makes hybrid
+// the standard rather than an opt-in extra. Tag/folder selection is the one
+// exception — mode there stays hardcoded 'keyword' (see selectTag/selectFolder
+// below), since the ranked path never applies those filters and the server
+// 400s the combination regardless of what the default would otherwise be.
+let defaultMode = 'keyword';
 const vtList          = document.getElementById('vtList');
 const vtGrid          = document.getElementById('vtGrid');
 
@@ -208,7 +217,15 @@ async function init() {
   query.mode = 'keyword';
   modeSelect.value = 'keyword';
   modeSelect.style.display = 'none';
-  fetchEmbeddingsEnabled().then(on => { modeSelect.style.display = on ? '' : 'none'; });
+  fetchEmbeddingsEnabled().then(on => {
+    modeSelect.style.display = on ? '' : 'none';
+    // Hybrid, not keyword, is the mode worth defaulting to once it's actually
+    // usable — it's the one that beats keyword-alone on this relay's own eval
+    // (relay #253). Every reset point below routes through defaultMode instead
+    // of a hardcoded 'keyword' so this stays the standard, not a one-off.
+    defaultMode = on ? 'hybrid' : 'keyword';
+    if (on && !query.tag && !query.folder) { query.mode = defaultMode; modeSelect.value = defaultMode; }
+  });
   await Promise.all([loadTags(), loadPosts(true), loadLinkIndex()]);
   setDot('connected');
   connectSSE();
@@ -514,8 +531,12 @@ searchInput.addEventListener('keydown', e => {
 searchClear.addEventListener('click', async () => {
   searchInput.value = '';
   query.search = null;
-  query.mode = 'keyword';
-  modeSelect.value = 'keyword';
+  // defaultMode can be 'hybrid', but clearing search doesn't clear an active
+  // tag/folder filter — landing on 'hybrid' while one is still set would
+  // violate the same mutual exclusivity modeSelect's own change handler
+  // enforces below, and the server 400s the combination.
+  query.mode = (query.tag || query.folder) ? 'keyword' : defaultMode;
+  modeSelect.value = query.mode;
   searchBar.classList.remove('active');
   resetPaging();
   await loadPosts(true);
@@ -1527,8 +1548,20 @@ pmDelete.addEventListener('click', async () => {
 });
 /* ── Keyboard shortcuts modal ─────────────────────────────── */
 const shortcutsModal = document.getElementById('shortcutsModal');
+const kbBackdrop = document.getElementById('kbBackdrop');
 document.getElementById('kbClose').onclick   = () => shortcutsModal.classList.remove('open');
-document.getElementById('kbBackdrop').onclick = () => shortcutsModal.classList.remove('open');
+kbBackdrop.onclick = () => shortcutsModal.classList.remove('open');
+// The other four sm-head/pm-head modals all get the swipe-to-dismiss gesture
+// (sheet.js) — this one only had the close button and the backdrop tap, the
+// exact gap that motivated attachSheetDismiss in the first place (see its
+// module docstring). Its grab handle already rendered (the ::before is
+// generic to every .sm-inner), so on a phone it looked draggable and wasn't.
+attachSheetDismiss({
+  inner: shortcutsModal.querySelector('.sm-inner'),
+  handle: shortcutsModal.querySelector('.sm-head'),
+  backdrop: kbBackdrop,
+  onDismiss: () => shortcutsModal.classList.remove('open'),
+});
 function isShortcutsOpen() { return shortcutsModal.classList.contains('open'); }
 
 /* ── Feed keyboard focus ──────────────────────────────────── */

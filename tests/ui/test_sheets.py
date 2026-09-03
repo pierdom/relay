@@ -14,6 +14,12 @@ part that was missing.
 gesture at all; on a phone they could only be closed by hitting a 22px "×".
 Each sheet is therefore checked by the same parametrised test rather than the
 post modal getting its own special case.
+
+The keyboard-shortcuts modal shipped later, reused the same `.sm-inner` shell
+(so it got the grab handle for free from the shared CSS), and was never wired
+to `attachSheetDismiss` — the exact "looks draggable, isn't" gap above, just
+found later because nothing here covered it. Fixed the same way and folded
+into `SHEETS` rather than left as a fifth, untested one-off.
 """
 from __future__ import annotations
 
@@ -25,6 +31,7 @@ SHEETS = [
     ("status", "open_status", "#statusModal"),
     ("edit", "open_edit", "#editModal"),
     ("history", "open_history", "#historyModal"),
+    ("shortcuts", "open_shortcuts", "#shortcutsModal"),
 ]
 
 # Dispatches a real touch sequence on an element. Playwright's touchscreen API
@@ -94,6 +101,15 @@ def open_history(page):
     open_post(page)
     page.locator("#pmHistory").click()
     page.wait_for_selector("#historyModal.open")
+
+
+def open_shortcuts(page):
+    # No button opens this one — "?" is the only trigger (main.js's keydown
+    # handler). Click the feed first so the key lands on the page, not a
+    # still-focused input from a previous step.
+    page.locator(".feed").click()
+    page.keyboard.press("?")
+    page.wait_for_selector("#shortcutsModal.open")
 
 
 def _open(page, name: str):
@@ -199,12 +215,15 @@ def test_the_edit_sheet_asks_before_a_swipe_throws_work_away(mobile_page):
 
 
 def test_every_desktop_modal_shares_the_same_chrome(page):
-    """Four modals, one shell. They are two separate implementations (`.pm-*`
-    for the post viewer, `.sm-*` for the other three) that drifted apart in the details
+    """Five modals, one shell. They are two separate implementations (`.pm-*`
+    for the post viewer, `.sm-*` for the other four) that drifted apart in the details
     nobody looks at directly but everybody feels: header padding was 20px on one
     and 18px on the other, only the post body had styled scrollbars, only the
     post modal clipped its corners, and the edit modal's buttons floated at the
-    end of the form while the post modal had a proper footer rail.
+    end of the form while the post modal had a proper footer rail. The keyboard-
+    shortcuts modal (added later) went untested the same way until it joined
+    `SHEETS` above — sharing `.sm-inner` means it was never actually at risk of
+    disagreeing on any of this, just unverified.
 
     Compared as a set rather than against hardcoded values — the point is that
     they agree, not what they agree on.

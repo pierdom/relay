@@ -114,7 +114,7 @@ You can drop Syncthing entirely if you only use the Web UI or the TUI (both are 
 
 ```bash
 uv sync --all-extras --dev   # install (uv only — never pip)
-uv run pytest -q             # 574 tests (incl. 116 browser smokes)
+uv run pytest -q             # 580 tests (incl. 122 browser smokes)
 uv run ruff check .          # lint
 ```
 

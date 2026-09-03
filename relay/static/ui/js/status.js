@@ -80,6 +80,96 @@ function smFeature(label, state, note) {
   return row;
 }
 
+/** "never run" / "running — N/M checked" / "N/M checked, finished <time>" —
+ * the three states vault.backfill_status() (relay #253) can report. */
+function fmtBackfill(b) {
+  if (b.running) return `running — ${b.checked}/${b.total} checked`;
+  if (b.completed_at) return `${b.checked}/${b.total} checked, finished ${b.completed_at}`;
+  return 'never run';
+}
+
+/* The health block above only ever answers on/off. Every production question
+ * this session's embedding work actually hit — which model, is the backfill
+ * still going, how much of the vault is covered — needed a shell or a log
+ * tail before /status grew the `embeddings` object (relay #253, v1.2.1) to
+ * answer them directly. This section is that object, plus the two controls
+ * (v1.3.0) that used to mean editing .env and restarting: pause/resume, and
+ * re-trigger a catch-up on demand. */
+function renderEmbeddings(e) {
+  const wrap = document.createElement('div');
+  wrap.appendChild(smRows([
+    ['Model', e.model || '—'],
+    ['Dimension', e.dimension != null ? `${e.dimension}d` : '—'],
+    ['Model size', e.model_size_mb != null ? `${e.model_size_mb} MB` : '—'],
+    ['Backend', e.backend_loaded ? 'loaded (resident)' : 'unloaded'],
+    ['Idle unload', e.idle_unload_seconds > 0 ? `${e.idle_unload_seconds}s` : 'never'],
+    ['Threads', String(e.threads)],
+    ['Coverage', `${e.posts_embedded} / ${e.posts_total} posts (${e.posts_missing} missing)`],
+    ['Chunks', String(e.chunks_total)],
+    ['Cache entries', String(e.cache_entries)],
+    ['Backfill', fmtBackfill(e.backfill)],
+  ]));
+
+  const err = document.createElement('div');
+  err.className = 'sm-error';
+  err.style.display = 'none';
+
+  // Both actions re-fetch and re-render the whole panel on success rather than
+  // patching this section alone — the health dot above and the Vault section's
+  // post count can move too (an enable auto-triggers a backfill; the toggle
+  // itself flips search.embeddings). The action and the refresh are caught
+  // separately: fn() failing means nothing happened, so show the real error
+  // and let the button be clicked again. refresh() failing means the action
+  // *did* happen but this copy of the panel doesn't know it yet — re-enabling
+  // the button there would invite a second, opposite-direction click against
+  // state the user can no longer see, so it stays disabled and says so.
+  const runAction = async (btn, fn) => {
+    err.style.display = 'none';
+    btn.disabled = true;
+    try {
+      await fn();
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.style.display = '';
+      btn.disabled = false;
+      return;
+    }
+    try {
+      renderStatus(await apiFetch('/status'));
+    } catch {
+      err.textContent = 'Done, but the panel could not refresh — close and reopen it to see the latest state.';
+      err.style.display = '';
+    }
+  };
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'btn-edit';
+  toggleBtn.textContent = e.enabled ? 'Turn off' : 'Turn on';
+  toggleBtn.title = e.enabled
+    ? 'Pause semantic search until re-enabled or restarted'
+    : 'Resume — a restart is not needed';
+  toggleBtn.onclick = () => runAction(toggleBtn, () => apiFetch('/embeddings', {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled: !e.enabled }),
+  }));
+
+  const backfillBtn = document.createElement('button');
+  backfillBtn.className = 'btn-edit';
+  backfillBtn.textContent = e.backfill.running ? 'Running…' : 'Re-run backfill';
+  backfillBtn.disabled = !e.available || e.backfill.running;
+  backfillBtn.title = e.available
+    ? 'Re-embed anything the content-addressed cache does not already cover'
+    : 'Enable semantic search first';
+  backfillBtn.onclick = () => runAction(backfillBtn, () => apiFetch('/embeddings/backfill', { method: 'POST' }));
+
+  const controls = document.createElement('div');
+  controls.className = 'sm-embed-controls';
+  controls.append(toggleBtn, backfillBtn);
+  wrap.append(controls, err);
+
+  return smSection('Semantic search', wrap);
+}
+
 /* Recovery lives here because this is the panel that already answers "does
  * vault history work". When it does not, there is nothing to recover, and this
  * section says so rather than offering a button that cannot help. */
@@ -156,6 +246,7 @@ function renderStatus(d) {
     d.features.watcher.running ? 'watching' : (d.features.watcher.enabled ? 'not running' : 'disabled'),
   ));
   smBody.appendChild(smSection('Health', health));
+  smBody.appendChild(renderEmbeddings(d.embeddings));
 
   const v = d.vault;
   smBody.appendChild(smSection('Vault', smRows([
