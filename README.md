@@ -16,13 +16,11 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![MCP](https://img.shields.io/badge/MCP-server-6E56CF?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io)
 
-**A shared knowledge base for humans and AI agents — plain Markdown, Obsidian-compatible, MCP-native, with semantic search built in.**
+**A shared knowledge base for humans and AI agents: plain Markdown, Obsidian-compatible, MCP-native, with semantic search built in.**
 
 </div>
 
 Your notes live as ordinary `.md` files on disk. Browse them in Obsidian, `grep` them, edit them in nvim — relay wraps that same vault with a **REST API**, an **MCP server**, and a real-time **SSE** stream so AI agents can read, write, and subscribe alongside you. Every write is committed to a local git history on the server, so posts can be restored even after deletion.
-
-relay is more than a web UI bolted onto a folder of Markdown — see [Why relay](#why-relay) below for the two things that actually make it different: MCP-native agent access, and semantic search that pays off for humans and agents alike.
 
 <div align="center">
 
@@ -34,14 +32,14 @@ relay is more than a web UI bolted onto a folder of Markdown — see [Why relay]
 
 ## Why relay
 
-**MCP-native agent access.** Any Obsidian-compatible vault becomes something an AI agent can read, write, and subscribe to — over the same `.md` files you edit by hand, not a bespoke export or a scraped copy. Agents get full CRUD, history, and real-time updates through the same interface humans use in the browser UI, the TUI, or Obsidian itself, so there's no second, agent-only copy of your notes to keep in sync.
+**MCP-native agent access.** An AI agent reads, writes, and subscribes to the same `.md` files you edit by hand: full CRUD, history, and real-time updates through the same interface the browser UI, the TUI, and Obsidian use. No separate export, no scraped copy, no second vault to keep in sync.
 
-**Semantic search, for you and for the agents.** Plain FTS5 keyword search only finds what you phrase the way the note is phrased — relay adds an optional `mode=semantic|hybrid` on top of it (chunk-level embeddings via sqlite-vec + fastembed), and the reason it's worth having is different depending on who's asking:
+**Semantic search, for humans and for agents.** Plain FTS5 keyword search only finds what you phrase the way the note is phrased. relay adds an optional `mode=semantic|hybrid` on top of it (chunk-level embeddings via sqlite-vec and fastembed):
 
-- **For you**, it closes gaps keyword search structurally can't: cross-lingual retrieval (an Italian query finding an English-language note, or vice versa) and oblique/paraphrased wording ("what did we decide about the notes backend" finding a post whose title shares none of those words).
-- **For agents**, it's not about wrong answers — it's about the token and round-trip cost of guessing right. An agent that doesn't know your tag taxonomy would otherwise have to `list_posts`, skim summaries, follow `[[wikilinks]]`/`#id` backlinks, and iterate — burning context on navigation before it ever reaches the relevant post. Semantic search collapses that into one query, ranked by meaning, so the agent spends its context budget on your actual question instead of on finding where the answer lives.
+- **For you**, it finds what keyword search can't: cross-lingual queries (an Italian search finding an English note, or the reverse) and paraphrased wording. "What did we decide about the notes backend" finds a post whose title shares none of those words.
+- **For agents**, it cuts the token and round-trip cost of guessing right. An agent that doesn't know your tag taxonomy has to `list_posts`, skim summaries, follow `[[wikilinks]]`/`#id` backlinks, and iterate before it reaches the relevant post. Semantic search replaces all of that with one query, ranked by meaning.
 
-Measured on a real 21-query set against a real vault: keyword search hits **recall@5 0.540 / MRR 0.418**; hybrid search (keyword + semantic, fused and confidence-weighted) hits **recall@5 0.687 / MRR 0.667** — a real jump, not a marginal one (semantic alone already beats keyword at 0.659/0.667; hybrid's fusion edges it out further on recall). Off by default (`RELAY_EMBEDDING_ENABLED=false`) — it's an opt-in feature, not yet a validated default; see [docs/setup.md](docs/setup.md) for what to expect when you turn it on.
+Measured on a real 21-query set against a real vault: keyword hits recall@5 0.540 / MRR 0.418, semantic alone hits 0.659/0.667, and hybrid (keyword and semantic fused, confidence-weighted) hits 0.687/0.667. It's off by default (`RELAY_EMBEDDING_ENABLED=false`), an opt-in feature and not yet a validated default. See [docs/setup.md](docs/setup.md) for what to expect when you turn it on.
 
 ## How it works
 
@@ -70,7 +68,7 @@ docker compose up -d
 docker compose pull && docker compose up -d   # update
 ```
 
-Service on `http://localhost:8000` — interactive docs at `/docs`. See [docs/setup.md](docs/setup.md) for configuration, OIDC login, and MCP OAuth.
+Service on `http://localhost:8000`. Interactive docs at `/docs`. See [docs/setup.md](docs/setup.md) for configuration, OIDC login, and MCP OAuth.
 
 ## Sample vault
 
@@ -84,11 +82,11 @@ Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the patt
 
 ## How I use it
 
-relay runs on a **VPS** behind a reverse proxy ([Nginx Proxy Manager](https://nginxproxymanager.com/) handles TLS), reachable at a public URL. Authentication is via [PocketID](https://github.com/stonith404/pocket-id) (any OIDC provider works — [Authelia](https://www.authelia.com/) is another good option). This is what makes Claude.ai's remote MCP connector work: it authenticates against the OIDC provider through the OAuth 2.1 gate relay exposes at `/mcp`.
+relay runs on a **VPS** behind a reverse proxy ([Nginx Proxy Manager](https://nginxproxymanager.com/) handles TLS), reachable at a public URL. Authentication is via [PocketID](https://github.com/stonith404/pocket-id) (any OIDC provider works, Authelia included). This is what makes Claude.ai's remote MCP connector work: it authenticates against the OIDC provider through the OAuth 2.1 gate relay exposes at `/mcp`.
 
-The **vault** lives on the VPS, mirrored to a local desktop copy via [Syncthing](https://syncthing.net/). [Obsidian](https://obsidian.md/) points to the local copy — all editing is offline. A save in Obsidian propagates to the server in seconds; relay's watchdog picks it up, re-indexes the file, and pushes the change via SSE to every connected client immediately.
+The **vault** lives on the VPS, mirrored to a local desktop copy via [Syncthing](https://syncthing.net/). [Obsidian](https://obsidian.md/) points to the local copy, and all editing happens offline. A save in Obsidian propagates to the server in seconds; relay's watchdog picks it up, re-indexes the file, and pushes the change via SSE to every connected client immediately.
 
-Day-to-day: I use the **web UI on my phone** for quick reads and notes on the go. On the desktop I use **Obsidian** for longer writing. A handful of AI agents run on a schedule — pulling news digests, finance summaries, and other feeds — and publish their output to relay via MCP, using it as a live bulletin board. The **terminal UI** (`relay-tui`) runs on the desktop as a real-time dashboard, following the SSE stream as updates land.
+Day-to-day: I use the **web UI on my phone** for quick reads and notes on the go, and **Obsidian** on the desktop for longer writing. A handful of AI agents run on a schedule, pulling news digests, finance summaries, and other feeds, and publish their output to relay via MCP as a live bulletin board. The **terminal UI** (`relay-tui`) runs on the desktop as a real-time dashboard, following the SSE stream as updates land.
 
 ```
   Obsidian (desktop) ──Syncthing──► VPS vault ◄──MCP── AI agents (news, finance…)
@@ -100,7 +98,7 @@ Day-to-day: I use the **web UI on my phone** for quick reads and notes on the go
                       (phone)       (dashboard)    (remote MCP)
 ```
 
-The Syncthing part can be completely removed if you just interact with the server via the Web UI or the TUI (they are rather feature rich anyway, search included) and don't need a different editor like Obsidian.
+You can drop Syncthing entirely if you only use the Web UI or the TUI (both are feature-rich, search included) and don't need a separate editor like Obsidian.
 
 ## Interfaces
 
@@ -129,14 +127,14 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 | Installation, configuration, OIDC, MCP OAuth | [docs/setup.md](docs/setup.md) |
 | REST API reference | [docs/api.md](docs/api.md) |
 | MCP tools and connection | [docs/mcp.md](docs/mcp.md) |
-| Terminal UI — keybindings, palettes, transparency | [docs/tui.md](docs/tui.md) |
+| Terminal UI: keybindings, palettes, transparency | [docs/tui.md](docs/tui.md) |
 | Best practices: Master Document, tags, agents | [docs/usage.md](docs/usage.md) |
 | Recovering an overwritten or deleted post | [docs/recovery.md](docs/recovery.md) |
 
 ## Technologies
 
 - **Python 3.13** + **FastAPI** + **aiosqlite** (FTS5 search) + **PyYAML**
-- **sqlite-vec** + **fastembed** — semantic/hybrid search (`mode=semantic|hybrid`): chunk-level embeddings, content-addressed cache, reciprocal rank fusion. Opt-in, off by default — see [Why relay](#why-relay)
+- **sqlite-vec** + **fastembed** — semantic/hybrid search (`mode=semantic|hybrid`): chunk-level embeddings, content-addressed cache, reciprocal rank fusion. Opt-in, off by default. See [Why relay](#why-relay)
 - **Markdown vault** — files are source of truth; SQLite index is disposable
 - **git** — a commit per write; any post is recoverable even after deletion
 - **watchdog** — live re-index of external edits (Obsidian, nvim)
