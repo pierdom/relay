@@ -678,6 +678,57 @@ def backfill_status() -> dict:
     return dict(_backfill_state)
 
 
+_backfill_task: asyncio.Task | None = None
+
+
+def spawn_backfill() -> asyncio.Task:
+    """Schedule ``run_backfill_task`` as a background task — from main.py's
+    lifespan at startup, or from ``POST /embeddings/backfill`` (relay #253,
+    v1.3.0) to re-trigger it without a restart.
+
+    Keeps a module-level reference to the task (asyncio only guarantees a
+    scheduled task survives GC while something still refers to it) and marks
+    ``_backfill_state`` as running *synchronously*, before the task has had a
+    chance to actually start — a caller polling `/status` immediately after
+    triggering this would otherwise race the task's first real event-loop
+    turn and could observe stale "not running" state."""
+    global _backfill_task
+    _backfill_state.update(running=True, checked=0, total=0, started_at=utcnow_iso(), completed_at=None)
+    _backfill_task = asyncio.create_task(run_backfill_task())
+    # If the task is cancelled (e.g. shutdown) before it ever gets a turn to
+    # run, nothing inside its body executes to clear the eager mark above —
+    # a task cancelled before its first step never runs, `finally` included.
+    # Without this, a process that starts and immediately shuts down (a fast
+    # test, a rapid redeploy) would leave `running: true` stuck for good.
+    _backfill_task.add_done_callback(
+        lambda t: _backfill_state.update(running=False) if t.cancelled() else None
+    )
+    return _backfill_task
+
+
+async def run_backfill_task() -> None:
+    """Open a fresh connection and run ``backfill_embeddings`` to completion,
+    logging start/complete/failure. The connection-management + logging half
+    of what used to be ``main.py``'s ``_embedding_backfill`` — factored out
+    here so ``spawn_backfill`` (and thus ``POST /embeddings/backfill``) can
+    reuse it instead of duplicating it."""
+    from . import database
+
+    logger.info("Embedding backfill starting")
+    try:
+        db = await aiosqlite.connect(settings.database_path)
+        db.row_factory = aiosqlite.Row
+        try:
+            if database.VEC_ENABLED:
+                await vectors.load_extension(db)
+            count = await backfill_embeddings(db)
+            logger.info("Embedding backfill complete — %d post(s) checked", count)
+        finally:
+            await db.close()
+    except Exception:
+        logger.exception("Embedding backfill failed")
+
+
 async def backfill_embeddings(db: aiosqlite.Connection) -> int:
     """Catch up whatever rebuild_index's startup pass skipped (relay #253).
 
@@ -688,12 +739,17 @@ async def backfill_embeddings(db: aiosqlite.Connection) -> int:
     restart) doesn't lose progress already made; the next run resumes from
     the cache exactly where this one stopped.
 
-    Meant to run as a background task (main.py's lifespan), never inline
+    Meant to run as a background task (main.py's lifespan, or
+    ``spawn_backfill`` from ``POST /embeddings/backfill``), never inline
     during startup — sequentially embedding a real vault's worth of posts
     blocked the ASGI lifespan's `await init_db()`, and with it every HTTP
     route including /health, until the whole backlog finished. No-ops
-    immediately (no query at all) when embeddings aren't enabled."""
+    immediately (no query at all) when embeddings aren't enabled — also
+    clearing ``running`` in case ``spawn_backfill`` marked it eagerly, so a
+    caller that raced disabling embeddings against triggering a backfill
+    doesn't leave `/status` stuck reporting one in progress forever."""
     if not settings.embedding_enabled:
+        _backfill_state["running"] = False
         return 0
     async with db.execute("SELECT id, title, content FROM posts") as cur:
         rows = await cur.fetchall()

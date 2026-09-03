@@ -124,6 +124,78 @@ async def embedding_status(db: aiosqlite.Connection, posts_total: int) -> Embedd
     )
 
 
+# ── runtime control (relay #253, v1.3.0) ───────────────────────────────────
+#
+# Read-only diagnostics above; these two actually change state. Both return
+# the same EmbeddingStatus embedding_status() builds for /status, so a caller
+# sees the result of what it just did without a second round trip.
+
+
+class EmbeddingsUnavailable(Exception):
+    """Raised when a control action needs embeddings usable and they aren't —
+    sqlite-vec isn't loaded on this relay at all, or (for ``enable``)
+    ``EMBEDDING_MODEL`` isn't a model fastembed's registry knows about."""
+
+
+class BackfillAlreadyRunning(Exception):
+    """Raised by ``trigger_backfill`` when a run is already in progress —
+    two runs racing on ``vault._backfill_state``'s shared progress counters
+    would produce nonsense (a checked/total that jumps around)."""
+
+
+class EmbeddingDimensionMismatch(Exception):
+    """Raised by ``set_embeddings_enabled(True)`` when the configured
+    ``EMBEDDING_MODEL``'s dimension doesn't match the ``vec_chunks`` schema
+    actually on disk. That migration only runs in ``vectors.init_vec`` at
+    startup (relay #253, v1.2.0) — enabling live can't safely rebuild the
+    table out from under any in-flight reads, so this asks for a restart
+    instead of attempting it."""
+
+
+async def trigger_backfill(db: aiosqlite.Connection, *, force: bool = False) -> EmbeddingStatus:
+    """``POST /embeddings/backfill``. Re-runs the same catch-up that runs
+    once at startup, without a restart — resuming from the content-addressed
+    cache by default, or wiping it first with ``force=True`` when the cache
+    itself (not just its completeness) is in question."""
+    if not (database.VEC_ENABLED and settings.embedding_enabled):
+        raise EmbeddingsUnavailable
+    if vault.backfill_status()["running"]:
+        raise BackfillAlreadyRunning
+    if force:
+        await vectors.reset(db)
+    vault.spawn_backfill()
+    return await embedding_status(db, await post_count(db))
+
+
+async def set_embeddings_enabled(db: aiosqlite.Connection, enabled: bool) -> EmbeddingStatus:
+    """``PATCH /embeddings``. Pause or resume semantic/hybrid search without
+    a restart — mutates ``settings.embedding_enabled`` directly, which every
+    embedding call site already re-checks per call rather than caching, so
+    the effect is immediate. In-memory only: a restart reverts to whatever
+    ``.env`` says, same as any other setting.
+
+    Enabling only ever resumes against whatever model/schema is already on
+    disk (see ``EmbeddingDimensionMismatch``) and kicks off a backfill so
+    newly-covered posts don't wait for the next restart. Disabling force-
+    unloads the backend immediately rather than waiting for the idle timer —
+    an explicit "off" means the memory is wanted back now, not eventually."""
+    if enabled:
+        if not database.VEC_ENABLED:
+            raise EmbeddingsUnavailable
+        try:
+            target_dim = embedding.resolve_dim(settings.embedding_model)
+        except ValueError:
+            raise EmbeddingsUnavailable from None
+        if await vectors.current_schema_dim(db) != target_dim:
+            raise EmbeddingDimensionMismatch
+        settings.embedding_enabled = True
+        vault.spawn_backfill()
+    else:
+        settings.embedding_enabled = False
+        embedding.force_unload()
+    return await embedding_status(db, await post_count(db))
+
+
 async def build(db: aiosqlite.Connection) -> StatusResponse:
     """Assemble the full status. Reports what is *working*, not what is configured."""
     attachments = vault.list_attachments()
