@@ -280,6 +280,28 @@ async def delete_post_chunks(db: aiosqlite.Connection, post_id: int) -> None:
     await db.commit()
 
 
+async def coverage(db: aiosqlite.Connection) -> tuple[int, int, int]:
+    """``(posts_with_chunks, chunks_total, cache_entries)`` — the counts behind
+    ``/status``'s embeddings section. ``posts_with_chunks`` is distinct
+    ``post_id`` in ``chunks``, not a re-chunk-and-compare: the write path keeps
+    a post's chunk rows in sync with its current content on every save (see
+    ``sync_post_chunks``), so "has a chunk row" already means "embedded as of
+    its last write" without redoing the chunking work here. ``cache_entries``
+    can exceed ``chunks_total`` — old rows from a prior model or a deleted
+    post's chunks are never eagerly pruned (see ``delete_post_chunks``)."""
+    from . import database
+
+    if not database.VEC_ENABLED:
+        return (0, 0, 0)
+    async with db.execute("SELECT COUNT(DISTINCT post_id) FROM chunks") as cur:
+        posts_with_chunks = (await cur.fetchone())[0]
+    async with db.execute("SELECT COUNT(*) FROM chunks") as cur:
+        chunks_total = (await cur.fetchone())[0]
+    async with db.execute("SELECT COUNT(*) FROM embeddings_cache") as cur:
+        cache_entries = (await cur.fetchone())[0]
+    return (posts_with_chunks, chunks_total, cache_entries)
+
+
 def _embed_query(query: str) -> list[float]:
     """Sync helper run off the event loop via asyncio.to_thread (see
     semantic_search) — get_backend()'s lazy model construction belongs in the

@@ -8,6 +8,20 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.2.1] — 2026-09-03
+
+`GET /status` and the `get_status` MCP tool report real embedding diagnostics instead of just the on/off flag — model identity, coverage, and backfill progress a shell or a log tail used to be the only way to see.
+
+### Added
+- `StatusResponse.embeddings`: `enabled`/`available` (unchanged semantics, now also nested here), `model` and `dimension` and `model_size_mb` (resolved from fastembed's registry via `embedding.resolve_dim`/`resolve_size_mb`), `backend_loaded` (`embedding.is_loaded()` — is the ~570MB model actually resident right now, or idle-unloaded per `EMBEDDING_IDLE_UNLOAD_SECONDS`), `idle_unload_seconds`/`threads` (the configured knobs), `posts_total`/`posts_embedded`/`posts_missing`/`chunks_total`/`cache_entries` (`vectors.coverage`), and `backfill` (`vault.backfill_status()`: `running`/`checked`/`total`/`started_at`/`completed_at` for the current or most recent backfill run)
+- `vault.backfill_status()` — a module-level snapshot `backfill_embeddings` now updates as it runs, so "is it still crunching, and how much is left" is one request instead of a log watch
+- `embedding.resolve_size_mb`, `embedding.is_loaded` — small additions alongside the existing `resolve_dim`, sharing its registry lookup (refactored into `_model_entry`) rather than duplicating it
+- `vectors.coverage(db)` — `(posts_with_chunks, chunks_total, cache_entries)`, purely additive to the existing schema (no migration)
+
+Purely additive to `StatusResponse` — `features.search.embeddings` (the existing boolean gate) is unchanged, so this isn't a breaking change to the stable surface (`docs/stability.md`). 9 new tests cover the disabled default, the enabled/covered case through a real HTTP round trip, and a completed backfill's reflected state; confirmed all 9 fail without the implementation. Full suite green, ruff clean, MCP parity intact (both `get_status` tool descriptions updated identically).
+
+---
+
 ## [1.2.0] — 2026-09-03
 
 Makes the embedding model's vector dimension a real config axis instead of a hardcoded constant, so relay can move to a bigger multilingual model (or back) without a manual migration.

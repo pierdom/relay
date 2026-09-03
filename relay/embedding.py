@@ -37,20 +37,33 @@ EMBEDDING_DIM = 384  # FakeBackend's fixed test dim; also vectors.py's schema
 # dim yet, so the schema is pre-built at the shipped default — see resolve_dim).
 
 
-def resolve_dim(model_id: str) -> int:
-    """Look up ``model_id``'s embedding dimension from fastembed's static model
-    registry — pure in-memory metadata (``TextEmbedding.EMBEDDINGS_REGISTRY``),
-    no download and no ONNX session constructed. Lets ``vectors.init_vec``
-    learn the dimension a model change requires *before* paying for a model
-    load, and makes a typo in ``EMBEDDING_MODEL`` fail fast at startup instead
-    of surfacing later as a dimension-mismatch error on the first real embed
-    call."""
+def _model_entry(model_id: str) -> dict:
+    """Look up ``model_id`` in fastembed's static model registry — pure
+    in-memory metadata (``TextEmbedding.EMBEDDINGS_REGISTRY``), no download
+    and no ONNX session constructed. Shared by ``resolve_dim`` and
+    ``resolve_size_mb`` so there's one lookup, not two."""
     from fastembed import TextEmbedding
 
     for m in TextEmbedding.list_supported_models():
         if m["model"] == model_id:
-            return m["dim"]
+            return m
     raise ValueError(f"Unknown fastembed model: {model_id!r}")
+
+
+def resolve_dim(model_id: str) -> int:
+    """``model_id``'s embedding dimension. Lets ``vectors.init_vec`` learn the
+    dimension a model change requires *before* paying for a model load, and
+    makes a typo in ``EMBEDDING_MODEL`` fail fast at startup instead of
+    surfacing later as a dimension-mismatch error on the first real embed
+    call."""
+    return _model_entry(model_id)["dim"]
+
+
+def resolve_size_mb(model_id: str) -> float:
+    """``model_id``'s on-disk size in MB, per fastembed's registry — surfaced
+    in ``/status`` so choosing a bigger model (relay #253 backlog) comes with
+    a concrete number, not just a dimension."""
+    return round(_model_entry(model_id)["size_in_GB"] * 1024, 1)
 
 
 class EmbeddingBackend(Protocol):
@@ -145,6 +158,13 @@ def get_backend() -> EmbeddingBackend:
         _backend = FastEmbedBackend()
     _last_used = time.monotonic()
     return _backend
+
+
+def is_loaded() -> bool:
+    """Whether the backend is currently resident in memory — surfaced in
+    ``/status`` so the idle-unload cycle (relay #253, v1.1.3) is observable
+    instead of only inferred from RSS."""
+    return _backend is not None
 
 
 def unload_if_idle() -> bool:

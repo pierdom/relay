@@ -324,6 +324,35 @@ class FeatureStatus(BaseModel):
     auth: AuthStatus
 
 
+class EmbeddingBackfillStatus(BaseModel):
+    running: bool = Field(description="Whether the startup backfill task is active right now")
+    checked: int = Field(description="Posts checked so far in the current or most recent run")
+    total: int = Field(description="Posts to check in the current or most recent run")
+    started_at: str | None = Field(description="Null if no backfill has run yet this process lifetime")
+    completed_at: str | None = Field(description="Null while running, or before the first run has finished")
+
+
+class EmbeddingStatus(BaseModel):
+    enabled: bool = Field(description="RELAY_EMBEDDING_ENABLED")
+    available: bool = Field(description="Same as features.search.embeddings: sqlite-vec loaded and enabled")
+    model: str | None = Field(description="EMBEDDING_MODEL; null when embeddings aren't available")
+    dimension: int | None = Field(description="The configured model's vector width")
+    model_size_mb: float | None = Field(description="On-disk size of the model, from fastembed's registry")
+    backend_loaded: bool = Field(
+        description="Whether the model is currently resident in memory, or unloaded (EMBEDDING_IDLE_UNLOAD_SECONDS)"
+    )
+    idle_unload_seconds: int = Field(description="EMBEDDING_IDLE_UNLOAD_SECONDS; 0 = never unload")
+    threads: int = Field(description="EMBEDDING_THREADS")
+    posts_total: int
+    posts_embedded: int = Field(description="Posts with at least one chunk currently embedded")
+    posts_missing: int = Field(description="posts_total minus posts_embedded")
+    chunks_total: int
+    cache_entries: int = Field(
+        description="Rows in the embedding cache; can exceed chunks_total (old model/deleted-post rows aren't pruned)"
+    )
+    backfill: EmbeddingBackfillStatus
+
+
 class StatusResponse(BaseModel):
     version: str
     uptime_seconds: int
@@ -331,6 +360,7 @@ class StatusResponse(BaseModel):
     sse_clients: int
     vault: VaultStatus
     features: FeatureStatus
+    embeddings: EmbeddingStatus
 
 
 class PostRevision(BaseModel):

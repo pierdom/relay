@@ -21,7 +21,7 @@ relay exposes the full feed API as **19 MCP tools** so Claude (or any MCP-capabl
 | `get_attachment` | Retrieve an attachment; images return as inline image content |
 | `list_attachments` | List attachments; scope by `post_id` or `folder` |
 | `delete_attachment` | Delete an attachment; reports posts still referencing it |
-| `get_status` | Version, uptime, which vault is served, counts, and which features actually work |
+| `get_status` | Version, uptime, which vault is served, counts, which features actually work, and embedding model/coverage/backfill diagnostics |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`) |
 | `rename_tag` | Rename a tag across every post that carries it, in one atomic pass |
@@ -78,6 +78,13 @@ restore_post(id=54, sha="a8dcc37")
   talking to the instance I think I am".
 - **Post ids are never reused.** Deleting the newest post does not free its id, so
   an `#id` reference always means the same post. Ids aren't contiguous.
+- **`get_status`'s `embeddings` field is the full picture, not just the on/off flag.**
+  `search.embeddings` (above) only says whether `mode=semantic|hybrid` is usable;
+  `embeddings.model`/`dimension`/`model_size_mb` say which model, `posts_embedded`/
+  `posts_missing`/`chunks_total` say how much of the vault is actually covered, and
+  `backfill.running` says whether the initial catch-up is still in progress — check
+  it before assuming a `semantic` query's silence on a just-enabled vault means
+  nothing matched, rather than that nothing is embedded yet.
 - **`list_posts` returns metadata + excerpt by default** (`summary=true`); call
   `get_post` for a full body.
 

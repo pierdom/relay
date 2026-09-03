@@ -295,7 +295,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_status",
-            description="Report this relay's runtime status: version, uptime, which vault it is serving, counts of posts/tags/folders/attachments, and which features are actually working. Use it to confirm you are talking to the vault you think you are, and to check features that degrade silently — vault history is off when git is missing (writes would be unrecoverable), search falls back to substring matching without FTS5, and external edits are not picked up when the watcher is off.",
+            description="Report this relay's runtime status: version, uptime, which vault it is serving, counts of posts/tags/folders/attachments, semantic-search embedding coverage and backend state, and which features are actually working. Use it to confirm you are talking to the vault you think you are, and to check features that degrade silently — vault history is off when git is missing (writes would be unrecoverable), search falls back to substring matching without FTS5, and external edits are not picked up when the watcher is off.",
             inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(

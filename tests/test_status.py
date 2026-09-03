@@ -10,13 +10,15 @@ import os
 
 os.environ.setdefault("API_KEY", "test-key")
 
+import aiosqlite
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from relay import database, status
+from relay import database, embedding, status, vault, vectors
 from relay.auth import require_api_key
 from relay.config import settings
+from relay.embedding import FakeBackend
 from relay.main import app
 
 AUTH = {"Authorization": "Bearer test-key"}
@@ -131,6 +133,74 @@ async def test_status_and_metrics_report_the_same_counts(client):
     }
     assert metric["relay_posts_total"] == data["vault"]["posts"]
     assert metric["relay_tags_total"] == data["vault"]["tags"]
+
+
+# ── embeddings section (relay #253's diagnostics) ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_embeddings_status_when_disabled(client):
+    data = await _status(client)
+    e = data["embeddings"]
+    assert e["enabled"] is False
+    assert e["available"] is False
+    assert e["model"] is None
+    assert e["dimension"] is None
+    assert e["model_size_mb"] is None
+    assert e["backend_loaded"] is False
+    assert e["posts_missing"] == e["posts_total"]
+    assert e["backfill"]["running"] is False
+    assert e["backfill"]["started_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_embeddings_status_when_enabled(client, monkeypatch):
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", lambda: FakeBackend())
+    monkeypatch.setattr(embedding, "_backend", FakeBackend())  # backend_loaded reads this directly
+
+    before = await _status(client)
+    posts_before = before["embeddings"]["posts_total"]
+
+    await client.post(
+        "/posts", json={"title": "Embed Me", "content": "## Section\nsome real content here", "tags": ["dev"]},
+        headers=AUTH,
+    )
+
+    e = (await _status(client))["embeddings"]
+    assert e["enabled"] is True
+    assert e["available"] is True
+    assert e["model"] == settings.embedding_model
+    assert e["dimension"] == 384
+    assert e["model_size_mb"] is not None and e["model_size_mb"] > 0
+    assert e["backend_loaded"] is True
+    assert e["posts_total"] == posts_before + 1
+    assert e["posts_embedded"] >= 1
+    assert e["posts_missing"] == e["posts_total"] - e["posts_embedded"]
+    assert e["chunks_total"] >= 1
+    assert e["cache_entries"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_embeddings_status_reflects_a_completed_backfill(client, monkeypatch):
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", lambda: FakeBackend())
+
+    conn = await aiosqlite.connect(settings.database_path)
+    conn.row_factory = aiosqlite.Row
+    await vectors.load_extension(conn)
+    try:
+        checked = await vault.backfill_embeddings(conn)
+    finally:
+        await conn.close()
+
+    e = (await _status(client))["embeddings"]
+    b = e["backfill"]
+    assert b["running"] is False
+    assert b["checked"] == checked
+    assert b["total"] == checked
+    assert b["started_at"] is not None
+    assert b["completed_at"] is not None
 
 
 @pytest.mark.asyncio
