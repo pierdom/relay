@@ -91,19 +91,45 @@ def _normalize(vec: list[float]) -> list[float]:
     return [x / norm for x in vec] if norm else vec
 
 
+def _backend_model_id() -> str:
+    """Sync helper run off the event loop via asyncio.to_thread (see
+    sync_post_chunks) — ensures the backend is loaded (constructing it is the
+    ~570MB/several-second cold path, see semantic_search's _embed_query) and
+    returns its model_id, needed up front for hashing before we know which
+    chunks are actually missing from the cache."""
+    return embedding.get_backend().model_id
+
+
+def _embed_documents(texts: list[str]) -> list[list[float]]:
+    """Sync helper run off the event loop via asyncio.to_thread (see
+    sync_post_chunks)."""
+    return embedding.get_backend().embed_documents(texts)
+
+
 async def sync_post_chunks(db: aiosqlite.Connection, *, post_id: int, title: str, content: str) -> None:
     """Re-chunk a post and reconcile ``chunks``/``vec_chunks`` against it.
     A chunk whose body hash is already in ``embeddings_cache`` skips the model
     call entirely; only genuinely new/changed chunks get embedded. Stale chunk
-    rows (edited/removed sections) are deleted."""
+    rows (edited/removed sections) are deleted.
+
+    Called inline from the write path (index_upsert/insert), not backgrounded
+    like vault.backfill_embeddings — so the two model calls below go through
+    asyncio.to_thread, same as semantic_search's _embed_query. Before
+    idle-unload (relay #253, v1.1.3) this rarely mattered: the backend loaded
+    once on the first write after startup and stayed resident. With
+    idle-unload the model can now go cold again after any quiet period, so an
+    edit arriving after one would otherwise reconstruct it (~570MB, several
+    seconds) directly on the event loop, stalling every other in-flight
+    request for the duration — the same class of bug semantic_search's own
+    fix closed, just on the write side instead of search."""
     from . import database  # deferred: database imports vault imports this module
 
     if not (database.VEC_ENABLED and settings.embedding_enabled):
         return
 
     chunks = chunking.chunk_post(title, content)
-    backend = embedding.get_backend()
-    hashed = [(c, _hash(backend.model_id, c.body)) for c in chunks]
+    model_id = await asyncio.to_thread(_backend_model_id)
+    hashed = [(c, _hash(model_id, c.body)) for c in chunks]
 
     new_hashes = {h for _, h in hashed}
     if new_hashes:
@@ -118,12 +144,12 @@ async def sync_post_chunks(db: aiosqlite.Connection, *, post_id: int, title: str
 
     missing = [(c, h) for c, h in hashed if h not in cached]
     if missing:
-        embedded = backend.embed_documents([c.embed_text for c, _ in missing])
+        embedded = await asyncio.to_thread(_embed_documents, [c.embed_text for c, _ in missing])
         for (_, h), vec in zip(missing, embedded, strict=True):
             blob = sqlite_vec.serialize_float32(_normalize(vec))
             await db.execute(
                 "INSERT OR IGNORE INTO embeddings_cache(content_hash, model_id, embedding) VALUES (?, ?, ?)",
-                (h, backend.model_id, blob),
+                (h, model_id, blob),
             )
 
     # Drop this post's chunk rows that no longer correspond to any current chunk.

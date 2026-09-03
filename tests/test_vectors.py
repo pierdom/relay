@@ -297,6 +297,37 @@ async def test_semantic_search_does_not_block_the_event_loop(db, backend, monkey
     await ticker_task
 
 
+@pytest.mark.asyncio
+async def test_sync_post_chunks_does_not_block_the_event_loop(db, backend, monkeypatch):
+    """Same class of bug as semantic_search's, on the write path instead of
+    search: create_post/update_post -> index_upsert/insert -> sync_post_chunks
+    must not block the event loop either. Mattered less before idle-unload
+    (v1.1.3) — the backend loaded once on the first write after startup and
+    stayed resident; idle-unload means a cold reload can now happen on any
+    write, not just the first one ever. Regression test for
+    _backend_model_id/_embed_documents being run via asyncio.to_thread."""
+
+    class SlowBackend(FakeBackend):
+        def embed_documents(self, texts):
+            time.sleep(0.2)  # a *blocking* sleep, standing in for ONNX inference
+            return super().embed_documents(texts)
+
+    monkeypatch.setattr(embedding, "get_backend", lambda: SlowBackend())
+
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    ticker_task = asyncio.create_task(ticker())
+    await vectors.sync_post_chunks(db, post_id=1, title="Slow", content=f"## S\n{LONG_SECTION}")
+    assert ticks >= 10, "ticker made no progress while sync_post_chunks ran — embedding call is blocking the loop"
+    await ticker_task
+
+
 # ── service.list_posts(mode=...) — the REST/MCP-facing entrypoint (relay #253 phase 5) ──
 
 

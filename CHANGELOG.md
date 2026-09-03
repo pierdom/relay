@@ -8,6 +8,17 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.1.4] — 2026-09-03
+
+Closes a gap v1.1.3's idle-unload made materially worse: the write path could block the event loop on a cold model reload, same class of bug already fixed on the search path.
+
+### Fixed
+- `vectors.sync_post_chunks` (the write path — `create_post`/`update_post` → `index_upsert`/`index_insert`) called `embedding.get_backend()` and `backend.embed_documents(...)` directly on the event loop, unlike `semantic_search`'s `_embed_query`, which already offloads via `asyncio.to_thread`. Before idle-unload this rarely mattered — the backend loaded once on the first write after startup and stayed resident, so a cold ~570MB/multi-second load only ever happened once per process lifetime. With idle-unload the model can go cold again after any quiet period, so an edit arriving after one would otherwise reconstruct it directly on the event loop, stalling every other in-flight request for the duration. Both calls now go through `asyncio.to_thread`, mirroring the search path exactly.
+
+Regression test simulates slow inference with a blocking `time.sleep` in a `FakeBackend` subclass and asserts a concurrent asyncio task keeps making progress during `sync_post_chunks`; verified it actually catches the bug (fails without the fix, via `git stash`). Full suite (432 passed) + ruff clean, plus a real end-to-end check with the actual embedding backend (create + edit a post, confirm chunks re-embed correctly through the new threaded path).
+
+---
+
 ## [1.1.3] — 2026-09-03
 
 The real fix for v1.1.1's memory-footprint issue — v1.1.2's thread cap measured no improvement in production, confirmed by the numbers here to have been the wrong theory.
