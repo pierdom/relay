@@ -158,6 +158,9 @@ async def test_embeddings_status_when_disabled(client, monkeypatch):
     assert e["model_size_mb"] is None
     assert e["backend_loaded"] is False
     assert e["posts_missing"] == e["posts_total"]
+    # embedding_enabled is off, so nothing has chunks — every post shows up
+    # (capped at 50), not just a lone offender.
+    assert len(e["posts_missing_ids"]) == min(e["posts_missing"], 50)
     assert e["backfill"]["running"] is False
     assert e["backfill"]["started_at"] is None
 
@@ -186,8 +189,30 @@ async def test_embeddings_status_when_enabled(client, monkeypatch):
     assert e["posts_total"] == posts_before + 1
     assert e["posts_embedded"] >= 1
     assert e["posts_missing"] == e["posts_total"] - e["posts_embedded"]
+    assert len(e["posts_missing_ids"]) == min(e["posts_missing"], 50)
     assert e["chunks_total"] >= 1
     assert e["cache_entries"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_embeddings_status_names_a_zero_chunk_post(client, monkeypatch):
+    # relay #253 usage report, Issue 1: posts_missing had no way to learn
+    # *which* post. A body that's entirely a fenced code block chunks to
+    # zero rows (chunking._strip_code_fences), so it's a deterministic,
+    # reproducible way to land in posts_missing_ids.
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", lambda: FakeBackend())
+
+    r = await client.post(
+        "/posts",
+        json={"title": "Code Only", "content": "```\nrclone sync a b\n```\n", "tags": ["dev"]},
+        headers=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    post_id = r.json()["id"]
+
+    e = (await _status(client))["embeddings"]
+    assert post_id in e["posts_missing_ids"]
 
 
 @pytest.mark.asyncio

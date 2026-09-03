@@ -11,13 +11,14 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
 
-from . import database, events, folders, frontmatter, history, ingest, links, metrics, vault, vectors
+from . import database, embedding, events, folders, frontmatter, history, ingest, links, metrics, vault, vectors
 from .config import settings
 from .models import (
     AttachmentDeleteResponse,
@@ -40,6 +41,7 @@ from .models import (
     PostSummary,
     PostSummaryListResponse,
     PostUpdate,
+    SearchTiming,
     TagConfigCreate,
     TagConfigResponse,
     TagCount,
@@ -81,14 +83,6 @@ class InvalidSearchMode(Exception):
     erroring. mode is worse to default silently on: it also gates
     SemanticSearchUnavailable, so a typo skips both the caller's intended
     ranking *and* the error that would have flagged the feature is off."""
-
-
-class RankedSearchFilterUnsupported(Exception):
-    """Raised when tag/folder is combined with mode='semantic'/'hybrid' and a
-    search term. _list_posts_ranked doesn't apply SQL filters (relay #253 —
-    an undocumented gap while this was Python-only); now that real REST/MCP
-    callers can hit it, silently ignoring a filter the caller explicitly
-    asked for is worse than telling them the combination isn't supported."""
 
 
 class AttachmentError(Exception):
@@ -207,20 +201,36 @@ def _fts_query(search: str) -> str | None:
     return " OR ".join(terms) if terms else None
 
 
-async def _keyword_ranked_ids(db: aiosqlite.Connection, search: str, *, limit: int) -> list[int]:
-    """Top-``limit`` post ids by keyword relevance, ignoring tag/folder filters
-    — feeds the RRF input list for ``mode="hybrid"``. Empty if FTS5 is
-    unavailable or the query has no searchable tokens (no LIKE fallback here;
-    the semantic list still carries the search on its own in that case)."""
+async def _keyword_ranked_ids(
+    db: aiosqlite.Connection, search: str, *, limit: int, tag: str | None = None, folder: str | None = None
+) -> list[int]:
+    """Top-``limit`` post ids by keyword relevance — feeds the RRF input list
+    for ``mode="hybrid"``. Empty if FTS5 is unavailable or the query has no
+    searchable tokens (no LIKE fallback here; the semantic list still carries
+    the search on its own in that case).
+
+    ``tag``/``folder`` (relay #253 usage report, Issue 4) use the exact same
+    condition shape as the unranked path below (``posts.tags LIKE
+    '%,tag,%'`` / ``posts.path LIKE 'folder/%'``) so a filtered hybrid query
+    fuses two lists that agree on which posts are even eligible."""
     if not database.FTS_ENABLED:
         return []
     match = _fts_query(search)
     if match is None:
         return []
+    conditions = ["posts_fts MATCH ?"]
+    params: list[str | int] = [match]
+    if tag:
+        conditions.append("posts.tags LIKE ?")
+        params.append(f"%,{tag.strip().lower()},%")
+    if folder:
+        conditions.append("posts.path LIKE ?")
+        params.append(f"{folder}/%")
+    params.append(limit)
     async with db.execute(
         f"SELECT posts.id FROM posts JOIN posts_fts ON posts_fts.rowid = posts.id "
-        f"WHERE posts_fts MATCH ? ORDER BY bm25(posts_fts, {_BM25_WEIGHTS}) LIMIT ?",
-        (match, limit),
+        f"WHERE {' AND '.join(conditions)} ORDER BY bm25(posts_fts, {_BM25_WEIGHTS}) LIMIT ?",
+        params,
     ) as cur:
         return [row[0] for row in await cur.fetchall()]
 
@@ -235,13 +245,22 @@ _RANKED_POOL_CAP = 200
 
 
 async def _list_posts_ranked(
-    db: aiosqlite.Connection, *, search: str, mode: str, limit: int, offset: int, summary: bool
+    db: aiosqlite.Connection,
+    *,
+    search: str,
+    mode: str,
+    limit: int,
+    offset: int,
+    summary: bool,
+    tag: str | None = None,
+    folder: str | None = None,
 ) -> PostListResponse | PostSummaryListResponse:
     """``mode="semantic"``/``"hybrid"`` path (relay #253 phases 2-5). Ranks by
-    vector similarity, RRF-fused with keyword for hybrid. Deliberately ignores
-    ``tag``/``folder`` filters, unlike the SQL-driven default path below:
-    undocumented gap the eval harness doesn't need closed yet, not an
-    oversight.
+    vector similarity, RRF-fused with keyword for hybrid. ``tag``/``folder``
+    (relay #253 usage report, Issue 4) are pushed into both rankers —
+    ``vectors.semantic_search`` and ``_keyword_ranked_ids`` — rather than
+    applied to the fused list afterward, so a filtered page doesn't need a
+    wider pool to make up for candidates dropped post-fusion.
 
     Raises ``SemanticSearchUnavailable`` if sqlite-vec isn't loaded or
     embeddings are off — callers must not silently fall back to keyword-only,
@@ -255,12 +274,23 @@ async def _list_posts_ranked(
         raise SemanticSearchUnavailable
     metrics.search_queries.inc()
     pool_size = min(max(offset + limit, 50), _RANKED_POOL_CAP)
-    semantic_results = await vectors.semantic_search(db, search, limit=pool_size)
+
+    # Cold-start observability (relay #253 usage report, Issue 5): sampled
+    # *before* the call, since embedding.get_backend() (inside
+    # vectors.semantic_search's to_thread hop) is what would load the model —
+    # after the call it's unconditionally loaded, so "was it cold" only has a
+    # signal if read first.
+    cold_start = not embedding.is_loaded()
+    t0 = time.monotonic()
+    semantic_results = await vectors.semantic_search(db, search, limit=pool_size, tag=tag, folder=folder)
+    embedding_ms = round((time.monotonic() - t0) * 1000, 1)
+    search_timing = SearchTiming(cold_start=cold_start, embedding_ms=embedding_ms)
+
     semantic_ranked = [pid for pid, _ in semantic_results]
     if mode == "semantic":
         ordered_ids = semantic_ranked
     else:
-        keyword_ranked = await _keyword_ranked_ids(db, search, limit=pool_size)
+        keyword_ranked = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder)
         # Per-query adaptive weight, not a fixed ratio — a fixed global ratio
         # measured zero-sum (relay #253 phase 4): it fixes queries where
         # semantic is strong and breaks queries where keyword is strong
@@ -283,10 +313,12 @@ async def _list_posts_ranked(
         return PostSummaryListResponse(
             items=[PostSummary.from_row(r) for r in rows],
             total=len(ordered_ids), limit=limit, offset=offset, pinned=None,
+            search_timing=search_timing,
         )
     return PostListResponse(
         items=[PostResponse.from_row(r) for r in rows],
         total=len(ordered_ids), limit=limit, offset=offset, pinned=None,
+        search_timing=search_timing,
     )
 
 
@@ -306,9 +338,9 @@ async def list_posts(
     if mode not in ("keyword", "semantic", "hybrid"):
         raise InvalidSearchMode
     if search and mode in ("semantic", "hybrid"):
-        if tag or folder:
-            raise RankedSearchFilterUnsupported
-        return await _list_posts_ranked(db, search=search, mode=mode, limit=limit, offset=offset, summary=summary)
+        return await _list_posts_ranked(
+            db, search=search, mode=mode, limit=limit, offset=offset, summary=summary, tag=tag, folder=folder
+        )
 
     conditions: list[str] = []
     params: list[str | int] = []

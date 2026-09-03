@@ -290,6 +290,44 @@ async def test_coverage_is_zero_when_vec_disabled(db, backend, monkeypatch):
     assert await vectors.coverage(db) == (0, 0, 0)
 
 
+# ── unembedded_post_ids (relay #253 usage report, Issue 1) ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_unembedded_post_ids_finds_a_code_fence_only_post(db, backend):
+    # chunking._strip_code_fences drops fenced code before chunking; a post
+    # whose entire body is one fenced code block chunks to zero rows and
+    # never appears in `chunks` at all — the exact failure mode a real vault
+    # usage report traced `posts_missing: 1` to.
+    code_only = await service.create_post(
+        db, PostCreate(title="Code Only", content="```\nrclone sync a b\n```\n", tags=["dev"])
+    )
+    await service.create_post(db, PostCreate(title="Prose", content=f"## S\n{LONG_SECTION}", tags=["dev"]))
+
+    missing = await vectors.unembedded_post_ids(db)
+    assert code_only.id in missing
+
+
+@pytest.mark.asyncio
+async def test_unembedded_post_ids_excludes_embedded_posts(db, backend):
+    post = await service.create_post(db, PostCreate(title="Embedded", content=f"## S\n{LONG_SECTION}", tags=["dev"]))
+    assert post.id not in await vectors.unembedded_post_ids(db)
+
+
+@pytest.mark.asyncio
+async def test_unembedded_post_ids_respects_limit(db, backend):
+    for i in range(5):
+        await service.create_post(db, PostCreate(title=f"Code {i}", content="```\nx\n```\n", tags=["dev"]))
+    assert len(await vectors.unembedded_post_ids(db, limit=2)) == 2
+
+
+@pytest.mark.asyncio
+async def test_unembedded_post_ids_empty_when_vec_disabled(db, backend, monkeypatch):
+    monkeypatch.setattr(database, "VEC_ENABLED", False)
+    await service.create_post(db, PostCreate(title="Code Only", content="```\nx\n```\n", tags=["dev"]))
+    assert await vectors.unembedded_post_ids(db) == []
+
+
 # ── rebuild_index reuses the cache ───────────────────────────────────────────
 
 
@@ -511,17 +549,58 @@ async def test_list_posts_rejects_invalid_mode(db, backend):
 
 
 @pytest.mark.asyncio
-async def test_list_posts_ranked_mode_rejects_tag_filter(db, backend):
-    # _list_posts_ranked doesn't apply SQL filters — silently ignoring tag
-    # would return unfiltered results with no signal anything was dropped.
-    with pytest.raises(service.RankedSearchFilterUnsupported):
-        await service.list_posts(db, search="anything", mode="semantic", tag="dev")
+async def test_semantic_search_tag_filter_excludes_non_matching_posts(db, backend):
+    # relay #253 usage report, Issue 4.
+    a = await service.create_post(db, PostCreate(title="A", content=f"## S\n{LONG_SECTION} x", tags=["dev"]))
+    b = await service.create_post(db, PostCreate(title="B", content=f"## S\n{LONG_SECTION} x", tags=["homelab"]))
+
+    results = await vectors.semantic_search(db, "x", limit=10, tag="dev")
+    ids = [pid for pid, _ in results]
+    assert a.id in ids
+    assert b.id not in ids
 
 
 @pytest.mark.asyncio
-async def test_list_posts_ranked_mode_rejects_folder_filter(db, backend):
-    with pytest.raises(service.RankedSearchFilterUnsupported):
-        await service.list_posts(db, search="anything", mode="hybrid", folder="Dev")
+async def test_semantic_search_folder_filter_excludes_non_matching_posts(db, backend):
+    a = await service.create_post(db, PostCreate(title="A", content=f"## S\n{LONG_SECTION} y", tags=["dev"]))
+    b = await service.create_post(db, PostCreate(title="B", content=f"## S\n{LONG_SECTION} y", tags=["homelab"]))
+    a_row = await service.get_post(db, a.id)
+    b_row = await service.get_post(db, b.id)
+
+    async with db.execute("SELECT id, path FROM posts") as cur:
+        paths = {row["id"]: row["path"] for row in await cur.fetchall()}
+    a_folder = paths[a_row.id].split("/", 1)[0]
+    b_folder = paths[b_row.id].split("/", 1)[0]
+    assert a_folder != b_folder  # different first-domain tags -> different folders
+
+    results = await vectors.semantic_search(db, "y", limit=10, folder=a_folder)
+    ids = [pid for pid, _ in results]
+    assert a.id in ids
+    assert b.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_list_posts_ranked_mode_accepts_tag_filter(db, backend):
+    a = await service.create_post(db, PostCreate(title="A", content=f"## S\n{LONG_SECTION} z", tags=["dev"]))
+    await service.create_post(db, PostCreate(title="B", content=f"## S\n{LONG_SECTION} z", tags=["homelab"]))
+
+    result = await service.list_posts(db, search="z", mode="hybrid", tag="dev", summary=True)
+    ids = [item.id for item in result.items]
+    assert a.id in ids
+    assert all(item.tags == ["dev"] for item in result.items)
+
+
+@pytest.mark.asyncio
+async def test_list_posts_ranked_mode_response_carries_search_timing(db, backend):
+    await service.create_post(db, PostCreate(title="A", content=f"## S\n{LONG_SECTION} w", tags=["dev"]))
+
+    result = await service.list_posts(db, search="w", mode="semantic", summary=True)
+    assert result.search_timing is not None
+    assert isinstance(result.search_timing.cold_start, bool)
+    assert result.search_timing.embedding_ms >= 0
+
+    keyword_result = await service.list_posts(db, search="w", mode="keyword", summary=True)
+    assert keyword_result.search_timing is None
 
 
 @pytest.mark.asyncio
@@ -556,9 +635,9 @@ async def test_ranked_pool_covers_offset_plus_limit(db, backend, monkeypatch):
     calls: list[int] = []
     real_semantic_search = vectors.semantic_search
 
-    async def spy(db_, query, *, limit=50):
+    async def spy(db_, query, *, limit=50, tag=None, folder=None):
         calls.append(limit)
-        return await real_semantic_search(db_, query, limit=limit)
+        return await real_semantic_search(db_, query, limit=limit, tag=tag, folder=folder)
 
     monkeypatch.setattr(vectors, "semantic_search", spy)
     await service.list_posts(db, search="anything", mode="semantic", limit=10, offset=60)
@@ -572,9 +651,9 @@ async def test_ranked_pool_size_is_capped(db, backend, monkeypatch):
     calls: list[int] = []
     real_semantic_search = vectors.semantic_search
 
-    async def spy(db_, query, *, limit=50):
+    async def spy(db_, query, *, limit=50, tag=None, folder=None):
         calls.append(limit)
-        return await real_semantic_search(db_, query, limit=limit)
+        return await real_semantic_search(db_, query, limit=limit, tag=tag, folder=folder)
 
     monkeypatch.setattr(vectors, "semantic_search", spy)
     await service.list_posts(db, search="anything", mode="semantic", limit=50, offset=10_000)

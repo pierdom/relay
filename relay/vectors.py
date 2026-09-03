@@ -302,6 +302,31 @@ async def coverage(db: aiosqlite.Connection) -> tuple[int, int, int]:
     return (posts_with_chunks, chunks_total, cache_entries)
 
 
+async def unembedded_post_ids(db: aiosqlite.Connection, *, limit: int = 50) -> list[int]:
+    """Up to ``limit`` ids behind ``/status``'s ``posts_missing`` count — the
+    concrete list a caller needs to go investigate, not just a number (relay
+    #253 usage report: "posts_missing: 1 ... there is no tool or field
+    returning the offending post ID(s)").
+
+    The only way a post ends up here while every write path (and the startup/
+    triggered backfill) runs cleanly is ``chunking.chunk_post`` returning zero
+    chunks for it — e.g. a body that's entirely a fenced code block, stripped
+    before chunking ever sees it (``chunking._strip_code_fences``) — not a
+    race and not a partial failure: ``sync_post_chunks`` is awaited inline on
+    every write, and ``backfill_embeddings``'s loop has no per-post
+    try/except to swallow an error silently. So there's exactly one root
+    cause to report, and it doesn't need computing per id here."""
+    from . import database
+
+    if not database.VEC_ENABLED:
+        return []
+    async with db.execute(
+        "SELECT id FROM posts WHERE id NOT IN (SELECT DISTINCT post_id FROM chunks) ORDER BY id LIMIT ?",
+        (limit,),
+    ) as cur:
+        return [row[0] for row in await cur.fetchall()]
+
+
 async def current_schema_dim(db: aiosqlite.Connection) -> int:
     """The dimension ``vec_chunks`` was actually built at — the
     ``embedding_state`` row if one exists, else the disabled-state default
@@ -337,10 +362,25 @@ def _embed_query(query: str) -> list[float]:
     return embedding.get_backend().embed_query(query)
 
 
-async def semantic_search(db: aiosqlite.Connection, query: str, *, limit: int = 50) -> list[tuple[int, float]]:
+async def semantic_search(
+    db: aiosqlite.Connection, query: str, *, limit: int = 50, tag: str | None = None, folder: str | None = None
+) -> list[tuple[int, float]]:
     """(post_id, best_distance) pairs, ascending distance (= descending
     similarity). Chunk→post aggregation uses **max similarity / min distance**,
-    not mean — a post is relevant if *any* section is (relay #253)."""
+    not mean — a post is relevant if *any* section is (relay #253).
+
+    ``tag``/``folder`` (relay #253 usage report, Issue 4) restrict the result
+    to matching posts. ``vec_chunks`` has no partition/metadata columns, so
+    sqlite-vec can't push a WHERE down into the KNN index itself — the filter
+    is applied as an ordinary SQL join instead, *after* the k-nearest chunks
+    are pulled. That only stays correct if k is large enough that filtering
+    can't starve it: a small k tuned for the unfiltered case could return k
+    nearest chunks that all happen to belong to excluded posts, silently
+    under-filling or emptying a filtered page. So when a filter is present, k
+    widens to the full chunk count instead of the usual `limit`-derived
+    multiple — full-corpus KNN is fine at this vault's scale (proof of
+    concept, hundreds of chunks) but is a real cost that would need
+    revisiting before this filters a much larger vault."""
     from . import database
 
     if not (database.VEC_ENABLED and settings.embedding_enabled):
@@ -356,14 +396,31 @@ async def semantic_search(db: aiosqlite.Connection, query: str, *, limit: int = 
     # Request more chunks than `limit` posts: several top chunks can share a
     # post, so a 1:1 chunk:post k would under-fill the post-level ranking.
     chunk_k = max(limit * 4, 100)
+
+    joins = ""
+    conditions = ["v.embedding MATCH ?", "k = ?"]
+    params: list = [query_vec, chunk_k]
+    if tag or folder:
+        async with db.execute("SELECT COUNT(*) FROM chunks") as cur:
+            total_chunks = (await cur.fetchone())[0]
+        params[1] = chunk_k = max(total_chunks, chunk_k)
+        joins = "JOIN posts p ON p.id = c.post_id"
+        if tag:
+            conditions.append("p.tags LIKE ?")
+            params.append(f"%,{tag.strip().lower()},%")
+        if folder:
+            conditions.append("p.path LIKE ?")
+            params.append(f"{folder}/%")
+
     async with db.execute(
-        """
+        f"""
         SELECT c.post_id, v.distance FROM vec_chunks v
         JOIN chunks c ON c.id = v.rowid
-        WHERE v.embedding MATCH ? AND k = ?
+        {joins}
+        WHERE {" AND ".join(conditions)}
         ORDER BY v.distance
         """,
-        (query_vec, chunk_k),
+        params,
     ) as cur:
         rows = await cur.fetchall()
 
