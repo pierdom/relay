@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from relay.config import settings
 from relay.embedding import EMBEDDING_DIM, FakeBackend, FastEmbedBackend
 
 
@@ -72,3 +73,25 @@ def test_fastembed_backend_skips_prefixes_for_non_e5_models():
 
     assert captured[0] == ["what is x"]
     assert captured[1] == ["doc one", "doc two"]
+
+
+def test_fastembed_backend_passes_cache_dir_and_threads(monkeypatch, tmp_path):
+    """Both must reach the real TextEmbedding constructor — cache_dir per the
+    relay #253 production incidents (unwritable HOME under the container's
+    UID), threads per the post-v1.1.1 memory-footprint fix (onnxruntime's own
+    default thread count carries real memory cost, and embedding here is
+    inherently sequential — no parallelism to lose by capping it)."""
+    captured: dict = {}
+
+    class _StubTextEmbedding:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path))
+    monkeypatch.setattr(settings, "embedding_threads", 1)
+    monkeypatch.setattr("fastembed.TextEmbedding", _StubTextEmbedding)
+
+    FastEmbedBackend()
+
+    assert captured["cache_dir"] == settings.embedding_cache_dir
+    assert captured["threads"] == 1

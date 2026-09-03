@@ -72,6 +72,7 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `RELAY_HISTORY_ENABLED` | `true` | Commit the vault to git after every write, so a clobbered or deleted post can be restored. No-ops with a warning if the `git` binary is missing — check `features.history.effective` in `/status` |
 | `RELAY_EMBEDDING_ENABLED` | `false` | Semantic/hybrid search (relay #253, proof of concept). See [Semantic search](#semantic-search-optional-proof-of-concept) below before enabling in production |
 | `EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | fastembed model id. No `RELAY_` prefix (unlike most vars here) |
+| `EMBEDDING_THREADS` | `1` | onnxruntime's intra-op thread pool. Kept low deliberately — embedding here is sequential (one post's chunks at a time), so extra threads buy nothing but memory. Raise it if a deployment has spare CPU and wants faster embedding |
 | `SECURE_COOKIES` | `true` | `Secure` flag on the session cookie; set `false` for plain HTTP |
 | `ATTACHMENT_MAX_MB` | `25` | Max upload size; larger uploads → 413 (all transports) |
 | `ATTACHMENT_UPLOAD_TTL_SECONDS` | `3600` | Presigned upload slot lifetime before it's purged |

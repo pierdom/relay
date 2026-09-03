@@ -8,6 +8,18 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.1.2] — 2026-09-03
+
+First mitigation for v1.1.1's known memory-footprint issue.
+
+### Changed
+- `EMBEDDING_THREADS` (default `1`) caps onnxruntime's intra-op thread pool. Previously unset, so onnxruntime picked its own default sized from the host's CPU count — real memory cost on a 2-CPU production VPS, since each thread carries its own tensor-buffer overhead. Embedding here is inherently sequential (one post's chunks at a time, `vault.backfill_embeddings`/`sync_post_chunks` never run concurrently), so there was no cross-request parallelism being bought by the extra threads. Raise it via env var, no code change, on a deployment with CPU to spare that wants faster embedding instead.
+
+### Known issue
+- Effect on actual steady-state memory not yet confirmed against production — this is the cheapest, most directly-targeted lever from the candidate list, not a verified fix. Next: measure `docker stats` after deploying this, before reaching for the remaining levers (checking for a configured `mem_limit`, unloading the model between uses).
+
+---
+
 ## [1.1.1] — 2026-09-02
 
 Four fixes found deploying v1.1.0 to production for the first time — this path (real vault, `RELAY_EMBEDDING_ENABLED=true`, actual internet traffic) had never been exercised before. All four are internal/operational; no API or MCP surface changed.

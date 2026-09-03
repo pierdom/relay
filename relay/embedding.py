@@ -60,7 +60,12 @@ class FastEmbedBackend:
         # Without it, huggingface_hub's snapshot_download falls back to a
         # HOME-based default that's unwritable under relay's actual runtime UID.
         Path(settings.embedding_cache_dir).mkdir(parents=True, exist_ok=True)
-        self._model = TextEmbedding(model_name=self.model_id, cache_dir=settings.embedding_cache_dir)
+        # threads caps onnxruntime's own thread pool — see Settings.embedding_threads.
+        self._model = TextEmbedding(
+            model_name=self.model_id,
+            cache_dir=settings.embedding_cache_dir,
+            threads=settings.embedding_threads,
+        )
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if self._e5_prefixes:
