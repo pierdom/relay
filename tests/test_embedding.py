@@ -213,3 +213,34 @@ def test_unload_if_idle_unloads_past_the_threshold(monkeypatch):
         assert embedding._backend is None
     finally:
         _reset_module_state()
+
+
+# ── resolve_size_mb / is_loaded (relay #253's /status embedding diagnostics) ─
+
+
+def test_resolve_size_mb_looks_up_the_real_fastembed_registry():
+    """Same pure-metadata guarantee as resolve_dim — no download, safe in CI."""
+    mb = embedding.resolve_size_mb("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    assert 200 < mb < 250  # registry reports 0.22 GB for this model
+
+
+def test_resolve_size_mb_rejects_an_unknown_model():
+    with pytest.raises(ValueError, match="Unknown fastembed model"):
+        embedding.resolve_size_mb("not-a-real-model")
+
+
+def test_is_loaded_false_when_nothing_loaded():
+    _reset_module_state()
+    try:
+        assert embedding.is_loaded() is False
+    finally:
+        _reset_module_state()
+
+
+def test_is_loaded_true_when_a_backend_is_resident():
+    _reset_module_state()
+    try:
+        embedding._backend = object()
+        assert embedding.is_loaded() is True
+    finally:
+        _reset_module_state()

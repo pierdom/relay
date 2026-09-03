@@ -251,6 +251,45 @@ async def test_delete_removes_chunk_and_vec_rows(db, backend):
         assert (await cur.fetchone())[0] == 0
 
 
+# ── coverage (relay #253's /status embedding diagnostics) ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_coverage_reflects_synced_posts(db, backend):
+    # The `db` fixture already backfills the seeded master doc (id=0), so
+    # coverage starts from that baseline rather than zero.
+    base_posts, base_chunks, base_cache = await vectors.coverage(db)
+
+    post_a = await service.create_post(db, PostCreate(
+        title="Post A", content=f"## Section\n{LONG_SECTION}", tags=["dev"],
+    ))
+    posts_with_chunks, chunks_total, cache_entries = await vectors.coverage(db)
+    assert posts_with_chunks == base_posts + 1
+    assert chunks_total == base_chunks + 1
+    assert cache_entries == base_cache + 1
+
+    # A second post reusing byte-identical content is a cache hit — more
+    # chunks and posts covered, no new cache row.
+    await service.create_post(db, PostCreate(
+        title="Post B", content=f"## Section\n{LONG_SECTION}", tags=["dev"],
+    ))
+    posts_with_chunks, chunks_total, cache_entries = await vectors.coverage(db)
+    assert posts_with_chunks == base_posts + 2
+    assert chunks_total == base_chunks + 2
+    assert cache_entries == base_cache + 1
+
+    await service.delete_post(db, post_a.id)
+    posts_with_chunks, chunks_total, _ = await vectors.coverage(db)
+    assert posts_with_chunks == base_posts + 1
+    assert chunks_total == base_chunks + 1
+
+
+@pytest.mark.asyncio
+async def test_coverage_is_zero_when_vec_disabled(db, backend, monkeypatch):
+    monkeypatch.setattr(database, "VEC_ENABLED", False)
+    assert await vectors.coverage(db) == (0, 0, 0)
+
+
 # ── rebuild_index reuses the cache ───────────────────────────────────────────
 
 

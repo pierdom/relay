@@ -662,6 +662,22 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
     return len(parsed)
 
 
+_backfill_state: dict = {
+    "running": False,
+    "checked": 0,
+    "total": 0,
+    "started_at": None,
+    "completed_at": None,
+}
+
+
+def backfill_status() -> dict:
+    """A snapshot of the current/most-recent backfill run — surfaced in
+    `/status` so "is it still crunching" is one request instead of a log
+    watch (relay #253's production incidents made that question a real one)."""
+    return dict(_backfill_state)
+
+
 async def backfill_embeddings(db: aiosqlite.Connection) -> int:
     """Catch up whatever rebuild_index's startup pass skipped (relay #253).
 
@@ -682,10 +698,12 @@ async def backfill_embeddings(db: aiosqlite.Connection) -> int:
     async with db.execute("SELECT id, title, content FROM posts") as cur:
         rows = await cur.fetchall()
     total = len(rows)
+    _backfill_state.update(running=True, checked=0, total=total, started_at=utcnow_iso(), completed_at=None)
     last_logged = time.monotonic()
     for i, row in enumerate(rows, start=1):
         await vectors.sync_post_chunks(db, post_id=row["id"], title=row["title"], content=row["content"])
         await db.commit()
+        _backfill_state["checked"] = i
         # Time-based, not count-based: a cache-hit-heavy run flies through
         # hundreds of posts in milliseconds, while a cold run can spend real
         # seconds on a single post — a fixed post-count interval would either
@@ -694,6 +712,7 @@ async def backfill_embeddings(db: aiosqlite.Connection) -> int:
         if now - last_logged >= 15:
             logger.info("Embedding backfill progress: %d/%d posts checked", i, total)
             last_logged = now
+    _backfill_state.update(running=False, completed_at=utcnow_iso())
     return total
 
 

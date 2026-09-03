@@ -24,10 +24,12 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
-from . import __version__, database, events, history, vault, watcher
+from . import __version__, database, embedding, events, history, vault, vectors, watcher
 from .config import settings
 from .models import (
     AuthStatus,
+    EmbeddingBackfillStatus,
+    EmbeddingStatus,
     FeatureStatus,
     HistoryStatus,
     SearchStatus,
@@ -82,10 +84,51 @@ async def folder_count(db: aiosqlite.Connection) -> int:
     return len({r[0].split("/", 1)[0] for r in rows if "/" in r[0]})
 
 
+async def embedding_status(db: aiosqlite.Connection, posts_total: int) -> EmbeddingStatus:
+    """Model, dimension, coverage, and backend warmth — the diagnostics the
+    memory-footprint and dimension-migration work (relay #253, v1.1.2-v1.2.0)
+    kept needing and only had via logs or a shell on the host."""
+    available = database.VEC_ENABLED and settings.embedding_enabled
+    model: str | None = None
+    dimension: int | None = None
+    model_size_mb: float | None = None
+    if available:
+        model = settings.embedding_model
+        try:
+            dimension = embedding.resolve_dim(model)
+            model_size_mb = embedding.resolve_size_mb(model)
+        except ValueError:
+            # EMBEDDING_MODEL isn't in fastembed's registry — init_vec already
+            # logs and disables VEC_ENABLED for this, so `available` above
+            # would already be false in the normal case; kept defensive here
+            # rather than letting /status 500 on a config that changed
+            # underneath a running process without a restart.
+            pass
+    posts_with_chunks, chunks_total, cache_entries = await vectors.coverage(db)
+    backfill = vault.backfill_status()
+    return EmbeddingStatus(
+        enabled=settings.embedding_enabled,
+        available=available,
+        model=model,
+        dimension=dimension,
+        model_size_mb=model_size_mb,
+        backend_loaded=embedding.is_loaded(),
+        idle_unload_seconds=settings.embedding_idle_unload_seconds,
+        threads=settings.embedding_threads,
+        posts_total=posts_total,
+        posts_embedded=posts_with_chunks,
+        posts_missing=posts_total - posts_with_chunks,
+        chunks_total=chunks_total,
+        cache_entries=cache_entries,
+        backfill=EmbeddingBackfillStatus(**backfill),
+    )
+
+
 async def build(db: aiosqlite.Connection) -> StatusResponse:
     """Assemble the full status. Reports what is *working*, not what is configured."""
     attachments = vault.list_attachments()
     git = await history.git_version()
+    posts = await post_count(db)
     return StatusResponse(
         version=__version__,
         uptime_seconds=uptime_seconds(),
@@ -93,7 +136,7 @@ async def build(db: aiosqlite.Connection) -> StatusResponse:
         sse_clients=events.subscriber_count(),
         vault=VaultStatus(
             path=settings.vault_path,
-            posts=await post_count(db),
+            posts=posts,
             tags=await tag_count(db),
             folders=await folder_count(db),
             attachments=len(attachments),
@@ -114,4 +157,5 @@ async def build(db: aiosqlite.Connection) -> StatusResponse:
             watcher=WatcherStatus(enabled=settings.watch_enabled, running=watcher.is_running()),
             auth=AuthStatus(oidc=settings.oidc_enabled, mcp_oauth=settings.mcp_oauth_active),
         ),
+        embeddings=await embedding_status(db, posts),
     )
