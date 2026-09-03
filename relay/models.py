@@ -332,8 +332,17 @@ class EmbeddingBackfillStatus(BaseModel):
     completed_at: str | None = Field(description="Null while running, or before the first run has finished")
 
 
+class EmbeddingToggle(BaseModel):
+    enabled: bool = Field(description="Turn semantic/hybrid search on or off at runtime, without a restart")
+
+
 class EmbeddingStatus(BaseModel):
-    enabled: bool = Field(description="RELAY_EMBEDDING_ENABLED")
+    enabled: bool = Field(
+        description=(
+            "RELAY_EMBEDDING_ENABLED's current value — its live, in-memory state, which PATCH "
+            "/embeddings can change; a restart reverts to whatever .env says"
+        )
+    )
     available: bool = Field(description="Same as features.search.embeddings: sqlite-vec loaded and enabled")
     model: str | None = Field(description="EMBEDDING_MODEL; null when embeddings aren't available")
     dimension: int | None = Field(description="The configured model's vector width")

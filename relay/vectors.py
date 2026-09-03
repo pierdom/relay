@@ -302,6 +302,34 @@ async def coverage(db: aiosqlite.Connection) -> tuple[int, int, int]:
     return (posts_with_chunks, chunks_total, cache_entries)
 
 
+async def current_schema_dim(db: aiosqlite.Connection) -> int:
+    """The dimension ``vec_chunks`` was actually built at — the
+    ``embedding_state`` row if one exists, else the disabled-state default
+    (mirrors ``init_vec``'s own fallback). Used to guard a runtime enable
+    (``PATCH /embeddings``, relay #253 v1.3.0) against a model whose
+    dimension doesn't match the schema already on disk: that migration only
+    runs in ``init_vec`` at startup, so enabling live can't safely rebuild
+    the table out from under any in-flight reads."""
+    async with db.execute("SELECT dim FROM embedding_state WHERE id = 1") as cur:
+        row = await cur.fetchone()
+    return row["dim"] if row is not None else EMBEDDING_DIM
+
+
+async def reset(db: aiosqlite.Connection) -> None:
+    """Wipe every embedded chunk, vector, and cache row — a full re-embed
+    from scratch, not relying on the content-addressed cache at all. For
+    ``POST /embeddings/backfill?force=true`` (relay #253, v1.3.0): a plain
+    re-trigger is a fast no-op in steady state precisely because the cache is
+    trusted; ``force`` is for when it's specifically the cache that's
+    suspected stale or wrong. No-ops if ``VEC_ENABLED`` is false."""
+    from . import database
+
+    if not database.VEC_ENABLED:
+        return
+    await db.executescript("DELETE FROM vec_chunks; DELETE FROM chunks; DELETE FROM embeddings_cache;")
+    await db.commit()
+
+
 def _embed_query(query: str) -> list[float]:
     """Sync helper run off the event loop via asyncio.to_thread (see
     semantic_search) — get_backend()'s lazy model construction belongs in the

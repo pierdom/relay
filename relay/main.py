@@ -9,13 +9,12 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 
-import aiosqlite
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, database, embedding, history, metrics, vault, vectors, watcher
+from . import __version__, embedding, history, metrics, vault, watcher
 from . import status as app_status
 from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
@@ -24,6 +23,7 @@ from .database import init_db
 from .mcp_server import mcp, mcp_asgi_app
 from .routes.attachments import router as attachments_router
 from .routes.auth import router as auth_router
+from .routes.embeddings import router as embeddings_router
 from .routes.events import router as events_router
 from .routes.folders import router as folders_router
 from .routes.links import router as links_router
@@ -36,27 +36,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-
-
-async def _embedding_backfill() -> None:
-    """One-shot background catch-up for posts the content-addressed cache
-    doesn't cover yet — never run inline during startup. See
-    vault.backfill_embeddings's docstring for why: sequentially embedding a
-    real vault's worth of posts blocked the ASGI lifespan's `await init_db()`
-    — and with it every HTTP route, including /health — until the whole
-    backlog finished. On a vault of any size that's real downtime on every
-    restart, not a rounding error."""
-    logger = logging.getLogger(__name__)
-    try:
-        async with aiosqlite.connect(settings.database_path) as db:
-            db.row_factory = aiosqlite.Row
-            if database.VEC_ENABLED:
-                await vectors.load_extension(db)
-            logger.info("Embedding backfill starting")
-            count = await vault.backfill_embeddings(db)
-            logger.info("Embedding backfill complete — %d post(s) checked", count)
-    except Exception:
-        logger.exception("Embedding backfill failed")
 
 
 async def _embedding_idle_unload_loop() -> None:
@@ -115,9 +94,10 @@ async def lifespan(app: FastAPI):
     await history.init()
     task = asyncio.create_task(cleanup_loop())
     # One-shot catch-up for posts the embedding cache doesn't cover yet — never
-    # inline in init_db/rebuild_index above (see _embedding_backfill's
-    # docstring). No-ops immediately if embeddings aren't enabled.
-    embedding_task = asyncio.create_task(_embedding_backfill())
+    # inline in init_db/rebuild_index above (see vault.backfill_embeddings's
+    # docstring). No-ops immediately if embeddings aren't enabled. Same
+    # spawn_backfill also backs POST /embeddings/backfill (relay #253, v1.3.0).
+    embedding_task = vault.spawn_backfill()
     # Gives the ~570MB embedding backend back to the OS after an idle period —
     # see _embedding_idle_unload_loop's docstring. Runs regardless of whether
     # embeddings are enabled; unload_if_idle() itself no-ops when nothing has
@@ -360,6 +340,7 @@ app.include_router(folders_router)
 app.include_router(attachments_router)
 app.include_router(metrics_router)
 app.include_router(status_router)
+app.include_router(embeddings_router)
 
 # Remote MCP endpoint (Streamable HTTP). Any MCP client can connect to /mcp
 # with the relay bearer key; shares relay.service with the REST routes. The

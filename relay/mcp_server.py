@@ -382,6 +382,54 @@ async def get_status() -> dict:
     return result.model_dump()
 
 
+@mcp.tool(
+    description=(
+        "Re-run the embedding backfill without restarting relay — resumes from the content-addressed "
+        "cache by default, or pass force=true to wipe every embedded chunk/vector/cache row first and "
+        "re-embed the whole vault from scratch. Returns the same object as get_status's 'embeddings' "
+        "field. Errors if embeddings aren't enabled on this relay, or if a backfill is already running."
+    )
+)
+async def trigger_embedding_backfill(force: bool = False) -> dict:
+    metrics.record_tool_call("trigger_embedding_backfill")
+    async with _db() as db:
+        try:
+            result = await status.trigger_backfill(db, force=force)
+        except status.EmbeddingsUnavailable:
+            return {"error": "Semantic search is not enabled on this relay."}
+        except status.BackfillAlreadyRunning:
+            return {"error": "A backfill is already running."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Turn semantic/hybrid search on or off at runtime, without a restart. Enabling only resumes "
+        "against whatever model and vector schema are already on disk and kicks off a backfill for "
+        "any posts written while it was off; changing EMBEDDING_MODEL to a different dimension still "
+        "needs a restart. Disabling frees the embedding model's memory immediately rather than waiting "
+        "for the idle timeout. In-memory only — a restart reverts to whatever .env says. Returns the "
+        "same object as get_status's 'embeddings' field."
+    )
+)
+async def set_embeddings_enabled(enabled: bool) -> dict:
+    metrics.record_tool_call("set_embeddings_enabled")
+    async with _db() as db:
+        try:
+            result = await status.set_embeddings_enabled(db, enabled)
+        except status.EmbeddingsUnavailable:
+            return {
+                "error": "sqlite-vec is not available on this relay, or EMBEDDING_MODEL is not a known "
+                "fastembed model."
+            }
+        except status.EmbeddingDimensionMismatch:
+            return {
+                "error": "EMBEDDING_MODEL's dimension doesn't match the vector schema already on disk. "
+                "Restart relay to rebuild it before enabling."
+            }
+    return result.model_dump()
+
+
 @mcp.tool(description="Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.")
 async def delete_post(id: int) -> dict:
     metrics.record_tool_call("delete_post")

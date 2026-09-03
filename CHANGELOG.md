@@ -8,6 +8,22 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.3.0] — 2026-09-03
+
+Runtime control over semantic search: pause/resume and re-trigger the embedding backfill without a restart, on both REST and MCP. New capability, not a diagnostics tweak — cut as a minor bump per the project's own versioning rule.
+
+### Added
+- `PATCH /embeddings` (`{"enabled": bool}`) and `POST /embeddings/backfill` (`?force=true` wipes the cache first), plus `set_embeddings_enabled`/`trigger_embedding_backfill` on both MCP surfaces (in-process and stdio proxy, parity maintained). Both REST endpoints and both MCP tools return the same object `GET /status`'s `embeddings` field already returns.
+- The toggle mutates `settings.embedding_enabled` in memory only — every embedding call site already re-checks it per call rather than caching it, so the effect is immediate with no new state variable, and a restart reverts to whatever `.env` says.
+- Enabling validates the configured model's dimension against whatever the on-disk `vec_chunks` schema was actually built for (`vectors.current_schema_dim`, mirroring `vectors.init_vec`'s own fallback) and 409s on a mismatch rather than attempting a live schema rebuild — that migration only runs at startup (v1.2.0). Enabling that passes the check auto-triggers a backfill; disabling force-unloads the embedding backend immediately (`embedding.force_unload`) instead of waiting for `EMBEDDING_IDLE_UNLOAD_SECONDS`.
+- A backfill trigger 409s if one is already running (`vault.backfill_status()["running"]`) rather than racing two runs on the same progress counters. `vault.spawn_backfill()` marks `running` synchronously before scheduling the background task, and clears it via a `done_callback` if the task is cancelled before it ever gets a turn to run — closes a real edge case where a fast shutdown right after triggering could otherwise leave `/status` reporting a phantom backfill forever.
+
+Refactored: `main.py`'s inline `_embedding_backfill` moved into `vault.run_backfill_task`/`spawn_backfill`, now shared by startup and the new endpoint instead of duplicated. `embedding.unload_if_idle` and the new `embedding.force_unload` share a `_do_unload` helper. `embedding.resolve_dim`/`resolve_size_mb` share a `_model_entry` registry lookup.
+
+18 new tests (9 for the REST/MCP control surface, plus `vectors.reset`/`current_schema_dim` coverage); confirmed all fail without the implementation. Verified end-to-end against the real embedding backend, not just `FakeBackend`: enabled on a real vault, watched the real model download and the auto-triggered backfill complete, ran a real semantic query, disabled and confirmed the backend unloaded, force-retriggered and confirmed the wipe was immediate and synchronous. Full suite green, ruff clean, MCP parity intact.
+
+---
+
 ## [1.2.1] — 2026-09-03
 
 `GET /status` and the `get_status` MCP tool report real embedding diagnostics instead of just the on/off flag — model identity, coverage, and backfill progress a shell or a log tail used to be the only way to see.

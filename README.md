@@ -106,7 +106,7 @@ You can drop Syncthing entirely if you only use the Web UI or the TUI (both are 
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven split: TOPICS sidebar + FEED list. `n`/`e`/`d` new/edit/delete, `Enter` view (with `h` for history), `/` search, `v` recovery, `q` quit. Set `RELAY_PALETTE` to match your terminal. See [docs/tui.md](docs/tui.md).
 
-**MCP server** — 19 tools over Streamable HTTP at `/mcp` (or the legacy stdio proxy), covering full CRUD, keyword/semantic/hybrid search, history, restoration, and attachment management. See [docs/mcp.md](docs/mcp.md).
+**MCP server** — 21 tools over Streamable HTTP at `/mcp` (or the legacy stdio proxy), covering full CRUD, keyword/semantic/hybrid search, history, restoration, attachment management, and runtime control of semantic search itself. See [docs/mcp.md](docs/mcp.md).
 
 **REST API** — every capability is also a plain HTTP endpoint. See [docs/api.md](docs/api.md).
 
@@ -114,7 +114,7 @@ You can drop Syncthing entirely if you only use the Web UI or the TUI (both are 
 
 ```bash
 uv sync --all-extras --dev   # install (uv only — never pip)
-uv run pytest -q             # 541 tests (incl. 116 browser smokes)
+uv run pytest -q             # 574 tests (incl. 116 browser smokes)
 uv run ruff check .          # lint
 ```
 

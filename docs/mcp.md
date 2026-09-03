@@ -1,6 +1,6 @@
 # MCP server
 
-relay exposes the full feed API as **19 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
+relay exposes the full feed API as **21 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
 
 ## Tools
 
@@ -22,6 +22,8 @@ relay exposes the full feed API as **19 MCP tools** so Claude (or any MCP-capabl
 | `list_attachments` | List attachments; scope by `post_id` or `folder` |
 | `delete_attachment` | Delete an attachment; reports posts still referencing it |
 | `get_status` | Version, uptime, which vault is served, counts, which features actually work, and embedding model/coverage/backfill diagnostics |
+| `trigger_embedding_backfill` | Re-run the embedding backfill without a restart (`force` wipes the cache first); errors if embeddings aren't enabled or a backfill is already running |
+| `set_embeddings_enabled` | Turn semantic/hybrid search on or off at runtime, without a restart. In-memory only — see [Notes for agents](#notes-for-agents) |
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`) |
 | `rename_tag` | Rename a tag across every post that carries it, in one atomic pass |
@@ -87,6 +89,18 @@ restore_post(id=54, sha="a8dcc37")
   nothing matched, rather than that nothing is embedded yet.
 - **`list_posts` returns metadata + excerpt by default** (`summary=true`); call
   `get_post` for a full body.
+- **`set_embeddings_enabled` is in-memory only.** It flips `settings.embedding_enabled`
+  for the life of the process — a restart reverts to whatever `.env` says. Enabling
+  only resumes against whichever model the vector schema was already built for
+  (`get_status`'s `embeddings.model`/`dimension`); it errors with a dimension
+  mismatch rather than attempting a live schema rebuild if `EMBEDDING_MODEL` was
+  changed without a restart in between. Enabling auto-triggers a backfill;
+  disabling frees the embedding model's memory immediately rather than waiting
+  for the idle timeout.
+- **`trigger_embedding_backfill` errors 409 (`"already running"`) if one is in
+  flight** — including the one `set_embeddings_enabled(true)` just kicked off.
+  Check `get_status`'s `embeddings.backfill.running` before retrying rather than
+  polling blind.
 
 ---
 

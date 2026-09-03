@@ -191,15 +191,33 @@ def unload_if_idle() -> bool:
     pre-load baseline. Best-effort — wrapped in a broad except so a platform
     without glibc's malloc_trim (musl, non-Linux dev boxes) still unloads the
     Python object correctly, just without the extra reclaim."""
-    global _backend
     if _backend is None or settings.embedding_idle_unload_seconds <= 0:
         return False
     if time.monotonic() - _last_used < settings.embedding_idle_unload_seconds:
         return False
+    _do_unload()
+    return True
+
+
+def force_unload() -> bool:
+    """Unconditionally drop the backend, bypassing the idle-time check —
+    for ``PATCH /embeddings`` (relay #253, v1.3.0) disabling the feature: if
+    you're explicitly turning it off, you want the ~570MB back now, not
+    after ``EMBEDDING_IDLE_UNLOAD_SECONDS`` next elapses. Returns whether
+    anything was actually unloaded."""
+    if _backend is None:
+        return False
+    _do_unload()
+    return True
+
+
+def _do_unload() -> None:
+    """The actual reclaim, shared by ``unload_if_idle`` and ``force_unload``
+    — only the trigger condition differs between them."""
+    global _backend
     _backend = None
     gc.collect()
     try:
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except Exception:
         logger.debug("malloc_trim unavailable on this platform — unloaded anyway", exc_info=True)
-    return True

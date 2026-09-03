@@ -299,6 +299,30 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
+            name="trigger_embedding_backfill",
+            description="Re-run the embedding backfill without restarting relay — resumes from the content-addressed cache by default, or pass force=true to wipe every embedded chunk/vector/cache row first and re-embed the whole vault from scratch. Returns the same object as get_status's 'embeddings' field. Errors if embeddings aren't enabled on this relay, or if a backfill is already running.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "force": {
+                        "type": "boolean",
+                        "description": "Wipe every embedded chunk/vector/cache row first (default false)",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="set_embeddings_enabled",
+            description="Turn semantic/hybrid search on or off at runtime, without a restart. Enabling only resumes against whatever model and vector schema are already on disk and kicks off a backfill for any posts written while it was off; changing EMBEDDING_MODEL to a different dimension still needs a restart. Disabling frees the embedding model's memory immediately rather than waiting for the idle timeout. In-memory only — a restart reverts to whatever .env says. Returns the same object as get_status's 'embeddings' field.",
+            inputSchema={
+                "type": "object",
+                "required": ["enabled"],
+                "properties": {
+                    "enabled": {"type": "boolean", "description": "Turn semantic/hybrid search on or off"},
+                },
+            },
+        ),
+        types.Tool(
             name="delete_post",
             description='Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.',
             inputSchema={
@@ -766,6 +790,50 @@ async def call_tool(
             f"auth: oidc={f['auth']['oidc']} mcp_oauth={f['auth']['mcp_oauth']}",
         ]
         return [types.TextContent(type="text", text="\n".join(lines))]
+
+    if name == "trigger_embedding_backfill":
+        params = {"force": "true"} if arguments.get("force") else {}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{RELAY_BASE_URL}/embeddings/backfill",
+                params=params,
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 503:
+                return [types.TextContent(type="text", text="Semantic search is not enabled on this relay.")]
+            if response.status_code == 409:
+                return [types.TextContent(type="text", text="A backfill is already running.")]
+            response.raise_for_status()
+            e = response.json()
+        return [types.TextContent(
+            type="text",
+            text=f"Backfill running: {e['backfill']['checked']}/{e['backfill']['total']} posts checked so far.",
+        )]
+
+    if name == "set_embeddings_enabled":
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                f"{RELAY_BASE_URL}/embeddings",
+                json={"enabled": arguments["enabled"]},
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 503:
+                return [types.TextContent(
+                    type="text",
+                    text="sqlite-vec is not available on this relay, or EMBEDDING_MODEL is not a known "
+                    "fastembed model.",
+                )]
+            if response.status_code == 409:
+                return [types.TextContent(
+                    type="text",
+                    text="EMBEDDING_MODEL's dimension doesn't match the vector schema already on disk. "
+                    "Restart relay to rebuild it before enabling.",
+                )]
+            response.raise_for_status()
+            e = response.json()
+        return [types.TextContent(type="text", text=f"Embeddings {'enabled' if e['enabled'] else 'disabled'}.")]
 
     if name == "delete_post":
         post_id = arguments["id"]

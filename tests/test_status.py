@@ -139,7 +139,16 @@ async def test_status_and_metrics_report_the_same_counts(client):
 
 
 @pytest.mark.asyncio
-async def test_embeddings_status_when_disabled(client):
+async def test_embeddings_status_when_disabled(client, monkeypatch):
+    # vault._backfill_state is process-global — another test exercising the
+    # real app lifespan (test_auth.py) may have already run a (disabled,
+    # instant) backfill in this same process. Reset it so "never run yet" is
+    # actually what's being asserted, not incidental test order.
+    monkeypatch.setattr(
+        vault,
+        "_backfill_state",
+        {"running": False, "checked": 0, "total": 0, "started_at": None, "completed_at": None},
+    )
     data = await _status(client)
     e = data["embeddings"]
     assert e["enabled"] is False
