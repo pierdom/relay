@@ -23,7 +23,10 @@ from .embedding import EMBEDDING_DIM
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA = f"""
+# vec_chunks (the vec0 virtual table) isn't in here — its column width is the
+# embedding dimension, which varies by configured model, so it's created
+# separately in init_vec once that dimension is known.
+_SCHEMA = """
 CREATE TABLE IF NOT EXISTS embeddings_cache (
     content_hash TEXT PRIMARY KEY,
     model_id     TEXT NOT NULL,
@@ -38,7 +41,11 @@ CREATE TABLE IF NOT EXISTS chunks (
     UNIQUE(post_id, chunk_index)
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_post_id ON chunks(post_id);
-CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(embedding FLOAT[{EMBEDDING_DIM}]);
+CREATE TABLE IF NOT EXISTS embedding_state (
+    id       INTEGER PRIMARY KEY CHECK (id = 1),
+    model_id TEXT NOT NULL,
+    dim      INTEGER NOT NULL
+);
 """
 
 
@@ -55,6 +62,11 @@ async def load_extension(db: aiosqlite.Connection) -> None:
     await db.enable_load_extension(False)
 
 
+async def _table_exists(db: aiosqlite.Connection, name: str) -> bool:
+    async with db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)) as cur:
+        return await cur.fetchone() is not None
+
+
 async def init_vec(db: aiosqlite.Connection) -> bool:
     """Load the extension + create the schema, once, at startup. Mirrors
     ``database._init_fts``: catch, warn, degrade to disabled rather than crash.
@@ -62,13 +74,83 @@ async def init_vec(db: aiosqlite.Connection) -> bool:
     Runs *before* ``vault.rebuild_index`` (unlike FTS, which rebuilds in bulk
     after) — embedding sync is per-row via the same hook writes already use, so
     the tables must exist first. See relay/vault.py's index_upsert/index_insert.
+
+    ``vec_chunks`` (the vec0 virtual table) is created here, not in the static
+    ``_SCHEMA`` script, because its column width — the embedding dimension —
+    depends on whichever model ``EMBEDDING_MODEL`` currently names, and
+    ``CREATE VIRTUAL TABLE IF NOT EXISTS`` silently keeps an existing table's
+    *old* width if the model (and thus dimension) has changed since it was
+    created — there is no ALTER for a vec0 column. ``embedding_state`` tracks
+    the dimension a previous run actually built the table at, so a change is
+    detected and the table (plus the now-stale ``chunks`` rows that point into
+    it) is dropped and rebuilt. No explicit re-embed is needed after that: the
+    content-addressed cache already keys each chunk on ``(model_id, body)``
+    (see ``_hash``), so *any* model change already makes every existing chunk
+    a cache miss — dropping the vector table just lets the unconditional
+    per-startup ``vault.backfill_embeddings`` background task (relay #253,
+    v1.1.0) re-fill it against the new, correctly-sized schema instead of
+    erroring on the first mismatched insert.
+
+    The dimension check only ever runs while ``embedding_enabled`` is true.
+    Toggling the flag off doesn't touch an existing table at all — the
+    disabled state has no real dimension of its own to compare against
+    (nothing embeds while off), and treating the placeholder default as if it
+    were a genuine target would misfire a rebuild on every disable/re-enable
+    cycle even when the configured model never changed.
     """
     try:
         await load_extension(db)
         await db.executescript(_SCHEMA)
+
+        vec_chunks_exists = await _table_exists(db, "vec_chunks")
+
+        if settings.embedding_enabled:
+            target_model = settings.embedding_model
+            target_dim = embedding.resolve_dim(target_model)
+            async with db.execute("SELECT model_id, dim FROM embedding_state WHERE id = 1") as cur:
+                state = await cur.fetchone()
+            if state is not None:
+                stored_dim = state["dim"]
+            elif vec_chunks_exists:
+                # No embedding_state row yet, but a vec_chunks table already
+                # exists — either upgrading from before this table existed, or
+                # embeddings were enabled once before embedding_state existed.
+                # Either way it was built at the old hardcoded default.
+                stored_dim = EMBEDDING_DIM
+            else:
+                stored_dim = target_dim  # first-ever enable, nothing to compare against
+
+            if stored_dim != target_dim:
+                logger.warning(
+                    "Embedding dimension changed (%sd -> %sd, model now %r) — "
+                    "rebuilding vector schema; every post will be re-embedded",
+                    stored_dim,
+                    target_dim,
+                    target_model,
+                )
+                await db.executescript("DROP TABLE IF EXISTS vec_chunks; DELETE FROM chunks;")
+
+            await db.execute(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(embedding FLOAT[{target_dim}])"
+            )
+            await db.execute(
+                """
+                INSERT INTO embedding_state (id, model_id, dim) VALUES (1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET model_id = excluded.model_id, dim = excluded.dim
+                """,
+                (target_model, target_dim),
+            )
+        elif not vec_chunks_exists:
+            # Never enabled on this vault — pre-build the schema at the
+            # shipped default so it's ready the moment the flag flips true,
+            # same as before EMBEDDING_MODEL was configurable.
+            await db.execute(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(embedding FLOAT[{EMBEDDING_DIM}])"
+            )
+
         await db.commit()
         return True
-    except (aiosqlite.Error, AttributeError, OSError) as exc:
+    except (aiosqlite.Error, AttributeError, OSError, ValueError) as exc:
         logger.warning("sqlite-vec unavailable — semantic search disabled (%s)", exc)
         return False
 

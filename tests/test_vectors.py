@@ -13,6 +13,7 @@ os.environ.setdefault("API_KEY", "test-key")
 import aiosqlite
 import pytest
 import pytest_asyncio
+import sqlite_vec
 
 from relay import database, embedding, service, vectors, watcher
 from relay.config import settings
@@ -63,6 +64,122 @@ async def _chunk_rows(db, post_id: int):
 
 
 LONG_SECTION = "content word " * 60  # safely over the 50-word runt floor
+
+
+async def _vec_chunks_sql(db) -> str:
+    async with db.execute("SELECT sql FROM sqlite_master WHERE name = 'vec_chunks'") as cur:
+        return (await cur.fetchone())[0]
+
+
+async def _insert_fake_chunk(db, dim: int) -> None:
+    """Simulate a chunk embedded by a prior run, at ``dim`` — used to prove a
+    later init_vec pass actually wipes (or actually preserves) it."""
+    await db.execute(
+        "INSERT INTO chunks (id, post_id, chunk_index, heading_path, content_hash) VALUES (999, 999, 0, '', 'x')"
+    )
+    blob = sqlite_vec.serialize_float32([0.0] * dim)
+    await db.execute("INSERT INTO vec_chunks(rowid, embedding) VALUES (999, ?)", (blob,))
+    await db.commit()
+
+
+# ── embedding dimension migration (init_vec) ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_disabled_prebuilds_schema_at_default_dim(monkeypatch):
+    monkeypatch.setattr(settings, "embedding_enabled", False)
+    await database.init_db()
+    assert database.VEC_ENABLED
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vectors.load_extension(db)
+        sql = await _vec_chunks_sql(db)
+    assert f"FLOAT[{embedding.EMBEDDING_DIM}]" in sql
+
+
+@pytest.mark.asyncio
+async def test_dimension_change_rebuilds_vec_chunks_and_wipes_chunks(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    dims = {"model-a": 4, "model-b": 8}
+    monkeypatch.setattr(embedding, "resolve_dim", lambda model_id: dims[model_id])
+    monkeypatch.setattr(settings, "embedding_model", "model-a")
+
+    await database.init_db()
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vectors.load_extension(db)
+        assert "FLOAT[4]" in await _vec_chunks_sql(db)
+        await _insert_fake_chunk(db, dim=4)
+
+    monkeypatch.setattr(settings, "embedding_model", "model-b")
+    with caplog.at_level("WARNING"):
+        await database.init_db()
+    assert "dimension changed" in caplog.text.lower()
+
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vectors.load_extension(db)
+        assert "FLOAT[8]" in await _vec_chunks_sql(db)
+        async with db.execute("SELECT COUNT(*) FROM chunks") as cur:
+            assert (await cur.fetchone())[0] == 0
+        async with db.execute("SELECT model_id, dim FROM embedding_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        assert row["model_id"] == "model-b"
+        assert row["dim"] == 8
+
+
+@pytest.mark.asyncio
+async def test_model_change_at_the_same_dimension_does_not_rebuild(monkeypatch, caplog):
+    """A model swap that keeps the same dimension is already handled by the
+    content-addressed cache (every hash misses since it's keyed on model_id) —
+    no schema rebuild needed, so existing chunk rows must survive untouched."""
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    dims = {"model-a": 4, "model-c": 4}
+    monkeypatch.setattr(embedding, "resolve_dim", lambda model_id: dims[model_id])
+    monkeypatch.setattr(settings, "embedding_model", "model-a")
+
+    await database.init_db()
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vectors.load_extension(db)
+        await _insert_fake_chunk(db, dim=4)
+
+    monkeypatch.setattr(settings, "embedding_model", "model-c")
+    with caplog.at_level("WARNING"):
+        await database.init_db()
+    assert "dimension changed" not in caplog.text.lower()
+
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vectors.load_extension(db)
+        async with db.execute("SELECT COUNT(*) FROM chunks WHERE id = 999") as cur:
+            assert (await cur.fetchone())[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_disabling_after_enabled_leaves_existing_schema_untouched(monkeypatch):
+    """Toggling embedding_enabled off must not be mistaken for a dimension
+    change back to the disabled-state placeholder default — nothing reads or
+    writes vec_chunks while disabled, so there's nothing to migrate."""
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "resolve_dim", lambda model_id: 4)
+    monkeypatch.setattr(settings, "embedding_model", "model-a")
+
+    await database.init_db()
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vectors.load_extension(db)
+        await _insert_fake_chunk(db, dim=4)
+
+    monkeypatch.setattr(settings, "embedding_enabled", False)
+    await database.init_db()
+
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vectors.load_extension(db)
+        assert "FLOAT[4]" in await _vec_chunks_sql(db)
+        async with db.execute("SELECT COUNT(*) FROM chunks WHERE id = 999") as cur:
+            assert (await cur.fetchone())[0] == 1
 
 
 # ── sync on create/update ──────────────────────────────────────────────────
