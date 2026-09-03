@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from relay import embedding
 from relay.config import settings
 from relay.embedding import EMBEDDING_DIM, FakeBackend, FastEmbedBackend
 
@@ -95,3 +96,85 @@ def test_fastembed_backend_passes_cache_dir_and_threads(monkeypatch, tmp_path):
 
     assert captured["cache_dir"] == settings.embedding_cache_dir
     assert captured["threads"] == 1
+
+
+# ── get_backend / unload_if_idle (relay #253's memory-footprint fix) ────────
+#
+# _backend/_last_used are module globals — every test sets them explicitly
+# rather than relying on get_backend()'s real construction path (no real
+# model load in this file), and restores them afterward so tests don't leak
+# state into each other.
+
+
+def _reset_module_state():
+    embedding._backend = None
+    embedding._last_used = 0.0
+
+
+def test_get_backend_updates_last_used_without_reconstructing(monkeypatch):
+    """A pre-loaded backend must be reused (not rebuilt) — only its
+    last-used timestamp moves, which is exactly what should reset the idle
+    clock on real usage."""
+    _reset_module_state()
+    try:
+        sentinel = object()
+        embedding._backend = sentinel
+        clock = iter([100.0])
+        monkeypatch.setattr(embedding.time, "monotonic", lambda: next(clock))
+
+        result = embedding.get_backend()
+
+        assert result is sentinel  # not reconstructed
+        assert embedding._last_used == 100.0
+    finally:
+        _reset_module_state()
+
+
+def test_unload_if_idle_noop_when_nothing_loaded():
+    _reset_module_state()
+    try:
+        assert embedding.unload_if_idle() is False
+    finally:
+        _reset_module_state()
+
+
+def test_unload_if_idle_noop_when_disabled(monkeypatch):
+    _reset_module_state()
+    try:
+        embedding._backend = object()
+        embedding._last_used = 0.0
+        monkeypatch.setattr(settings, "embedding_idle_unload_seconds", 0)
+        monkeypatch.setattr(embedding.time, "monotonic", lambda: 10_000.0)
+
+        assert embedding.unload_if_idle() is False
+        assert embedding._backend is not None
+    finally:
+        _reset_module_state()
+
+
+def test_unload_if_idle_noop_before_the_threshold(monkeypatch):
+    _reset_module_state()
+    try:
+        embedding._backend = object()
+        embedding._last_used = 100.0
+        monkeypatch.setattr(settings, "embedding_idle_unload_seconds", 300)
+        monkeypatch.setattr(embedding.time, "monotonic", lambda: 100.0 + 299)
+
+        assert embedding.unload_if_idle() is False
+        assert embedding._backend is not None
+    finally:
+        _reset_module_state()
+
+
+def test_unload_if_idle_unloads_past_the_threshold(monkeypatch):
+    _reset_module_state()
+    try:
+        embedding._backend = object()
+        embedding._last_used = 100.0
+        monkeypatch.setattr(settings, "embedding_idle_unload_seconds", 300)
+        monkeypatch.setattr(embedding.time, "monotonic", lambda: 100.0 + 300)
+
+        assert embedding.unload_if_idle() is True
+        assert embedding._backend is None
+    finally:
+        _reset_module_state()

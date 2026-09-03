@@ -3,8 +3,12 @@ one-line config change, and so the default test suite never has to load one.
 """
 from __future__ import annotations
 
+import ctypes
+import gc
 import hashlib
+import logging
 import os
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -25,6 +29,8 @@ from .config import settings
 # regardless of embedding_enabled), so it's early enough even before any opt-in.
 os.environ.setdefault("HF_HOME", str(Path(settings.relay_dir) / "hf-home"))
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 384  # fixed at vec0 table creation — see relay/vectors.py
 
@@ -101,12 +107,56 @@ class FakeBackend:
 
 
 _backend: EmbeddingBackend | None = None
+_last_used: float = 0.0
 
 
 def get_backend() -> EmbeddingBackend:
     """Lazy singleton — constructing (and thus model-loading) ``FastEmbedBackend``
-    only happens on first real call. Tests monkeypatch this function directly."""
-    global _backend
+    only happens on first real call. Tests monkeypatch this function directly.
+
+    Records ``_last_used`` on every call (not just the first) — see
+    ``unload_if_idle``, which reads it to decide whether the model has been
+    sitting unused long enough to give its memory back."""
+    global _backend, _last_used
     if _backend is None:
         _backend = FastEmbedBackend()
+    _last_used = time.monotonic()
     return _backend
+
+
+def unload_if_idle() -> bool:
+    """Drop the loaded backend if nothing has used it in
+    ``settings.embedding_idle_unload_seconds``. Returns whether it actually
+    unloaded something. Meant to be polled periodically from a background
+    task (main.py's lifespan), never from a request path.
+
+    Constructing FastEmbedBackend costs ~570MB of RSS by itself (onnxruntime
+    session + model weights, measured locally: ~67MB -> ~637MB before a
+    single embed call), and that cost doesn't grow with usage afterward — a
+    single query and a 20-doc batch both left RSS flat. So capping
+    embedding_threads (a thread-pool size) never touched this: the memory is
+    the model being loaded at all, not per-call or per-thread. Unloading
+    between uses trades that ~570MB for a several-second reload delay on the
+    next embed call — a real tradeoff, tuned via
+    ``settings.embedding_idle_unload_seconds`` (default 300s; 0 disables and
+    keeps the model resident forever, the pre-v1.1.3 behavior).
+
+    ``gc.collect()`` alone only gave back ~200MB of that ~570MB in local
+    testing — the rest sat in glibc's malloc arenas as free-but-not-returned-
+    to-the-OS memory (normal glibc behavior, not a leak). ``malloc_trim(0)``
+    is what actually returns it: same test dropped to within ~65MB of the
+    pre-load baseline. Best-effort — wrapped in a broad except so a platform
+    without glibc's malloc_trim (musl, non-Linux dev boxes) still unloads the
+    Python object correctly, just without the extra reclaim."""
+    global _backend
+    if _backend is None or settings.embedding_idle_unload_seconds <= 0:
+        return False
+    if time.monotonic() - _last_used < settings.embedding_idle_unload_seconds:
+        return False
+    _backend = None
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        logger.debug("malloc_trim unavailable on this platform — unloaded anyway", exc_info=True)
+    return True

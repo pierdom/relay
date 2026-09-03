@@ -73,6 +73,7 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `RELAY_EMBEDDING_ENABLED` | `false` | Semantic/hybrid search (relay #253, proof of concept). See [Semantic search](#semantic-search-optional-proof-of-concept) below before enabling in production |
 | `EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | fastembed model id. No `RELAY_` prefix (unlike most vars here) |
 | `EMBEDDING_THREADS` | `1` | onnxruntime's intra-op thread pool. Kept low deliberately — embedding here is sequential (one post's chunks at a time), so extra threads buy nothing but memory. Raise it if a deployment has spare CPU and wants faster embedding |
+| `EMBEDDING_IDLE_UNLOAD_SECONDS` | `300` | Unload the embedding model after this much idle time, freeing ~500MB+ of RSS back to the OS (reload costs a few seconds on the next search/write). `0` disables — keep the model resident forever |
 | `SECURE_COOKIES` | `true` | `Secure` flag on the session cookie; set `false` for plain HTTP |
 | `ATTACHMENT_MAX_MB` | `25` | Max upload size; larger uploads → 413 (all transports) |
 | `ATTACHMENT_UPLOAD_TTL_SECONDS` | `3600` | Presigned upload slot lifetime before it's purged |
@@ -109,7 +110,7 @@ What to expect when you flip it on:
 
 - **First-run model download.** The configured `EMBEDDING_MODEL` downloads on first use into `<vault>/.relay/models` (plus `.relay/hf-home` for `huggingface_hub`'s own cache) — inside the vault dir on purpose, so it rides the same Docker volume and survives container restarts instead of re-downloading every time.
 - **Startup stays fast regardless of vault size.** Embedding every existing post runs as a background task *after* the server is already serving requests, not inline during startup — watch the logs for `Embedding backfill starting` / periodic `N/M posts checked` (every 15s) / `Embedding backfill complete`. A crash or restart mid-backfill doesn't lose progress: the embedding cache is content-addressed and survives, so the next run resumes rather than starting over.
-- **CPU and memory during the backfill.** Embedding is real local ONNX inference — expect a CPU-bound burst proportional to how much of the vault is genuinely new (not yet cached). Memory footprint on a small VPS is still being characterized; the model stays resident in memory for the process lifetime by design (so later searches don't reload it), and reducing that steady-state footprint is an open next step, not yet solved.
+- **CPU and memory during the backfill.** Embedding is real local ONNX inference — expect a CPU-bound burst proportional to how much of the vault is genuinely new (not yet cached), and ~500-600MB of RSS while the model is loaded (measured locally; onnxruntime session + model weights, not per-call growth). By default it unloads after `EMBEDDING_IDLE_UNLOAD_SECONDS` (300s) of no embedding activity, trading a several-second reload on the next search/write for giving that memory back to the OS — set it to `0` to keep the model always resident instead.
 - **Verify it actually came up:** check `features.search.embeddings` in `GET /status`, or the "Semantic search" row in the browser UI's status panel — both report whether embeddings are *actually* usable, not just configured.
 
 ---
