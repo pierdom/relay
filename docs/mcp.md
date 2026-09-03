@@ -1,6 +1,6 @@
 # MCP server
 
-relay exposes the full feed API as **19 MCP tools** so Claude — or any MCP-capable agent — can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
+relay exposes the full feed API as **19 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
 
 ## Tools
 
@@ -38,7 +38,7 @@ restore_post(id=54, sha="a8dcc37")
 ```
 
 - **Start with `list_deleted_posts` when you do not know the id.** Everything else
-  here needs one, and after a delete nobody has one — that is the whole reason the
+  here needs one, and after a delete nobody has one. That's the whole reason the
   tool exists. The `sha` it reports is already a restorable revision, so it can go
   straight to `restore_post` without a `get_post_history` round trip.
 - **It is not a trash can.** Nothing is moved on delete and there is nothing to
@@ -48,21 +48,21 @@ restore_post(id=54, sha="a8dcc37")
   deletion you are looking for.
 
 - **Works for a deleted post.** `get_post_history` answers with `exists: false` and
-  still lists restorable revisions — that is the case most worth recovering, so it
+  still lists restorable revisions. That's the case most worth recovering, so it
   is deliberately not a 404.
 - **The delete commit itself is not listed.** Every revision returned is one you
   can restore *to*, and a file has no content at the commit that removed it.
   Restore from the newest listed revision to undo a deletion.
 - **A restore keeps the post's id**, so inbound `[[wikilinks]]` and `#id`
-  references resolve again — and it is itself committed, so it can be undone the
-  same way.
+  references resolve again. The restore is itself committed, so it can be undone
+  the same way.
 - **Short shas are accepted.**
 - Posts that predate vault history show a single `vault: initial import`
-  revision — their state when history was first enabled.
+  revision, reflecting their state when history was first enabled.
 
 - **Preview before you restore.** `get_post_revision(id, sha)` returns that
   revision's title, content and tags without changing anything. The history
-  listing is metadata only, so restoring straight off a sha is done blind — and
+  listing is metadata only, so restoring straight off a sha is done blind. And
   while a restore is itself undoable, "undo it and look" is a poor way to answer
   "what would this give me back".
 
@@ -77,7 +77,7 @@ restore_post(id=54, sha="a8dcc37")
   indexed. It also reports which vault path is being served, which settles "am I
   talking to the instance I think I am".
 - **Post ids are never reused.** Deleting the newest post does not free its id, so
-  an `#id` reference always means the same post — ids are simply not contiguous.
+  an `#id` reference always means the same post. Ids aren't contiguous.
 - **`list_posts` returns metadata + excerpt by default** (`summary=true`); call
   `get_post` for a full body.
 
@@ -85,7 +85,7 @@ restore_post(id=54, sha="a8dcc37")
 
 ## Connect via Streamable HTTP (recommended)
 
-The MCP endpoint is at `/mcp`, on the same port as the REST API — no local checkout needed.
+The MCP endpoint is at `/mcp`, on the same port as the REST API. No local checkout needed.
 
 ```bash
 claude mcp add --transport http relay https://your-relay-host/mcp \
@@ -133,6 +133,6 @@ Run `git pull` and restart the client to pick up updates.
 
 ## OAuth login (optional)
 
-With `MCP_OAUTH_ENABLED=true`, relay acts as its own OAuth 2.1 Authorization Server. Remote clients authenticate via OAuth + Dynamic Client Registration instead of a pasted bearer key — in the connector dialog, fill only the **name** and **URL** and leave the OAuth fields blank. The static `API_KEY` keeps working alongside OAuth.
+With `MCP_OAUTH_ENABLED=true`, relay acts as its own OAuth 2.1 Authorization Server. Remote clients authenticate via OAuth + Dynamic Client Registration instead of a pasted bearer key: in the connector dialog, fill only the **name** and **URL** and leave the OAuth fields blank. The static `API_KEY` keeps working alongside OAuth.
 
-Setup: [docs/setup.md — OAuth 2.1 for remote MCP clients](setup.md#optional-oauth-21-for-remote-mcp-clients).
+Setup: [docs/setup.md: OAuth 2.1 for remote MCP clients](setup.md#optional-oauth-21-for-remote-mcp-clients).

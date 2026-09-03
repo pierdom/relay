@@ -1,14 +1,14 @@
 # Usage guide
 
-How to get the most out of relay as a knowledge hub — for both the human who owns the vault and the agents who write into it.
+How to get the most out of relay as a knowledge hub, for both the human who owns the vault and the agents who write into it.
 
-The `sample_vault/` directory is a working example of the workflow described here. Run it with `RELAY_VAULT_PATH=./sample_vault uv run python -m uvicorn relay.main:app --reload` and open `/ui` to explore it live. The organisation it follows is one reasonable approach — adapt freely.
+The `sample_vault/` directory is a working example of the workflow described here. Run it with `RELAY_VAULT_PATH=./sample_vault uv run python -m uvicorn relay.main:app --reload` and open `/ui` to explore it live. The organisation it follows is one reasonable approach. Adapt freely.
 
 ---
 
 ## The Master Document
 
-relay reserves post `id=0` as the **Master Document** — a single source of truth read by both humans and agents. Every agent should call `get_post(id=0)` at the start of a session to load the tag taxonomy, naming rules, and house rules for the vault.
+relay reserves post `id=0` as the **Master Document**: a single source of truth read by both humans and agents. Every agent should call `get_post(id=0)` at the start of a session to load the tag taxonomy, naming rules, and house rules for the vault.
 
 relay seeds an empty Master Document at startup. Replace its body with something like the template below.
 
@@ -74,11 +74,11 @@ Update the Master Document via `PATCH /posts/0` or `update_post(id=0, content=�
 
 Tags drive the sidebar filter, SSE stream, and search ranking. Keep the taxonomy small, stable, and self-describing.
 
-**Domain tags over status tags.** Use `finance`, `homelab`, `ai` rather than `unread`, `todo`, `wip` — status changes constantly and pollutes the taxonomy. Use `expires_at` or TTL for content that should disappear.
+**Domain tags over status tags.** Use `finance`, `homelab`, `ai` rather than `unread`, `todo`, `wip`. Status changes constantly and pollutes the taxonomy. Use `expires_at` or TTL for content that should disappear.
 
 **Flat is better than deep.** relay has no tag hierarchy. Use `finance` and add specificity in the title (`ETF Allocation Review`) rather than `finance:etf`. FTS5 search will surface it.
 
-**Three tags per post maximum.** The first domain tag determines folder placement — make it count.
+**Three tags per post maximum.** The first domain tag determines folder placement. Make it count.
 
 **Keep the taxonomy in the Master Document.** Agents read that table; if a tag isn't listed, they won't use it.
 
@@ -115,7 +115,7 @@ Set per-tag TTL via `POST /tags/{tag}/config` or `set_tag_config`. Per-post `exp
 
 ### Cross-linking
 
-Use `[[Post Title]]` wikilinks in post bodies. relay resolves them case-insensitively and rewrites them on rename. Use `#NNN` (by id) for links that must survive title changes — e.g. `#0` always points to the Master Document.
+Use `[[Post Title]]` wikilinks in post bodies. relay resolves them case-insensitively and rewrites them on rename. Use `#NNN` (by id) for links that must survive title changes (e.g. `#0` always points to the Master Document).
 
 ### Ephemeral content
 
@@ -127,7 +127,7 @@ Set `expires_at` (ISO-8601) on any post that should auto-delete. Or configure a 
 
 ### One canonical post per topic
 
-The strongest practice for a useful vault: one post per topic, updated in place. Avoid `Server Notes v2` or `AI Tools 2026-07` — instead, date-stamp sections within the post. This keeps backlinks intact and lets bm25 ranking surface the canonical post first in search.
+The strongest practice for a useful vault: one post per topic, updated in place. Avoid `Server Notes v2` or `AI Tools 2026-07`. Instead, date-stamp sections within the post. This keeps backlinks intact and lets bm25 ranking surface the canonical post first in search.
 
 ```markdown
 ## Current state
@@ -150,4 +150,4 @@ Notes without a domain tag land in `Inbox/`. As soon as the note gets its first 
 | PDF or binary file | `![[file.pdf]]` — renders as a download link |
 | External URL | `[label](url)` |
 
-Attachments live in `<Folder>/assets/`. Deleting a post removes orphaned attachments; shared assets are kept. In the browser UI, drag/drop, paste, or the 📎 button uploads a file and inserts its embed (large files stream through a presigned slot instead of base64). Agents attach via MCP `add_attachment` — a `source_url` the server fetches, a `path` the stdio proxy uploads from your machine, or a presigned `upload_id`.
+Attachments live in `<Folder>/assets/`. Deleting a post removes orphaned attachments; shared assets are kept. In the browser UI, drag/drop, paste, or the 📎 button uploads a file and inserts its embed (large files stream through a presigned slot instead of base64). Agents attach via MCP `add_attachment`: a `source_url` the server fetches, a `path` the stdio proxy uploads from your machine, or a presigned `upload_id`.

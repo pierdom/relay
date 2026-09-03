@@ -104,15 +104,15 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 
 ## Semantic search (optional, proof of concept)
 
-`RELAY_EMBEDDING_ENABLED=true` turns on chunk-level embeddings (sqlite-vec + fastembed) and exposes `mode=semantic|hybrid` alongside the default `keyword` mode on `GET /posts`, the `list_posts` MCP tool, and a ranking-mode select in the browser UI's search bar. Off by default everywhere — relay #253's proof of concept, not a fully validated default yet.
+`RELAY_EMBEDDING_ENABLED=true` turns on chunk-level embeddings (sqlite-vec + fastembed) and exposes `mode=semantic|hybrid` alongside the default `keyword` mode on `GET /posts`, the `list_posts` MCP tool, and a ranking-mode select in the browser UI's search bar. Off by default everywhere: relay #253's proof of concept, not yet a fully validated default.
 
 What to expect when you flip it on:
 
-- **First-run model download.** The configured `EMBEDDING_MODEL` downloads on first use into `<vault>/.relay/models` (plus `.relay/hf-home` for `huggingface_hub`'s own cache) — inside the vault dir on purpose, so it rides the same Docker volume and survives container restarts instead of re-downloading every time.
-- **Startup stays fast regardless of vault size.** Embedding every existing post runs as a background task *after* the server is already serving requests, not inline during startup — watch the logs for `Embedding backfill starting` / periodic `N/M posts checked` (every 15s) / `Embedding backfill complete`. A crash or restart mid-backfill doesn't lose progress: the embedding cache is content-addressed and survives, so the next run resumes rather than starting over.
-- **CPU and memory during the backfill.** Embedding is real local ONNX inference — expect a CPU-bound burst proportional to how much of the vault is genuinely new (not yet cached), and ~500-600MB of RSS while the model is loaded (measured locally; onnxruntime session + model weights, not per-call growth). By default it unloads after `EMBEDDING_IDLE_UNLOAD_SECONDS` (300s) of no embedding activity, trading a several-second reload on the next search/write for giving that memory back to the OS — set it to `0` to keep the model always resident instead.
-- **Verify it actually came up:** check `features.search.embeddings` in `GET /status`, or the "Semantic search" row in the browser UI's status panel — both report whether embeddings are *actually* usable, not just configured.
-- **Changing `EMBEDDING_MODEL` re-embeds the whole vault automatically** — no migration step. If the new model's vector dimension differs from the old one (e.g. moving from the 384-dim default up to `paraphrase-multilingual-mpnet-base-v2` at 768d or `multilingual-e5-large` at 1024d), relay detects it at the next startup, rebuilds the vector schema, and the background backfill re-embeds every post against the new model — same log lines as the first-ever backfill. A same-dimension model swap needs no schema change at all: the embedding cache is keyed on the model id, so it's already a full cache miss either way.
+- **First-run model download.** The configured `EMBEDDING_MODEL` downloads on first use into `<vault>/.relay/models` (plus `.relay/hf-home` for `huggingface_hub`'s own cache). This lives inside the vault dir on purpose, so it rides the same Docker volume and survives container restarts instead of re-downloading every time.
+- **Startup stays fast regardless of vault size.** Embedding every existing post runs as a background task *after* the server is already serving requests, not inline during startup. Watch the logs for `Embedding backfill starting` / periodic `N/M posts checked` (every 15s) / `Embedding backfill complete`. A crash or restart mid-backfill doesn't lose progress: the embedding cache is content-addressed and survives, so the next run resumes rather than starting over.
+- **CPU and memory during the backfill.** Embedding is real local ONNX inference. Expect a CPU-bound burst proportional to how much of the vault is genuinely new (not yet cached), plus ~500-600MB of RSS while the model is loaded (measured locally; onnxruntime session + model weights, not per-call growth). By default it unloads after `EMBEDDING_IDLE_UNLOAD_SECONDS` (300s) of no embedding activity, trading a several-second reload on the next search/write for giving that memory back to the OS. Set it to `0` to keep the model always resident instead.
+- **Verify it actually came up:** check `features.search.embeddings` in `GET /status`, or the "Semantic search" row in the browser UI's status panel. Both report whether embeddings are actually usable, not just configured.
+- **Changing `EMBEDDING_MODEL` re-embeds the whole vault automatically, no migration step.** If the new model's vector dimension differs from the old one (e.g. moving from the 384-dim default up to `paraphrase-multilingual-mpnet-base-v2` at 768d or `multilingual-e5-large` at 1024d), relay detects it at the next startup, rebuilds the vector schema, and the background backfill re-embeds every post against the new model, same log lines as the first-ever backfill. A same-dimension model swap needs no schema change at all: the embedding cache is keyed on the model id, so it's already a full cache miss either way.
 
 ---
 
@@ -120,7 +120,7 @@ What to expect when you flip it on:
 
 Required for remote use. relay delegates authentication to any standard OIDC provider.
 
-**Recommended for self-hosters: [PocketID](https://github.com/pocket-id/pocket-id)** — a minimal, single-binary OIDC provider designed for personal use. No database setup, no admin overhead, runs as a Docker container alongside relay. Other providers (Authentik, Keycloak, Authelia, …) work equally well if you already run one.
+**Recommended for self-hosters: [PocketID](https://github.com/pocket-id/pocket-id).** A minimal, single-binary OIDC provider designed for personal use. No database setup, no admin overhead, runs as a Docker container alongside relay. Other providers (Authentik, Keycloak, Authelia, …) work equally well if you already run one.
 
 **1. Register a confidential client at your IdP.** Set the redirect URI to `<RELAY_BASE_URL>/auth/callback`. Note the client ID and secret.
 
@@ -162,6 +162,6 @@ Lets remote MCP clients (Claude.ai, ChatGPT, etc.) authenticate via OAuth + Dyna
 
 **5. Restart relay.**
 
-In the client's connector dialog, fill only the **name** and **URL** (`<RELAY_BASE_URL>/mcp`) — Dynamic Client Registration self-registers the client. The static `API_KEY` keeps working alongside OAuth.
+In the client's connector dialog, fill only the **name** and **URL** (`<RELAY_BASE_URL>/mcp`). Dynamic Client Registration self-registers the client. The static `API_KEY` keeps working alongside OAuth.
 
 > Tokens are opaque and hashed at rest, audience-bound to `/mcp`, single-use on auth codes and refresh tokens, and revoking one cascades to the whole client+user token family.

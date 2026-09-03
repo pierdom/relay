@@ -97,7 +97,7 @@ A `keepalive` fires every 30 s. Event types:
 | `delete` | `{"id": N}` | On delete via API or vault |
 | `keepalive` | — | Every 30 s |
 
-Edits to older posts are sent without an SSE `id:` so they don't rewind a client's `Last-Event-ID`. Catch-up replay on reconnect is append-only — edits and deletes to already-seen posts require a manual refresh.
+Edits to older posts are sent without an SSE `id:` so they don't rewind a client's `Last-Event-ID`. Catch-up replay on reconnect is append-only. Edits and deletes to already-seen posts require a manual refresh.
 
 ---
 
