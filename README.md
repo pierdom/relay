@@ -16,11 +16,13 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![MCP](https://img.shields.io/badge/MCP-server-6E56CF?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io)
 
-**A shared knowledge base for humans and AI agents — plain Markdown, Obsidian-compatible, real-time.**
+**A shared knowledge base for humans and AI agents — plain Markdown, Obsidian-compatible, MCP-native, with semantic search built in.**
 
 </div>
 
 Your notes live as ordinary `.md` files on disk. Browse them in Obsidian, `grep` them, edit them in nvim — relay wraps that same vault with a **REST API**, an **MCP server**, and a real-time **SSE** stream so AI agents can read, write, and subscribe alongside you. Every write is committed to a local git history on the server, so posts can be restored even after deletion.
+
+relay is more than a web UI bolted onto a folder of Markdown — see [Why relay](#why-relay) below for the two things that actually make it different: MCP-native agent access, and semantic search that pays off for humans and agents alike.
 
 <div align="center">
 
@@ -29,6 +31,17 @@ Your notes live as ordinary `.md` files on disk. Browse them in Obsidian, `grep`
 <sub>Browser UI and Terminal UI &nbsp;·&nbsp; both support themes</sub>
 
 </div>
+
+## Why relay
+
+**MCP-native agent access.** Any Obsidian-compatible vault becomes something an AI agent can read, write, and subscribe to — over the same `.md` files you edit by hand, not a bespoke export or a scraped copy. Agents get full CRUD, history, and real-time updates through the same interface humans use in the browser UI, the TUI, or Obsidian itself, so there's no second, agent-only copy of your notes to keep in sync.
+
+**Semantic search, for you and for the agents.** Plain FTS5 keyword search only finds what you phrase the way the note is phrased — relay adds an optional `mode=semantic|hybrid` on top of it (chunk-level embeddings via sqlite-vec + fastembed), and the reason it's worth having is different depending on who's asking:
+
+- **For you**, it closes gaps keyword search structurally can't: cross-lingual retrieval (an Italian query finding an English-language note, or vice versa) and oblique/paraphrased wording ("what did we decide about the notes backend" finding a post whose title shares none of those words).
+- **For agents**, it's not about wrong answers — it's about the token and round-trip cost of guessing right. An agent that doesn't know your tag taxonomy would otherwise have to `list_posts`, skim summaries, follow `[[wikilinks]]`/`#id` backlinks, and iterate — burning context on navigation before it ever reaches the relevant post. Semantic search collapses that into one query, ranked by meaning, so the agent spends its context budget on your actual question instead of on finding where the answer lives.
+
+Measured on a real 21-query set against a real vault: keyword search hits **recall@5 0.540 / MRR 0.418**; hybrid search (keyword + semantic, fused and confidence-weighted) hits **recall@5 0.687 / MRR 0.667** — a real jump, not a marginal one (semantic alone already beats keyword at 0.659/0.667; hybrid's fusion edges it out further on recall). Off by default (`RELAY_EMBEDDING_ENABLED=false`) — it's an opt-in feature, not yet a validated default; see [docs/setup.md](docs/setup.md) for what to expect when you turn it on.
 
 ## How it works
 
@@ -95,7 +108,7 @@ The Syncthing part can be completely removed if you just interact with the serve
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven split: TOPICS sidebar + FEED list. `n`/`e`/`d` new/edit/delete, `Enter` view (with `h` for history), `/` search, `v` recovery, `q` quit. Set `RELAY_PALETTE` to match your terminal. See [docs/tui.md](docs/tui.md).
 
-**MCP server** — 19 tools over Streamable HTTP at `/mcp` (or the legacy stdio proxy), covering full CRUD, history, restoration, and attachment management. See [docs/mcp.md](docs/mcp.md).
+**MCP server** — 19 tools over Streamable HTTP at `/mcp` (or the legacy stdio proxy), covering full CRUD, keyword/semantic/hybrid search, history, restoration, and attachment management. See [docs/mcp.md](docs/mcp.md).
 
 **REST API** — every capability is also a plain HTTP endpoint. See [docs/api.md](docs/api.md).
 
@@ -123,7 +136,7 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 ## Technologies
 
 - **Python 3.13** + **FastAPI** + **aiosqlite** (FTS5 search) + **PyYAML**
-- **sqlite-vec** + **fastembed** — optional semantic/hybrid search (`mode=semantic|hybrid`, proof of concept, off by default)
+- **sqlite-vec** + **fastembed** — semantic/hybrid search (`mode=semantic|hybrid`): chunk-level embeddings, content-addressed cache, reciprocal rank fusion. Opt-in, off by default — see [Why relay](#why-relay)
 - **Markdown vault** — files are source of truth; SQLite index is disposable
 - **git** — a commit per write; any post is recoverable even after deletion
 - **watchdog** — live re-index of external edits (Obsidian, nvim)
