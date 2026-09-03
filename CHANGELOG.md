@@ -8,6 +8,19 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.2.0] — 2026-09-03
+
+Makes the embedding model's vector dimension a real config axis instead of a hardcoded constant, so relay can move to a bigger multilingual model (or back) without a manual migration.
+
+### Added
+- `embedding.resolve_dim(model_id)` looks up a fastembed model's dimension from its static registry — no download, no ONNX session, safe to call in tests/CI. `FastEmbedBackend.dim` is now resolved per-instance from whichever model `EMBEDDING_MODEL` names, instead of a fixed `384`.
+- `vectors.init_vec` tracks the dimension the on-disk `vec_chunks` table (a vec0 virtual table — no `ALTER` for its column width) was actually built at, in a new `embedding_state` table. A startup where the configured model's dimension has changed since the table was created drops and rebuilds `vec_chunks` (and clears `chunks`) at the new width, logging a warning. No separate re-embed step is needed: the embedding cache is already keyed on `(model_id, chunk_body)`, so any model change — same dimension or not — already makes every existing chunk a cache miss; the background backfill that already runs on every startup just re-fills whatever's empty.
+- The check only runs while `embedding_enabled=true` — toggling the flag off leaves an existing `vec_chunks` table untouched rather than comparing it against the disabled-state placeholder dimension, which would otherwise misfire a rebuild on every disable/re-enable cycle.
+
+Confirmed against fastembed's real registry: `paraphrase-multilingual-MiniLM-L12-v2` (current default) = 384d, `paraphrase-multilingual-mpnet-base-v2` = 768d, `multilingual-e5-large` = 1024d — both bigger options are now a pure `.env` change. 7 new tests cover the dimension-change rebuild, the same-dimension no-op case, the disabled-toggle no-op case, and `resolve_dim` itself (including an unknown-model error). Full suite green, ruff clean.
+
+---
+
 ## [1.1.4] — 2026-09-03
 
 Closes a gap v1.1.3's idle-unload made materially worse: the write path could block the event loop on a cold model reload, same class of bug already fixed on the search path.

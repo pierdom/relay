@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from relay import embedding
 from relay.config import settings
@@ -29,6 +30,17 @@ def test_fake_backend_vectors_are_unit_normalized():
     v = backend.embed_query("some text")
     norm = sum(x * x for x in v) ** 0.5
     assert abs(norm - 1.0) < 1e-9
+
+
+def test_resolve_dim_looks_up_the_real_fastembed_registry():
+    """Pure metadata lookup — no model download, safe to run unstubbed in CI
+    (relay #253's offline-CI invariant)."""
+    assert embedding.resolve_dim("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") == 384
+
+
+def test_resolve_dim_rejects_an_unknown_model():
+    with pytest.raises(ValueError, match="Unknown fastembed model"):
+        embedding.resolve_dim("not-a-real-model")
 
 
 def _stub_backend(model_id: str, captured: list[list[str]]) -> FastEmbedBackend:
@@ -76,6 +88,26 @@ def test_fastembed_backend_skips_prefixes_for_non_e5_models():
     assert captured[1] == ["doc one", "doc two"]
 
 
+def test_fastembed_backend_dim_is_resolved_per_instance(monkeypatch, tmp_path):
+    """dim used to be a fixed class constant; it's now looked up per instance
+    from whichever model EMBEDDING_MODEL actually names, so two backends
+    configured for differently-sized models must report different dims."""
+
+    class _StubTextEmbedding:
+        def __init__(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path))
+    monkeypatch.setattr("fastembed.TextEmbedding", _StubTextEmbedding)
+    monkeypatch.setattr(embedding, "resolve_dim", lambda model_id: {"model-a": 4, "model-b": 8}[model_id])
+
+    monkeypatch.setattr(settings, "embedding_model", "model-a")
+    assert FastEmbedBackend().dim == 4
+
+    monkeypatch.setattr(settings, "embedding_model", "model-b")
+    assert FastEmbedBackend().dim == 8
+
+
 def test_fastembed_backend_passes_cache_dir_and_threads(monkeypatch, tmp_path):
     """Both must reach the real TextEmbedding constructor — cache_dir per the
     relay #253 production incidents (unwritable HOME under the container's
@@ -91,6 +123,9 @@ def test_fastembed_backend_passes_cache_dir_and_threads(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "vault_path", str(tmp_path))
     monkeypatch.setattr(settings, "embedding_threads", 1)
     monkeypatch.setattr("fastembed.TextEmbedding", _StubTextEmbedding)
+    # resolve_dim looks up the real fastembed registry, which _StubTextEmbedding
+    # doesn't carry — stub it directly, this test is about cache_dir/threads.
+    monkeypatch.setattr(embedding, "resolve_dim", lambda model_id: EMBEDDING_DIM)
 
     FastEmbedBackend()
 

@@ -32,7 +32,25 @@ os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_DIM = 384  # fixed at vec0 table creation — see relay/vectors.py
+EMBEDDING_DIM = 384  # FakeBackend's fixed test dim; also vectors.py's schema
+# default while embedding_enabled=False (nothing has resolved a real model's
+# dim yet, so the schema is pre-built at the shipped default — see resolve_dim).
+
+
+def resolve_dim(model_id: str) -> int:
+    """Look up ``model_id``'s embedding dimension from fastembed's static model
+    registry — pure in-memory metadata (``TextEmbedding.EMBEDDINGS_REGISTRY``),
+    no download and no ONNX session constructed. Lets ``vectors.init_vec``
+    learn the dimension a model change requires *before* paying for a model
+    load, and makes a typo in ``EMBEDDING_MODEL`` fail fast at startup instead
+    of surfacing later as a dimension-mismatch error on the first real embed
+    call."""
+    from fastembed import TextEmbedding
+
+    for m in TextEmbedding.list_supported_models():
+        if m["model"] == model_id:
+            return m["dim"]
+    raise ValueError(f"Unknown fastembed model: {model_id!r}")
 
 
 class EmbeddingBackend(Protocol):
@@ -55,12 +73,17 @@ class FastEmbedBackend:
     the prefixes on it would silently degrade quality the same way omitting
     them does on a model that needs them."""
 
-    dim = EMBEDDING_DIM
-
     def __init__(self) -> None:
         from fastembed import TextEmbedding
 
         self.model_id = settings.embedding_model
+        # dim is per-instance, not a fixed class constant — EMBEDDING_MODEL is
+        # a one-line .env change to any fastembed model, and different models
+        # carry different dims (relay #253 backlog: bigger multilingual models
+        # are 768d/1024d, not 384d). vectors.init_vec resolves the same value
+        # ahead of constructing this backend, to size vec_chunks before the
+        # model ever loads.
+        self.dim = resolve_dim(self.model_id)
         self._e5_prefixes = "e5" in self.model_id.lower()
         # Explicit cache_dir — see Settings.embedding_cache_dir's docstring.
         # Without it, huggingface_hub's snapshot_download falls back to a
