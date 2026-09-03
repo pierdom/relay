@@ -1584,18 +1584,36 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   }
   aside.open { transform: translateX(0); }
 
-  /* Search bar — the input has no min-width, so under flex it never shrank
-     past its intrinsic content size and pushed the sort control and view
-     toggle off the right edge of the screen entirely. `min-width: 0` lets it
-     actually give up space; shrinking the two control groups' own padding
-     claims less of that space back, so a normal-width input still fits
-     alongside both on one row instead of the row wrapping. */
-  .search-bar { gap: 6px; }
-  .search-bar input { min-width: 0; }
-  .sort-select, .mode-select { padding: 4px 18px 4px 6px; font-size: 11px; }
-  .sort-dir { min-width: 26px; padding: 5px 6px; }
-  .vt-btn { padding: 5px 7px; font-size: 12px; }
-  .search-bar .view-toggle { margin-left: 4px; padding-left: 8px; }
+  /* Search bar. `min-width: 0` alone (the previous fix here) let the input
+     give up space under flex, but with nothing stopping it, four siblings —
+     mode select, sort select, sort direction, two view-toggle buttons — could
+     still squeeze it down to a few unusable pixels on a real phone width.
+     `input, select { font-size: 16px !important }` above (iOS zoom guard,
+     @media (hover: none)) also means the 11px this block used to set on
+     .sort-select/.mode-select never actually applied on a touch device —
+     shrinking those was never doing anything there. The real levers on a
+     touch device are padding and each control's own rendered width, not
+     font-size: tighter padding throughout, and a capped, ellipsis-truncated
+     width on the two <select>s (their closed-state label — "Keyword",
+     "Updated" — otherwise sizes the box to fit the longest option in full).
+     The input's own min-width is the floor that actually matters: it can
+     still shrink below its content size for a long placeholder, just not
+     below something you can read and type into. */
+  /* wrap is a safety net, not the expectation: mode-select (opt-in, off by
+     default everywhere) plus an active search's "×" plus the narrowest
+     supported phone (320px, the @media (max-width: 400px) tier) is the one
+     combination where the floors above can still add up past the viewport.
+     Wrapping to a second line beats silently clipping controls off-screen. */
+  .search-bar { gap: 5px; padding: 8px 14px; flex-wrap: wrap; }
+  .search-bar input { min-width: 72px; }
+  .search-bar .search-label { display: none !important; }
+  .sort-select, .mode-select {
+    padding: 4px 16px 4px 5px; max-width: 62px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sort-dir { min-width: 24px; padding: 5px 5px; }
+  .vt-btn { padding: 5px 6px; font-size: 12px; }
+  .search-bar .view-toggle { margin-left: 3px; padding-left: 6px; }
 
   /* Feed — full width, tighter spacing */
   .feed { padding: 12px; gap: 8px; }
@@ -1788,6 +1806,9 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .sm-feat-note { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
 .sm-recovery-line { font-size: 12.5px; color: var(--text); margin-bottom: 10px; }
 .sm-error { font-size: 12.5px; color: var(--red); }
+.sm-embed-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.sm-embed-controls .btn-edit:disabled { opacity: 0.5; cursor: default; }
+.sm-embed-controls .btn-edit:disabled:hover { border-color: var(--border); color: var(--muted); }
 
 .post-modal { display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; }
 .post-modal.open { display: flex; }

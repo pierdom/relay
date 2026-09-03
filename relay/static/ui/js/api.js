@@ -21,7 +21,15 @@ export async function apiFetch(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   const res = await fetch(path, { credentials: 'same-origin', ...opts, headers });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    // FastAPI's HTTPException(detail=...) is the one thing worth showing a user
+    // over the generic status text — "A backfill is already running" beats
+    // "409 Conflict". Best-effort: a body that isn't JSON, or has no `detail`,
+    // falls back to the status line exactly as before.
+    let detail;
+    try { detail = (await res.json())?.detail; } catch { /* not JSON, or no body */ }
+    throw new Error(detail || `${res.status} ${res.statusText}`);
+  }
   return res.json();
 }
 

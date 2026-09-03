@@ -157,7 +157,7 @@ Single-page app on the REST API + SSE. ES modules, no build step — nothing is 
 - **Draggable elements**: `animation-fill-mode: backwards` and no `to` keyframe. A `both` fill + explicit `to` outranks inline styles and swallows drag transforms.
 - **Markdown content rules must go through `.post-body`** — a rule on `.pm-body` directly matches nothing (the rendered markdown is wrapped).
 - **`min-width: 0` on every grid tile area.** A `1fr` track's automatic minimum is min-content; any non-shrinkable child overflows the card.
-- **Four modals share chrome.** `test_every_desktop_modal_shares_the_same_chrome` asserts they agree as a set — change the look once.
+- **Five modals share chrome.** `test_every_desktop_modal_shares_the_same_chrome` asserts they agree as a set — change the look once. The keyboard-shortcuts modal shipped later and was excluded from `SHEETS` (`tests/ui/test_sheets.py`) until it was found in the exact "grab handle renders, `attachSheetDismiss` never wired" state the file's own docstring warns about — sharing `.sm-inner` means it was never actually at risk of *looking* different, just untested.
 - **`apiSend` for DELETEs only** (no `Content-Type`, never throws on non-ok). Use `apiFetch` for anything that sends a body and needs to know if it worked.
 - **Deleted post recovery lives in the status panel**, not the sidebar. It's a read over `history.git`, not a trash can.
 - **History panel is fixed height** — panes built once, only contents swap. `min(82vh, 860px)`.

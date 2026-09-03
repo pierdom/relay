@@ -8,6 +8,25 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.4.0] — 2026-09-03
+
+A batch of browser-UI fixes and one new capability: the semantic-search toggle and backfill trigger (v1.3.0's REST/MCP endpoints) are now reachable from the info panel, not just curl or MCP.
+
+### Added
+- Info panel ("Semantic search" section): model, dimension, on-disk size, whether the embedding backend is currently resident in memory, idle-unload timeout, thread count, coverage (posts embedded/missing, chunk count, cache entries), and backfill state (never run / running with live counts / last completed) — the full `/status` `embeddings` object, not just the on/off dot. Two buttons alongside it: turn semantic search on/off at runtime, and re-run the backfill on demand, both wired to v1.3.0's `PATCH /embeddings` and `POST /embeddings/backfill`.
+- The search bar's ranking-mode select now defaults to `hybrid` instead of `keyword` once `/status` confirms embeddings are usable — it's the mode that already beats keyword-alone on this relay's own eval. Every reset point (fresh connect, clearing the search box) routes through the same default; tag/folder selection still forces `keyword` unconditionally, since the ranked path can't combine with either.
+- `apiFetch` now surfaces the server's actual error `detail` ("A backfill is already running") instead of a generic status line ("409 Conflict") — a small change to shared plumbing that improves every existing caller, not just the two new buttons above.
+
+### Fixed
+- Mobile search bar: the input had no minimum width, so on a real phone it could be squeezed to a few unusable pixels by its four siblings (ranking mode, sort field, sort direction, list/grid toggle). Gave the input a real floor (72px), capped and ellipsis-truncated the two `<select>`s instead of relying on a smaller font-size that a separate iOS zoom-prevention rule was silently overriding anyway, tightened padding throughout, and added a `flex-wrap` safety net for the narrowest supported width combined with every optional control visible at once.
+- The keyboard-shortcuts modal (`?`) reused the same shell as the other settings-style modals, so it displayed a grab handle on mobile — but was never wired to the shared `attachSheetDismiss` gesture, so dragging it did nothing. Fixed, and folded into `tests/ui/test_sheets.py`'s `SHEETS` list so it's covered by the same parity tests as the other four modals going forward (`CLAUDE.md`'s "four modals share chrome" is now five).
+
+Caught in review before shipping: `searchClear`'s reset to the new default mode didn't check for an active tag/folder filter first, which could have set `mode=hybrid` while one was still active — a combination the server rejects. And the info panel's action buttons originally shared one try/catch between the action and its follow-up refresh, so a refresh failure after a successful action would have misreported as a failed one and re-enabled the button for a redundant, wrong-direction retry. Both fixed before merge.
+
+Full non-UI suite green (457 passed), CSS token test passes (no color literals outside the token blocks). Browser-level verification wasn't possible this round — Playwright's Chromium can't launch in this environment (missing system libs); worth a manual pass on a phone.
+
+---
+
 ## [1.3.0] — 2026-09-03
 
 Runtime control over semantic search: pause/resume and re-trigger the embedding backfill without a restart, on both REST and MCP. New capability, not a diagnostics tweak — cut as a minor bump per the project's own versioning rule.
