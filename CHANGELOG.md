@@ -8,6 +8,20 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.5.0] — 2026-09-03
+
+Three fixes from a real vault usage report on semantic/hybrid search (relay #253): the missing pieces were diagnosability and a filter gap, not the ranking math itself — a length-normalization theory the report also raised was investigated and refuted against real vault data before any ranking code was touched (see relay #253 for the writeup; no ranking change shipped here).
+
+### Added
+- `/status`'s `embeddings.posts_missing_ids` — up to 50 concrete post ids behind `posts_missing`, instead of just a count. The only way a post lands there while a backfill runs cleanly is `chunking.chunk_post` returning zero chunks for it (e.g. a body that's entirely a fenced code block).
+- `mode=semantic`/`hybrid` on `GET /posts` and `list_posts` (both MCP surfaces) can now be combined with `tag`/`folder` — previously a 400. `vectors.semantic_search` and `service._keyword_ranked_ids` both apply the filter directly (same condition shape as the unranked path) rather than the fused list silently dropping it.
+- Ranked search responses (`mode=semantic`/`hybrid`) carry a `search_timing` field: whether the query triggered a cold embedding-model load, and how long the embed call took — makes a session's first (cold) ranked query distinguishable from a genuinely slow vault.
+
+### Removed
+- `RankedSearchFilterUnsupported` / the 400 it produced — superseded by real filter support above.
+
+---
+
 ## [1.4.0] — 2026-09-03
 
 A batch of browser-UI fixes and one new capability: the semantic-search toggle and backfill trigger (v1.3.0's REST/MCP endpoints) are now reachable from the info panel, not just curl or MCP.

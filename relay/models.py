@@ -60,12 +60,26 @@ class PostResponse(BaseModel):
         )
 
 
+class SearchTiming(BaseModel):
+    """Cold-start observability for a ranked (semantic/hybrid) search (relay
+    #253 usage report, Issue 5): with the embedding model idle-unloaded
+    (``EMBEDDING_IDLE_UNLOAD_SECONDS``), the first ranked query after a quiet
+    period pays a multi-hundred-MB model reload plus the query embed itself,
+    indistinguishable from a slow vault without this. Only present on
+    ``mode="semantic"``/``"hybrid"`` responses — plain keyword search never
+    touches the embedding backend."""
+
+    cold_start: bool = Field(description="Whether this query triggered a model load, vs. finding it already resident")
+    embedding_ms: float = Field(description="Wall-clock time spent embedding the query (plus the model load, if cold)")
+
+
 class PostListResponse(BaseModel):
     items: list[PostResponse]
     total: int
     limit: int
     offset: int
     pinned: PostResponse | None = None  # master doc, on the home feed's first page
+    search_timing: SearchTiming | None = None  # set only for mode="semantic"/"hybrid"
 
 
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
@@ -140,6 +154,7 @@ class PostSummaryListResponse(BaseModel):
     limit: int
     offset: int
     pinned: PostSummary | None = None  # master doc, on the home feed's first page
+    search_timing: SearchTiming | None = None  # set only for mode="semantic"/"hybrid"
 
 
 class PostUpdate(BaseModel):
@@ -355,6 +370,14 @@ class EmbeddingStatus(BaseModel):
     posts_total: int
     posts_embedded: int = Field(description="Posts with at least one chunk currently embedded")
     posts_missing: int = Field(description="posts_total minus posts_embedded")
+    posts_missing_ids: list[int] = Field(
+        default_factory=list,
+        description=(
+            "Up to 50 ids behind posts_missing. The only way a post lands here while backfill runs "
+            "cleanly is chunking.chunk_post producing zero chunks for it — e.g. a body that's "
+            "entirely a fenced code block, stripped before chunking ever sees it"
+        ),
+    )
     chunks_total: int
     cache_entries: int = Field(
         description="Rows in the embedding cache; can exceed chunks_total (old model/deleted-post rows aren't pruned)"

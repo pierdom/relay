@@ -9,9 +9,10 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from relay import database, vault
+from relay import database, embedding, vault
 from relay.auth import require_api_key
 from relay.config import settings
+from relay.embedding import FakeBackend
 from relay.main import app
 from relay.service import _fts_query
 
@@ -185,20 +186,60 @@ async def test_hybrid_mode_503_when_embeddings_disabled(client):
 
 
 @pytest.mark.asyncio
-async def test_semantic_mode_400_when_combined_with_tag(client):
-    # 400 (not 503) even with embeddings off here — the filter/mode shape is
-    # invalid regardless of feature availability, checked first (service.py's
-    # RankedSearchFilterUnsupported precedes the SemanticSearchUnavailable check).
-    r = await client.get("/posts", params={"search": "x", "mode": "semantic", "tag": "dev"}, headers=AUTH)
-    assert r.status_code == 400
-    assert "tag" in r.json()["detail"]
+async def test_semantic_mode_can_be_combined_with_tag_filter(client, monkeypatch):
+    # relay #253 usage report, Issue 4: this used to be a 400 — the ranked
+    # path silently couldn't apply SQL filters at all. Both posts match the
+    # query; only the "dev"-tagged one should survive the tag filter.
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", lambda: FakeBackend())
+    section = "content word " * 60  # over the runt-merge floor, see chunking.py
+    await _create(client, "Alpha Dev", f"## S\n{section} alpha", tags=["dev"])
+    await _create(client, "Alpha Other", f"## S\n{section} alpha", tags=["homelab"])
+
+    r = await client.get("/posts", params={"search": "alpha", "mode": "semantic", "tag": "dev"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    titles = [i["title"] for i in r.json()["items"]]
+    assert "Alpha Dev" in titles
+    assert "Alpha Other" not in titles
 
 
 @pytest.mark.asyncio
-async def test_hybrid_mode_400_when_combined_with_folder(client):
-    r = await client.get("/posts", params={"search": "x", "mode": "hybrid", "folder": "Dev"}, headers=AUTH)
-    assert r.status_code == 400
-    assert "folder" in r.json()["detail"]
+async def test_hybrid_mode_can_be_combined_with_folder_filter(client, monkeypatch):
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", lambda: FakeBackend())
+    section = "content word " * 60
+    dev_post = await _create(client, "Beta Dev", f"## S\n{section} beta", tags=["dev"])
+    await _create(client, "Beta Other", f"## S\n{section} beta", tags=["homelab"])
+    # folder isn't on PostResponse — resolve it via the summary listing instead.
+    r = await client.get("/posts", params={"limit": 100, "summary": "true"}, headers=AUTH)
+    folder = next(i["folder"] for i in r.json()["items"] if i["id"] == dev_post["id"])
+
+    r = await client.get(
+        "/posts", params={"search": "beta", "mode": "hybrid", "folder": folder}, headers=AUTH
+    )
+    assert r.status_code == 200, r.text
+    titles = [i["title"] for i in r.json()["items"]]
+    assert "Beta Dev" in titles
+    assert "Beta Other" not in titles
+
+
+@pytest.mark.asyncio
+async def test_ranked_mode_response_carries_search_timing(client, monkeypatch):
+    # relay #253 usage report, Issue 5.
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", lambda: FakeBackend())
+    section = "content word " * 60
+    await _create(client, "Gamma", f"## S\n{section} gamma", tags=["dev"])
+
+    r = await client.get("/posts", params={"search": "gamma", "mode": "hybrid"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    timing = r.json()["search_timing"]
+    assert isinstance(timing["cold_start"], bool)
+    assert timing["embedding_ms"] >= 0
+
+    # Plain keyword search never touches the embedding backend.
+    r = await client.get("/posts", params={"search": "gamma", "mode": "keyword"}, headers=AUTH)
+    assert r.json()["search_timing"] is None
 
 
 @pytest.mark.asyncio

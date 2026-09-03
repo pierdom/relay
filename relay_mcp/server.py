@@ -143,8 +143,8 @@ async def list_tools() -> list[types.Tool]:
                 "'created'; order is 'desc' (default) or 'asc'. Sort by created + asc to read a topic's posts "
                 "in the order they were written. mode ranks 'search' (relay #253, proof of concept): "
                 "'keyword' (default, FTS5/bm25), 'semantic' (embedding similarity), or 'hybrid' (fusion of "
-                "both) — semantic/hybrid return an error if this relay hasn't got embeddings enabled, or if "
-                "combined with tag/folder (the ranked path doesn't apply them)."
+                "both), and can be combined with tag/folder — semantic/hybrid return an error if this "
+                "relay hasn't got embeddings enabled."
             ),
             inputSchema={
                 "type": "object",
