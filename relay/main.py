@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, database, history, metrics, vault, vectors, watcher
+from . import __version__, database, embedding, history, metrics, vault, vectors, watcher
 from . import status as app_status
 from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
@@ -59,6 +59,28 @@ async def _embedding_backfill() -> None:
         logger.exception("Embedding backfill failed")
 
 
+async def _embedding_idle_unload_loop() -> None:
+    """Poll embedding.unload_if_idle() every 60s for the life of the process.
+
+    Constructing the embedding backend costs ~570MB of RSS by itself
+    (onnxruntime session + model weights) that doesn't grow with usage
+    afterward — see embedding.unload_if_idle's docstring. Capping
+    embedding_threads (v1.1.2) didn't touch this, confirmed on production: no
+    observed reduction, because the cost was never about thread-pool buffers.
+    This trades that ~570MB back to the OS during idle stretches for a
+    several-second reload on the next embed call. No-ops (0 overhead beyond
+    the sleep) when embedding_idle_unload_seconds is 0 or nothing has loaded
+    the backend yet."""
+    logger = logging.getLogger(__name__)
+    while True:
+        await asyncio.sleep(60)
+        try:
+            if embedding.unload_if_idle():
+                logger.info("Embedding backend unloaded after idle timeout")
+        except Exception:
+            logger.exception("Embedding idle-unload check failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
@@ -96,6 +118,11 @@ async def lifespan(app: FastAPI):
     # inline in init_db/rebuild_index above (see _embedding_backfill's
     # docstring). No-ops immediately if embeddings aren't enabled.
     embedding_task = asyncio.create_task(_embedding_backfill())
+    # Gives the ~570MB embedding backend back to the OS after an idle period —
+    # see _embedding_idle_unload_loop's docstring. Runs regardless of whether
+    # embeddings are enabled; unload_if_idle() itself no-ops when nothing has
+    # loaded the backend.
+    idle_unload_task = asyncio.create_task(_embedding_idle_unload_loop())
     # Live vault watcher: external edits (e.g. from Obsidian) re-index + push SSE.
     watcher.start(asyncio.get_running_loop())
     # The Streamable HTTP MCP app needs its session manager running for the
@@ -106,7 +133,8 @@ async def lifespan(app: FastAPI):
     watcher.stop()
     task.cancel()
     embedding_task.cancel()
-    for t in (task, embedding_task):
+    idle_unload_task.cancel()
+    for t in (task, embedding_task, idle_unload_task):
         try:
             await t
         except asyncio.CancelledError:

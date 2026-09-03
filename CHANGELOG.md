@@ -8,6 +8,19 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.1.3] — 2026-09-03
+
+The real fix for v1.1.1's memory-footprint issue — v1.1.2's thread cap measured no improvement in production, confirmed by the numbers here to have been the wrong theory.
+
+### Fixed
+- Confirmed the actual cause: constructing `FastEmbedBackend` costs ~570MB of RSS by itself (onnxruntime session + model weights, measured locally: ~67MB → ~637MB before a single embed call), and that cost is flat across usage afterward — a single query and a 20-doc batch both left RSS unchanged. Not per-call, not per-thread — `EMBEDDING_THREADS` was addressing a mechanism that was never the bottleneck.
+
+### Added
+- `EMBEDDING_IDLE_UNLOAD_SECONDS` (default `300`) unloads the embedding model after that much idle time, polled every 60s from a background task. Trades a several-second reload on the next embed call for giving the memory back to the OS. `0` disables — keeps the model resident forever, the prior behavior.
+- `gc.collect()` alone only reclaimed ~200MB of the ~570MB in testing — the rest sits in glibc's malloc arenas, freed but not returned to the OS (normal glibc behavior, not a leak). `malloc_trim(0)` after the `gc.collect()` is what actually returns it: verified end-to-end through the real code path, not just a probe script — 621MB → 105MB after unload, ~640MB again after reload. Best-effort (wrapped in a broad except) for platforms without glibc's `malloc_trim`.
+
+---
+
 ## [1.1.2] — 2026-09-03
 
 First mitigation for v1.1.1's known memory-footprint issue.

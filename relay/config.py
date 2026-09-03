@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     # conservative starting point; raise it (env var, no code change) if a
     # deployment has CPU to spare and wants faster embedding instead.
     embedding_threads: int = 1
+    # The real memory cost, measured locally: constructing FastEmbedBackend
+    # jumps RSS ~67MB -> ~637MB (onnxruntime session + model weights), *before*
+    # a single embed call — and stays flat after, across both a single query
+    # and a 20-doc batch. So it's not a leak and not per-call growth; it's the
+    # one-time cost of having the model loaded at all, which embedding_threads
+    # (a thread-pool cap) never touched — confirmed on the production VPS: no
+    # observed reduction. This is the model actually being unloaded between
+    # uses to give that ~570MB back to the OS during idle stretches, at the
+    # cost of a several-second reload on the next search/write. 0 disables
+    # (never unload, previous always-resident behavior).
+    embedding_idle_unload_seconds: int = 300
     relay_palette: str = "default"
     relay_transparent: bool = False
     secure_cookies: bool = True
