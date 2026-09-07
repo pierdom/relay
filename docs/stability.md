@@ -30,7 +30,7 @@ All endpoints listed in [`docs/api.md`](api.md), excluding `/links` (see below):
 | `/posts/{id}` | `GET`, `PATCH`, `DELETE` |
 | `/posts/deleted` | `GET` |
 | `/posts/{id}/backlinks` | `GET` |
-| `/posts/{id}/history` | `GET`, `POST` |
+| `/posts/{id}/history` | `GET` |
 | `/posts/{id}/history/{sha}` | `GET` |
 | `/posts/{id}/restore` | `POST` |
 | `/attachments` | `POST`, `GET` |
@@ -39,8 +39,8 @@ All endpoints listed in [`docs/api.md`](api.md), excluding `/links` (see below):
 | `/attachments/{path}` | `GET`, `DELETE` |
 | `/folders` | `GET` |
 | `/tags` | `GET` |
-| `/tags/{tag}` | `POST` |
-| `/tags/{tag}/config` | `PATCH` |
+| `/tags/{tag}` | `PATCH` |
+| `/tags/{tag}/config` | `POST` |
 | `/events` | `GET` |
 | `/status` | `GET` |
 | `/metrics` | `GET` |
@@ -48,11 +48,11 @@ All endpoints listed in [`docs/api.md`](api.md), excluding `/links` (see below):
 
 Stability covers: the HTTP methods, path shapes, query parameters, and response field names documented in `docs/api.md`. New optional query parameters and new fields in responses do not count as breaking changes.
 
-### MCP tools (19)
+### MCP tools (21)
 
 All tool names and their documented parameters are stable:
 
-`publish_post` · `update_post` · `get_post` · `delete_post` · `list_posts` · `get_post_history` · `get_post_revision` · `list_deleted_posts` · `restore_post` · `get_backlinks` · `add_attachment` · `create_upload` · `get_attachment` · `list_attachments` · `delete_attachment` · `list_tags` · `set_tag_config` · `rename_tag` · `get_status`
+`publish_post` · `update_post` · `get_post` · `delete_post` · `list_posts` · `get_post_history` · `get_post_revision` · `list_deleted_posts` · `restore_post` · `get_backlinks` · `add_attachment` · `create_upload` · `get_attachment` · `list_attachments` · `delete_attachment` · `list_tags` · `set_tag_config` · `rename_tag` · `get_status` · `trigger_embedding_backfill` · `set_embeddings_enabled`
 
 Adding new optional parameters to existing tools is not a breaking change. Adding new tools is a minor bump.
 
@@ -83,7 +83,7 @@ Before tagging v1.0.0, a deliberate pass was made over all 19 MCP tools and ever
 
 - `add_attachment` — "add" is slightly unusual (vs. "upload" or "create") but captures the intent (the bytes may come from `source_url`, presigned slot, or base64, not only from an upload). Consistent with the REST `POST /attachments`. Keep.
 - `create_upload` — names the operation correctly (creating a presigned upload slot, not the attachment itself). Keep.
-- `set_tag_config` — verbose, but mirrors `PATCH /tags/{tag}/config` and is unambiguous. Keep.
+- `set_tag_config` — verbose, but mirrors `POST /tags/{tag}/config` and is unambiguous. Keep.
 - `/posts/deleted` — declared before `/{id}` for FastAPI path resolution; the shape is deliberate and documented. Keep.
 - `/links` — marked out of scope above; not worth versioning as a stable endpoint.
 

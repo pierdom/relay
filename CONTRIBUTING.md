@@ -18,7 +18,7 @@ uv run playwright install chromium
 ## Running tests and lint
 
 ```bash
-uv run pytest -q          # full suite (includes 100+ browser smokes)
+uv run pytest -q          # full suite (tests/ui are browser smokes; they skip without Chromium)
 uv run ruff check .        # lint — E, F, I, UP, B, C4, SIM at line-length 120
 ```
 

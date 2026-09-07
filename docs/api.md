@@ -7,7 +7,7 @@ All endpoints require `Authorization: Bearer <API_KEY>` — **except `/health`**
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/posts` | Publish a post |
-| GET | `/posts` | List posts (`tag`, `folder`, `search`, `summary`, `limit`, `offset`, `sort`, `order`; master doc pinned on home feed). `sort` = `updated` (default, last-modified) or `created`; `order` = `desc` (default) or `asc`. A `search` ranks by relevance first and uses `sort`/`order` only as a tiebreak |
+| GET | `/posts` | List posts (`tag`, `folder`, `search`, `summary`, `limit`, `offset`, `sort`, `order`, `mode`; master doc pinned on home feed). `mode` = `keyword` (default) / `semantic` / `hybrid` ranks a `search` and combines with `tag`/`folder`; 503 if embeddings are off. `sort` = `updated` (default, last-modified) or `created`; `order` = `desc` (default) or `asc`. A `search` ranks by relevance first and uses `sort`/`order` only as a tiebreak |
 | GET | `/posts/{id}` | Get a single post |
 | PATCH | `/posts/{id}` | Partial update — omitted fields unchanged |
 | DELETE | `/posts/{id}` | Delete a post |

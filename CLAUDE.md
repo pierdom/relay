@@ -14,8 +14,9 @@ uv run uvicorn relay.main:app --reload      # http://localhost:8000, docs at /do
 docker compose up -d                        # or Docker
 docker compose pull && docker compose up -d # update
 
-uv run pytest -q                            # tests (incl. 116 browser smokes)
+uv run pytest -q                            # tests (tests/ui are browser smokes; they skip without Chromium)
 uv run ruff check .                         # lint (config in pyproject.toml)
+uvx mypy relay --ignore-missing-imports     # types: clean apart from PyYAML's missing stubs (no mypy dependency added)
 uv run playwright install chromium          # once, for browser smokes
 RELAY_EVAL_URL=... RELAY_EVAL_KEY=... uv run pytest -m eval -s  # search-quality recall/MRR baseline (tests/eval), skipped otherwise
 ```
