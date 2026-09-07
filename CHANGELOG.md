@@ -8,6 +8,19 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.7.1] — 2026-09-07
+
+A post's id was only useful over the API — nothing in the UI let you jump straight to one. Adds a `/id/<id>` link and teaches search to treat a bare id as "find this post", not text to rank.
+
+### Added
+- `GET /id/{id}` redirects to `/?post={id}`; the browser UI picks that up on load and opens the post directly. A link to paste, not an API call — no auth of its own, `422` on a non-numeric or negative id. Survives an OIDC login round trip (stashed in the same short-lived session authlib already uses for PKCE/state across the redirect to the IdP and back), not just the in-page API-key-paste login.
+- A bare `123` or `#123` search on `GET /posts?search=` (and `list_posts` on both MCP surfaces) — the same `#NNN` convention `links.py` already resolves in-content — answers with that post directly instead of ranking it as free text: no FTS query, no embedding call, mode-independent (a lookup by id works the same whether or not this relay even has embeddings enabled, unlike a real `semantic`/`hybrid` text query). Reuses the existing `pinned` response field (previously only ever the home feed's master-doc pin) and ignores the active `tag`/`folder` filter, since the point is finding a specific post regardless of where it's filed.
+
+### Fixed
+- The Textual TUI's pagination offset and its SSE prepend ordering both special-cased the master doc's id (`0`) as *the* pinned post; generalizing `pinned` to also mean a bare-id search hit broke both — a search offset could double-count or skip a real post, and a live SSE arrival could displace the search pin from the top slot. Both now compare against whichever id the server actually pinned.
+
+---
+
 ## [1.7.0] — 2026-09-07
 
 The MCP SDK moves from 1.x to 2.x ([#122](https://github.com/pierdom/relay/pull/122), superseding dependabot's [#106](https://github.com/pierdom/relay/pull/106), which raises the constraint without the code that makes it import).

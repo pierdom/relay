@@ -137,7 +137,10 @@ document.getElementById('connectForm').addEventListener('submit', async (ev) => 
   }
 });
 
-oidcLoginBtn.addEventListener('click', () => { window.location.href = '/auth/login'; });
+// Forward `?post=<id>` (an /id/<id> deep link landed here logged out) so
+// /auth/login can stash it and the OIDC callback can restore it — see
+// routes/auth.py's auth_login/auth_callback.
+oidcLoginBtn.addEventListener('click', () => { window.location.href = '/auth/login' + location.search; });
 useKeyBtn.addEventListener('click', () => {
   oidcLogin.style.display = 'none';
   connectForm.style.display = '';
@@ -226,10 +229,19 @@ async function init() {
     defaultMode = on ? 'hybrid' : 'keyword';
     if (on && !query.tag && !query.folder) { query.mode = defaultMode; modeSelect.value = defaultMode; }
   });
-  await Promise.all([loadTags(), loadPosts(true), loadLinkIndex()]);
+  // openPostFromUrl has no dependency on tags/posts, so it runs concurrently
+  // with those — but it does depend on loadLinkIndex: the modal renders the
+  // post body through the same linkIndex-reading path as a feed card, and
+  // unlike a card (which just silently shows unresolved links until the next
+  // re-render), the deep-linked modal only ever renders once. Gating on
+  // linkIndexReady specifically, not the whole group, is what keeps this from
+  // both being unnecessarily serialized after tags/posts *and* racing ahead
+  // of the one thing it actually needs.
+  const linkIndexReady = loadLinkIndex();
+  linkIndexReady.then(openPostFromUrl);
+  await Promise.all([loadTags(), loadPosts(true), linkIndexReady]);
   setDot('connected');
   connectSSE();
-  openPostFromUrl();
 }
 
 // /id/<id> deep links land here as `/?post=<id>` (see relay/main.py's
@@ -241,8 +253,11 @@ async function openPostFromUrl() {
   if (raw === null) return;
   history.replaceState(null, '', location.pathname);
   if (!/^\d+$/.test(raw)) return;
-  try { openPostModal(await apiFetch(`/posts/${raw}`)); }
-  catch { alert(`Post #${raw} not found.`); }
+  // Unlike a wikilink click (silent on failure — broken in-content links are
+  // common and not worth interrupting reading for), this is the one thing an
+  // /id/<id> visit is *for*, so a failure — including an expired session's
+  // real 401, not just a missing post — is worth surfacing with its own detail.
+  await openPostById(raw, { onError: (e) => alert(`Could not open post #${raw}: ${e.message}`) });
 }
 
 // ── Wikilinks: [[Title]] / [[Title|alias]] and #NNN cross-references ──────────
@@ -327,8 +342,9 @@ function extractMedia(content) {
   return { thumb, count, stripped };
 }
 
-async function openPostById(id) {
-  try { openPostModal(await apiFetch(`/posts/${id}`)); } catch {}
+async function openPostById(id, { onError } = {}) {
+  try { openPostModal(await apiFetch(`/posts/${id}`)); }
+  catch (e) { if (onError) onError(e); }
 }
 
 // Delegated: any rendered wikilink opens its target post.

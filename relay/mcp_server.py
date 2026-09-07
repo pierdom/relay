@@ -162,9 +162,10 @@ async def publish_post(
         "mode ranks 'search' (relay #253, proof of concept): 'keyword' (default, FTS5/bm25), "
         "'semantic' (embedding similarity), or 'hybrid' (fusion of both), and can be combined "
         "with tag/folder — semantic/hybrid return an error if this relay hasn't got embeddings "
-        "enabled. A bare id or '#id' as search (e.g. '42' or '#42') jumps straight to that post "
-        "by id instead of ranking it as text — it comes back as the response's 'pinned' field, "
-        "on top of whatever else the search/mode/tag/folder combination matches."
+        "enabled. A bare id or '#id' as search (e.g. '42' or '#42') is a lookup, not a ranked "
+        "search: it answers with just that post as the response's 'pinned' field (items empty) "
+        "and ignores mode/tag/folder entirely — a plain id lookup works the same whether or not "
+        "this relay has embeddings enabled."
     )
 )
 async def list_posts(

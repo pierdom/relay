@@ -11,6 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, status
+from fastapi import Path as ApiPath
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -281,13 +282,15 @@ async def ui() -> RedirectResponse:
 
 
 @app.get("/id/{post_id}", include_in_schema=False)
-async def open_post(post_id: int) -> RedirectResponse:
+async def open_post(post_id: int = ApiPath(ge=0)) -> RedirectResponse:
     """Deep link to a post by id — `/id/123` opens it in the app.
 
     A plain redirect, not a lookup: existence/auth are the client's job once it
-    lands on `/`, same as any other in-app navigation. FastAPI's `int`
-    parameter already rejects anything non-numeric with a 422, so garbage
-    never reaches the redirect.
+    lands on `/`, same as any other in-app navigation. `ge=0` (post ids are
+    monotonic from 0, the master doc) is a real constraint, not FastAPI's
+    default: Starlette's own route matching accepts any string here — `int`
+    coercion happens after, and would otherwise pass `-1` through as a
+    "valid" (if meaningless) redirect target instead of a 422.
     """
     return RedirectResponse(f"/?post={post_id}", status_code=status.HTTP_302_FOUND)
 

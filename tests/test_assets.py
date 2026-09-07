@@ -126,3 +126,11 @@ async def test_id_link_redirects_to_the_shell_with_the_post_id(client):
 async def test_id_link_rejects_a_non_numeric_id(client):
     r = await client.get("/id/not-a-number")
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_id_link_rejects_a_negative_id(client):
+    # Starlette's route matching accepts any string here — plain `int` coercion
+    # alone would let `-1` through as a "valid" (if meaningless) redirect target.
+    r = await client.get("/id/-1")
+    assert r.status_code == 422

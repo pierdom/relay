@@ -182,8 +182,10 @@ async def test_bare_id_search_pins_the_post(client):
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["pinned"]["id"] == target["id"]
-        # Not duplicated into the ranked results below the pin.
-        assert target["id"] not in [i["id"] for i in data["items"]]
+        # A bare-id query is a lookup, not a ranked search — no other post
+        # (however matched) rides along in `items`.
+        assert data["items"] == []
+        assert data["total"] == 0
 
 
 @pytest.mark.asyncio
@@ -221,7 +223,36 @@ async def test_hybrid_mode_pins_a_bare_id_too(client, monkeypatch):
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["pinned"]["id"] == target["id"]
-    assert target["id"] not in [i["id"] for i in data["items"]]
+    assert data["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_bare_id_search_ignores_mode_and_embedding_availability(client):
+    # A bare-id search is a lookup, not a ranking — unlike a real semantic/hybrid
+    # text query (test_hybrid_mode_503_when_embeddings_disabled), it has nothing
+    # to do with whether this relay even has embeddings configured, so it must
+    # not 503 just because mode=hybrid was also passed.
+    target = await _create(client, "No Embeddings Target", "body")
+    r = await client.get("/posts", params={"search": str(target["id"]), "mode": "hybrid"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["pinned"]["id"] == target["id"]
+
+
+@pytest.mark.asyncio
+async def test_bare_id_search_never_loads_the_embedding_backend(client, monkeypatch):
+    # Regression: an earlier implementation ran the full semantic/hybrid ranking
+    # pipeline before discarding it in favour of the pin — wasting a cold-start
+    # reload (~570MB RSS, several seconds; see CLAUDE.md) on every bare-id
+    # search once the model had idle-unloaded.
+    def _boom():
+        raise AssertionError("embedding backend must not be loaded for a bare-id search")
+
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", _boom)
+    target = await _create(client, "No Cold Start Target", "body")
+    r = await client.get("/posts", params={"search": str(target["id"]), "mode": "hybrid"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["pinned"]["id"] == target["id"]
 
 
 @pytest.mark.asyncio

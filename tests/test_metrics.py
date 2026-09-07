@@ -108,6 +108,17 @@ async def test_search_counter_increments(client):
     assert end == start_val + 1
 
 
+@pytest.mark.asyncio
+async def test_search_counter_increments_for_a_bare_id_search_too(client):
+    # _id_lookup answers a bare-id search via a row fetch, not FTS/ranking —
+    # still a search-box interaction, so it must still count.
+    start = metrics.search_queries.family()[3]
+    start_val = start[0][1] if start else 0
+    await client.get("/posts", params={"search": "42"}, headers=AUTH)
+    end = metrics.search_queries.family()[3][0][1]
+    assert end == start_val + 1
+
+
 def test_label_escaping():
     # Quotes/backslashes/newlines in label values must be escaped so the line parses.
     fam = ("m", "help", "counter", [({"k": 'a"b\\c\nd'}, 1.0)])

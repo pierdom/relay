@@ -193,7 +193,6 @@ async def _list_posts_ranked(
     summary: bool,
     tag: str | None = None,
     folder: str | None = None,
-    id_query: int | None = None,
 ) -> PostListResponse | PostSummaryListResponse:
     """``mode="semantic"``/``"hybrid"`` path (relay #253 phases 2-5). Ranks by
     vector similarity, RRF-fused with keyword for hybrid. ``tag``/``folder``
@@ -211,10 +210,10 @@ async def _list_posts_ranked(
     corpus-wide match count like the keyword path's ``SELECT COUNT(*)`` —
     "matches" isn't binary for a similarity ranking the way it is for FTS.
 
-    ``id_query`` (a bare-id search, see ``_id_query``) is pinned the same way
-    the unranked path pins it: pulled out of the ranked pool so it can't also
-    surface at whatever rank it happened to fuse to, and attached as
-    ``pinned`` only on the first page."""
+    A bare-id search (``_id_query``) never reaches this function — ``list_posts``
+    answers it directly with ``_id_lookup`` before branching on mode, so a
+    query that's just an id never pays for a ranking (or FTS) pass whose
+    result would be discarded anyway."""
     if not (database.VEC_ENABLED and settings.embedding_enabled):
         raise SemanticSearchUnavailable
     metrics.search_queries.inc()
@@ -257,8 +256,6 @@ async def _list_posts_ranked(
             keyword_ranked, semantic_ranked, weight_a=1.0, weight_b=weight_b
         )
 
-    if id_query is not None:
-        ordered_ids = [pid for pid in ordered_ids if pid != id_query]
     page_ids = ordered_ids[offset : offset + limit]
     rows_by_id: dict[int, aiosqlite.Row] = {}
     if page_ids:
@@ -267,20 +264,46 @@ async def _list_posts_ranked(
             rows_by_id = {row["id"]: row for row in await cur.fetchall()}
     rows = [rows_by_id[pid] for pid in page_ids if pid in rows_by_id]
 
-    pin_row = await _fetch(db, id_query) if (id_query is not None and offset == 0) else None
-
     if summary:
         return PostSummaryListResponse(
             items=[PostSummary.from_row(r) for r in rows],
-            total=len(ordered_ids), limit=limit, offset=offset,
-            pinned=PostSummary.from_row(pin_row) if pin_row is not None else None,
+            total=len(ordered_ids), limit=limit, offset=offset, pinned=None,
             search_timing=search_timing,
         )
     return PostListResponse(
         items=[PostResponse.from_row(r) for r in rows],
-        total=len(ordered_ids), limit=limit, offset=offset,
-        pinned=PostResponse.from_row(pin_row) if pin_row is not None else None,
+        total=len(ordered_ids), limit=limit, offset=offset, pinned=None,
         search_timing=search_timing,
+    )
+
+
+async def _id_lookup(
+    db: aiosqlite.Connection, post_id: int, *, limit: int, offset: int, summary: bool
+) -> PostListResponse | PostSummaryListResponse:
+    """A bare-id search (``_id_query``) means "find this post", full stop — not
+    "also rank the digits as text". Answered directly, mode-independent: no
+    FTS query, no ``vectors.semantic_search`` call, so it can't pay for (or
+    trigger a cold reload of) a ranking pass whose result would be discarded
+    the moment it came back, and it works the same whether or not this relay
+    even has embeddings enabled — a plain lookup by id has nothing to do with
+    ``mode``. ``tag``/``folder`` are deliberately not applied either: the
+    point is finding a specific post regardless of where it's filed. ``items``
+    is always empty and ``total`` always 0 — there is no paginated result
+    here, only the single ``pinned`` post (and only on the first page,
+    matching the master-doc pin's own convention) — so the UI's "load more"
+    never appears for one. Still counts toward ``metrics.search_queries``: it
+    is a search-box interaction, even though it resolves via a row fetch
+    rather than FTS or a ranking pass."""
+    metrics.search_queries.inc()
+    pin_row = await _fetch(db, post_id) if offset == 0 else None
+    if summary:
+        return PostSummaryListResponse(
+            items=[], total=0, limit=limit, offset=offset,
+            pinned=PostSummary.from_row(pin_row) if pin_row is not None else None,
+        )
+    return PostListResponse(
+        items=[], total=0, limit=limit, offset=offset,
+        pinned=PostResponse.from_row(pin_row) if pin_row is not None else None,
     )
 
 
@@ -306,10 +329,11 @@ async def list_posts(
     limit = _clamp(limit, low=1, high=MAX_PAGE_LIMIT)
     offset = max(0, int(offset))
     id_query = _id_query(search) if search else None
+    if id_query is not None:
+        return await _id_lookup(db, id_query, limit=limit, offset=offset, summary=summary)
     if search and mode in ("semantic", "hybrid"):
         return await _list_posts_ranked(
-            db, search=search, mode=mode, limit=limit, offset=offset, summary=summary,
-            tag=tag, folder=folder, id_query=id_query,
+            db, search=search, mode=mode, limit=limit, offset=offset, summary=summary, tag=tag, folder=folder
         )
 
     conditions: list[str] = []
@@ -340,15 +364,9 @@ async def list_posts(
 
     # On the unfiltered home feed, pin the master document (id=0) on top and keep
     # it out of the dated stream so pagination stays consistent across pages.
-    # A bare-id search (`_id_query`) pins that post the same way, for the same
-    # reason: shown once, above the fold, not duplicated wherever it happened
-    # to rank in the dated/relevance-ordered results below.
     pin_master = tag is None and search is None and folder is None
     if pin_master:
         conditions.append("posts.id != 0")
-    elif id_query is not None:
-        conditions.append("posts.id != ?")
-        params.append(id_query)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -361,12 +379,9 @@ async def list_posts(
     ) as cur:
         rows = await cur.fetchall()
 
-    pin_row = None
-    if offset == 0:
-        if pin_master:
-            pin_row = await _fetch(db, 0)
-        elif id_query is not None:
-            pin_row = await _fetch(db, id_query)
+    master = None
+    if pin_master and offset == 0:
+        master = await _fetch(db, 0)
 
     if summary:
         return PostSummaryListResponse(
@@ -374,7 +389,7 @@ async def list_posts(
             total=count_row[0],
             limit=limit,
             offset=offset,
-            pinned=PostSummary.from_row(pin_row) if pin_row is not None else None,
+            pinned=PostSummary.from_row(master) if master is not None else None,
         )
 
     return PostListResponse(
@@ -382,7 +397,7 @@ async def list_posts(
         total=count_row[0],
         limit=limit,
         offset=offset,
-        pinned=PostResponse.from_row(pin_row) if pin_row is not None else None,
+        pinned=PostResponse.from_row(master) if master is not None else None,
     )
 
 

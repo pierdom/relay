@@ -130,6 +130,74 @@ async def test_session_endpoint_rejects_wrong_key():
     assert token and auth.verify_session(token) is not None
 
 
+# ── OIDC login/callback: /id/<id> deep link survives the round trip ─────────
+
+
+class _FakeOIDCClient:
+    """Stands in for authlib's per-provider client — real `authorize_redirect`/
+    `authorize_access_token` need a live IdP; these two are all the routes call."""
+
+    def __init__(self, claims: dict | None = None) -> None:
+        self._claims = claims or {"sub": "user-1", "email": "me@example.com", "email_verified": True}
+
+    async def authorize_redirect(self, request, redirect_uri):
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse("https://idp.example.com/authorize", status_code=302)
+
+    async def authorize_access_token(self, request):
+        return {"userinfo": self._claims}
+
+
+async def _login_then_callback(c: AsyncClient, post: str | None):
+    # `SessionMiddleware`'s `relay_oauth` cookie is `Secure` (https_only follows
+    # settings.secure_cookies, baked in at app-construction time — monkeypatching
+    # the setting in a test doesn't reach an already-built middleware instance),
+    # so httpx's cookie jar won't forward it to the next request over this test's
+    # plain-http transport. Attach it explicitly, same workaround already used by
+    # test_session_cookie_authorizes_protected_route for the same reason.
+    params = {"post": post} if post is not None else {}
+    login = await c.get("/auth/login", params=params, follow_redirects=False)
+    oauth_cookie = login.cookies.get("relay_oauth")
+    return await c.get("/auth/callback", cookies={"relay_oauth": oauth_cookie}, follow_redirects=False)
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_roundtrips_a_pending_post_id_through_the_callback(monkeypatch):
+    # relay #(this PR): /id/<id> redirects to /?post=<id>, which an
+    # unauthenticated visitor can only consume after finishing OIDC login —
+    # a full-page redirect out to the IdP and back, unlike the in-page
+    # API-key-paste login. Without stashing `post` across that round trip,
+    # the callback's hardcoded "/" silently drops the deep link.
+    from relay.routes import auth as auth_routes
+
+    monkeypatch.setattr(auth_routes, "_client", lambda: _FakeOIDCClient())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        callback = await _login_then_callback(c, "42")
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/?post=42"
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_without_a_pending_post_id_falls_back_to_plain_root(monkeypatch):
+    from relay.routes import auth as auth_routes
+
+    monkeypatch.setattr(auth_routes, "_client", lambda: _FakeOIDCClient())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        callback = await _login_then_callback(c, None)
+    assert callback.headers["location"] == "/"
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_ignores_a_malformed_post_param(monkeypatch):
+    from relay.routes import auth as auth_routes
+
+    monkeypatch.setattr(auth_routes, "_client", lambda: _FakeOIDCClient())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        callback = await _login_then_callback(c, "not-a-number")
+    assert callback.headers["location"] == "/"
+
+
 @pytest.mark.asyncio
 async def test_mcp_metadata_absent_when_oauth_disabled():
     # With OAuth off (the default this app was imported under), the SDK mounts no
