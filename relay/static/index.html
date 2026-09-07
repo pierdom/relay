@@ -28,8 +28,11 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon-180.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/marked@14.1.4/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
+  <!-- Vendored (relay/static/ui/vendor), not a CDN: the sanitiser between
+       agent-written Markdown and this session must not be fetched from a third
+       party on every load, and the CSP on this page allows 'self' only. -->
+  <script src="/static/__ASSETS__/vendor/marked.min.js"></script>
+  <script src="/static/__ASSETS__/vendor/purify.min.js"></script>
   <link rel="stylesheet" href="/static/__ASSETS__/app.css">
 </head>
 <body>

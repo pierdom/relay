@@ -5,6 +5,8 @@ import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from . import folders
+
 # The one shape every stored timestamp has (vault.utcnow_iso, frontmatter._to_iso,
 # and the cleanup loop's strftime('now') all agree on it). expires_at is compared
 # *lexically* against it in SQL, so anything else is not "unusual", it is wrong:
@@ -277,6 +279,18 @@ class AttachmentCreate(BaseModel):
             return None
         v = v.strip()
         return v or None
+
+    @field_validator("folder")
+    @classmethod
+    def folder_is_a_plain_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        if not folders.is_valid_name(v):
+            raise ValueError("folder must be a plain first-level folder name")
+        return v
 
     @model_validator(mode="after")
     def one_source(self) -> AttachmentCreate:

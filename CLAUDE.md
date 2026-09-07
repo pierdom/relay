@@ -55,7 +55,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 
 ## Attachments
 
-Non-`.md` files live in `<Folder>/assets/`, embedded as `![[file.png]]`. Names are vault-globally unique. Three byte transports (enforced exactly-one): `data` (base64), `source_url` (server fetches, SSRF-guarded), `upload_id` (presigned slot). Slots are in-memory + disk-staged under `.relay/uploads/`, single-use, TTL'd — **single-worker assumption**. `ATTACHMENT_MAX_MB` (25) → 413. Deleting a post removes only the attachments it embedded that no other post references.
+Non-`.md` files live in `<Folder>/assets/`, embedded as `![[file.png]]`. Names are vault-globally unique. **Serving is an inline allowlist by resolved MIME** (`routes/attachments._renders_inline`: raster images, audio/video, PDF, plain text); everything else — HTML, XHTML, SVG-as-document, XML/XSLT, and unknown types — gets `Content-Disposition: attachment` so an upload can never run script in the UI's origin. Never go back to a suffix list: `mimetypes` maps `.xht`/`.svgz`/`.shtml`/`.xsl` to active types too. A caller-supplied `folder` must pass `folders.is_valid_name` (one segment, not `..`, not dot-prefixed) — `Path(folder).name` alone let `..` through. Three byte transports (enforced exactly-one): `data` (base64), `source_url` (server fetches, SSRF-guarded), `upload_id` (presigned slot). Slots are in-memory + disk-staged under `.relay/uploads/`, single-use, TTL'd — **single-worker assumption**. `ATTACHMENT_MAX_MB` (25) → 413. Deleting a post removes only the attachments it embedded that no other post references.
 
 ## History
 
@@ -103,7 +103,7 @@ Stored verbatim, resolved at display time. Code spans/blocks are skipped.
 
 ## Authentication
 
-Two channels checked by `require_api_key` (`relay/auth.py`): **Bearer `API_KEY`** (machine-to-machine) and **`relay_session` cookie** (web UI, signed `itsdangerous` token). The cookie is verified with a **live allowlist re-check on every request** — dropping a sub from `OIDC_ALLOWED_SUBS` revokes in-wild sessions immediately. No per-token revocation; a captured cookie stays valid until expiry.
+Two channels checked by `require_api_key` (`relay/auth.py`): **Bearer `API_KEY`** (machine-to-machine) and **`relay_session` cookie** (web UI, signed `itsdangerous` token). **`auth.bearer_matches()` is the only place the key is compared** — every surface (`/session`, `/events`, the MCP bearer gate, the OAuth verifier) calls it; it compares UTF-8 bytes because `compare_digest` on `str` raises on non-ASCII. Cookie-authenticated state-changing requests are rejected when `Sec-Fetch-Site`/`Origin` say cross-site (`auth.is_cross_site`), a second lock next to `SameSite=Strict`. The cookie is verified with a **live allowlist re-check on every request** — dropping a sub from `OIDC_ALLOWED_SUBS` revokes in-wild sessions immediately. No per-token revocation; a captured cookie stays valid until expiry.
 
 **MCP OAuth** (`MCP_OAUTH_ENABLED`): relay acts as its own OAuth 2.1 AS, brokering to PocketID. Tokens are opaque, hashed at rest, stored in `<vault>/.relay/oauth.db` (separate from `index.db`). The static `API_KEY` always works as a synthetic bearer. Setup: add `<RELAY_BASE_URL>/mcp/oauth/callback` to the PocketID client before enabling.
 
@@ -146,7 +146,7 @@ claude mcp add --transport http relay https://your-relay.example.com/mcp \
 
 ## Browser UI (`GET /ui`)
 
-Single-page app on the REST API + SSE. ES modules, no build step — nothing is on `window`; imported bindings are read-only, so shared mutable state uses exported objects or private setters (`api.js` owns `apiKey` behind `setApiKey`/`clearApiKey`).
+Single-page app on the REST API + SSE. ES modules, no build step — nothing is on `window`; imported bindings are read-only, so shared mutable state uses exported objects or private setters (`api.js` owns `apiKey` behind `setApiKey`/`clearApiKey`). `marked` and `DOMPurify` are **vendored** in `static/ui/vendor/` (not CDN-loaded) and `/` carries a CSP built by `main.ui_csp()`: `script-src 'self'` plus a hash of the one inline theme script in `index.html` — add another inline `<script>` and the hash list grows automatically, add an external script host and the CSP must be changed deliberately.
 
 **Critical invariants:**
 
@@ -164,6 +164,7 @@ Single-page app on the REST API + SSE. ES modules, no build step — nothing is 
 - **Header control order is a safety property**: `+ New Post` · theme · status · disconnect. Primary action and session-kill must not be adjacent. `test_header_controls_are_one_visual_set` pins this.
 - **Use inline SVG, not glyphs or emoji** for icons. Colour emoji ignores CSS `color`; Unicode glyphs render unpredictably at small sizes.
 - **iOS input zoom**: handled globally by `@media (hover: none) { input, textarea, select { font-size: 16px !important } }` — not per-form.
+- **CSP forbids inline event handlers and `javascript:` URLs** (`script-src` has no `'unsafe-inline'`). Wire handlers with `addEventListener`; `style=` attributes are fine (`style-src` allows inline).
 
 ## Terminal UI
 

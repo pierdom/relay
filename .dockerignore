@@ -1,0 +1,23 @@
+# Only pyproject.toml, uv.lock and relay/ are COPY'd, but the build context is
+# still sent to the daemon — keep secrets, vaults and junk out of it.
+.git
+.github
+.env
+.env.*
+!.env.example
+.mcp.json
+.claude/
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+*.db-shm
+*.db-wal
+vault/
+vault.bak*/
+sample_vault/
+tests/
+docs/
+scripts/
+dist/
+**/.DS_Store

@@ -433,12 +433,9 @@ async def semantic_search(
             total_chunks = (await cur.fetchone())[0]
         params[1] = chunk_k = max(total_chunks, chunk_k)
         joins = "JOIN posts p ON p.id = c.post_id"
-        if tag:
-            conditions.append("p.tags LIKE ?")
-            params.append(f"%,{tag.strip().lower()},%")
-        if folder:
-            conditions.append("p.path LIKE ?")
-            params.append(f"{folder}/%")
+        f_conds, f_params = database.tag_folder_filters(tag, folder, alias="p")
+        conditions += f_conds
+        params += f_params
 
     async with db.execute(
         f"""
