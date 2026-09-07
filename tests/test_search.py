@@ -14,7 +14,7 @@ from relay.auth import require_api_key
 from relay.config import settings
 from relay.embedding import FakeBackend
 from relay.main import app
-from relay.service.posts import _fts_query
+from relay.service.posts import _fts_query, _id_query
 
 AUTH = {"Authorization": "Bearer test-key"}
 
@@ -71,6 +71,21 @@ def test_fts_query_empty_when_no_tokens():
     assert _fts_query("") is None
     assert _fts_query("   ") is None
     assert _fts_query('"()*:-') is None
+
+
+def test_id_query_matches_bare_and_hash_forms():
+    assert _id_query("42") == 42
+    assert _id_query("#42") == 42
+    assert _id_query("  42  ") == 42
+
+
+def test_id_query_none_for_non_id_text():
+    assert _id_query("wireguard") is None
+    assert _id_query("42 homelab") is None
+    assert _id_query("4.2") is None
+    assert _id_query("#") is None
+    assert _id_query("") is None
+    assert _id_query("123456") is None  # over the 5-digit bound (links.IDREF_RE)
 
 
 # ── FTS behaviour (integration) ──────────────────────────────────────────────
@@ -153,6 +168,91 @@ async def test_fts_survives_index_rebuild(client, vault_dir):
 async def test_search_matches_tags(client):
     await _create(client, "Tagged", "body text", tags=["homelab", "reference"])
     assert "Tagged" in await _titles(client, "homelab")
+
+
+# ── Bare-id search pin ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bare_id_search_pins_the_post(client):
+    target = await _create(client, "Target Post", "nothing searchable in here")
+    await _create(client, "Other", "unrelated content")
+    for q in (str(target["id"]), f"#{target['id']}"):
+        r = await client.get("/posts", params={"search": q}, headers=AUTH)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["pinned"]["id"] == target["id"]
+        # A bare-id query is a lookup, not a ranked search — no other post
+        # (however matched) rides along in `items`.
+        assert data["items"] == []
+        assert data["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bare_id_search_no_pin_when_id_does_not_exist(client):
+    r = await client.get("/posts", params={"search": "99999"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["pinned"] is None
+
+
+@pytest.mark.asyncio
+async def test_bare_id_search_pin_ignores_the_active_tag_filter(client):
+    # The pin means "find this post" regardless of what's filtered — a real id
+    # jumps straight to it even if the current tag filter wouldn't show it.
+    target = await _create(client, "Filtered Target", "body", tags=["homelab"])
+    r = await client.get("/posts", params={"search": str(target["id"]), "tag": "dev"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["pinned"]["id"] == target["id"]
+
+
+@pytest.mark.asyncio
+async def test_id_search_pin_only_on_the_first_page(client):
+    target = await _create(client, "Paged Target", "body")
+    r = await client.get("/posts", params={"search": str(target["id"]), "offset": 1}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["pinned"] is None
+
+
+@pytest.mark.asyncio
+async def test_hybrid_mode_pins_a_bare_id_too(client, monkeypatch):
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", lambda: FakeBackend())
+    section = "content word " * 60
+    target = await _create(client, "Hybrid Target", f"## S\n{section} delta")
+    r = await client.get("/posts", params={"search": str(target["id"]), "mode": "hybrid"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["pinned"]["id"] == target["id"]
+    assert data["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_bare_id_search_ignores_mode_and_embedding_availability(client):
+    # A bare-id search is a lookup, not a ranking — unlike a real semantic/hybrid
+    # text query (test_hybrid_mode_503_when_embeddings_disabled), it has nothing
+    # to do with whether this relay even has embeddings configured, so it must
+    # not 503 just because mode=hybrid was also passed.
+    target = await _create(client, "No Embeddings Target", "body")
+    r = await client.get("/posts", params={"search": str(target["id"]), "mode": "hybrid"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["pinned"]["id"] == target["id"]
+
+
+@pytest.mark.asyncio
+async def test_bare_id_search_never_loads_the_embedding_backend(client, monkeypatch):
+    # Regression: an earlier implementation ran the full semantic/hybrid ranking
+    # pipeline before discarding it in favour of the pin — wasting a cold-start
+    # reload (~570MB RSS, several seconds; see CLAUDE.md) on every bare-id
+    # search once the model had idle-unloaded.
+    def _boom():
+        raise AssertionError("embedding backend must not be loaded for a bare-id search")
+
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", _boom)
+    target = await _create(client, "No Cold Start Target", "body")
+    r = await client.get("/posts", params={"search": str(target["id"]), "mode": "hybrid"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["pinned"]["id"] == target["id"]
 
 
 @pytest.mark.asyncio

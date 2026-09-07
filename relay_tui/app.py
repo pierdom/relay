@@ -34,6 +34,15 @@ from .widgets.post_panel import PostPanel
 from .widgets.tag_panel import TagPanel
 
 
+def _dated_stream_offset(posts: list[api.Post], pinned_id: int | None) -> int:
+    """How many of ``posts`` are real dated/ranked-stream entries — i.e. not
+    the pinned post (master doc, or a bare-id search hit) the server returns
+    separately and the caller prepends. Undercounting this repeats a real post
+    on the next page; overcounting it skips one. Pure so it's testable without
+    a running app — see ``RelayTuiApp._update_data``, its one caller."""
+    return sum(1 for p in posts if p.id != pinned_id)
+
+
 # ── terminal-transparency filter ──────────────────────────────────────────────
 # Textual renders in truecolor, and its built-in ANSIToTruecolor line filter
 # rewrites any "terminal default" background into a concrete RGB colour pulled
@@ -295,21 +304,20 @@ class RelayTuiApp(App):
                 pass
             if posts:
                 self._sse.set_last_id(posts[0].id)  # newest real post (before pin)
+            pinned_id = pinned.id if pinned is not None else None
             if pinned is not None:
-                posts = [pinned, *posts]  # master document pinned on top
-            self.call_from_thread(self._update_data, posts, total, tags)
+                posts = [pinned, *posts]  # master doc or a bare-id search hit, pinned on top
+            self.call_from_thread(self._update_data, posts, total, tags, pinned_id)
         except Exception as e:
             self.call_from_thread(self.notify, f"Reload failed: {e}", severity="error")
 
     def _update_data(
-        self, posts: list[api.Post], total: int, tags: list[api.Tag]
+        self, posts: list[api.Post], total: int, tags: list[api.Tag], pinned_id: int | None = None
     ) -> None:
         self._total = total
-        # the pinned master (#0) isn't part of the dated stream — don't count it
-        # toward the offset or the next page skips a real post
-        self._offset = sum(1 for p in posts if p.id != 0)
+        self._offset = _dated_stream_offset(posts, pinned_id)
         self._loading_more = False
-        self.query_one(PostPanel).set_posts(posts, search=self._search)
+        self.query_one(PostPanel).set_posts(posts, search=self._search, pinned_id=pinned_id)
         if self._topics_mode == "tags":
             self.query_one(TagPanel).set_tags(tags, active=self._active_tag)
 

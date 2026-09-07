@@ -108,6 +108,18 @@ def _order_clause(sort: str, order: str) -> str:
     return f"{col} {direction}, posts.id {direction}"
 
 
+# A bare `123` or `#123` search means "find this post by id", not free text —
+# the id column was never indexed by FTS. Same `#NNN` convention and 1-5 digit
+# bound `links.IDREF_RE` resolves in-content, so a query and a #-mention agree
+# on what counts as an id.
+_ID_QUERY_RE = re.compile(r"^#?(\d{1,5})$")
+
+
+def _id_query(search: str) -> int | None:
+    m = _ID_QUERY_RE.match(search.strip())
+    return int(m.group(1)) if m else None
+
+
 def _fts_query(search: str) -> str | None:
     """Turn free text into a safe FTS5 MATCH string, or ``None`` if it has no
     searchable tokens. Every token is stripped to word characters (neutralising
@@ -196,7 +208,12 @@ async def _list_posts_ranked(
     ``total`` in the response is the size of the fused candidate pool
     actually considered (bounded by ``_RANKED_POOL_CAP``), not an exact
     corpus-wide match count like the keyword path's ``SELECT COUNT(*)`` —
-    "matches" isn't binary for a similarity ranking the way it is for FTS."""
+    "matches" isn't binary for a similarity ranking the way it is for FTS.
+
+    A bare-id search (``_id_query``) never reaches this function — ``list_posts``
+    answers it directly with ``_id_lookup`` before branching on mode, so a
+    query that's just an id never pays for a ranking (or FTS) pass whose
+    result would be discarded anyway."""
     if not (database.VEC_ENABLED and settings.embedding_enabled):
         raise SemanticSearchUnavailable
     metrics.search_queries.inc()
@@ -260,6 +277,36 @@ async def _list_posts_ranked(
     )
 
 
+async def _id_lookup(
+    db: aiosqlite.Connection, post_id: int, *, limit: int, offset: int, summary: bool
+) -> PostListResponse | PostSummaryListResponse:
+    """A bare-id search (``_id_query``) means "find this post", full stop — not
+    "also rank the digits as text". Answered directly, mode-independent: no
+    FTS query, no ``vectors.semantic_search`` call, so it can't pay for (or
+    trigger a cold reload of) a ranking pass whose result would be discarded
+    the moment it came back, and it works the same whether or not this relay
+    even has embeddings enabled — a plain lookup by id has nothing to do with
+    ``mode``. ``tag``/``folder`` are deliberately not applied either: the
+    point is finding a specific post regardless of where it's filed. ``items``
+    is always empty and ``total`` always 0 — there is no paginated result
+    here, only the single ``pinned`` post (and only on the first page,
+    matching the master-doc pin's own convention) — so the UI's "load more"
+    never appears for one. Still counts toward ``metrics.search_queries``: it
+    is a search-box interaction, even though it resolves via a row fetch
+    rather than FTS or a ranking pass."""
+    metrics.search_queries.inc()
+    pin_row = await _fetch(db, post_id) if offset == 0 else None
+    if summary:
+        return PostSummaryListResponse(
+            items=[], total=0, limit=limit, offset=offset,
+            pinned=PostSummary.from_row(pin_row) if pin_row is not None else None,
+        )
+    return PostListResponse(
+        items=[], total=0, limit=limit, offset=offset,
+        pinned=PostResponse.from_row(pin_row) if pin_row is not None else None,
+    )
+
+
 async def list_posts(
     db: aiosqlite.Connection,
     *,
@@ -281,6 +328,9 @@ async def list_posts(
     tag, folder, search = tag or None, folder or None, search or None
     limit = _clamp(limit, low=1, high=MAX_PAGE_LIMIT)
     offset = max(0, int(offset))
+    id_query = _id_query(search) if search else None
+    if id_query is not None:
+        return await _id_lookup(db, id_query, limit=limit, offset=offset, summary=summary)
     if search and mode in ("semantic", "hybrid"):
         return await _list_posts_ranked(
             db, search=search, mode=mode, limit=limit, offset=offset, summary=summary, tag=tag, folder=folder

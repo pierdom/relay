@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
@@ -11,6 +12,19 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["auth"])
+
+# An /id/<id> deep link's `?post=` survives the OIDC round trip via this, not
+# a generic `next=` redirect target (which would need its own open-redirect
+# validation this doesn't need: the result is always exactly `/?post=<id>`).
+# Deliberately *not* the 1-5 digit bound links.IDREF_RE / service.posts.
+# _ID_QUERY_RE share for the `#NNN` in-content convention — that bound has
+# nothing to do with this one. This one only needs to match what /id/{id}
+# itself accepts (`main.py`'s `Path(ge=0)`, no upper bound), so a post id
+# outside 1-99999 doesn't silently lose its deep link on this path alone
+# while `/id/<id>` and the search-box bare-id shortcut both still work at
+# that size. Bounded anyway (not bare `\d+`) so an attacker can't stuff an
+# arbitrarily long digit string into the session via a crafted login link.
+_POST_ID_RE = re.compile(r"^\d{1,15}$")
 
 # Registered lazily on first use so import never touches the network and a
 # missing/rotated OIDC config doesn't break app startup.
@@ -76,6 +90,23 @@ async def auth_login(request: Request):
     client = _client()
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OIDC not configured")
+    # Round-trip a pending /id/<id> deep link through the OIDC redirect, which
+    # otherwise drops it: the login button navigates the whole page away, and
+    # PocketID's callback always lands back on plain `/`. Stashed in the same
+    # short-lived `relay_oauth` session authlib already uses for PKCE/state,
+    # not the querystring, so it survives a provider that doesn't echo unknown
+    # authorize params back unchanged. Explicitly cleared when absent so a
+    # retry without `?post=` can't resurrect a stale value from an earlier
+    # attempt. Shares that session's own pre-existing limitation: it's one
+    # cookie per browser, not per tab, so two logins started from two tabs
+    # before either completes can clobber each other's stashed `post` (and,
+    # already, authlib's own state/PKCE verifier) — not a regression this
+    # introduces, just not something it fixes either.
+    post_id = request.query_params.get("post")
+    if post_id and _POST_ID_RE.match(post_id):
+        request.session["post"] = post_id
+    else:
+        request.session.pop("post", None)
     return await client.authorize_redirect(request, _redirect_uri())
 
 
@@ -102,7 +133,9 @@ async def auth_callback(request: Request):
         logger.warning("OIDC login denied for sub=%s email=%s (not in allowlist)", sub, email)
         return RedirectResponse("/?auth_error=forbidden", status_code=status.HTTP_303_SEE_OTHER)
 
-    resp = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    post_id = request.session.pop("post", None)
+    target = f"/?post={post_id}" if post_id else "/"
+    resp = RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
     _set_session_cookie(resp, sub=sub, email=email)
     return resp
 

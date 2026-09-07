@@ -12,6 +12,19 @@ from .. import api
 from ..theme import ACCENT, BORDER, PERF_BAD, PERF_TERRIBLE
 
 
+def _skip_pinned(first_child_id: int | None, pinned_id: int | None) -> int:
+    """How many leading children a new SSE arrival must be inserted after, so
+    it lands below whatever's pinned on top (master doc, or a bare-id search
+    hit) instead of displacing it. Takes just the current first child's id
+    (``None`` if the feed is empty), not the whole list — `prepend_post`
+    indexes the very list this is computed from, so building a second,
+    ``PostItem``-filtered list to compute it from would risk the two silently
+    drifting apart if a non-``PostItem`` were ever mounted into the feed.
+    Pure so it's testable without mounting a Textual app — see
+    ``prepend_post``, its one caller."""
+    return 1 if pinned_id is not None and first_child_id == pinned_id else 0
+
+
 def _fmt_span(seconds: int) -> str:
     if seconds < 60:
         return "<1m"
@@ -143,6 +156,10 @@ class PostPanel(Widget):
     # Tracked explicitly: widget removal/mount is async, so counting live DOM
     # children can't tell whether the feed is empty within a single tick.
     _count = 0
+    # id of whichever post `set_posts` pinned on top (master doc, or a bare-id
+    # search hit), if any — `prepend_post` needs this to know which slot an
+    # incoming SSE post must not be inserted above.
+    _pinned_id: int | None = None
 
     @property
     def selected_post(self) -> api.Post | None:
@@ -169,7 +186,9 @@ class PostPanel(Widget):
             lv.display = False
             empty.display = True
 
-    def set_posts(self, posts: list[api.Post], search: str | None = None) -> None:
+    def set_posts(
+        self, posts: list[api.Post], search: str | None = None, pinned_id: int | None = None
+    ) -> None:
         header = self.query_one(Label)
         if search:
             header.update(f"[bold]FEED[/]  [dim]search: {escape(search)}[/dim]")
@@ -181,6 +200,7 @@ class PostPanel(Widget):
         lv = self.query_one("#post-listview", ListView)
         lv.clear()
         self._count = len(posts)
+        self._pinned_id = pinned_id
         self._apply_visibility()
         for p in posts:
             lv.mount(PostItem(p))
@@ -197,10 +217,10 @@ class PostPanel(Widget):
         self._apply_visibility()
         item = PostItem(post)
         children = list(lv.children)
-        before = children[0] if children else None
-        # keep the pinned master document (#0) on top
-        if before is not None and isinstance(before, PostItem) and before.post.id == 0:
-            before = children[1] if len(children) > 1 else None
+        first = children[0] if children else None
+        first_id = first.post.id if isinstance(first, PostItem) else None
+        skip = _skip_pinned(first_id, self._pinned_id)
+        before = children[skip] if skip < len(children) else None
         if before is not None:
             lv.mount(item, before=before)
         else:

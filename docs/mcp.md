@@ -9,7 +9,7 @@ relay exposes the full feed API as **22 MCP tools** so Claude (or any MCP-capabl
 | `publish_post` | Publish a post (title, content, tags, source, expires_at) |
 | `update_post` | Partially update a post by ID — only provided fields change; pass `""` for `expires_at` or `source` to clear it |
 | `get_post` | Get a post by ID (`id=0` for the master document) |
-| `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default. `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) and combines with tag/folder — errors if embeddings aren't enabled |
+| `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default. `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) and combines with tag/folder — errors if embeddings aren't enabled. A bare id or `#id` as `search` (e.g. `42`) is a lookup, not a ranked search: answers with just that post as `pinned`, ignoring `mode`/`tag`/`folder`, whether or not embeddings are enabled |
 | `delete_post` | Delete a post by ID |
 | `get_post_history` | List a post's revisions from vault history; works for a deleted post (`exists:false`) |
 | `get_post_revision` | Read a post exactly as it was at one revision — preview before restoring |
