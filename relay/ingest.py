@@ -229,9 +229,6 @@ class UploadRegistry:
         self._discard(upload_id)
         return data
 
-    def discard(self, upload_id: str) -> None:
-        self._discard(upload_id)
-
 
 registry = UploadRegistry()
 

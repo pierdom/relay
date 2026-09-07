@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+from urllib.parse import urlsplit
 
 from fastapi import Cookie, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -16,6 +17,19 @@ _SALT = "relay-session"
 # The break-glass API-key paste (`POST /session`) mints this subject. Possession
 # of API_KEY is itself the credential there, so the OIDC allowlist doesn't apply.
 APIKEY_SUB = "apikey"
+
+
+def bearer_matches(token: str | None) -> bool:
+    """Constant-time comparison of a presented bearer against ``API_KEY``.
+
+    The single place the key is compared. Compares UTF-8 bytes: ``compare_digest``
+    on ``str`` raises ``TypeError`` for non-ASCII input, which turned an
+    unauthenticated request carrying ``Bearer café`` into a 500 and a stack
+    trace in the log (once per copy of this check — there used to be five).
+    """
+    if not token:
+        return False
+    return hmac.compare_digest(token.encode("utf-8"), settings.api_key.encode("utf-8"))
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -71,14 +85,38 @@ def revoke_session(token: str) -> None:
     """
 
 
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def is_cross_site(request: Request) -> bool:
+    """Whether a browser sent this request from another site.
+
+    ``Sec-Fetch-Site`` is authoritative when present (every current browser
+    sends it); otherwise fall back to comparing ``Origin`` with ``Host``. A
+    request with neither header is a non-browser client and passes.
+    """
+    site = request.headers.get("sec-fetch-site")
+    if site:
+        return site not in ("same-origin", "none")
+    origin = request.headers.get("origin")
+    if origin:
+        return urlsplit(origin).netloc.lower() != request.headers.get("host", "").lower()
+    return False
+
+
 async def require_api_key(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
     relay_session: str | None = Cookie(default=None),
 ) -> None:
     if relay_session and verify_session(relay_session) is not None:
+        # The cookie is a browser credential, so a state-changing request must
+        # come from this site. SameSite=Strict already keeps the cookie off
+        # cross-site requests in current browsers; this is the second lock.
+        if request.method not in _SAFE_METHODS and is_cross_site(request):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-site request rejected")
         return
-    if credentials and hmac.compare_digest(credentials.credentials, settings.api_key):
+    if credentials and bearer_matches(credentials.credentials):
         return
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

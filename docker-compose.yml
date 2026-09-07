@@ -1,11 +1,11 @@
 services:
   relay:
     container_name: relay
-    # Pinned to the 0.9 minor line so `docker compose pull` rolls forward within
-    # 0.9.x (deliberate, rollback-able) instead of tracking whatever last hit
-    # main via :latest. Pin to an exact :0.9.N to freeze, or bump to :0.10 on the
-    # next minor release. CI publishes :X.Y.Z + :X.Y on every vX.Y.Z tag.
-    image: ghcr.io/pierdom/relay:0.9
+    # Pinned to the current minor line so `docker compose pull` rolls forward
+    # within 1.5.x (deliberate, rollback-able) instead of tracking whatever last
+    # hit main via :latest. Pin to an exact :1.5.N to freeze. CI publishes
+    # :X.Y.Z + :X.Y on every vX.Y.Z tag; this line moves with each minor release.
+    image: ghcr.io/pierdom/relay:1.5
     # Run as your host user so files relay writes into the bind-mounted vault
     # (renames, index.db) stay user-owned — good for backup/Syncthing/Obsidian.
     user: "${RELAY_UID:-1000}:${RELAY_GID:-1000}"
@@ -23,4 +23,13 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+    # Hardening: the process needs no capabilities, must never gain privileges,
+    # and writes only into the vault volume (plus /tmp for Python's tempfile).
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped

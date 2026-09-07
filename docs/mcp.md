@@ -7,16 +7,16 @@ relay exposes the full feed API as **22 MCP tools** so Claude (or any MCP-capabl
 | Tool | Description |
 |------|-------------|
 | `publish_post` | Publish a post (title, content, tags, source, expires_at) |
-| `update_post` | Partially update a post by ID — only provided fields change |
+| `update_post` | Partially update a post by ID — only provided fields change; pass `""` for `expires_at` or `source` to clear it |
 | `get_post` | Get a post by ID (`id=0` for the master document) |
-| `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default. `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) — errors if embeddings aren't enabled or if combined with tag/folder |
+| `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default. `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) and combines with tag/folder — errors if embeddings aren't enabled |
 | `delete_post` | Delete a post by ID |
 | `get_post_history` | List a post's revisions from vault history; works for a deleted post (`exists:false`) |
 | `get_post_revision` | Read a post exactly as it was at one revision — preview before restoring |
 | `restore_post` | Restore a post to a revision sha, recreating it if deleted; the restore is itself recorded |
 | `get_backlinks` | Posts that link here via `[[Title]]` or `#id` (linked mentions) |
 | `list_deleted_posts` | Posts that are gone but restorable — id, title, restorable sha, and why they went |
-| `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio proxy also accepts `path` (a local file it uploads for you) |
+| `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio bridge also accepts `path` (a local file it uploads for you) |
 | `create_upload` | Mint a presigned upload slot (`upload_id` + `upload_url`); PUT the raw bytes there, then finalize with `add_attachment(upload_id=…)` |
 | `get_attachment` | Retrieve an attachment; images return as inline image content |
 | `list_attachments` | List attachments; scope by `post_id` or `folder` |
@@ -128,9 +128,9 @@ Or in a `streamable-http` client config:
 }
 ```
 
-## Connect via stdio proxy (legacy)
+## Connect via the stdio bridge
 
-For clients that don't support remote MCP, `relay-mcp` runs locally and proxies to the relay over REST. Requires a checkout of this repo and `uv`.
+For clients that don't support remote MCP, `relay-mcp` runs locally and bridges stdio to the relay's `/mcp` endpoint over Streamable HTTP — same tools, same results, plus a local `path` option on `add_attachment`. Requires a checkout of this repo and `uv`.
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 

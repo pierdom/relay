@@ -15,6 +15,8 @@ lock — cheap, and correct regardless of which thread touches a counter.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
+from typing import Any
 
 # A metric "family" as passed to the renderer:
 #   (name, help_text, type, [(labels_dict, value), ...])
@@ -128,3 +130,59 @@ def build_info_family() -> Family:
 def gauge(name: str, documentation: str, value: float, labels: dict[str, str] | None = None) -> Family:
     """Build a single-sample gauge family for a scrape-time value."""
     return (name, documentation, "gauge", [(labels or {}, value)])
+
+
+# ── HTTP request counting (ASGI middleware) ────────────────────────────────────
+
+# Top-level path segments we count under a stable label. Anything else (e.g. a
+# 404 probe at /random/xyz) buckets to "other" so /metrics cardinality can't be
+# blown up by unmatched paths.
+_KNOWN_SEGMENTS = frozenset({
+    "posts", "tags", "folders", "links", "events", "attachments", "mcp",
+    "auth", "session", "health", "metrics", "assets", "favicon.ico",
+})
+
+
+def _metric_path(scope: dict[str, Any]) -> str:
+    """Stable, low-cardinality path label for an HTTP request.
+
+    A matched FastAPI route exposes its template (``/posts/{post_id}``); a mounted
+    sub-app (the MCP app at ``/mcp``) or an unmatched path has no APIRoute, so we
+    bucket by the first path segment (allowlisted, else ``other``)."""
+    route = scope.get("route")
+    template = getattr(route, "path", None)
+    if template:  # APIRoute template — already parameterised, bounded cardinality
+        return template
+    segment = scope.get("path", "/").strip("/").split("/", 1)[0]
+    if not segment:
+        return "/"
+    return f"/{segment}" if segment in _KNOWN_SEGMENTS else "/other"
+
+
+class MetricsMiddleware:
+    """Pure-ASGI request counter.
+
+    Kept as raw ASGI (not ``BaseHTTPMiddleware``) so it never buffers a response
+    body — that would break the SSE ``/events`` stream and the MCP Streamable HTTP
+    transport. It only peeks at the response-start status message."""
+
+    def __init__(self, app: Callable[..., Any]) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        status_code = 500  # assume failure until we see a response start
+        method = scope.get("method", "GET")
+
+        async def send_wrapper(message: dict[str, Any]) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            http_requests.inc(method=method, path=_metric_path(scope), status=str(status_code))

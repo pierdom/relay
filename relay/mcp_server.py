@@ -8,11 +8,8 @@ transport can connect remotely with the relay's bearer key.
 """
 from __future__ import annotations
 
-import hmac
 import re
-from contextlib import asynccontextmanager
 
-import aiosqlite
 from mcp.server.auth.settings import (
     AuthSettings,
     ClientRegistrationOptions,
@@ -25,7 +22,8 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import database, metrics, service, status, vault, vectors
+from . import database, metrics, service, status, vault
+from .auth import bearer_matches
 from .config import settings
 from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
 
@@ -118,14 +116,7 @@ async def mcp_oauth_callback(request: Request) -> Response:
     return await handle_callback(request)
 
 
-@asynccontextmanager
-async def _db():
-    async with aiosqlite.connect(settings.database_path) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA busy_timeout=5000;")
-        if database.VEC_ENABLED:
-            await vectors.load_extension(db)
-        yield db
+_db = database.connect
 
 
 @mcp.resource(
@@ -218,7 +209,7 @@ async def get_post(id: int) -> dict:
     description=(
         "Update an existing post. Only provided fields change; omitted fields are left "
         "untouched. Providing tags replaces the list wholesale; an empty array clears them. "
-        "Pass expires_at=null to clear an existing expiry."
+        "Pass an empty string for expires_at (or source) to clear it."
     )
 )
 async def update_post(
@@ -230,6 +221,9 @@ async def update_post(
     expires_at: str | None = None,
 ) -> dict:
     metrics.record_tool_call("update_post")
+    # An omitted argument and an explicit null both arrive as None here, so a
+    # None is "leave alone". PostUpdate turns "" into a clear for expires_at and
+    # source — the documented way to unset either from MCP (AUDIT.md B-05).
     fields = {
         "title": title,
         "content": content,
@@ -605,18 +599,17 @@ async def set_tag_config(
 class BearerAuthASGI:
     """Minimal ASGI wrapper that gates the MCP app behind the static bearer key."""
 
-    def __init__(self, app, api_key: str) -> None:
+    def __init__(self, app) -> None:
         self.app = app
-        self.api_key = api_key
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
         headers = dict(scope.get("headers") or [])
-        auth = headers.get(b"authorization", b"").decode()
+        auth = headers.get(b"authorization", b"").decode("latin-1")
         token = auth[7:] if auth.startswith("Bearer ") else ""
-        if not (token and hmac.compare_digest(token, self.api_key)):
+        if not bearer_matches(token):
             await JSONResponse({"detail": "Invalid API key"}, status_code=401)(scope, receive, send)
             return
         await self.app(scope, receive, send)
@@ -632,4 +625,4 @@ def mcp_asgi_app():
     app = mcp.streamable_http_app()
     if settings.mcp_oauth_active:
         return app
-    return BearerAuthASGI(app, settings.api_key)
+    return BearerAuthASGI(app)

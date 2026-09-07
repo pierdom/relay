@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import aiosqlite
 
@@ -123,10 +124,52 @@ async def init_db() -> None:
         FTS_ENABLED = await _init_fts(db)
 
 
-async def get_db():
+def escape_like(value: str) -> str:
+    """Escape ``%``/``_``/``\\`` so a filter value is matched literally under
+    ``LIKE ? ESCAPE '\\'`` — ``folder=%`` used to match every post (AUDIT.md S-16)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def tag_folder_filters(
+    tag: str | None, folder: str | None, *, alias: str | None = "posts"
+) -> tuple[list[str], list[str]]:
+    """The ``tag``/``folder`` WHERE fragments every listing path shares.
+
+    Tags are stored with sentinel commas (``,news,ai,``) and matched with
+    ``LIKE '%,tag,%'``; a folder is the first path segment, ``LIKE 'folder/%'``.
+    One helper so the unranked list, the keyword ranker, the KNN join and the
+    SSE replay agree on which posts are eligible — and all escape wildcards.
+    """
+    col = f"{alias}." if alias else ""
+    conditions: list[str] = []
+    params: list[str] = []
+    if tag:
+        conditions.append(f"{col}tags LIKE ? ESCAPE '\\'")
+        params.append(f"%,{escape_like(tag.strip().lower())},%")
+    if folder:
+        conditions.append(f"{col}path LIKE ? ESCAPE '\\'")
+        params.append(f"{escape_like(folder)}/%")
+    return conditions, params
+
+
+
+@asynccontextmanager
+async def connect():
+    """Open the index the one right way: ``Row`` factory, ``busy_timeout`` (a
+    concurrent writer means "wait", not "database is locked"), and the
+    sqlite-vec extension when it's live — the extension is per-connection, so
+    every fresh connection must load it before touching ``vec_chunks``. Used
+    by the request dependency, the MCP server, the cleanup loop, the watcher,
+    the backfill task and the SSE replay; two of those used to skip the
+    timeout (AUDIT.md B-09)."""
     async with aiosqlite.connect(settings.database_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA busy_timeout=5000;")
         if VEC_ENABLED:
             await vectors.load_extension(db)
+        yield db
+
+
+async def get_db():
+    async with connect() as db:
         yield db

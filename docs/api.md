@@ -1,15 +1,17 @@
 # REST API
 
-All endpoints require `Authorization: Bearer <API_KEY>` — **except `/health`**, which is public so a container healthcheck can probe it without a secret. Browser-UI requests may authenticate with the `relay_session` cookie instead of the bearer token; both are checked by the same dependency. Interactive docs (Swagger UI) at `/docs`.
+All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may authenticate with the `relay_session` cookie instead of the bearer token; both are checked by the same dependency (cookie-authenticated writes additionally reject cross-site requests). Interactive docs (Swagger UI) at `/docs`.
+
+**Public, no auth:** `/health` (container healthcheck), the UI shell and its static files (`/`, `/ui`, `/static/*`, `/assets/*`, `/favicon.ico`), the API schema (`/docs`, `/redoc`, `/openapi.json` — it carries no secrets and this repository is public), the login bootstrap (`/auth/*`, `POST /session` which itself takes the key) and, when MCP OAuth is enabled, the OAuth AS metadata, `/register` and `/mcp/oauth/callback`. Every other path — including any unmatched one — answers 401.
 
 ## Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/posts` | Publish a post |
-| GET | `/posts` | List posts (`tag`, `folder`, `search`, `summary`, `limit`, `offset`, `sort`, `order`; master doc pinned on home feed). `sort` = `updated` (default, last-modified) or `created`; `order` = `desc` (default) or `asc`. A `search` ranks by relevance first and uses `sort`/`order` only as a tiebreak |
+| GET | `/posts` | List posts (`tag`, `folder`, `search`, `summary`, `limit`, `offset`, `sort`, `order`, `mode`; master doc pinned on home feed). `mode` = `keyword` (default) / `semantic` / `hybrid` ranks a `search` and combines with `tag`/`folder`; 503 if embeddings are off. `sort` = `updated` (default, last-modified) or `created`; `order` = `desc` (default) or `asc`. A `search` ranks by relevance first and uses `sort`/`order` only as a tiebreak |
 | GET | `/posts/{id}` | Get a single post |
-| PATCH | `/posts/{id}` | Partial update — omitted fields unchanged |
+| PATCH | `/posts/{id}` | Partial update — omitted fields unchanged; `null` or `""` clears `expires_at`/`source` |
 | DELETE | `/posts/{id}` | Delete a post |
 | GET | `/posts/{id}/backlinks` | Posts linking here via `[[title]]` or `#id` |
 | GET | `/status` | Runtime diagnostics: version, uptime, vault path + counts, effective feature state, embedding model/coverage/backfill diagnostics |
@@ -115,6 +117,8 @@ curl -X POST http://localhost:8000/tags/news/config \
 ```
 
 TTL precedence: per-post `expires_at` > per-tag config > global `DEFAULT_TTL_HOURS`. For multi-tag posts, the shortest TTL wins.
+
+`expires_at` (on posts and tag configs) must be an ISO 8601 datetime; offsets and date-only values are accepted and normalised to `YYYY-MM-DDTHH:MM:SSZ` (UTC). Anything else is a 422 — the sweep compares timestamps lexically, so a relative value like `"1 week"` used to sort *before* every real date and delete the post at the next run. A non-ISO value hand-written into front-matter is skipped with a warning.
 
 ### Rename
 

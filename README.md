@@ -106,7 +106,7 @@ You can drop Syncthing entirely if you only use the Web UI or the TUI (both are 
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven split: TOPICS sidebar + FEED list. `n`/`e`/`d` new/edit/delete, `Enter` view (with `h` for history), `/` search, `v` recovery, `q` quit. Set `RELAY_PALETTE` to match your terminal. See [docs/tui.md](docs/tui.md).
 
-**MCP server** — 22 tools over Streamable HTTP at `/mcp` (or the legacy stdio proxy), covering full CRUD, keyword/semantic/hybrid search, history, restoration, attachment management, and runtime control of semantic search itself. See [docs/mcp.md](docs/mcp.md).
+**MCP server** — 22 tools over Streamable HTTP at `/mcp` (or the stdio bridge for clients that can't speak remote MCP), covering full CRUD, keyword/semantic/hybrid search, history, restoration, attachment management, and runtime control of semantic search itself. See [docs/mcp.md](docs/mcp.md).
 
 **REST API** — every capability is also a plain HTTP endpoint. See [docs/api.md](docs/api.md).
 
@@ -114,7 +114,7 @@ You can drop Syncthing entirely if you only use the Web UI or the TUI (both are 
 
 ```bash
 uv sync --all-extras --dev   # install (uv only — never pip)
-uv run pytest -q             # 580 tests (incl. 122 browser smokes)
+uv run pytest -q             # full suite; the browser smokes in tests/ui skip without Chromium
 uv run ruff check .          # lint
 ```
 
@@ -139,4 +139,4 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 - **git** — a commit per write; any post is recoverable even after deletion
 - **watchdog** — live re-index of external edits (Obsidian, nvim)
 - **SSE** via [sse-starlette](https://github.com/sysid/sse-starlette); **Textual** for the TUI
-- **MCP** (Streamable HTTP + stdio proxy); **uv**; **Docker**
+- **MCP** (Streamable HTTP, plus a stdio bridge); **uv**; **Docker**

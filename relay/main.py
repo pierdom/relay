@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
-import hmac
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__, embedding, history, metrics, vault, watcher
 from . import status as app_status
-from .auth import create_session, revoke_session
 from .cleanup import cleanup_loop
 from .config import settings
 from .database import init_db
@@ -70,6 +70,11 @@ async def lifespan(app: FastAPI):
             "See docs/setup.md."
         )
     app_status.mark_started()
+    if settings.oidc_enabled and not settings.session_secret:
+        logging.getLogger(__name__).warning(
+            "SESSION_SECRET is unset: the browser session cookie is signed with API_KEY. "
+            "Set a dedicated SESSION_SECRET so one secret does not serve two roles."
+        )
     await init_db()
     # Presigned upload slots are in-memory + disk-staged; any bytes left in the
     # staging dir from a prior run belong to slots that no longer exist. Wipe them.
@@ -123,63 +128,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="relay", version=__version__, lifespan=lifespan)
 
-# Top-level path segments we count under a stable label. Anything else (e.g. a
-# 404 probe at /random/xyz) buckets to "other" so /metrics cardinality can't be
-# blown up by unmatched paths.
-_KNOWN_SEGMENTS = frozenset({
-    "posts", "tags", "folders", "links", "events", "attachments", "mcp",
-    "auth", "session", "health", "metrics", "assets", "favicon.ico",
-})
-
-
-def _metric_path(scope) -> str:
-    """Stable, low-cardinality path label for an HTTP request.
-
-    A matched FastAPI route exposes its template (``/posts/{post_id}``); a mounted
-    sub-app (the MCP app at ``/mcp``) or an unmatched path has no APIRoute, so we
-    bucket by the first path segment (allowlisted, else ``other``)."""
-    route = scope.get("route")
-    template = getattr(route, "path", None)
-    if template:  # APIRoute template — already parameterised, bounded cardinality
-        return template
-    segment = scope.get("path", "/").strip("/").split("/", 1)[0]
-    if not segment:
-        return "/"
-    return f"/{segment}" if segment in _KNOWN_SEGMENTS else "/other"
-
-
-class MetricsMiddleware:
-    """Pure-ASGI request counter.
-
-    Kept as raw ASGI (not ``BaseHTTPMiddleware``) so it never buffers a response
-    body — that would break the SSE ``/events`` stream and the MCP Streamable HTTP
-    transport. It only peeks at the response-start status message."""
-
-    def __init__(self, app) -> None:
-        self.app = app
-
-    async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-        status_code = 500  # assume failure until we see a response start
-        method = scope.get("method", "GET")
-
-        async def send_wrapper(message) -> None:
-            nonlocal status_code
-            if message["type"] == "http.response.start":
-                status_code = message["status"]
-            await send(message)
-
-        try:
-            await self.app(scope, receive, send_wrapper)
-        finally:
-            metrics.http_requests.inc(
-                method=method, path=_metric_path(scope), status=str(status_code)
-            )
-
-
-app.add_middleware(MetricsMiddleware)
+app.add_middleware(metrics.MetricsMiddleware)
 
 # Holds transient OAuth state (state/nonce/PKCE verifier) between /auth/login and
 # /auth/callback. SameSite=lax so it survives the top-level redirect back from
@@ -276,6 +225,36 @@ async def favicon() -> FileResponse:
     return FileResponse(_STATIC_DIR / "assets" / "favicon-64.png", media_type="image/png")
 
 
+_INLINE_SCRIPT_RE = re.compile(r"<script>(.*?)</script>", re.DOTALL)
+
+
+@lru_cache(maxsize=1)
+def ui_csp() -> str:
+    """Content-Security-Policy for the UI shell.
+
+    Scripts come from this origin only — the Markdown renderer and the sanitiser
+    are vendored, not CDN-loaded — plus the one inline theme-bootstrap script in
+    index.html, allowed by hash so 'unsafe-inline' never appears in script-src.
+    Styles need 'unsafe-inline' for the `style=` attributes the SPA renders;
+    images may come from any https origin because posts embed external pictures.
+    `frame-ancestors 'none'` doubles as X-Frame-Options.
+    """
+    html = _UI_PATH.read_text(encoding="utf-8")
+    hashes = " ".join(
+        "'sha256-" + base64.b64encode(hashlib.sha256(m.group(1).encode("utf-8")).digest()).decode() + "'"
+        for m in _INLINE_SCRIPT_RE.finditer(html)
+    )
+    return (
+        "default-src 'self'; "
+        f"script-src 'self' {hashes}; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: blob: https:; "
+        "media-src 'self'; connect-src 'self'; object-src 'none'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    )
+
+
 @app.get("/", include_in_schema=False)
 async def root() -> HTMLResponse:
     """The UI shell, with the asset version stamped into its URLs.
@@ -285,50 +264,20 @@ async def root() -> HTMLResponse:
     scripts. It revalidates cheaply (a few KB, and usually a 304).
     """
     html = _UI_PATH.read_text(encoding="utf-8").replace("__ASSETS__", asset_version())
-    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-cache",
+            "Content-Security-Policy": ui_csp(),
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "same-origin",
+        },
+    )
 
 
 @app.get("/ui", include_in_schema=False)
 async def ui() -> RedirectResponse:
     return RedirectResponse("/", status_code=status.HTTP_301_MOVED_PERMANENTLY)
-
-
-@app.post("/session", include_in_schema=False)
-async def session_create(request: Request, response: Response) -> dict:
-    key = ""
-    ct = request.headers.get("content-type", "")
-    if "application/json" in ct:
-        try:
-            body = await request.json()
-            key = body.get("key", "")
-        except Exception:
-            pass
-    auth = request.headers.get("authorization", "")
-    if not key and auth.startswith("Bearer "):
-        key = auth[7:]
-    if not (key and hmac.compare_digest(key, settings.api_key)):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-    token = create_session()
-    response.set_cookie(
-        key="relay_session",
-        value=token,
-        httponly=True,
-        samesite="strict",
-        secure=settings.secure_cookies,
-        max_age=settings.session_max_age_hours * 3600,
-    )
-    return {"ok": True}
-
-
-@app.delete("/session", include_in_schema=False)
-async def session_delete(
-    response: Response,
-    relay_session: str | None = Cookie(default=None),
-) -> dict:
-    if relay_session:
-        revoke_session(relay_session)
-    response.delete_cookie("relay_session")
-    return {"ok": True}
 
 
 app.include_router(auth_router)
