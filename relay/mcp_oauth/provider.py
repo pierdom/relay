@@ -14,7 +14,6 @@ provider). It resolves relay tokens from the store and *also* accepts the static
 """
 from __future__ import annotations
 
-import hmac
 import logging
 import time
 
@@ -29,6 +28,7 @@ from mcp.server.auth.provider import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyUrl
 
+from ..auth import bearer_matches
 from ..config import settings
 from . import pocketid
 from .store import OAuthStore, PendingAuth, StoredCode, get_store, new_secret
@@ -215,7 +215,7 @@ class RelayOAuthProvider:
                     expires_at=int(t.expires_at) if t.expires_at else None,
                     resource=t.resource,
                 )
-        if token and hmac.compare_digest(token, settings.api_key):
+        if bearer_matches(token):
             return AccessToken(
                 token=token,
                 client_id="apikey",

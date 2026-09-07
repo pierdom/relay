@@ -80,7 +80,7 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `ATTACHMENT_FETCH_TIMEOUT_SECONDS` | `20` | Timeout for a server-side `source_url` fetch |
 | `OIDC_ISSUER` | `""` | OIDC provider base URL. Set with the client credentials below to enable Login with OIDC; blank = API-key-paste login |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | `""` | Confidential OIDC client credentials |
-| `SESSION_SECRET` | `""` | Signs the session cookie; falls back to `API_KEY` if unset |
+| `SESSION_SECRET` | `""` | Signs the session cookie; falls back to `API_KEY` if unset. Set it (`openssl rand -hex 32`) when OIDC is on so one secret does not serve two roles — relay warns at startup otherwise |
 | `SESSION_MAX_AGE_HOURS` | `720` | Session-cookie lifetime (default 30 days) |
 | `OIDC_ALLOWED_SUBS` | `""` | Comma-separated OIDC `sub` allowlist (immutable user IDs — preferred over email) |
 | `OIDC_ALLOWED_EMAILS` | `""` | Comma-separated email allowlist; matches **verified** emails only. Both empty = any authenticated IdP user |

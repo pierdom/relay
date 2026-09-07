@@ -35,6 +35,19 @@ FALLBACK = {
 
 INBOX = "Inbox"
 
+
+def is_valid_name(folder: str) -> bool:
+    """Whether ``folder`` names a first-level vault folder a caller may address.
+
+    One path segment, not ``.``/``..``, not dot-prefixed (``.relay``, ``.obsidian``,
+    ``.trash`` are relay/Obsidian bookkeeping, never a post folder). Stripping the
+    name with ``Path(folder).name`` alone is not enough: ``Path("..").name`` is
+    ``".."``, which let ``folder=".."`` write beside the vault (AUDIT.md S-02).
+    """
+    if not folder or folder in (".", "..") or folder.startswith("."):
+        return False
+    return "/" not in folder and "\\" not in folder
+
 # tag/pseudo-domain -> on-disk folder name
 _FOLDER = {d: d.capitalize() for d in DOMAINS}
 _FOLDER["digests"] = "Digests"

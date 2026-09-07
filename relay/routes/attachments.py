@@ -33,6 +33,8 @@ async def list_attachments(
     """List attachments under ``assets/`` dirs (optionally scoped to a folder or post)."""
     try:
         return await service.list_attachments(db, post_id=post_id, folder=folder)
+    except service.InvalidFolder as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{post_id} not found") from None
 
@@ -59,7 +61,7 @@ async def create_attachment(
         )
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data is not valid base64") from None
-    except service.AttachmentSourceError as exc:
+    except (service.AttachmentSourceError, service.InvalidFolder) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{body.post_id} not found") from None
@@ -101,7 +103,23 @@ async def put_upload_bytes(upload_id: str, request: Request) -> UploadStatusResp
     return UploadStatusResponse(upload_id=upload_id, bytes=size, ready=True)
 
 
-_FORCE_DOWNLOAD_SUFFIXES = {".svg", ".html", ".htm", ".xml", ".xhtml"}
+# MIME types a browser may render inline. Everything else is served as a download:
+# HTML, XHTML, SVG-as-document, XML/XSLT and any future active type get
+# `Content-Disposition: attachment`, so an uploaded file can never execute
+# script in the UI's origin. Decided on the *resolved* MIME, not the suffix —
+# the old suffix list missed `.xht`, `.svgz`, `.shtml` and `.xsl`, all of which
+# `mimetypes` maps to an active type (AUDIT.md S-01).
+_INLINE_MIME_PREFIXES = ("image/", "audio/", "video/")
+# Unknown types (`application/octet-stream`) download too: the MIME table
+# differs between hosts (the slim image has no /etc/mime.types), so "unknown
+# here" can be "active there".
+_INLINE_MIMES = frozenset({"application/pdf", "text/plain", "text/markdown", "text/csv", "application/json"})
+
+
+def _renders_inline(mime: str) -> bool:
+    if mime == "image/svg+xml":
+        return False
+    return mime in _INLINE_MIMES or mime.startswith(_INLINE_MIME_PREFIXES)
 
 
 @router.get(
@@ -114,18 +132,17 @@ async def get_attachment(name: str) -> FileResponse:
 
     Resolution + path-traversal protection live in ``vault.resolve_attachment``;
     served same-origin so the browser UI's session cookie authenticates ``<img>``.
+    Anything a browser would execute (see ``_renders_inline``) is forced to
+    download; ``FileResponse(filename=…)`` RFC 5987-encodes non-ASCII names.
     """
     path = vault.resolve_attachment(name)
     if path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    headers: dict[str, str] = {"X-Content-Type-Options": "nosniff"}
-    # Force download for active document types (SVG, HTML, XML) that browsers
-    # render as live documents and execute scripts in, which would give uploaded
-    # content same-origin script execution. nosniff alone does not prevent this
-    # when the MIME type is already correctly identified.
-    if path.suffix.lower() in _FORCE_DOWNLOAD_SUFFIXES:
-        headers["Content-Disposition"] = f'attachment; filename="{path.name}"'
-    return FileResponse(path, headers=headers)
+    mime = vault.attachment_mime(path)
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if _renders_inline(mime):
+        return FileResponse(path, media_type=mime, headers=headers)
+    return FileResponse(path, media_type=mime, headers=headers, filename=path.name)
 
 
 @router.delete(

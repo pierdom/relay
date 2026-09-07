@@ -1,6 +1,8 @@
 # REST API
 
-All endpoints require `Authorization: Bearer <API_KEY>` — **except `/health`**, which is public so a container healthcheck can probe it without a secret. Browser-UI requests may authenticate with the `relay_session` cookie instead of the bearer token; both are checked by the same dependency. Interactive docs (Swagger UI) at `/docs`.
+All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may authenticate with the `relay_session` cookie instead of the bearer token; both are checked by the same dependency (cookie-authenticated writes additionally reject cross-site requests). Interactive docs (Swagger UI) at `/docs`.
+
+**Public, no auth:** `/health` (container healthcheck), the UI shell and its static files (`/`, `/ui`, `/static/*`, `/assets/*`, `/favicon.ico`), the API schema (`/docs`, `/redoc`, `/openapi.json` — it carries no secrets and this repository is public), the login bootstrap (`/auth/*`, `POST /session` which itself takes the key) and, when MCP OAuth is enabled, the OAuth AS metadata, `/register` and `/mcp/oauth/callback`. Every other path — including any unmatched one — answers 401.
 
 ## Endpoints
 

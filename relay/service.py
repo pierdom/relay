@@ -89,6 +89,11 @@ class AttachmentError(Exception):
     """Raised when an attachment can't be stored (e.g. too large)."""
 
 
+class InvalidFolder(Exception):
+    """Raised when a caller-supplied ``folder`` is not a plain first-level folder
+    name (``..``, a dot-folder, a path) — see ``folders.is_valid_name``."""
+
+
 class AttachmentSourceError(Exception):
     """Raised when the attachment's byte source fails to resolve — a source_url
     fetch error or a presigned upload slot that's unknown/expired/unfilled. Maps
@@ -220,12 +225,9 @@ async def _keyword_ranked_ids(
         return []
     conditions = ["posts_fts MATCH ?"]
     params: list[str | int] = [match]
-    if tag:
-        conditions.append("posts.tags LIKE ?")
-        params.append(f"%,{tag.strip().lower()},%")
-    if folder:
-        conditions.append("posts.path LIKE ?")
-        params.append(f"{folder}/%")
+    f_conds, f_params = database.tag_folder_filters(tag, folder)
+    conditions += f_conds
+    params += f_params
     params.append(limit)
     async with db.execute(
         f"SELECT posts.id FROM posts JOIN posts_fts ON posts_fts.rowid = posts.id "
@@ -233,6 +235,17 @@ async def _keyword_ranked_ids(
         params,
     ) as cur:
         return [row[0] for row in await cur.fetchall()]
+
+
+# Page bounds, enforced here so every transport agrees: REST already validates
+# these at the Query() layer; the in-process MCP server passed them straight to
+# SQL, where `limit=-1` is SQLite's "unbounded" (AUDIT.md S-07).
+MAX_PAGE_LIMIT = 100
+MAX_HISTORY_LIMIT = 200
+
+
+def _clamp(value: int, *, low: int, high: int) -> int:
+    return max(low, min(int(value), high))
 
 
 # Both rankers' candidate pool must cover offset+limit or pagination silently
@@ -337,6 +350,8 @@ async def list_posts(
 ) -> PostListResponse | PostSummaryListResponse:
     if mode not in ("keyword", "semantic", "hybrid"):
         raise InvalidSearchMode
+    limit = _clamp(limit, low=1, high=MAX_PAGE_LIMIT)
+    offset = max(0, int(offset))
     if search and mode in ("semantic", "hybrid"):
         return await _list_posts_ranked(
             db, search=search, mode=mode, limit=limit, offset=offset, summary=summary, tag=tag, folder=folder
@@ -364,12 +379,9 @@ async def list_posts(
             conditions.append("(posts.title LIKE ? OR posts.content LIKE ? OR posts.source LIKE ?)")
             params.extend([q, q, q])
 
-    if tag:
-        conditions.append("posts.tags LIKE ?")
-        params.append(f"%,{tag.strip().lower()},%")
-    if folder:
-        conditions.append("posts.path LIKE ?")
-        params.append(f"{folder}/%")
+    f_conds, f_params = database.tag_folder_filters(tag, folder)
+    conditions += f_conds
+    params += f_params
 
     # On the unfiltered home feed, pin the master document (id=0) on top and keep
     # it out of the dated stream so pagination stays consistent across pages.
@@ -556,6 +568,7 @@ async def get_post_history(
     """
     if not history.enabled():
         raise HistoryUnavailable
+    limit = _clamp(limit, low=1, high=MAX_HISTORY_LIMIT)
     row = await _fetch(db, post_id)
     revs = await history.revisions(
         post_id, current_path=row["path"] if row is not None else None, limit=limit
@@ -620,6 +633,7 @@ async def list_deleted_posts(
     """
     if not history.enabled():
         raise HistoryUnavailable()
+    limit = _clamp(limit, low=1, high=MAX_HISTORY_LIMIT)
     found = await history.deletions(limit=limit if include_expiry else limit * 3)
     if not include_expiry:
         found = [d for d in found if d.reason != "expiry"]
@@ -897,6 +911,8 @@ async def add_attachment(
         path_str = row["path"]
         target_folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
     elif folder:
+        if not folders.is_valid_name(folder):
+            raise InvalidFolder(f"invalid folder name: {folder!r}")
         target_folder = folder
     elif tags:
         target_folder = folders.folder_for(1, tags) or folders.INBOX
@@ -934,6 +950,8 @@ async def list_attachments(
             raise PostNotFound
         path_str = row["path"]
         folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
+    elif folder and not folders.is_valid_name(folder):
+        raise InvalidFolder(f"invalid folder name: {folder!r}")
     items = [
         AttachmentInfo(filename=n, folder=f, bytes=s, ref=f"![[{n}]]")
         for (n, f, s) in vault.list_attachments(folder)

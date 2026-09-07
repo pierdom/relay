@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
-import hmac
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -16,7 +17,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__, embedding, history, metrics, vault, watcher
 from . import status as app_status
-from .auth import create_session, revoke_session
+from .auth import bearer_matches, create_session, revoke_session
 from .cleanup import cleanup_loop
 from .config import settings
 from .database import init_db
@@ -70,6 +71,11 @@ async def lifespan(app: FastAPI):
             "See docs/setup.md."
         )
     app_status.mark_started()
+    if settings.oidc_enabled and not settings.session_secret:
+        logging.getLogger(__name__).warning(
+            "SESSION_SECRET is unset: the browser session cookie is signed with API_KEY. "
+            "Set a dedicated SESSION_SECRET so one secret does not serve two roles."
+        )
     await init_db()
     # Presigned upload slots are in-memory + disk-staged; any bytes left in the
     # staging dir from a prior run belong to slots that no longer exist. Wipe them.
@@ -276,6 +282,36 @@ async def favicon() -> FileResponse:
     return FileResponse(_STATIC_DIR / "assets" / "favicon-64.png", media_type="image/png")
 
 
+_INLINE_SCRIPT_RE = re.compile(r"<script>(.*?)</script>", re.DOTALL)
+
+
+@lru_cache(maxsize=1)
+def ui_csp() -> str:
+    """Content-Security-Policy for the UI shell.
+
+    Scripts come from this origin only — the Markdown renderer and the sanitiser
+    are vendored, not CDN-loaded — plus the one inline theme-bootstrap script in
+    index.html, allowed by hash so 'unsafe-inline' never appears in script-src.
+    Styles need 'unsafe-inline' for the `style=` attributes the SPA renders;
+    images may come from any https origin because posts embed external pictures.
+    `frame-ancestors 'none'` doubles as X-Frame-Options.
+    """
+    html = _UI_PATH.read_text(encoding="utf-8")
+    hashes = " ".join(
+        "'sha256-" + base64.b64encode(hashlib.sha256(m.group(1).encode("utf-8")).digest()).decode() + "'"
+        for m in _INLINE_SCRIPT_RE.finditer(html)
+    )
+    return (
+        "default-src 'self'; "
+        f"script-src 'self' {hashes}; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: blob: https:; "
+        "media-src 'self'; connect-src 'self'; object-src 'none'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    )
+
+
 @app.get("/", include_in_schema=False)
 async def root() -> HTMLResponse:
     """The UI shell, with the asset version stamped into its URLs.
@@ -285,7 +321,15 @@ async def root() -> HTMLResponse:
     scripts. It revalidates cheaply (a few KB, and usually a 304).
     """
     html = _UI_PATH.read_text(encoding="utf-8").replace("__ASSETS__", asset_version())
-    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-cache",
+            "Content-Security-Policy": ui_csp(),
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "same-origin",
+        },
+    )
 
 
 @app.get("/ui", include_in_schema=False)
@@ -306,7 +350,7 @@ async def session_create(request: Request, response: Response) -> dict:
     auth = request.headers.get("authorization", "")
     if not key and auth.startswith("Bearer "):
         key = auth[7:]
-    if not (key and hmac.compare_digest(key, settings.api_key)):
+    if not bearer_matches(key):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     token = create_session()
     response.set_cookie(
