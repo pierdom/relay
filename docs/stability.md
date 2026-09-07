@@ -48,11 +48,11 @@ All endpoints listed in [`docs/api.md`](api.md), excluding `/links` (see below):
 
 Stability covers: the HTTP methods, path shapes, query parameters, and response field names documented in `docs/api.md`. New optional query parameters and new fields in responses do not count as breaking changes.
 
-### MCP tools (21)
+### MCP tools (22)
 
 All tool names and their documented parameters are stable:
 
-`publish_post` · `update_post` · `get_post` · `delete_post` · `list_posts` · `get_post_history` · `get_post_revision` · `list_deleted_posts` · `restore_post` · `get_backlinks` · `add_attachment` · `create_upload` · `get_attachment` · `list_attachments` · `delete_attachment` · `list_tags` · `set_tag_config` · `rename_tag` · `get_status` · `trigger_embedding_backfill` · `set_embeddings_enabled`
+`publish_post` · `update_post` · `get_post` · `delete_post` · `list_posts` · `get_post_history` · `get_post_revision` · `list_deleted_posts` · `restore_post` · `get_backlinks` · `add_attachment` · `create_upload` · `get_attachment` · `list_attachments` · `delete_attachment` · `list_tags` · `set_tag_config` · `rename_tag` · `get_status` · `trigger_embedding_backfill` · `set_embeddings_enabled` · `list_folders`
 
 Adding new optional parameters to existing tools is not a breaking change. Adding new tools is a minor bump.
 

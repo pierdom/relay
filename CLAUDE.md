@@ -125,6 +125,7 @@ Two surfaces, **one tool definition**:
 | `list_deleted_posts` | Restorable deleted posts (discovery — you need an id to restore) |
 | `get_status` | Version, uptime, vault path + counts, effective feature state, embedding model/coverage/backfill diagnostics |
 | `trigger_embedding_backfill` / `set_embeddings_enabled` | Runtime control of semantic search — re-embed, or pause/resume without a restart (in-memory only) |
+| `list_folders` | First-level folders with post counts (the `folder` filter's vocabulary) |
 | `list_tags` / `set_tag_config` / `rename_tag` | Tag management |
 | `get_backlinks` | Posts linking here — check before rewriting or deleting |
 
@@ -173,7 +174,7 @@ See [docs/tui.md](docs/tui.md) for keybindings, palette names, and transparency 
 
 ## Tags · master doc · TTL
 
-- **Tags:** front-matter list; stored with sentinel commas (`,news,ai,`) for `LIKE '%,tag,%'` matching. Per-tag TTL in `<vault>/.relay/tags.yml`.
+- **Tags:** front-matter list; stored with sentinel commas (`,news,ai,`) for `LIKE '%,tag,%'` matching. Per-tag TTL in `<vault>/.relay/tags.yml`; `set_tag_config` with neither field removes the entry (it is the only way to drop a tag from `list_tags` once its posts are gone).
 - **Search:** SQLite FTS5 over title/content/source/tags — porter-stemmed, bm25-ranked. Falls back to `LIKE` if FTS5 unavailable.
 - **Master doc (`id=0`):** `Master Document.md` at vault root, seeded at startup, `DELETE` blocked, TTL-exempt. Update via `update_post(id=0, …)`.
 - **TTL:** off by default. Precedence: per-post `expires_at` > per-tag > global. Shortest TTL wins for multi-tag posts. **`expires_at` is validated and normalised to `YYYY-MM-DDTHH:MM:SSZ`** (`models.normalize_expires_at`) because the sweep compares it *lexically* in SQL — `"1 week"` sorted below every real date and got swept. The sweep also only compares values in that shape (`GLOB` guard) and warns on anything else in hand-edited front-matter.

@@ -1,6 +1,6 @@
 # MCP server
 
-relay exposes the full feed API as **21 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
+relay exposes the full feed API as **22 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
 
 ## Tools
 
@@ -24,8 +24,9 @@ relay exposes the full feed API as **21 MCP tools** so Claude (or any MCP-capabl
 | `get_status` | Version, uptime, which vault is served, counts, which features actually work, and embedding model/coverage/backfill diagnostics |
 | `trigger_embedding_backfill` | Re-run the embedding backfill without a restart (`force` wipes the cache first); errors if embeddings aren't enabled or a backfill is already running |
 | `set_embeddings_enabled` | Turn semantic/hybrid search on or off at runtime, without a restart. In-memory only — see [Notes for agents](#notes-for-agents) |
+| `list_folders` | First-level vault folders with post counts — the names `list_posts`/`list_attachments` accept as `folder` |
 | `list_tags` | List all tags with post counts |
-| `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`) |
+| `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`); pass neither to remove it |
 | `rename_tag` | Rename a tag across every post that carries it, in one atomic pass |
 
 ## Recovering a post
