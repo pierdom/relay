@@ -21,11 +21,20 @@ import time
 import urllib.error
 import urllib.request
 
+import mcp.types as types
 import pytest
-from pydantic import AnyUrl
 
 import relay_mcp.server as bridge
 from relay.mcp_server import mcp
+
+
+async def _tools() -> dict:
+    result = await bridge.list_tools(None, types.PaginatedRequestParams())
+    return {t.name: t for t in result.tools}
+
+
+async def _call(name: str, arguments: dict):
+    return await bridge.call_tool(None, types.CallToolRequestParams(name=name, arguments=arguments))
 
 API_KEY = "test-key"
 
@@ -80,55 +89,56 @@ def bridged(relay_server, monkeypatch):
 @pytest.mark.asyncio
 async def test_bridge_exposes_the_servers_tools_plus_path_on_add_attachment(bridged):
     remote = {t.name: t for t in await mcp.list_tools()}
-    local = {t.name: t for t in await bridge.list_tools()}
+    local = await _tools()
     assert set(local) == set(remote)
     for name, tool in local.items():
         if name == "add_attachment":
             continue
         assert tool.description == remote[name].description, name
-        assert tool.inputSchema == remote[name].inputSchema, name
-    local_props = set(local["add_attachment"].inputSchema["properties"])
-    assert local_props - set(remote["add_attachment"].inputSchema["properties"]) == {"path"}
-    assert "path" not in remote["add_attachment"].inputSchema["properties"]
+        assert tool.input_schema == remote[name].input_schema, name
+    local_props = set(local["add_attachment"].input_schema["properties"])
+    assert local_props - set(remote["add_attachment"].input_schema["properties"]) == {"path"}
+    assert "path" not in remote["add_attachment"].input_schema["properties"]
 
 
 def _payload(result) -> dict:
-    """The in-process tools return plain dicts, which FastMCP serialises as JSON text."""
-    assert not result.isError
+    """The in-process tools return plain dicts, which the SDK serialises as JSON text."""
+    assert not result.is_error
     return json.loads(result.content[0].text)
 
 
 @pytest.mark.asyncio
 async def test_bridge_forwards_calls_and_returns_the_servers_result(bridged):
-    assert _payload(await bridge.call_tool("get_post", {"id": 0}))["id"] == 0
-    published = await bridge.call_tool("publish_post", {"title": "Via bridge", "content": "hi", "tags": ["homelab"]})
+    assert _payload(await _call("get_post", {"id": 0}))["id"] == 0
+    published = await _call("publish_post", {"title": "Via bridge", "content": "hi", "tags": ["homelab"]})
     assert _payload(published)["title"] == "Via bridge"
-    listed = _payload(await bridge.call_tool("list_posts", {"tag": "homelab"}))
+    listed = _payload(await _call("list_posts", {"tag": "homelab"}))
     assert [p["title"] for p in listed["items"]] == ["Via bridge"]
 
 
 @pytest.mark.asyncio
 async def test_bridge_passes_server_errors_through(bridged):
-    assert _payload(await bridge.call_tool("get_post", {"id": 999})) == {"error": "Post #999 not found."}
+    assert _payload(await _call("get_post", {"id": 999})) == {"error": "Post #999 not found."}
 
 
 @pytest.mark.asyncio
 async def test_bridge_serves_the_master_document_resource(bridged):
-    resources = await bridge.list_resources()
-    assert [str(r.uri) for r in resources] == ["relay://master-document"]
-    contents = await bridge.read_resource(AnyUrl("relay://master-document"))
-    assert contents[0].mime_type == "text/markdown"
-    assert "Master Document" in contents[0].content
+    result = await bridge.list_resources(None, types.PaginatedRequestParams())
+    assert [str(r.uri) for r in result.resources] == ["relay://master-document"]
+    read = await bridge.read_resource(None, types.ReadResourceRequestParams(uri="relay://master-document"))
+    assert read.contents[0].mime_type == "text/markdown"
+    assert "Master Document" in read.contents[0].text
 
 
 @pytest.mark.asyncio
 async def test_bridge_refuses_two_byte_sources(bridged):
-    out = await bridge.call_tool("add_attachment", {"path": "/x", "data": "aGk="})
-    assert "exactly one" in out[0].text
+    out = await _call("add_attachment", {"path": "/x", "data": "aGk="})
+    assert "exactly one" in out.content[0].text
 
 
 def test_bridge_declares_no_tool_schemas_of_its_own():
     """The whole point: nothing here can drift from the server."""
     src = Path(bridge.__file__).read_text(encoding="utf-8")
     assert "types.Tool(" not in src
+    assert "input_schema={" not in src
     assert "inputSchema={" not in src

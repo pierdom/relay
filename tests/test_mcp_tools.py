@@ -198,3 +198,21 @@ async def test_list_posts_can_browse_by_folder_and_reverse_the_sort(client):
     desc = await mcp_server.list_posts(sort="created", order="desc")
     asc_titles = [p["title"] for p in asc["items"]]
     assert asc_titles == list(reversed([p["title"] for p in desc["items"]]))
+
+
+@pytest.mark.asyncio
+async def test_initialize_announces_relays_own_version_and_branding():
+    """`serverInfo` is what a client shows beside the server's name.
+
+    Under mcp 1.x the version there was the *SDK's* — relay 1.6.1 announced
+    itself as "1.29.0" — and leaving it unset on 2.x makes it an empty string.
+    Neither is a fact about relay, so it is set explicitly; the icons and
+    website URL (SEP-973) ride the same struct and are pinned here with it.
+    """
+    from relay import __version__
+
+    opts = mcp_server.mcp._lowlevel_server.create_initialization_options()
+    assert opts.server_name == "relay"
+    assert opts.server_version == __version__
+    assert opts.website_url == settings.relay_base_url.rstrip("/")
+    assert [i.mime_type for i in opts.icons] == ["image/svg+xml", "image/png"]

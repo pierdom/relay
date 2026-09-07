@@ -8,6 +8,28 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.7.0] — 2026-09-07
+
+The MCP SDK moves from 1.x to 2.x ([#122](https://github.com/pierdom/relay/pull/122), superseding dependabot's [#106](https://github.com/pierdom/relay/pull/106), which raises the constraint without the code that makes it import).
+
+Minor rather than patch, though nothing is added: the dependency crosses a major version, and one user-visible limit moves with it — **`add_attachment(data=…)` over `/mcp` is now capped at 4 MiB**, the SDK's transport default, below relay's own `ATTACHMENT_MAX_MB` of 25. Base64 was always documented as the small-file transport and `source_url`/`upload_id` are untouched, so nothing that was sized sensibly breaks; but a caller that had been pushing large base64 through `/mcp` will now get a 413 from the transport before relay sees the request.
+
+Nothing in the stable surface (`docs/stability.md`) changed shape. The tool surface is identical either side of the migration: 22 tools, same parameters, one resource.
+
+### Changed
+- The MCP SDK moves to 2.x (`mcp>=2.1.1,<3.0.0`), closing [#106](https://github.com/pierdom/relay/pull/106). Both surfaces keep the same 22 tools with the same parameters and the same one resource; the migration is mechanical, and the tests that assert the surface are unchanged.
+  - `FastMCP` is now `MCPServer`, and its transport options (`stateless_http`, `streamable_http_path`, `transport_security`) moved from the constructor onto `streamable_http_app()`. The DNS-rebinding opt-out relay needs behind a reverse proxy is unchanged, just relocated.
+  - The stdio bridge registers handlers through the `Server` constructor (`on_list_tools`, `on_call_tool`, …) instead of decorators; each takes `(ctx, params)` and returns the result object. Wire fields are snake_case attributes with camelCase aliases now (`tool.input_schema`, `result.is_error`), which the bridge's one rewrite of `add_attachment` had to follow.
+  - The bridge's HTTP transport takes a client rather than headers, and that client must be `httpx2` — the SDK's own dependency, now declared directly. `httpx` stays for everything else in relay; the two coexist rather than dragging unrelated modules into the migration.
+  - **`add_attachment(data=…)` over `/mcp` is now capped at 4 MiB**, the SDK's `max_request_body_size` default, below relay's own `ATTACHMENT_MAX_MB` of 25. Base64 was already documented as the tiny-files transport; `source_url` and `upload_id` are unaffected and remain the way to send anything real.
+  - The bridge's own "provide exactly one of path/data/source_url/upload_id" rejection is now flagged `isError`, where before it came back as an ordinary text result. Same message either way.
+  - Two upstream fixes relay wanted ride along: the request body limit now applies to the SSE and OAuth endpoints (python-sdk#3336), and handler exceptions are logged by kind instead of putting crash details on the wire (upstream `56af447`).
+
+### Fixed
+- `serverInfo.version` in the MCP handshake is relay's own version. Under 1.x it was the *SDK's* — a relay on 1.6.1 announced itself to clients as "1.29.0" — and unset on 2.x it would be an empty string.
+
+---
+
 ## [1.6.1] — 2026-09-07
 
 Dependency maintenance, plus the reason these bumps needed a release of their own.

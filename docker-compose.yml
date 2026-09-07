@@ -5,7 +5,7 @@ services:
     # within 1.6.x (deliberate, rollback-able) instead of tracking whatever last
     # hit main via :latest. Pin to an exact :1.6.N to freeze. CI publishes
     # :X.Y.Z + :X.Y on every vX.Y.Z tag; this line moves with each minor release.
-    image: ghcr.io/pierdom/relay:1.6
+    image: ghcr.io/pierdom/relay:1.7
     # Run as your host user so files relay writes into the bind-mounted vault
     # (renames, index.db) stay user-owned — good for backup/Syncthing/Obsidian.
     user: "${RELAY_UID:-1000}:${RELAY_GID:-1000}"

@@ -118,7 +118,7 @@ Two surfaces, **one tool definition**:
 
 | Tool | Description |
 |------|-------------|
-| `publish_post` / `update_post` / `get_post` / `delete_post` | CRUD (`id=0` = master doc, delete blocked). `update_post`: FastMCP cannot tell an omitted argument from `null`, so `""` is how `expires_at`/`source` are cleared — on both surfaces, and REST `PATCH` accepts it too |
+| `publish_post` / `update_post` / `get_post` / `delete_post` | CRUD (`id=0` = master doc, delete blocked). `update_post`: the MCP SDK's server cannot tell an omitted argument from `null`, so `""` is how `expires_at`/`source` are cleared — on both surfaces, and REST `PATCH` accepts it too |
 | `list_posts` | List with filters; `summary` defaults true (metadata + excerpt, no bodies). `mode`=`keyword`(default)/`semantic`/`hybrid` (relay #253, proof of concept) — errors if embeddings aren't enabled; can be combined with `tag`/`folder` |
 | `add_attachment` / `create_upload` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD |
 | `get_post_history` / `get_post_revision` / `restore_post` | History browse / preview / restore |
@@ -224,7 +224,7 @@ relay/
 ├── chunking.py      # H2/H3-aware post chunking (semantic search POC)
 ├── embedding.py     # Swappable embedding backend (FastEmbed / Fake for tests)
 ├── vectors.py       # sqlite-vec schema, embedding cache, KNN, RRF (semantic search POC)
-├── mcp_server.py    # In-process FastMCP server (/mcp)
+├── mcp_server.py    # In-process MCP SDK server (/mcp)
 ├── mcp_oauth/       # Remote MCP OAuth AS
 ├── events.py · cleanup.py
 ├── metrics.py       # Zero-dep Prometheus counter registry

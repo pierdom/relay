@@ -134,7 +134,7 @@ async def test_session_endpoint_rejects_wrong_key():
 async def test_mcp_metadata_absent_when_oauth_disabled():
     # With OAuth off (the default this app was imported under), the SDK mounts no
     # auth metadata and there is no hand-rolled route — the path 404s. The
-    # enabled-mode metadata is emitted by the SDK when FastMCP is constructed with
+    # enabled-mode metadata is emitted by the SDK when MCPServer is constructed with
     # auth (import-time), covered in test_mcp_oauth via a fresh app build.
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/.well-known/oauth-protected-resource/mcp")
@@ -146,7 +146,7 @@ async def test_mcp_metadata_absent_when_oauth_disabled():
 
 @pytest.mark.asyncio
 async def test_mcp_accepts_public_host_and_origin(monkeypatch, tmp_path):
-    # Regression: FastMCP's default host (127.0.0.1) auto-enables localhost-scoped
+    # Regression: the SDK's default host (127.0.0.1) auto-enables localhost-scoped
     # DNS-rebinding protection, which 421s any real Host (e.g. relay.geon.im) and
     # 403s a browser Origin — breaking remote /mcp entirely. We disable it (auth +
     # HTTPS + proxy are the real controls), so a real Host/Origin must pass through
