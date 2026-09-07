@@ -19,6 +19,7 @@ dependencies = [
     "joserfc>=1.7.4",
     "sqlite-vec>=0.1.9",
     "fastembed>=0.8.0",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]
@@ -31,7 +32,6 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pip-audit>=2.10.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -61,9 +61,3 @@ ignore = [
     # Nested `with` blocks read better than one wrapped line in the test fixtures.
     "SIM117",
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# The stdio proxy carries the MCP tool schemas as single-line description
-# strings that must stay byte-identical to relay/mcp_server.py (see the feature
-# parity rule in CLAUDE.md). Reflowing them to fit is a silent parity hazard.
-"relay_mcp/server.py" = ["E501"]

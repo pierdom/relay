@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
-from . import __version__, database, embedding, events, history, vault, vectors, watcher
+from . import __version__, database, embedding, events, folders, history, vault, vectors, watcher
 from .config import settings
 from .models import (
     AuthStatus,
@@ -81,7 +81,7 @@ async def folder_count(db: aiosqlite.Connection) -> int:
     async with db.execute("SELECT path FROM posts") as cur:
         rows = await cur.fetchall()
     # Root files (the master doc) live in no folder.
-    return len({r[0].split("/", 1)[0] for r in rows if "/" in r[0]})
+    return len({folders.folder_of(r[0]) for r in rows} - {""})
 
 
 async def embedding_status(db: aiosqlite.Connection, posts_total: int) -> EmbeddingStatus:

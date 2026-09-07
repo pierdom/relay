@@ -10,14 +10,13 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import Cookie, FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__, embedding, history, metrics, vault, watcher
 from . import status as app_status
-from .auth import bearer_matches, create_session, revoke_session
 from .cleanup import cleanup_loop
 from .config import settings
 from .database import init_db
@@ -129,63 +128,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="relay", version=__version__, lifespan=lifespan)
 
-# Top-level path segments we count under a stable label. Anything else (e.g. a
-# 404 probe at /random/xyz) buckets to "other" so /metrics cardinality can't be
-# blown up by unmatched paths.
-_KNOWN_SEGMENTS = frozenset({
-    "posts", "tags", "folders", "links", "events", "attachments", "mcp",
-    "auth", "session", "health", "metrics", "assets", "favicon.ico",
-})
-
-
-def _metric_path(scope) -> str:
-    """Stable, low-cardinality path label for an HTTP request.
-
-    A matched FastAPI route exposes its template (``/posts/{post_id}``); a mounted
-    sub-app (the MCP app at ``/mcp``) or an unmatched path has no APIRoute, so we
-    bucket by the first path segment (allowlisted, else ``other``)."""
-    route = scope.get("route")
-    template = getattr(route, "path", None)
-    if template:  # APIRoute template — already parameterised, bounded cardinality
-        return template
-    segment = scope.get("path", "/").strip("/").split("/", 1)[0]
-    if not segment:
-        return "/"
-    return f"/{segment}" if segment in _KNOWN_SEGMENTS else "/other"
-
-
-class MetricsMiddleware:
-    """Pure-ASGI request counter.
-
-    Kept as raw ASGI (not ``BaseHTTPMiddleware``) so it never buffers a response
-    body — that would break the SSE ``/events`` stream and the MCP Streamable HTTP
-    transport. It only peeks at the response-start status message."""
-
-    def __init__(self, app) -> None:
-        self.app = app
-
-    async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-        status_code = 500  # assume failure until we see a response start
-        method = scope.get("method", "GET")
-
-        async def send_wrapper(message) -> None:
-            nonlocal status_code
-            if message["type"] == "http.response.start":
-                status_code = message["status"]
-            await send(message)
-
-        try:
-            await self.app(scope, receive, send_wrapper)
-        finally:
-            metrics.http_requests.inc(
-                method=method, path=_metric_path(scope), status=str(status_code)
-            )
-
-
-app.add_middleware(MetricsMiddleware)
+app.add_middleware(metrics.MetricsMiddleware)
 
 # Holds transient OAuth state (state/nonce/PKCE verifier) between /auth/login and
 # /auth/callback. SameSite=lax so it survives the top-level redirect back from
@@ -335,44 +278,6 @@ async def root() -> HTMLResponse:
 @app.get("/ui", include_in_schema=False)
 async def ui() -> RedirectResponse:
     return RedirectResponse("/", status_code=status.HTTP_301_MOVED_PERMANENTLY)
-
-
-@app.post("/session", include_in_schema=False)
-async def session_create(request: Request, response: Response) -> dict:
-    key = ""
-    ct = request.headers.get("content-type", "")
-    if "application/json" in ct:
-        try:
-            body = await request.json()
-            key = body.get("key", "")
-        except Exception:
-            pass
-    auth = request.headers.get("authorization", "")
-    if not key and auth.startswith("Bearer "):
-        key = auth[7:]
-    if not bearer_matches(key):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-    token = create_session()
-    response.set_cookie(
-        key="relay_session",
-        value=token,
-        httponly=True,
-        samesite="strict",
-        secure=settings.secure_cookies,
-        max_age=settings.session_max_age_hours * 3600,
-    )
-    return {"ok": True}
-
-
-@app.delete("/session", include_in_schema=False)
-async def session_delete(
-    response: Response,
-    relay_session: str | None = Cookie(default=None),
-) -> dict:
-    if relay_session:
-        revoke_session(relay_session)
-    response.delete_cookie("relay_session")
-    return {"ok": True}
 
 
 app.include_router(auth_router)

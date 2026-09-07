@@ -32,6 +32,18 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 - SSE subscriber queues are bounded (256); a client that stops reading gets the stream closed and replays via `Last-Event-ID` instead of growing memory forever (S-06).
 - A ranked (`semantic`/`hybrid`) query whose embedding backend fails at query time answers keyword-ranked with `search_timing.degraded=true` instead of a 500. Embeddings configured off remain a 503.
 
+### Changed
+- `relay_mcp/server.py` is a stdio ↔ Streamable HTTP bridge (≈190 lines) instead of a hand-written copy of every tool schema re-implemented over REST (923 lines). Tools, parameters, descriptions and results are the in-process server's, fetched per call, so the two surfaces cannot drift; `add_attachment(path=…)` stays as the one proxy-only addition. `tests/test_mcp_parity.py` (AST diff) is replaced by `tests/test_mcp_bridge.py` (end to end against a real uvicorn). Bridge replies are now the server's JSON rather than hand-formatted text.
+- `relay/service.py` (1035 lines) is a package: `posts`, `revisions`, `attachments`, `tags`, `_common`; `relay.service` re-exports every public name, so callers are unchanged.
+- `main.py` keeps the app, lifespan, static serving and mounts; `/session` lives in `routes/auth.py`, the request-metrics middleware in `metrics.py`.
+- `folders.folder_of` replaces six copies of the first-path-segment expression; `models` share one title validator; the TUI imports the wikilink/id-ref patterns from `relay.links` instead of re-declaring them.
+- `uvx mypy relay --ignore-missing-imports` passes (PyYAML's missing stubs are the only remaining diagnostics); no type-checker dependency added.
+- `httpx` is declared as a runtime dependency (it was imported at runtime by `ingest`, `mcp_oauth.pocketid` and the bridge but only listed in the dev group, working through `mcp`'s transitive pin).
+
+### Removed
+- Dead code: `vault.path_for_id`, `mcp_oauth.pocketid.reset_cache`, `ingest.UploadRegistry.discard`, the `"in keys"` guards in `PostResponse`/`PostSummary.from_row`, the ruff `E501` exemption for the old proxy.
+- Docs drift: test counts in README/CLAUDE.md/CONTRIBUTING, `docs/stability.md` (tag routes had their methods swapped, 19 → 21 MCP tools), `docs/api.md` (`GET /posts` now documents `mode`), `docs/mcp.md` (`mode` combines with tag/folder since 1.5.0).
+
 ---
 
 ## [1.5.0] — 2026-09-03

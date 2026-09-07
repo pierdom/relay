@@ -14,7 +14,7 @@ from relay.auth import require_api_key
 from relay.config import settings
 from relay.embedding import FakeBackend
 from relay.main import app
-from relay.service import _fts_query
+from relay.service.posts import _fts_query
 
 AUTH = {"Authorization": "Bearer test-key"}
 

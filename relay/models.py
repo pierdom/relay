@@ -33,6 +33,12 @@ def normalize_expires_at(value: str | None) -> str | None:
         parsed = parsed.replace(tzinfo=_dt.UTC)
     return parsed.astimezone(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+def _clean_title(v: str) -> str:
+    v = v.strip()
+    if not v:
+        raise ValueError("title must not be empty")
+    return v
+
 
 def _clean_tag_list(v: list[str]) -> list[str]:
     cleaned = []
@@ -53,10 +59,7 @@ class PostCreate(BaseModel):
     @field_validator("title")
     @classmethod
     def title_not_blank(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("title must not be empty")
-        return v
+        return _clean_title(v)
 
     @field_validator("tags")
     @classmethod
@@ -81,7 +84,6 @@ class PostResponse(BaseModel):
 
     @classmethod
     def from_row(cls, row) -> PostResponse:
-        keys = row.keys()
         return cls(
             id=row["id"],
             title=row["title"],
@@ -89,8 +91,8 @@ class PostResponse(BaseModel):
             tags=[t for t in row["tags"].split(",") if t],
             source=row["source"],
             created_at=row["created_at"],
-            updated_at=row["updated_at"] if "updated_at" in keys else None,
-            expires_at=row["expires_at"] if "expires_at" in keys else None,
+            updated_at=row["updated_at"],
+            expires_at=row["expires_at"],
         )
 
 
@@ -174,18 +176,16 @@ class PostSummary(BaseModel):
 
     @classmethod
     def from_row(cls, row) -> PostSummary:
-        keys = row.keys()
-        path = row["path"] if "path" in keys else ""
         return cls(
             id=row["id"],
             title=row["title"],
             tags=[t for t in row["tags"].split(",") if t],
             source=row["source"],
-            folder=path.split("/", 1)[0] if "/" in path else "",
+            folder=folders.folder_of(row["path"]),
             excerpt=make_excerpt(row["content"]),
             created_at=row["created_at"],
-            updated_at=row["updated_at"] if "updated_at" in keys else None,
-            expires_at=row["expires_at"] if "expires_at" in keys else None,
+            updated_at=row["updated_at"],
+            expires_at=row["expires_at"],
         )
 
 
@@ -208,12 +208,7 @@ class PostUpdate(BaseModel):
     @field_validator("title")
     @classmethod
     def title_not_blank(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        v = v.strip()
-        if not v:
-            raise ValueError("title must not be empty")
-        return v
+        return None if v is None else _clean_title(v)
 
     @field_validator("tags")
     @classmethod
