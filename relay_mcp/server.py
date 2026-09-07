@@ -65,7 +65,7 @@ INSTRUCTIONS = (
     "Clients subscribe to changes in real time. Before writing, read the master document "
     "with get_post(id=0) — it holds the index, tag taxonomy, naming conventions, and "
     "house rules. Keep one canonical post per topic and update it in place rather than "
-    "creating duplicates."
+    "creating duplicates. list_folders shows how the vault is already organised."
 )
 
 MASTER_DOC_URI = "relay://master-document"
@@ -127,6 +127,15 @@ async def list_tools() -> list[types.Tool]:
                     },
                 },
             },
+        ),
+        types.Tool(
+            name="list_folders",
+            description=(
+                "List the vault's first-level folders with their post counts. These are the names list_posts and l"
+                "ist_attachments accept as `folder`; a post is filed by its first domain tag at creation, so t"
+                "his is the map of what the vault already has before you choose one."
+            ),
+            inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
             name="list_tags",
@@ -573,6 +582,18 @@ async def call_tool(
             type="text",
             text=f"Retrieved '{arguments['name']}' ({mime}, {len(raw)} bytes) — not an image, can't show inline.",
         )]
+
+    if name == "list_folders":
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{RELAY_BASE_URL}/folders",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            folders = response.json()["folders"]
+        text = "\n".join(f"{f['folder']} ({f['count']} posts)" for f in folders) if folders else "No folders yet."
+        return [types.TextContent(type="text", text=text)]
 
     if name == "list_tags":
         async with httpx.AsyncClient() as client:

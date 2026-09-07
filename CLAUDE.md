@@ -126,6 +126,7 @@ Two surfaces, **identical tools**:
 | `list_deleted_posts` | Restorable deleted posts (discovery — you need an id to restore) |
 | `get_status` | Version, uptime, vault path + counts, effective feature state, embedding model/coverage/backfill diagnostics |
 | `trigger_embedding_backfill` / `set_embeddings_enabled` | Runtime control of semantic search — re-embed, or pause/resume without a restart (in-memory only) |
+| `list_folders` | First-level folders with post counts (the `folder` filter's vocabulary) |
 | `list_tags` / `set_tag_config` / `rename_tag` | Tag management |
 | `get_backlinks` | Posts linking here — check before rewriting or deleting |
 

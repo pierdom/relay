@@ -19,6 +19,7 @@ from relay.auth import require_api_key
 from relay.config import settings
 from relay.main import app
 from relay.mcp_server import add_attachment as mcp_add_attachment
+from relay.mcp_server import list_folders as mcp_list_folders
 
 AUTH = {"Authorization": "Bearer test-key"}
 
@@ -57,3 +58,15 @@ async def test_mcp_add_attachment_can_file_by_tags_and_skip_the_embed(client, va
     out = await mcp_add_attachment(filename="side.png", data=data, post_id=pid, embed=False)
     assert out["folder"] == "Homelab" and out["post_id"] is None
     assert (await client.get(f"/posts/{pid}", headers=AUTH)).json()["content"] == "body"
+
+
+# ── G-02: MCP can discover folder names, as REST GET /folders can ───────────
+
+
+@pytest.mark.asyncio
+async def test_mcp_list_folders_matches_rest(client):
+    for tags in (["homelab"], ["homelab"], ["finance"]):
+        await client.post("/posts", json={"title": "p", "content": "b", "tags": tags}, headers=AUTH)
+    out = await mcp_list_folders()
+    assert out == (await client.get("/folders", headers=AUTH)).json()
+    assert out["folders"] == [{"folder": "Finance", "count": 1}, {"folder": "Homelab", "count": 2}]

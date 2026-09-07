@@ -44,7 +44,7 @@ INSTRUCTIONS = (
     "Clients subscribe to changes in real time. Before writing, read the master document "
     "with get_post(id=0) — it holds the index, tag taxonomy, naming conventions, and "
     "house rules. Keep one canonical post per topic and update it in place rather than "
-    "creating duplicates."
+    "creating duplicates. list_folders shows how the vault is already organised."
 )
 
 
@@ -558,6 +558,20 @@ async def list_attachments(post_id: int | None = None, folder: str | None = None
             result = await service.list_attachments(db, post_id=post_id, folder=folder)
         except service.PostNotFound:
             return {"error": f"Post #{post_id} not found."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "List the vault's first-level folders with their post counts. These are the names list_posts and l"
+        "ist_attachments accept as `folder`; a post is filed by its first domain tag at creation, so t"
+        "his is the map of what the vault already has before you choose one."
+    )
+)
+async def list_folders() -> dict:
+    metrics.record_tool_call("list_folders")
+    async with _db() as db:
+        result = await service.list_folders(db)
     return result.model_dump()
 
 
