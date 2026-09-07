@@ -19,6 +19,7 @@ dependencies = [
     "joserfc>=1.7.4",
     "sqlite-vec>=0.1.9",
     "fastembed>=0.8.0",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]
@@ -31,7 +32,6 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pip-audit>=2.10.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
