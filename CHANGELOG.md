@@ -8,6 +8,17 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.6.1] — 2026-09-07
+
+Dependency maintenance, plus the reason these bumps needed a release of their own.
+
+Raising a floor in `pyproject.toml` without regenerating `uv.lock` does **not** fail the build — `uv sync --frozen`, which the Dockerfile uses, resolves the stale lock happily and installs the *old* version. Verified on this repo: with `authlib>=1.8.0` in `pyproject.toml` and 1.7.2 in the lockfile, a frozen sync exits 0 and installs 1.7.2. CI never catches it either, because CI runs a plain `uv sync` that re-resolves. So a merged bump can look applied everywhere and reach production as a no-op. This is the quiet cousin of the v1.1.0 → v1.1.1 outage, where the same lockfile/pyproject drift crashed loudly instead.
+
+### Changed
+- `authlib` floor raised to `>=1.8.0` and `ruff` to `>=0.16.6`, **each with `uv.lock` regenerated** so the versions actually ship. `authlib` backs the OIDC login and the MCP OAuth broker, so a silently un-upgraded copy is worth avoiding.
+- `joserfc>=1.7.5` and `requests>=2.34.2` (#109, #110): floors only, already satisfied by the lockfile, so nothing changed on disk.
+- The uv build stage moves to 0.12.10 (#117); the image is unchanged otherwise.
+
 ## [1.6.0] — 2026-09-07
 
 A full audit of the codebase — security, bugs, structure, and the feature gaps it exposed — shipped as four reviewed PRs ([#111](https://github.com/pierdom/relay/pull/111), [#112](https://github.com/pierdom/relay/pull/112), [#113](https://github.com/pierdom/relay/pull/113), [#114](https://github.com/pierdom/relay/pull/114)) against a written findings register.
