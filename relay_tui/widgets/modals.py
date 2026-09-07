@@ -21,6 +21,8 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
+from relay import links
+
 from .. import api
 from ..theme import ACCENT, BORDER, HEADER_BG
 from .post_panel import _time_ago, _time_until
@@ -28,8 +30,9 @@ from .post_panel import _time_ago, _time_until
 # ── Wikilink preprocessing ────────────────────────────────────────────────────
 
 _EMBED_RE = re.compile(r"!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]")
-_WIKI_RE = re.compile(r"\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]")
-_IDREF_RE = re.compile(r"(?<![\w#])#(\d{1,5})\b")
+# Same link grammar the server resolves with — one definition, not a copy.
+_WIKI_RE = links.WIKILINK_RE
+_IDREF_RE = links.IDREF_RE
 # Any extension — used only on the ![[…]] embed path (always a file in Obsidian).
 _ANY_EXT_RE = re.compile(r"\.[a-z0-9]{1,12}$", re.IGNORECASE)
 # Curated attachment types for the plain [[…]] link path — not a generic ``\.xxx$``

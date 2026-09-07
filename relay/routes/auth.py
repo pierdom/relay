@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hmac
 import logging
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
-from fastapi import APIRouter, Cookie, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 
 from ..auth import SESSION_COOKIE, create_session, revoke_session, verify_session
@@ -126,3 +127,44 @@ async def auth_logout(relay_session: str | None = Cookie(default=None)):
     resp = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     resp.delete_cookie(SESSION_COOKIE)
     return resp
+
+
+# ── Break-glass API-key session (the browser's paste-the-key login) ──────────
+
+
+@router.post("/session", include_in_schema=False)
+async def session_create(request: Request, response: Response) -> dict:
+    key = ""
+    ct = request.headers.get("content-type", "")
+    if "application/json" in ct:
+        try:
+            body = await request.json()
+            key = body.get("key", "")
+        except Exception:
+            pass
+    auth = request.headers.get("authorization", "")
+    if not key and auth.startswith("Bearer "):
+        key = auth[7:]
+    if not (key and hmac.compare_digest(key, settings.api_key)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    token = create_session()
+    response.set_cookie(
+        key="relay_session",
+        value=token,
+        httponly=True,
+        samesite="strict",
+        secure=settings.secure_cookies,
+        max_age=settings.session_max_age_hours * 3600,
+    )
+    return {"ok": True}
+
+
+@router.delete("/session", include_in_schema=False)
+async def session_delete(
+    response: Response,
+    relay_session: str | None = Cookie(default=None),
+) -> dict:
+    if relay_session:
+        revoke_session(relay_session)
+    response.delete_cookie("relay_session")
+    return {"ok": True}
