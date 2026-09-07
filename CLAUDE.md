@@ -210,7 +210,7 @@ relay/
 ├── vault.py         # File layer: posts + attachments, id allocation, rebuild, tags.yml
 ├── watcher.py       # watchdog: external edits → reindex + SSE
 ├── history.py       # git commit per write → <vault>/.relay/history.git
-├── service.py       # Shared post/tag/attachment logic
+├── service/         # Shared logic: posts · revisions · attachments · tags (+ _common); relay.service re-exports
 ├── ingest.py        # Attachment byte transports
 ├── chunking.py      # H2/H3-aware post chunking (semantic search POC)
 ├── embedding.py     # Swappable embedding backend (FastEmbed / Fake for tests)
