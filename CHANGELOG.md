@@ -6,6 +6,16 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ## [Unreleased]
 
+---
+
+## [1.7.0] — 2026-09-07
+
+The MCP SDK moves from 1.x to 2.x ([#122](https://github.com/pierdom/relay/pull/122), superseding dependabot's [#106](https://github.com/pierdom/relay/pull/106), which raises the constraint without the code that makes it import).
+
+Minor rather than patch, though nothing is added: the dependency crosses a major version, and one user-visible limit moves with it — **`add_attachment(data=…)` over `/mcp` is now capped at 4 MiB**, the SDK's transport default, below relay's own `ATTACHMENT_MAX_MB` of 25. Base64 was always documented as the small-file transport and `source_url`/`upload_id` are untouched, so nothing that was sized sensibly breaks; but a caller that had been pushing large base64 through `/mcp` will now get a 413 from the transport before relay sees the request.
+
+Nothing in the stable surface (`docs/stability.md`) changed shape. The tool surface is identical either side of the migration: 22 tools, same parameters, one resource.
+
 ### Changed
 - The MCP SDK moves to 2.x (`mcp>=2.1.1,<3.0.0`), closing [#106](https://github.com/pierdom/relay/pull/106). Both surfaces keep the same 22 tools with the same parameters and the same one resource; the migration is mechanical, and the tests that assert the surface are unchanged.
   - `FastMCP` is now `MCPServer`, and its transport options (`stateless_http`, `streamable_http_path`, `transport_security`) moved from the constructor onto `streamable_http_app()`. The DNS-rebinding opt-out relay needs behind a reverse proxy is unchanged, just relocated.
