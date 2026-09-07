@@ -1,11 +1,37 @@
 from __future__ import annotations
 
+import datetime as _dt
 import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from . import folders
 
+# The one shape every stored timestamp has (vault.utcnow_iso, frontmatter._to_iso,
+# and the cleanup loop's strftime('now') all agree on it). expires_at is compared
+# *lexically* against it in SQL, so anything else is not "unusual", it is wrong:
+# "1 week" sorted below "2026-…" and was swept within the hour (AUDIT.md B-01).
+ISO_Z_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def normalize_expires_at(value: str | None) -> str | None:
+    """Parse an ISO 8601 datetime (offsets and date-only accepted, naive = UTC)
+    and return it as ``YYYY-MM-DDTHH:MM:SSZ``; ``None``/blank clears. Raises
+    ``ValueError`` on anything that is not a datetime."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if ISO_Z_RE.match(text):
+        return text
+    try:
+        parsed = _dt.datetime.fromisoformat(text.replace("Z", "+00:00") if text.endswith("Z") else text)
+    except ValueError:
+        raise ValueError("expires_at must be an ISO 8601 datetime, e.g. 2026-06-30T00:00:00Z") from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_dt.UTC)
+    return parsed.astimezone(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def _clean_title(v: str) -> str:
     v = v.strip()
@@ -39,6 +65,11 @@ class PostCreate(BaseModel):
     @classmethod
     def clean_tags(cls, v: list[str]) -> list[str]:
         return _clean_tag_list(v)
+
+    @field_validator("expires_at")
+    @classmethod
+    def iso_expiry(cls, v: str | None) -> str | None:
+        return normalize_expires_at(v)
 
 
 class PostResponse(BaseModel):
@@ -76,6 +107,13 @@ class SearchTiming(BaseModel):
 
     cold_start: bool = Field(description="Whether this query triggered a model load, vs. finding it already resident")
     embedding_ms: float = Field(description="Wall-clock time spent embedding the query (plus the model load, if cold)")
+    degraded: bool = Field(
+        default=False,
+        description=(
+            "True when the embedding backend failed at query time and the results are keyword-ranked "
+            "instead — a runtime failure (model download, OOM), not the feature being off (that is a 503)"
+        ),
+    )
 
 
 class PostListResponse(BaseModel):
@@ -177,6 +215,18 @@ class PostUpdate(BaseModel):
     def clean_tags(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _clean_tag_list(v)
 
+    @field_validator("expires_at")
+    @classmethod
+    def iso_expiry(cls, v: str | None) -> str | None:
+        # "" clears — the in-process MCP server cannot tell an omitted argument
+        # from null, so an empty string is the documented way to clear a field.
+        return normalize_expires_at(v)
+
+    @field_validator("source")
+    @classmethod
+    def blank_source_clears(cls, v: str | None) -> str | None:
+        return v if v is None else (v.strip() or None)
+
 
 class FolderCount(BaseModel):
     folder: str
@@ -224,6 +274,18 @@ class AttachmentCreate(BaseModel):
             return None
         v = v.strip()
         return v or None
+
+    @field_validator("folder")
+    @classmethod
+    def folder_is_a_plain_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        if not folders.is_valid_name(v):
+            raise ValueError("folder must be a plain first-level folder name")
+        return v
 
     @model_validator(mode="after")
     def one_source(self) -> AttachmentCreate:
@@ -447,6 +509,11 @@ class PostRestore(BaseModel):
 class TagConfigCreate(BaseModel):
     ttl_hours: int | None = Field(default=None, gt=0)
     expires_at: str | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def iso_expiry(cls, v: str | None) -> str | None:
+        return normalize_expires_at(v)
 
 
 class TagConfigResponse(BaseModel):

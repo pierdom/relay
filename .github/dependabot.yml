@@ -11,3 +11,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+
+  # Keeps the digest pins in the Dockerfile (python base + uv stage) current.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

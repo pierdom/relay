@@ -1,7 +1,11 @@
-"""Exceptions and row helpers shared by every service module."""
+"""Exceptions, row helpers and page bounds shared by every service module."""
 from __future__ import annotations
 
+import logging
+
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 
 class PostNotFound(Exception):
@@ -43,6 +47,15 @@ class AttachmentError(Exception):
     """Raised when an attachment can't be stored (e.g. too large)."""
 
 
+class InvalidTag(Exception):
+    """Raised when a tag name normalises to nothing (``"!!"``) — it would
+    otherwise create a nameless ``tag_config`` row that ``list_tags`` shows
+    forever (AUDIT.md B-08)."""
+class InvalidFolder(Exception):
+    """Raised when a caller-supplied ``folder`` is not a plain first-level folder
+    name (``..``, a dot-folder, a path) — see ``folders.is_valid_name``."""
+
+
 class AttachmentSourceError(Exception):
     """Raised when the attachment's byte source fails to resolve — a source_url
     fetch error or a presigned upload slot that's unknown/expired/unfilled. Maps
@@ -56,4 +69,16 @@ async def _fetch(db: aiosqlite.Connection, post_id: int) -> aiosqlite.Row | None
 
 def _tags_from_sentinel(s: str) -> list[str]:
     return [t for t in s.split(",") if t]
+
+
+
+# Page bounds, enforced here so every transport agrees: REST already validates
+# these at the Query() layer; the in-process MCP server passed them straight to
+# SQL, where `limit=-1` is SQLite's "unbounded" (AUDIT.md S-07).
+MAX_PAGE_LIMIT = 100
+MAX_HISTORY_LIMIT = 200
+
+
+def _clamp(value: int, *, low: int, high: int) -> int:
+    return max(low, min(int(value), high))
 

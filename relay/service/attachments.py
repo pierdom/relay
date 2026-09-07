@@ -18,7 +18,7 @@ from ..models import (
     PostUpdate,
     UploadSlotResponse,
 )
-from ._common import AttachmentError, AttachmentSourceError, PostNotFound, _fetch
+from ._common import AttachmentError, AttachmentSourceError, InvalidFolder, PostNotFound, _fetch
 
 _EMBED_OR_LINK_RE = re.compile(r"!?\[\[([^\]|#]+?)(?:\|[^\]]*)?\]\]")
 
@@ -170,6 +170,8 @@ async def add_attachment(
             raise PostNotFound
         target_folder = folders.folder_of(row["path"], default=folders.INBOX)
     elif folder:
+        if not folders.is_valid_name(folder):
+            raise InvalidFolder(f"invalid folder name: {folder!r}")
         target_folder = folder
     elif tags:
         target_folder = folders.folder_for(1, tags) or folders.INBOX
@@ -208,6 +210,8 @@ async def list_attachments(
         if row is None:
             raise PostNotFound
         folder = folders.folder_of(row["path"], default=folders.INBOX)
+    elif folder and not folders.is_valid_name(folder):
+        raise InvalidFolder(f"invalid folder name: {folder!r}")
     items = [
         AttachmentInfo(filename=n, folder=f, bytes=s, ref=f"![[{n}]]")
         for (n, f, s) in vault.list_attachments(folder)
@@ -228,4 +232,3 @@ async def delete_attachment(db: aiosqlite.Connection, name: str) -> AttachmentDe
     referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
     await history.commit(f"attachment delete: {removed.name}")
     return AttachmentDeleteResponse(filename=removed.name, referenced_by=sorted(referenced_by))
-

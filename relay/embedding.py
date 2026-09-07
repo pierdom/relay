@@ -8,6 +8,7 @@ import gc
 import hashlib
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Protocol
@@ -144,6 +145,10 @@ class FakeBackend:
 
 _backend: EmbeddingBackend | None = None
 _last_used: float = 0.0
+# Every caller reaches get_backend() from a worker thread (asyncio.to_thread), so
+# two cold calls — a search and a write landing together after an idle unload —
+# would each build a ~570MB backend without this (AUDIT.md B-11).
+_load_lock = threading.Lock()
 
 
 def get_backend() -> EmbeddingBackend:
@@ -155,7 +160,9 @@ def get_backend() -> EmbeddingBackend:
     sitting unused long enough to give its memory back."""
     global _backend, _last_used
     if _backend is None:
-        _backend = FastEmbedBackend()
+        with _load_lock:
+            if _backend is None:
+                _backend = FastEmbedBackend()
     _last_used = time.monotonic()
     return _backend
 

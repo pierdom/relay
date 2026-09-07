@@ -6,11 +6,29 @@ from collections import defaultdict
 # tag -> set of subscriber queues; None = subscribe to all tags
 _subscribers: dict[str | None, set[asyncio.Queue]] = defaultdict(set)
 
+# A subscriber that stops reading (a phone tab asleep) must not grow a queue
+# without bound (AUDIT.md S-06). Past this many undelivered events the oldest is
+# dropped and an OVERFLOW marker queued; the SSE generator ends the stream on it
+# and the client reconnects with Last-Event-ID, replaying what it missed.
+QUEUE_MAXSIZE = 256
+OVERFLOW = {"type": "overflow"}
+
 
 def subscribe(tag: str | None) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
+    q: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAXSIZE)
     _subscribers[tag].add(q)
     return q
+
+
+def _offer(q: asyncio.Queue, envelope: dict) -> None:
+    try:
+        q.put_nowait(envelope)
+    except asyncio.QueueFull:
+        try:
+            q.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        q.put_nowait(OVERFLOW)
 
 
 def unsubscribe(q: asyncio.Queue, tag: str | None) -> None:
@@ -33,13 +51,13 @@ async def _broadcast(envelope: dict) -> None:
     for tag in tags:
         for q in list(_subscribers.get(tag, set())):
             if id(q) not in notified:
-                await q.put(envelope)
+                _offer(q, envelope)
                 notified.add(id(q))
 
     # Global subscribers (no tag filter)
     for q in list(_subscribers.get(None, set())):
         if id(q) not in notified:
-            await q.put(envelope)
+            _offer(q, envelope)
             notified.add(id(q))
 
 

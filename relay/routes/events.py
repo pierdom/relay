@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import json
 import logging
 
-import aiosqlite
-from fastapi import APIRouter, Cookie, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth import verify_session
-from ..config import settings
-from ..events import subscribe, unsubscribe
+from .. import database
+from ..auth import require_api_key
+from ..events import OVERFLOW, subscribe, unsubscribe
 from ..models import PostResponse
 
 logger = logging.getLogger(__name__)
@@ -21,31 +19,17 @@ _KEEPALIVE_SECONDS = 30
 
 
 
-@router.get("/events")
+@router.get("/events", dependencies=[Depends(require_api_key)])
 async def stream_events(
     request: Request,
     tag: str | None = Query(default=None),
-    relay_session: str | None = Cookie(default=None),
 ) -> EventSourceResponse:
     """
     SSE stream. Sends a 'post' event whenever new content is published.
     On reconnect, set the Last-Event-ID header to replay missed posts.
     Optional ?tag= filter to receive only matching content.
-    Auth: relay_session cookie or Authorization Bearer header.
+    Auth: relay_session cookie or Authorization Bearer header (``require_api_key``).
     """
-    from fastapi import HTTPException
-    from fastapi import status as http_status
-
-    authed = False
-    if relay_session and verify_session(relay_session):
-        authed = True
-    if not authed:
-        auth_header = request.headers.get("authorization", "")
-        bearer = auth_header[7:] if auth_header.startswith("Bearer ") else ""
-        authed = bool(bearer) and hmac.compare_digest(bearer, settings.api_key)
-    if not authed:
-        raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-
     last_event_id = request.headers.get("last-event-id")
 
     async def generator():
@@ -64,12 +48,11 @@ async def stream_events(
             last_id = high_water
             conditions = ["id > ?"]
             params: list = [last_id]
-            if tag:
-                conditions.append("tags LIKE ?")
-                params.append(f"%,{tag.strip().lower()},%")
+            f_conds, f_params = database.tag_folder_filters(tag, None, alias=None)
+            conditions += f_conds
+            params += f_params
             where = "WHERE " + " AND ".join(conditions)
-            async with aiosqlite.connect(settings.database_path) as db:
-                db.row_factory = aiosqlite.Row
+            async with database.connect() as db:
                 async with db.execute(
                     f"SELECT * FROM posts {where} ORDER BY created_at ASC",
                     params,
@@ -88,6 +71,11 @@ async def stream_events(
                     break
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=_KEEPALIVE_SECONDS)
+                    if event is OVERFLOW:
+                        # Too far behind to be caught up in-band. Close; the client
+                        # reconnects with Last-Event-ID and replays from the index.
+                        logger.info("SSE client fell behind (tag=%s) — closing for replay", tag)
+                        break
                     if event.get("type") == "delete":
                         # No SSE id: a delete carries the post's (possibly old) id
                         # and must not rewind the client's Last-Event-ID cursor.

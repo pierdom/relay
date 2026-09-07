@@ -22,14 +22,19 @@ from ..models import (
     SearchTiming,
 )
 from ._common import (
+    MAX_PAGE_LIMIT,
     InvalidSearchMode,
     PostNotFound,
     ProtectedPost,
     SemanticSearchUnavailable,
+    _clamp,
     _fetch,
     _tags_from_sentinel,
+    logger,
 )
 from .attachments import _all_referenced_attachments, referenced_attachment_names
+
+# ── Posts ─────────────────────────────────────────────────────────────────────
 
 
 async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostResponse:
@@ -145,12 +150,9 @@ async def _keyword_ranked_ids(
         return []
     conditions = ["posts_fts MATCH ?"]
     params: list[str | int] = [match]
-    if tag:
-        conditions.append("posts.tags LIKE ?")
-        params.append(f"%,{tag.strip().lower()},%")
-    if folder:
-        conditions.append("posts.path LIKE ?")
-        params.append(f"{folder}/%")
+    f_conds, f_params = database.tag_folder_filters(tag, folder)
+    conditions += f_conds
+    params += f_params
     params.append(limit)
     async with db.execute(
         f"SELECT posts.id FROM posts JOIN posts_fts ON posts_fts.rowid = posts.id "
@@ -207,12 +209,23 @@ async def _list_posts_ranked(
     # signal if read first.
     cold_start = not embedding.is_loaded()
     t0 = time.monotonic()
-    semantic_results = await vectors.semantic_search(db, search, limit=pool_size, tag=tag, folder=folder)
+    degraded = False
+    try:
+        semantic_results = await vectors.semantic_search(db, search, limit=pool_size, tag=tag, folder=folder)
+    except Exception:
+        # The feature is on but the backend failed *now* (model download blocked,
+        # OOM, corrupt cache). Answer the query keyword-ranked and say so, rather
+        # than 500 — "configured off" stays a loud 503 above (AUDIT.md, Q3).
+        logger.warning("Semantic search failed at query time — answering keyword-only", exc_info=True)
+        semantic_results = []
+        degraded = True
     embedding_ms = round((time.monotonic() - t0) * 1000, 1)
-    search_timing = SearchTiming(cold_start=cold_start, embedding_ms=embedding_ms)
+    search_timing = SearchTiming(cold_start=cold_start, embedding_ms=embedding_ms, degraded=degraded)
 
     semantic_ranked = [pid for pid, _ in semantic_results]
-    if mode == "semantic":
+    if degraded:
+        ordered_ids = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder)
+    elif mode == "semantic":
         ordered_ids = semantic_ranked
     else:
         keyword_ranked = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder)
@@ -262,6 +275,12 @@ async def list_posts(
 ) -> PostListResponse | PostSummaryListResponse:
     if mode not in ("keyword", "semantic", "hybrid"):
         raise InvalidSearchMode
+    # ``?tag=`` / ``?search=`` (empty) mean "no filter", not "filter on nothing";
+    # without this the empty string skipped the master-doc pin while filtering
+    # on nothing (AUDIT.md B-14).
+    tag, folder, search = tag or None, folder or None, search or None
+    limit = _clamp(limit, low=1, high=MAX_PAGE_LIMIT)
+    offset = max(0, int(offset))
     if search and mode in ("semantic", "hybrid"):
         return await _list_posts_ranked(
             db, search=search, mode=mode, limit=limit, offset=offset, summary=summary, tag=tag, folder=folder
@@ -289,12 +308,9 @@ async def list_posts(
             conditions.append("(posts.title LIKE ? OR posts.content LIKE ? OR posts.source LIKE ?)")
             params.extend([q, q, q])
 
-    if tag:
-        conditions.append("posts.tags LIKE ?")
-        params.append(f"%,{tag.strip().lower()},%")
-    if folder:
-        conditions.append("posts.path LIKE ?")
-        params.append(f"{folder}/%")
+    f_conds, f_params = database.tag_folder_filters(tag, folder)
+    conditions += f_conds
+    params += f_params
 
     # On the unfiltered home feed, pin the master document (id=0) on top and keep
     # it out of the dated stream so pagination stays consistent across pages.
@@ -492,4 +508,3 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
     # After the orphan sweep, so the note and the assets it took with it are one
     # commit — restoring the post restores its images in the same revert.
     await history.commit(f"post {post_id} delete: {row['title']}")
-

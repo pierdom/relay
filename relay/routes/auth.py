@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import hmac
 import logging
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 
-from ..auth import SESSION_COOKIE, create_session, revoke_session, verify_session
+from ..auth import SESSION_COOKIE, bearer_matches, create_session, revoke_session, verify_session
 from ..config import settings
 
 logger = logging.getLogger(__name__)
@@ -145,7 +144,7 @@ async def session_create(request: Request, response: Response) -> dict:
     auth = request.headers.get("authorization", "")
     if not key and auth.startswith("Bearer "):
         key = auth[7:]
-    if not (key and hmac.compare_digest(key, settings.api_key)):
+    if not bearer_matches(key):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     token = create_session()
     response.set_cookie(

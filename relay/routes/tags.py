@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import aiosqlite
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from .. import service
 from ..auth import require_api_key
@@ -30,7 +30,10 @@ async def rename_tag(
     body: TagRename,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> TagListResponse:
-    return await service.rename_tag(db, tag, body.new_name)
+    try:
+        return await service.rename_tag(db, tag, body.new_name)
+    except service.InvalidTag:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="tag must not be empty") from None
 
 
 @router.post(
@@ -44,4 +47,7 @@ async def set_tag_config(
     body: TagConfigCreate,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> TagConfigResponse:
-    return await service.set_tag_config(db, tag, body)
+    try:
+        return await service.set_tag_config(db, tag, body)
+    except service.InvalidTag:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="tag must not be empty") from None

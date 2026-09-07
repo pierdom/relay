@@ -15,7 +15,7 @@ import aiosqlite
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import database, events, frontmatter, history, service, vault, vectors
+from . import database, events, frontmatter, history, service, vault
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class _Handler(FileSystemEventHandler):
         if not path.endswith(".md"):
             return False
         p = Path(path).resolve()
-        if str(p).startswith(self._relay_dir):
+        if str(p).startswith(self._relay_dir) or vault.is_hidden_path(p):
             return False
         # Syncthing conflict copies (.sync-conflict-YYYYMMDD-HHMMSS-DEVICEID.md)
         # carry the original post's id: in front-matter — ingesting them would
@@ -89,11 +89,7 @@ def _log_failure(fut) -> None:
 async def _reconcile(paths: list[str]) -> None:
     existing = [Path(p) for p in paths if Path(p).exists()]
     missing = [Path(p) for p in paths if not Path(p).exists()]
-    async with aiosqlite.connect(settings.database_path) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA busy_timeout=5000;")
-        if database.VEC_ENABLED:
-            await vectors.load_extension(db)
+    async with database.connect() as db:
         for path in existing:
             await _reconcile_file(db, path)
         for path in missing:
@@ -122,6 +118,13 @@ async def _reconcile_file(db: aiosqlite.Connection, path: Path) -> None:
     meta, body = frontmatter.parse(text)
     async with vault.write_lock:
         pid = meta.get("id")
+        if pid is not None and await _id_taken_elsewhere(db, pid, path):
+            # A copy carrying another live note's id (Obsidian "Duplicate note", a
+            # backup dropped beside the original). Upserting would repoint the id
+            # at the copy and drop the original from the index (AUDIT.md B-03);
+            # stamp a fresh id instead, exactly as rebuild_index does at startup.
+            logger.warning("External note %s carries id %s already used by another file — re-stamping", path.name, pid)
+            pid = None
         if pid is None:
             pid = await vault.allocate_id(db)
             path = vault.write_file(
@@ -142,6 +145,17 @@ async def _reconcile_file(db: aiosqlite.Connection, path: Path) -> None:
     if post is not None:
         await events.publish(post.model_dump())
     logger.info("Indexed external change: %s (id=%s)", path.name, pid)
+
+
+async def _id_taken_elsewhere(db: aiosqlite.Connection, pid: int, path: Path) -> bool:
+    """Whether ``pid`` is indexed at a *different* path whose file still exists.
+    A rename (old path gone) is not a collision; a second file is."""
+    async with db.execute("SELECT path FROM posts WHERE id = ?", (pid,)) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        return False
+    other = vault.abspath(row["path"])
+    return other != path.resolve() and other.exists()
 
 
 async def _reconcile_delete(db: aiosqlite.Connection, path: Path) -> None:

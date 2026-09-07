@@ -7,7 +7,7 @@ relay exposes the full feed API as **21 MCP tools** so Claude (or any MCP-capabl
 | Tool | Description |
 |------|-------------|
 | `publish_post` | Publish a post (title, content, tags, source, expires_at) |
-| `update_post` | Partially update a post by ID — only provided fields change |
+| `update_post` | Partially update a post by ID — only provided fields change; pass `""` for `expires_at` or `source` to clear it |
 | `get_post` | Get a post by ID (`id=0` for the master document) |
 | `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default. `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) and combines with tag/folder — errors if embeddings aren't enabled |
 | `delete_post` | Delete a post by ID |

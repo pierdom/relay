@@ -15,7 +15,9 @@ from ..models import (
     TagCount,
     TagListResponse,
 )
-from ._common import _tags_from_sentinel
+from ._common import InvalidTag, _tags_from_sentinel
+
+# ── Tags ──────────────────────────────────────────────────────────────────────
 
 
 async def list_folders(db: aiosqlite.Connection) -> FolderListResponse:
@@ -48,6 +50,8 @@ async def list_tags(db: aiosqlite.Connection) -> TagListResponse:
 
 async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagListResponse:
     old = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
+    if not old or not new_name:
+        raise InvalidTag
     if old == new_name:
         return await list_tags(db)
 
@@ -84,6 +88,8 @@ async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagLi
 
 async def set_tag_config(db: aiosqlite.Connection, tag: str, body: TagConfigCreate) -> TagConfigResponse:
     clean_tag = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
+    if not clean_tag:
+        raise InvalidTag
     await db.execute(
         "INSERT INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)"
         " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours, expires_at = excluded.expires_at",

@@ -15,8 +15,10 @@ from ..models import (
     PostRevisionContent,
     PostUpdate,
 )
-from ._common import HistoryUnavailable, RevisionNotFound, _fetch
+from ._common import MAX_HISTORY_LIMIT, HistoryUnavailable, RevisionNotFound, _clamp, _fetch
 from .posts import update_post
+
+# ── History / restore ─────────────────────────────────────────────────────────
 
 # How deep to look when resolving a sha for a restore. Larger than the listing
 # default: the caller may hold a sha from an older page of history.
@@ -33,6 +35,7 @@ async def get_post_history(
     """
     if not history.enabled():
         raise HistoryUnavailable
+    limit = _clamp(limit, low=1, high=MAX_HISTORY_LIMIT)
     row = await _fetch(db, post_id)
     revs = await history.revisions(
         post_id, current_path=row["path"] if row is not None else None, limit=limit
@@ -64,6 +67,10 @@ async def _resolve_revision(db: aiosqlite.Connection, post_id: int, sha: str):
         current_path=row["path"] if row is not None else None,
         limit=_RESTORE_SCAN_LIMIT,
     )
+    # REST enforces min_length=4 on the sha; MCP callers reach here unvalidated,
+    # and ``"".startswith("")`` would silently pick the newest revision (B-15).
+    if len(sha) < 4:
+        raise RevisionNotFound
     match = next((r for r in revs if r.sha == sha or r.sha.startswith(sha)), None)
     if match is None:
         raise RevisionNotFound
@@ -97,6 +104,7 @@ async def list_deleted_posts(
     """
     if not history.enabled():
         raise HistoryUnavailable()
+    limit = _clamp(limit, low=1, high=MAX_HISTORY_LIMIT)
     found = await history.deletions(limit=limit if include_expiry else limit * 3)
     if not include_expiry:
         found = [d for d in found if d.reason != "expiry"]
