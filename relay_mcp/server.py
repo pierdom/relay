@@ -24,14 +24,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
+import httpx2
 import mcp.server.stdio
 import mcp.types as types
 from mcp.client.session import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.server import Server
-from mcp.server.lowlevel.helper_types import ReadResourceContents
-from pydantic import AnyUrl
 
+from relay import __version__
 from relay.config import settings
 
 RELAY_BASE_URL = settings.relay_base_url
@@ -57,29 +57,22 @@ _PATH_PARAM = {
 }
 
 
-def _http_client_factory(
-    headers: dict[str, str] | None = None,
-    timeout: httpx.Timeout | None = None,
-    auth: httpx.Auth | None = None,
-) -> httpx.AsyncClient:
-    """The one place the bridge opens an HTTP connection — tests swap
-    ``httpx.AsyncClient`` for an ASGI transport and everything follows."""
-    return httpx.AsyncClient(
-        headers=headers,
-        timeout=timeout if timeout is not None else httpx.Timeout(30.0, read=300.0),
-        auth=auth,
-        follow_redirects=True,
-    )
-
-
 @asynccontextmanager
 async def _remote() -> AsyncIterator[ClientSession]:
-    async with streamablehttp_client(
-        f"{RELAY_BASE_URL}/mcp", headers=_AUTH, httpx_client_factory=_http_client_factory
-    ) as (read, write, _session_id):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            yield session
+    """One Streamable HTTP session against the relay's own /mcp.
+
+    mcp 2.x takes the transport's HTTP client rather than headers and a factory,
+    and that client must be httpx2 — the SDK's own dependency. The local upload
+    below still uses httpx, which is what the rest of relay speaks; the two
+    coexist deliberately rather than migrating unrelated modules here.
+    """
+    async with httpx2.AsyncClient(
+        headers=_AUTH, timeout=httpx2.Timeout(30.0, read=300.0), follow_redirects=True
+    ) as http_client:
+        async with streamable_http_client(f"{RELAY_BASE_URL}/mcp", http_client=http_client) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                yield session
 
 
 async def _upload_local_path(arguments: dict) -> list[types.TextContent]:
@@ -127,55 +120,71 @@ async def _upload_local_path(arguments: dict) -> list[types.TextContent]:
 
 
 def _with_local_path(tool: types.Tool) -> types.Tool:
-    """The server's ``add_attachment`` plus the proxy-only ``path`` parameter."""
-    schema = dict(tool.inputSchema)
+    """The server's ``add_attachment`` plus the proxy-only ``path`` parameter.
+
+    mcp 2.x renamed the wire's camelCase fields to snake_case attributes with
+    camelCase aliases, so ``model_copy`` has to update ``input_schema``; the
+    old ``inputSchema`` key would be dropped silently as an unknown field."""
+    schema = dict(tool.input_schema)
     schema["properties"] = {**schema.get("properties", {}), "path": _PATH_PARAM}
     description = (tool.description or "") + (
         " From this proxy you may instead pass `path` — a file on the machine running it — "
         "and the proxy uploads it for you (streamed, no base64)."
     )
-    return tool.model_copy(update={"inputSchema": schema, "description": description})
+    return tool.model_copy(update={"input_schema": schema, "description": description})
 
 
-server = Server("relay", instructions=INSTRUCTIONS)
+# mcp 2.x registers handlers through the constructor instead of decorators, and
+# they take (ctx, params) and return the result object itself. That suits a
+# bridge: the remote's result *is* the result, so most of these hand it straight
+# back rather than unpacking and rebuilding it.
 
 
-@server.list_resources()
-async def list_resources() -> list[types.Resource]:
+async def list_resources(ctx, params: types.PaginatedRequestParams) -> types.ListResourcesResult:
     async with _remote() as remote:
-        return (await remote.list_resources()).resources
+        return await remote.list_resources()
 
 
-@server.read_resource()
-async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
+async def read_resource(ctx, params: types.ReadResourceRequestParams) -> types.ReadResourceResult:
     async with _remote() as remote:
-        result = await remote.read_resource(uri)
-    return [
-        ReadResourceContents(
-            content=item.text if isinstance(item, types.TextResourceContents) else item.blob,
-            mime_type=item.mimeType,
-        )
-        for item in result.contents
-    ]
+        return await remote.read_resource(params.uri)
 
 
-@server.list_tools()
-async def list_tools() -> list[types.Tool]:
+async def list_tools(ctx, params: types.PaginatedRequestParams) -> types.ListToolsResult:
     async with _remote() as remote:
-        tools = (await remote.list_tools()).tools
-    return [_with_local_path(t) if t.name == "add_attachment" else t for t in tools]
+        result = await remote.list_tools()
+    return result.model_copy(
+        update={"tools": [_with_local_path(t) if t.name == "add_attachment" else t for t in result.tools]}
+    )
 
 
-@server.call_tool()
-async def call_tool(name: str, arguments: dict) -> types.CallToolResult | list[types.TextContent]:
-    if name == "add_attachment":
+async def call_tool(ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
+    arguments = params.arguments or {}
+    if params.name == "add_attachment":
         if sum(bool(arguments.get(k)) for k in ("path", "data", "source_url", "upload_id")) > 1:
-            return [types.TextContent(type="text", text="Provide exactly one of: path, data, source_url, upload_id.")]
+            return _text_result("Provide exactly one of: path, data, source_url, upload_id.")
         if arguments.get("path"):
-            return await _upload_local_path(arguments)
+            return types.CallToolResult(content=await _upload_local_path(arguments))
     async with _remote() as remote:
-        # Returned verbatim: content, structuredContent and isError are the server's.
-        return await remote.call_tool(name, arguments)
+        # Returned verbatim: content, structured_content and is_error are the server's.
+        return await remote.call_tool(params.name, arguments)
+
+
+def _text_result(message: str) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=message)], is_error=True)
+
+
+server = Server(
+    "relay",
+    # Same reasoning as the in-process server: serverInfo.version is what the
+    # client shows next to the name, and relay's version is the useful answer.
+    version=__version__,
+    instructions=INSTRUCTIONS,
+    on_list_resources=list_resources,
+    on_read_resource=read_resource,
+    on_list_tools=list_tools,
+    on_call_tool=call_tool,
+)
 
 
 def main() -> None:

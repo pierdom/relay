@@ -15,14 +15,14 @@ from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
 )
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import Icon
 from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import database, metrics, service, status, vault
+from . import __version__, database, metrics, service, status, vault
 from .auth import bearer_matches
 from .config import settings
 from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
@@ -89,21 +89,16 @@ def _brand_icons() -> list[Icon]:
     ]
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     "relay",
+    # serverInfo.version, which a client shows next to the server's name. Left
+    # unset it is the empty string; under mcp 1.x it was the *SDK's* version
+    # (a 1.6.1 relay announced itself as "1.29.0"), which was never what a user
+    # reading it wanted. relay's own version is.
+    version=__version__,
     instructions=INSTRUCTIONS,
     website_url=settings.relay_base_url.rstrip("/"),
     icons=_brand_icons(),
-    stateless_http=True,
-    streamable_http_path="/mcp",
-    # We mount into FastAPI behind a public reverse proxy, not FastMCP's own
-    # uvicorn. FastMCP's default host (127.0.0.1) otherwise auto-enables DNS-
-    # rebinding protection scoped to localhost, which 421s every real Host header
-    # (e.g. relay.geon.im) and 403s a browser Origin — so remote /mcp never worked
-    # over the network. DNS rebinding is a localhost-dev threat; our actual
-    # controls are bearer/OAuth auth + HTTPS + the proxy, so disable that check
-    # (this matches the SDK's own default for a non-localhost host).
-    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     **_auth_kwargs(),
 )
 
@@ -622,7 +617,26 @@ def mcp_asgi_app():
     verifier still accepts the static key), so we mount it bare. Otherwise we keep
     the minimal static-bearer gate.
     """
-    app = mcp.streamable_http_app()
+    # mcp 2.x moved the transport options off the constructor onto this factory.
+    #
+    # We mount into FastAPI behind a public reverse proxy, not the SDK's own
+    # uvicorn. Its default host (127.0.0.1) otherwise auto-enables DNS-rebinding
+    # protection scoped to localhost, which 421s every real Host header (e.g.
+    # relay.geon.im) and 403s a browser Origin — so remote /mcp never worked over
+    # the network. DNS rebinding is a localhost-dev threat; our actual controls
+    # are bearer/OAuth auth + HTTPS + the proxy, so that check stays off.
+    #
+    # max_request_body_size is the SDK's own 4 MiB default, named here because it
+    # is now load-bearing: `add_attachment(data=…)` is reachable over /mcp and
+    # ATTACHMENT_MAX_MB is 25, so a large base64 attachment is rejected by the
+    # transport before relay sees it. That is the intended shape — the tool
+    # documents base64 as tiny-files-only and points at source_url/upload_id for
+    # anything real — but it is a cap chosen here, not an accident.
+    app = mcp.streamable_http_app(
+        stateless_http=True,
+        streamable_http_path="/mcp",
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
     if settings.mcp_oauth_active:
         return app
     return BearerAuthASGI(app)
