@@ -79,7 +79,7 @@ Stored verbatim, resolved at display time. Code spans/blocks are skipped.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | required | Bearer token |
-| `RELAY_BASE_URL` | `http://localhost:8000` | Used by the stdio MCP proxy |
+| `RELAY_BASE_URL` | `http://localhost:8000` | Used by the stdio MCP bridge, OIDC redirect URIs and the MCP resource id |
 | `DEFAULT_TTL_HOURS` | 0 | Global expiry; 0 = off |
 | `CLEANUP_INTERVAL_MINUTES` | 60 | |
 | `RELAY_VAULT_PATH` | /data/vault | |
@@ -109,13 +109,11 @@ Two channels checked by `require_api_key` (`relay/auth.py`): **Bearer `API_KEY`*
 
 ## MCP
 
-Two surfaces, **identical tools**:
-- **`relay/mcp_server.py`** — in-process, Streamable HTTP at `/mcp`. Recommended.
-- **`relay_mcp/server.py`** — legacy stdio proxy for clients that can't speak remote MCP (e.g. Claude Desktop).
+Two surfaces, **one tool definition**:
+- **`relay/mcp_server.py`** — in-process, Streamable HTTP at `/mcp`. The only place tools are declared. Recommended.
+- **`relay_mcp/server.py`** — stdio ↔ Streamable HTTP **bridge** for clients that can't speak remote MCP (e.g. Claude Desktop). It forwards every request to `<RELAY_BASE_URL>/mcp` and returns the server's result verbatim; tools, parameters and descriptions come from the server at call time, so nothing can drift. One fresh connection per request (`/mcp` is stateless), so a relay restart is invisible to the client. `tests/test_mcp_bridge.py` drives it end to end against a real uvicorn.
 
-**Parity rule:** every change to one file must be reflected in the other. Tool names, parameters, and descriptions must match exactly. **`tests/test_mcp_parity.py` enforces this in CI** — it ast-parses both files, diffs names/params/descriptions, and checks every advertised tool is actually dispatched. Always update both files in the same change.
-
-**Documented exception** (`PROXY_ONLY_PARAMS` / `DESCRIPTION_EXEMPT`): `add_attachment`'s `path` parameter is stdio-proxy-only. The in-process server must never gain `path` — that would be an arbitrary file-read on the relay host.
+**The one bridge-only addition:** `add_attachment` gains a `path` parameter (a file on the client machine, uploaded through the presigned-slot REST flow). The in-process server must never gain `path` — that would be an arbitrary file-read on the relay host.
 
 | Tool | Description |
 |------|-------------|
@@ -223,7 +221,7 @@ relay/
 ├── metrics.py       # Zero-dep Prometheus counter registry
 ├── status.py        # Runtime diagnostics
 └── routes/          # Thin route handlers — delegate to service
-relay_mcp/server.py              # Legacy stdio MCP proxy
+relay_mcp/server.py              # stdio ↔ Streamable HTTP bridge (no tool definitions of its own)
 relay/static/index.html          # Browser UI markup (210 lines)
 relay/static/ui/app.css          # UI stylesheet
 relay/static/ui/js/main.js       # App entry point (ES module)

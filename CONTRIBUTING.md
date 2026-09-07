@@ -26,7 +26,7 @@ Tests always run against a throwaway vault. The `isolated_vault` autouse fixture
 
 ## Key invariants
 
-**MCP parity.** Every tool must exist in both `relay/mcp_server.py` (in-process) and `relay_mcp/server.py` (stdio proxy) with identical names, parameters, and descriptions. `tests/test_mcp_parity.py` enforces this in CI — always update both files in the same change.
+**One MCP tool definition.** Tools live only in `relay/mcp_server.py`. `relay_mcp/server.py` is a stdio bridge that forwards to `/mcp` and exposes whatever the server exposes (plus its own `path` parameter on `add_attachment`); never re-declare a tool there. `tests/test_mcp_bridge.py` drives the bridge against a real server.
 
 **CSS tokens.** All colour values must be declared in the two `:root` blocks at the top of `relay/static/ui/app.css`; components reference `var(--token)` only. `tests/test_css_tokens.py` fails on literals outside those blocks or a token missing from one theme. A new theme is one override block plus one registry entry — no component rules change.
 
@@ -36,6 +36,6 @@ Tests always run against a throwaway vault. The `isolated_vault` autouse fixture
 
 - Open an issue before starting large or API-surface-changing work.
 - Keep PRs focused; one logical change per PR.
-- Add or update tests for any behaviour you change. Browser smokes live in `tests/test_browser_*.py`.
+- Add or update tests for any behaviour you change. Browser smokes live in `tests/ui/`.
 - Run `ruff check .` and `pytest -q` locally before pushing — CI runs both.
 - Minor version bumps move the Docker tag line (`:0.N`); patches do not. The version bump and the git tag are two separate acts: only the tag publishes a GHCR image.

@@ -61,9 +61,3 @@ ignore = [
     # Nested `with` blocks read better than one wrapped line in the test fixtures.
     "SIM117",
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# The stdio proxy carries the MCP tool schemas as single-line description
-# strings that must stay byte-identical to relay/mcp_server.py (see the feature
-# parity rule in CLAUDE.md). Reflowing them to fit is a silent parity hazard.
-"relay_mcp/server.py" = ["E501"]

@@ -16,7 +16,7 @@ relay exposes the full feed API as **21 MCP tools** so Claude (or any MCP-capabl
 | `restore_post` | Restore a post to a revision sha, recreating it if deleted; the restore is itself recorded |
 | `get_backlinks` | Posts that link here via `[[Title]]` or `#id` (linked mentions) |
 | `list_deleted_posts` | Posts that are gone but restorable — id, title, restorable sha, and why they went |
-| `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio proxy also accepts `path` (a local file it uploads for you) |
+| `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio bridge also accepts `path` (a local file it uploads for you) |
 | `create_upload` | Mint a presigned upload slot (`upload_id` + `upload_url`); PUT the raw bytes there, then finalize with `add_attachment(upload_id=…)` |
 | `get_attachment` | Retrieve an attachment; images return as inline image content |
 | `list_attachments` | List attachments; scope by `post_id` or `folder` |
@@ -127,9 +127,9 @@ Or in a `streamable-http` client config:
 }
 ```
 
-## Connect via stdio proxy (legacy)
+## Connect via the stdio bridge
 
-For clients that don't support remote MCP, `relay-mcp` runs locally and proxies to the relay over REST. Requires a checkout of this repo and `uv`.
+For clients that don't support remote MCP, `relay-mcp` runs locally and bridges stdio to the relay's `/mcp` endpoint over Streamable HTTP — same tools, same results, plus a local `path` option on `add_attachment`. Requires a checkout of this repo and `uv`.
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
