@@ -6,16 +6,34 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ## [Unreleased]
 
-### Security
-- Attachments a browser would execute are forced to download, decided on the resolved MIME type instead of a suffix list. The old list missed `.xht`, `.svgz`, `.shtml` and `.xsl`, which `mimetypes` maps to active types — an uploaded `evil.xht` rendered same-origin with the owner's session (stored XSS for any key holder). `FileResponse(filename=…)` now also RFC 5987-encodes non-ASCII names, which used to 500 (AUDIT.md S-01, S-14).
-- `folder` on attachment create/list must be a plain first-level folder name: `..` (which `Path(".").name` passes through) wrote and listed one level outside the vault; dot-folders (`.relay`, `.obsidian`) are rejected too (S-02).
-- The browser UI ships `marked` and `DOMPurify` from `relay/static/ui/vendor/` instead of loading them from jsdelivr without integrity checks, and `/` carries a Content-Security-Policy (`script-src 'self'` plus a hash for the inline theme bootstrap, `frame-ancestors 'none'`, `img-src` any https) with `X-Content-Type-Options` and `Referrer-Policy` (S-03, S-15).
-- One `auth.bearer_matches()` replaces five copies of the bearer comparison. It compares UTF-8 bytes, so `Authorization: Bearer café` is a 401 instead of a `TypeError` 500 with a stack trace (S-04). `/events` now uses the shared `require_api_key` dependency.
-- Cookie-authenticated state-changing requests are rejected when `Sec-Fetch-Site` (or `Origin` vs `Host`) says cross-site — a second lock alongside `SameSite=Strict` (S-11). Bearer requests are unaffected.
-- The in-process MCP server clamps `limit`/`offset` to the REST bounds (`1..100`, history `1..200`); `limit=-1` was SQLite's "unbounded" (S-07).
-- `tag`/`folder` filters escape `%`/`_` (`LIKE … ESCAPE`) via one shared `database.tag_folder_filters` helper used by the list, keyword ranker, KNN join and SSE replay; `folder=%` no longer matches every post (S-16).
-- Docker: both base images pinned by digest (dependabot's `docker` ecosystem refreshes them), `USER 1000:1000` in the image, a `.dockerignore`, and compose adds `read_only`, `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`. **Compose now pulls `ghcr.io/pierdom/relay:1.5`** — it was still pinned to the 0.9 line (S-08).
-- Startup warns when OIDC is enabled without a dedicated `SESSION_SECRET` (S-10). `docs/api.md` lists the real unauthenticated surface (S-05); `docs/usage.md` documents that post content is untrusted input to agents (S-09).
+---
+
+## [1.6.0] — 2026-09-07
+
+A full audit of the codebase — security, bugs, structure, and the feature gaps it exposed — shipped as four reviewed PRs ([#111](https://github.com/pierdom/relay/pull/111), [#112](https://github.com/pierdom/relay/pull/112), [#113](https://github.com/pierdom/relay/pull/113), [#114](https://github.com/pierdom/relay/pull/114)) against a written findings register.
+
+Two of these you should care about even if you skip the rest. **Any client holding the API key could store a cross-site scripting payload in your browser session** by uploading a file whose extension the old suffix-based download list missed (`.xht`, `.svgz`, `.shtml`, `.xsl`); attachments are now classified by resolved MIME type and anything a browser would execute is sent as a download. And **`expires_at` was an unvalidated string compared lexically in SQL**, so an agent guessing a relative expiry like `"1 week"` had its post deleted at the next cleanup sweep — the value is now parsed as ISO 8601 and rejected otherwise.
+
+Minor rather than patch because the MCP surface gains a tool (`list_folders`, 22 total). Nothing in the stable surface (`docs/stability.md`) changed shape; the stdio proxy is now a bridge and answers with the server's JSON rather than hand-formatted text, which is the one behaviour change a client could notice.
+
+### Added
+- MCP `add_attachment` accepts `tags` (derive the folder as a post with those tags would be filed) and `embed` (with `post_id`, `embed=false` files the attachment without appending `![[file]]` to the body) — both were REST-only (AUDIT.md G-01).
+- MCP `list_folders`: first-level folders with post counts, the vocabulary of the `folder` filter on `list_posts`/`list_attachments`; mirrors REST `GET /folders`. 22 tools now (G-02).
+- A tag's expiry configuration can be removed: `POST /tags/{tag}/config` with `{}` (or `set_tag_config` with neither field) deletes the entry instead of leaving a `ttl_hours=0` row that kept the tag in `list_tags` at count 0 forever (G-03).
+
+---
+
+### Changed
+- `relay_mcp/server.py` is a stdio ↔ Streamable HTTP bridge (≈190 lines) instead of a hand-written copy of every tool schema re-implemented over REST (923 lines). Tools, parameters, descriptions and results are the in-process server's, fetched per call, so the two surfaces cannot drift; `add_attachment(path=…)` stays as the one proxy-only addition. `tests/test_mcp_parity.py` (AST diff) is replaced by `tests/test_mcp_bridge.py` (end to end against a real uvicorn). Bridge replies are now the server's JSON rather than hand-formatted text.
+- `relay/service.py` (1035 lines) is a package: `posts`, `revisions`, `attachments`, `tags`, `_common`; `relay.service` re-exports every public name, so callers are unchanged.
+- `main.py` keeps the app, lifespan, static serving and mounts; `/session` lives in `routes/auth.py`, the request-metrics middleware in `metrics.py`.
+- `folders.folder_of` replaces six copies of the first-path-segment expression; `models` share one title validator; the TUI imports the wikilink/id-ref patterns from `relay.links` instead of re-declaring them.
+- `uvx mypy relay --ignore-missing-imports` passes (PyYAML's missing stubs are the only remaining diagnostics); no type-checker dependency added.
+- `httpx` is declared as a runtime dependency (it was imported at runtime by `ingest`, `mcp_oauth.pocketid` and the bridge but only listed in the dev group, working through `mcp`'s transitive pin).
+
+### Removed
+- Dead code: `vault.path_for_id`, `mcp_oauth.pocketid.reset_cache`, `ingest.UploadRegistry.discard`, the `"in keys"` guards in `PostResponse`/`PostSummary.from_row`, the ruff `E501` exemption for the old proxy.
+- Docs drift: test counts in README/CLAUDE.md/CONTRIBUTING, `docs/stability.md` (tag routes had their methods swapped, 19 → 21 MCP tools), `docs/api.md` (`GET /posts` now documents `mode`), `docs/mcp.md` (`mode` combines with tag/folder since 1.5.0).
 
 ### Fixed
 - `expires_at` (posts and tag configs) is validated as ISO 8601 and normalised to `YYYY-MM-DDTHH:MM:SSZ`; offsets and date-only values are accepted, anything else is a 422. The cleanup sweep compares it lexically, so `"1 week"` sorted below every real date and **deleted the post at the next run**. The sweep now also ignores (and warns about) a non-ISO value hand-written into front-matter (AUDIT.md B-01).
@@ -32,22 +50,16 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 - SSE subscriber queues are bounded (256); a client that stops reading gets the stream closed and replays via `Last-Event-ID` instead of growing memory forever (S-06).
 - A ranked (`semantic`/`hybrid`) query whose embedding backend fails at query time answers keyword-ranked with `search_timing.degraded=true` instead of a 500. Embeddings configured off remain a 503.
 
-### Changed
-- `relay_mcp/server.py` is a stdio ↔ Streamable HTTP bridge (≈190 lines) instead of a hand-written copy of every tool schema re-implemented over REST (923 lines). Tools, parameters, descriptions and results are the in-process server's, fetched per call, so the two surfaces cannot drift; `add_attachment(path=…)` stays as the one proxy-only addition. `tests/test_mcp_parity.py` (AST diff) is replaced by `tests/test_mcp_bridge.py` (end to end against a real uvicorn). Bridge replies are now the server's JSON rather than hand-formatted text.
-- `relay/service.py` (1035 lines) is a package: `posts`, `revisions`, `attachments`, `tags`, `_common`; `relay.service` re-exports every public name, so callers are unchanged.
-- `main.py` keeps the app, lifespan, static serving and mounts; `/session` lives in `routes/auth.py`, the request-metrics middleware in `metrics.py`.
-- `folders.folder_of` replaces six copies of the first-path-segment expression; `models` share one title validator; the TUI imports the wikilink/id-ref patterns from `relay.links` instead of re-declaring them.
-- `uvx mypy relay --ignore-missing-imports` passes (PyYAML's missing stubs are the only remaining diagnostics); no type-checker dependency added.
-- `httpx` is declared as a runtime dependency (it was imported at runtime by `ingest`, `mcp_oauth.pocketid` and the bridge but only listed in the dev group, working through `mcp`'s transitive pin).
-
-### Removed
-- Dead code: `vault.path_for_id`, `mcp_oauth.pocketid.reset_cache`, `ingest.UploadRegistry.discard`, the `"in keys"` guards in `PostResponse`/`PostSummary.from_row`, the ruff `E501` exemption for the old proxy.
-- Docs drift: test counts in README/CLAUDE.md/CONTRIBUTING, `docs/stability.md` (tag routes had their methods swapped, 19 → 21 MCP tools), `docs/api.md` (`GET /posts` now documents `mode`), `docs/mcp.md` (`mode` combines with tag/folder since 1.5.0).
-
-### Added
-- MCP `add_attachment` accepts `tags` (derive the folder as a post with those tags would be filed) and `embed` (with `post_id`, `embed=false` files the attachment without appending `![[file]]` to the body) — both were REST-only (AUDIT.md G-01).
-- MCP `list_folders`: first-level folders with post counts, the vocabulary of the `folder` filter on `list_posts`/`list_attachments`; mirrors REST `GET /folders`. 22 tools now (G-02).
-- A tag's expiry configuration can be removed: `POST /tags/{tag}/config` with `{}` (or `set_tag_config` with neither field) deletes the entry instead of leaving a `ttl_hours=0` row that kept the tag in `list_tags` at count 0 forever (G-03).
+### Security
+- Attachments a browser would execute are forced to download, decided on the resolved MIME type instead of a suffix list. The old list missed `.xht`, `.svgz`, `.shtml` and `.xsl`, which `mimetypes` maps to active types — an uploaded `evil.xht` rendered same-origin with the owner's session (stored XSS for any key holder). `FileResponse(filename=…)` now also RFC 5987-encodes non-ASCII names, which used to 500 (AUDIT.md S-01, S-14).
+- `folder` on attachment create/list must be a plain first-level folder name: `..` (which `Path(".").name` passes through) wrote and listed one level outside the vault; dot-folders (`.relay`, `.obsidian`) are rejected too (S-02).
+- The browser UI ships `marked` and `DOMPurify` from `relay/static/ui/vendor/` instead of loading them from jsdelivr without integrity checks, and `/` carries a Content-Security-Policy (`script-src 'self'` plus a hash for the inline theme bootstrap, `frame-ancestors 'none'`, `img-src` any https) with `X-Content-Type-Options` and `Referrer-Policy` (S-03, S-15).
+- One `auth.bearer_matches()` replaces five copies of the bearer comparison. It compares UTF-8 bytes, so `Authorization: Bearer café` is a 401 instead of a `TypeError` 500 with a stack trace (S-04). `/events` now uses the shared `require_api_key` dependency.
+- Cookie-authenticated state-changing requests are rejected when `Sec-Fetch-Site` (or `Origin` vs `Host`) says cross-site — a second lock alongside `SameSite=Strict` (S-11). Bearer requests are unaffected.
+- The in-process MCP server clamps `limit`/`offset` to the REST bounds (`1..100`, history `1..200`); `limit=-1` was SQLite's "unbounded" (S-07).
+- `tag`/`folder` filters escape `%`/`_` (`LIKE … ESCAPE`) via one shared `database.tag_folder_filters` helper used by the list, keyword ranker, KNN join and SSE replay; `folder=%` no longer matches every post (S-16).
+- Docker: both base images pinned by digest (dependabot's `docker` ecosystem refreshes them), `USER 1000:1000` in the image, a `.dockerignore`, and compose adds `read_only`, `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`. **Compose now pulls the current minor line** (`ghcr.io/pierdom/relay:1.6` as of this release) — it was still pinned to the stale 0.9 line (S-08).
+- Startup warns when OIDC is enabled without a dedicated `SESSION_SECRET` (S-10). `docs/api.md` lists the real unauthenticated surface (S-05); `docs/usage.md` documents that post content is untrusted input to agents (S-09).
 
 ---
 
