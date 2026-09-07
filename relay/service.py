@@ -1024,12 +1024,19 @@ async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagLi
 
 
 async def set_tag_config(db: aiosqlite.Connection, tag: str, body: TagConfigCreate) -> TagConfigResponse:
+    """Set a tag's expiry — or, with neither ``ttl_hours`` nor ``expires_at``,
+    **remove** it. A config could be created but never deleted: clearing both
+    fields left a ``ttl_hours=0`` row that kept the tag in ``list_tags`` at
+    count 0 forever (AUDIT.md G-03)."""
     clean_tag = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
-    await db.execute(
-        "INSERT INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)"
-        " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours, expires_at = excluded.expires_at",
-        (clean_tag, body.ttl_hours or 0, body.expires_at),
-    )
+    if body.ttl_hours is None and body.expires_at is None:
+        await db.execute("DELETE FROM tag_config WHERE tag = ?", (clean_tag,))
+    else:
+        await db.execute(
+            "INSERT INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours, expires_at = excluded.expires_at",
+            (clean_tag, body.ttl_hours or 0, body.expires_at),
+        )
     await vault.write_tag_config(db)
     await db.commit()
     return TagConfigResponse(tag=clean_tag, ttl_hours=body.ttl_hours, expires_at=body.expires_at)

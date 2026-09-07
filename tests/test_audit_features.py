@@ -12,6 +12,7 @@ os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
 import pytest_asyncio
+import yaml
 from httpx import ASGITransport, AsyncClient
 
 from relay import database
@@ -20,6 +21,8 @@ from relay.config import settings
 from relay.main import app
 from relay.mcp_server import add_attachment as mcp_add_attachment
 from relay.mcp_server import list_folders as mcp_list_folders
+from relay.mcp_server import list_tags as mcp_list_tags
+from relay.mcp_server import set_tag_config as mcp_set_tag_config
 
 AUTH = {"Authorization": "Bearer test-key"}
 
@@ -70,3 +73,27 @@ async def test_mcp_list_folders_matches_rest(client):
     out = await mcp_list_folders()
     assert out == (await client.get("/folders", headers=AUTH)).json()
     assert out["folders"] == [{"folder": "Finance", "count": 1}, {"folder": "Homelab", "count": 2}]
+
+
+# ── G-03: a tag's expiry configuration can be removed, not just set ──────────
+
+
+@pytest.mark.asyncio
+async def test_tag_config_with_neither_field_removes_it(client, vault_dir):
+    r = await client.post("/tags/digest/config", json={"ttl_hours": 24}, headers=AUTH)
+    assert r.status_code == 200
+    assert {"tag": "digest", "count": 0} in (await client.get("/tags", headers=AUTH)).json()["tags"]
+    assert "digest" in yaml.safe_load((vault_dir / ".relay" / "tags.yml").read_text(encoding="utf-8"))
+
+    r = await client.post("/tags/digest/config", json={}, headers=AUTH)
+    assert r.status_code == 200 and r.json() == {"tag": "digest", "ttl_hours": None, "expires_at": None}
+    assert all(t["tag"] != "digest" for t in (await client.get("/tags", headers=AUTH)).json()["tags"])
+    assert not yaml.safe_load((vault_dir / ".relay" / "tags.yml").read_text(encoding="utf-8"))
+
+
+@pytest.mark.asyncio
+async def test_mcp_set_tag_config_clears_too(client):
+    await mcp_set_tag_config(tag="news", ttl_hours=1)
+    assert {"tag": "news", "count": 0} in (await mcp_list_tags())["tags"]
+    await mcp_set_tag_config(tag="news")
+    assert all(t["tag"] != "news" for t in (await mcp_list_tags())["tags"])

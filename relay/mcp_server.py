@@ -587,7 +587,7 @@ async def list_tags() -> dict:
     description=(
         "Set expiry configuration for a tag. Provide ttl_hours (relative to each post's "
         "creation), expires_at (absolute cutoff), or both. Only affects posts without their "
-        "own expires_at."
+        "own expires_at. Provide neither to remove the tag's expiry configuration."
     )
 )
 async def set_tag_config(

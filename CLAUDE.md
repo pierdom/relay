@@ -174,7 +174,7 @@ See [docs/tui.md](docs/tui.md) for keybindings, palette names, and transparency 
 
 ## Tags · master doc · TTL
 
-- **Tags:** front-matter list; stored with sentinel commas (`,news,ai,`) for `LIKE '%,tag,%'` matching. Per-tag TTL in `<vault>/.relay/tags.yml`.
+- **Tags:** front-matter list; stored with sentinel commas (`,news,ai,`) for `LIKE '%,tag,%'` matching. Per-tag TTL in `<vault>/.relay/tags.yml`; `set_tag_config` with neither field removes the entry (it is the only way to drop a tag from `list_tags` once its posts are gone).
 - **Search:** SQLite FTS5 over title/content/source/tags — porter-stemmed, bm25-ranked. Falls back to `LIKE` if FTS5 unavailable.
 - **Master doc (`id=0`):** `Master Document.md` at vault root, seeded at startup, `DELETE` blocked, TTL-exempt. Update via `update_post(id=0, …)`.
 - **TTL:** off by default. Precedence: per-post `expires_at` > per-tag > global. Shortest TTL wins for multi-tag posts.

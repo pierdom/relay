@@ -30,7 +30,7 @@ All endpoints require `Authorization: Bearer <API_KEY>` — **except `/health`**
 | GET | `/attachments/{path}` | Serve a vault attachment |
 | DELETE | `/attachments/{path}` | Delete an attachment; reports posts still referencing it |
 | GET | `/tags` | List tags with post counts |
-| POST | `/tags/{tag}/config` | Set per-tag TTL |
+| POST | `/tags/{tag}/config` | Set per-tag TTL (`ttl_hours` and/or `expires_at`); an empty body `{}` removes the tag's config |
 | PATCH | `/tags/{tag}` | Rename a tag across all posts |
 | GET | `/events` | SSE stream (`?tag=` filter, `Last-Event-ID` replay) |
 | POST/GET | `/mcp` | Streamable HTTP MCP endpoint (see [mcp.md](mcp.md)) |

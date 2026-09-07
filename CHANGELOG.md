@@ -6,6 +6,11 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ## [Unreleased]
 
+### Added
+- MCP `add_attachment` accepts `tags` (derive the folder as a post with those tags would be filed) and `embed` (with `post_id`, `embed=false` files the attachment without appending `![[file]]` to the body) — both were REST-only (AUDIT.md G-01).
+- MCP `list_folders`: first-level folders with post counts, the vocabulary of the `folder` filter on `list_posts`/`list_attachments`; mirrors REST `GET /folders`. 22 tools now (G-02).
+- A tag's expiry configuration can be removed: `POST /tags/{tag}/config` with `{}` (or `set_tag_config` with neither field) deletes the entry instead of leaving a `ttl_hours=0` row that kept the tag in `list_tags` at count 0 forever (G-03).
+
 ---
 
 ## [1.5.0] — 2026-09-03

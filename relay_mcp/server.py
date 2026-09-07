@@ -448,7 +448,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="set_tag_config",
             description=(
-                "Set expiry configuration for a tag. Provide ttl_hours (relative to each post's creation), expires_at (absolute cutoff), or both. Only affects posts without their own expires_at."
+                "Set expiry configuration for a tag. Provide ttl_hours (relative to each post's creation), expires_at (absolute cutoff), or both. Only affects posts without their own expires_at. Provide neither to remove the tag's expiry configuration."
             ),
             inputSchema={
                 "type": "object",
@@ -909,6 +909,8 @@ async def call_tool(
             )
             response.raise_for_status()
             cfg = response.json()
+        if not cfg.get("ttl_hours") and not cfg.get("expires_at"):
+            return [types.TextContent(type="text", text=f"Tag '{cfg['tag']}' expiry configuration removed.")]
         parts = [f"Tag '{cfg['tag']}' configured:"]
         if cfg.get("ttl_hours"):
             parts.append(f"  ttl_hours = {cfg['ttl_hours']}")
