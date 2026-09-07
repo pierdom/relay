@@ -307,7 +307,9 @@ def invalidate_assets_cache() -> None:
 
 def attachment_dir_for(folder: str) -> Path:
     """The ``assets/`` directory for a first-level folder (``Inbox`` when blank)."""
-    safe = Path(folder or folders.INBOX).name or folders.INBOX  # no separators/traversal
+    safe = folder or folders.INBOX
+    if not folders.is_valid_name(safe):  # no separators, no `..`, no dot-folders
+        raise ValueError(f"invalid folder name: {folder!r}")
     return vault_dir() / safe / ATTACHMENTS_DIRNAME
 
 

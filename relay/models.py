@@ -4,6 +4,8 @@ import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from . import folders
+
 
 def _clean_tag_list(v: list[str]) -> list[str]:
     cleaned = []
@@ -226,6 +228,18 @@ class AttachmentCreate(BaseModel):
             return None
         v = v.strip()
         return v or None
+
+    @field_validator("folder")
+    @classmethod
+    def folder_is_a_plain_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        if not folders.is_valid_name(v):
+            raise ValueError("folder must be a plain first-level folder name")
+        return v
 
     @model_validator(mode="after")
     def one_source(self) -> AttachmentCreate:

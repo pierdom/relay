@@ -8,7 +8,6 @@ transport can connect remotely with the relay's bearer key.
 """
 from __future__ import annotations
 
-import hmac
 import re
 from contextlib import asynccontextmanager
 
@@ -26,6 +25,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import database, metrics, service, status, vault, vectors
+from .auth import bearer_matches
 from .config import settings
 from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
 
@@ -587,18 +587,17 @@ async def set_tag_config(
 class BearerAuthASGI:
     """Minimal ASGI wrapper that gates the MCP app behind the static bearer key."""
 
-    def __init__(self, app, api_key: str) -> None:
+    def __init__(self, app) -> None:
         self.app = app
-        self.api_key = api_key
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
         headers = dict(scope.get("headers") or [])
-        auth = headers.get(b"authorization", b"").decode()
+        auth = headers.get(b"authorization", b"").decode("latin-1")
         token = auth[7:] if auth.startswith("Bearer ") else ""
-        if not (token and hmac.compare_digest(token, self.api_key)):
+        if not bearer_matches(token):
             await JSONResponse({"detail": "Invalid API key"}, status_code=401)(scope, receive, send)
             return
         await self.app(scope, receive, send)
@@ -614,4 +613,4 @@ def mcp_asgi_app():
     app = mcp.streamable_http_app()
     if settings.mcp_oauth_active:
         return app
-    return BearerAuthASGI(app, settings.api_key)
+    return BearerAuthASGI(app)
