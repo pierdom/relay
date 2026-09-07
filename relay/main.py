@@ -280,6 +280,18 @@ async def ui() -> RedirectResponse:
     return RedirectResponse("/", status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 
+@app.get("/id/{post_id}", include_in_schema=False)
+async def open_post(post_id: int) -> RedirectResponse:
+    """Deep link to a post by id — `/id/123` opens it in the app.
+
+    A plain redirect, not a lookup: existence/auth are the client's job once it
+    lands on `/`, same as any other in-app navigation. FastAPI's `int`
+    parameter already rejects anything non-numeric with a 422, so garbage
+    never reaches the redirect.
+    """
+    return RedirectResponse(f"/?post={post_id}", status_code=status.HTTP_302_FOUND)
+
+
 app.include_router(auth_router)
 app.include_router(posts_router)
 app.include_router(tags_router)

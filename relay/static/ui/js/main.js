@@ -229,6 +229,20 @@ async function init() {
   await Promise.all([loadTags(), loadPosts(true), loadLinkIndex()]);
   setDot('connected');
   connectSSE();
+  openPostFromUrl();
+}
+
+// /id/<id> deep links land here as `/?post=<id>` (see relay/main.py's
+// redirect). Consumed once per load — stripped from the URL immediately so a
+// later reload or back-navigation doesn't reopen it.
+async function openPostFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const raw = params.get('post');
+  if (raw === null) return;
+  history.replaceState(null, '', location.pathname);
+  if (!/^\d+$/.test(raw)) return;
+  try { openPostModal(await apiFetch(`/posts/${raw}`)); }
+  catch { alert(`Post #${raw} not found.`); }
 }
 
 // ── Wikilinks: [[Title]] / [[Title|alias]] and #NNN cross-references ──────────

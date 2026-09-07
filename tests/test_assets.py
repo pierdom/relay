@@ -113,3 +113,16 @@ async def test_traversal_outside_the_ui_dir_is_refused(client):
     for attack in ("%2e%2e%2f%2e%2e%2fmain.py", "..%2f..%2fconfig.py"):
         r = await client.get(f"/static/{version}/{attack}")
         assert r.status_code == 404, attack
+
+
+@pytest.mark.asyncio
+async def test_id_link_redirects_to_the_shell_with_the_post_id(client):
+    r = await client.get("/id/42")
+    assert r.status_code == 302
+    assert r.headers["location"] == "/?post=42"
+
+
+@pytest.mark.asyncio
+async def test_id_link_rejects_a_non_numeric_id(client):
+    r = await client.get("/id/not-a-number")
+    assert r.status_code == 422
