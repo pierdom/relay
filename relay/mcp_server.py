@@ -448,7 +448,8 @@ async def delete_post(id: int) -> dict:
         "`source_url` (an http(s) URL the server fetches — preferred for real files), or "
         "`upload_id` from create_upload (bytes PUT out-of-band). With `post_id`, the file is "
         "filed under that post's folder and its ![[file]] embed is appended to the post body; "
-        "otherwise it goes to `folder` (or Inbox) and you place the returned `ref` yourself. "
+        "otherwise it goes to `folder`, or to the folder `tags` would file a post under, or Inbox — and you place "
+        "the returned `ref` yourself. Pass embed=false to file a post's attachment without touching its body. "
         "`filename` is required with `data`; with `source_url`/`upload_id` it's derived when omitted."
     )
 )
@@ -459,13 +460,15 @@ async def add_attachment(
     upload_id: str | None = None,
     post_id: int | None = None,
     folder: str | None = None,
+    tags: list[str] | None = None,
+    embed: bool = True,
 ) -> dict:
     """Returns {filename, ref, folder, post_id}. `ref` is the ![[…]] embed to drop into a post."""
     metrics.record_tool_call("add_attachment")
     try:
         body = AttachmentCreate(
             filename=filename, data=data, source_url=source_url,
-            upload_id=upload_id, post_id=post_id, folder=folder,
+            upload_id=upload_id, post_id=post_id, folder=folder, tags=tags or [], embed=embed,
         )
     except ValidationError as exc:
         return {"error": _first_error(exc)}
@@ -474,6 +477,7 @@ async def add_attachment(
             result = await service.ingest_attachment(
                 db, filename=body.filename, data=body.data, source_url=body.source_url,
                 upload_id=body.upload_id, post_id=body.post_id, folder=body.folder,
+                tags=body.tags, embed=body.embed,
             )
         except ValueError:
             return {"error": "data is not valid base64"}

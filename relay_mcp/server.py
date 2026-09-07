@@ -367,7 +367,8 @@ async def list_tools() -> list[types.Tool]:
                 "'data' (base64 — only viable for tiny files, since you must emit the whole blob), or "
                 "'upload_id' from create_upload (bytes PUT out-of-band). With 'post_id', the file is "
                 "filed under that post's folder and its ![[file]] embed is appended to the post body; "
-                "otherwise it goes to 'folder' (or Inbox) and you place the returned ref yourself. "
+                "otherwise it goes to 'folder', or to the folder 'tags' would file a post under, or Inbox — and you place "
+                "the returned ref yourself. Pass embed=false to file a post's attachment without touching its body. "
                 "'filename' is required with 'data'; with 'path'/'source_url'/'upload_id' it's derived when omitted."
             ),
             inputSchema={
@@ -380,6 +381,12 @@ async def list_tools() -> list[types.Tool]:
                     "upload_id": {"type": "string", "description": "Id of a filled presigned upload slot (see create_upload)"},
                     "post_id": {"type": "integer", "description": "Post to attach to (appends ![[file]] to its body)"},
                     "folder": {"type": "string", "description": "First-level folder for a standalone attachment (default Inbox)"},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Derive the folder from these tags, as a post with them would be filed (compose-time upload)",
+                    },
+                    "embed": {"type": "boolean", "description": "With post_id, also append ![[file]] to the post body (default true)"},
                 },
             },
         ),
