@@ -9,9 +9,7 @@ transport can connect remotely with the relay's bearer key.
 from __future__ import annotations
 
 import re
-from contextlib import asynccontextmanager
 
-import aiosqlite
 from mcp.server.auth.settings import (
     AuthSettings,
     ClientRegistrationOptions,
@@ -24,7 +22,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import database, metrics, service, status, vault, vectors
+from . import database, metrics, service, status, vault
 from .auth import bearer_matches
 from .config import settings
 from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
@@ -118,14 +116,7 @@ async def mcp_oauth_callback(request: Request) -> Response:
     return await handle_callback(request)
 
 
-@asynccontextmanager
-async def _db():
-    async with aiosqlite.connect(settings.database_path) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA busy_timeout=5000;")
-        if database.VEC_ENABLED:
-            await vectors.load_extension(db)
-        yield db
+_db = database.connect
 
 
 @mcp.resource(
@@ -218,7 +209,7 @@ async def get_post(id: int) -> dict:
     description=(
         "Update an existing post. Only provided fields change; omitted fields are left "
         "untouched. Providing tags replaces the list wholesale; an empty array clears them. "
-        "Pass expires_at=null to clear an existing expiry."
+        "Pass an empty string for expires_at (or source) to clear it."
     )
 )
 async def update_post(
@@ -230,6 +221,9 @@ async def update_post(
     expires_at: str | None = None,
 ) -> dict:
     metrics.record_tool_call("update_post")
+    # An omitted argument and an explicit null both arrive as None here, so a
+    # None is "leave alone". PostUpdate turns "" into a clear for expires_at and
+    # source — the documented way to unset either from MCP (AUDIT.md B-05).
     fields = {
         "title": title,
         "content": content,

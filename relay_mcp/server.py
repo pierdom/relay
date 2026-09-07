@@ -336,7 +336,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="update_post",
             description=(
-                'Update an existing post. Only provided fields change; omitted fields are left untouched. Providing tags replaces the list wholesale; an empty array clears them. Pass expires_at=null to clear an existing expiry.'
+                'Update an existing post. Only provided fields change; omitted fields are left untouched. Providing tags replaces the list wholesale; an empty array clears them. Pass an empty string for expires_at (or source) to clear it.'
             ),
             inputSchema={
                 "type": "object",
@@ -350,10 +350,10 @@ async def list_tools() -> list[types.Tool]:
                         "items": {"type": "string"},
                         "description": "Replacement tag list (empty array clears all tags)",
                     },
-                    "source": {"type": "string", "description": "Source URL or label"},
+                    "source": {"type": "string", "description": "Source URL or label; an empty string clears it"},
                     "expires_at": {
                         "type": "string",
-                        "description": "ISO 8601 datetime after which the post expires. Pass null to clear an existing expiry.",
+                        "description": "ISO 8601 datetime after which the post expires. Pass an empty string to clear an existing expiry.",
                     },
                 },
             },

@@ -4,14 +4,12 @@ import asyncio
 import json
 import logging
 
-import aiosqlite
 from fastapi import APIRouter, Depends, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
 from .. import database
 from ..auth import require_api_key
-from ..config import settings
-from ..events import subscribe, unsubscribe
+from ..events import OVERFLOW, subscribe, unsubscribe
 from ..models import PostResponse
 
 logger = logging.getLogger(__name__)
@@ -54,9 +52,7 @@ async def stream_events(
             conditions += f_conds
             params += f_params
             where = "WHERE " + " AND ".join(conditions)
-            async with aiosqlite.connect(settings.database_path) as db:
-                db.row_factory = aiosqlite.Row
-                await db.execute("PRAGMA busy_timeout=5000;")
+            async with database.connect() as db:
                 async with db.execute(
                     f"SELECT * FROM posts {where} ORDER BY created_at ASC",
                     params,
@@ -75,6 +71,11 @@ async def stream_events(
                     break
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=_KEEPALIVE_SECONDS)
+                    if event is OVERFLOW:
+                        # Too far behind to be caught up in-band. Close; the client
+                        # reconnects with Last-Event-ID and replays from the index.
+                        logger.info("SSE client fell behind (tag=%s) — closing for replay", tag)
+                        break
                     if event.get("type") == "delete":
                         # No SSE id: a delete carries the post's (possibly old) id
                         # and must not rewind the client's Last-Event-ID cursor.

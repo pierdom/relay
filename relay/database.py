@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import aiosqlite
 
@@ -151,10 +152,24 @@ def tag_folder_filters(
     return conditions, params
 
 
-async def get_db():
+
+@asynccontextmanager
+async def connect():
+    """Open the index the one right way: ``Row`` factory, ``busy_timeout`` (a
+    concurrent writer means "wait", not "database is locked"), and the
+    sqlite-vec extension when it's live — the extension is per-connection, so
+    every fresh connection must load it before touching ``vec_chunks``. Used
+    by the request dependency, the MCP server, the cleanup loop, the watcher,
+    the backfill task and the SSE replay; two of those used to skip the
+    timeout (AUDIT.md B-09)."""
     async with aiosqlite.connect(settings.database_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA busy_timeout=5000;")
         if VEC_ENABLED:
             await vectors.load_extension(db)
+        yield db
+
+
+async def get_db():
+    async with connect() as db:
         yield db

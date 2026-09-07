@@ -11,6 +11,7 @@ import datetime as _dt
 import hashlib
 import logging
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -295,7 +296,7 @@ def _get_assets_dirs() -> list[Path]:
     key = str(root)
     if _assets_dirs_cache is not None and _assets_dirs_cache[0] == key:
         return _assets_dirs_cache[1]
-    dirs = [p for p in root.rglob(ATTACHMENTS_DIRNAME) if p.is_dir()]
+    dirs = [p for p in root.rglob(ATTACHMENTS_DIRNAME) if p.is_dir() and not is_hidden_path(p / "x")]
     _assets_dirs_cache = (key, dirs)
     return dirs
 
@@ -554,13 +555,22 @@ async def index_delete(db: aiosqlite.Connection, post_id: int) -> None:
 # ── startup rebuild ───────────────────────────────────────────────────────────
 
 
+def is_hidden_path(path: Path) -> bool:
+    """Whether ``path`` sits under a dot-directory of the vault (``.relay``,
+    ``.obsidian``, ``.trash``, ``.stversions``…). Those are bookkeeping, never
+    vault content: Obsidian's own trash keeps a deleted note's front-matter id,
+    so indexing it resurrected deletes and could renumber the live note at
+    startup (AUDIT.md B-04)."""
+    try:
+        rel = path.resolve().relative_to(vault_dir().resolve())
+    except ValueError:
+        return True
+    return any(part.startswith(".") for part in rel.parts[:-1])
+
+
 def _iter_notes() -> list[Path]:
-    """All ``.md`` notes in the vault, recursively, excluding the ``.relay`` dir."""
-    relay_dir = str(Path(settings.relay_dir).resolve())
-    return [
-        p for p in vault_dir().rglob("*.md")
-        if not str(p.resolve()).startswith(relay_dir)
-    ]
+    """All ``.md`` notes in the vault, recursively, skipping dot-directories."""
+    return [p for p in vault_dir().rglob("*.md") if not is_hidden_path(p)]
 
 
 def _ensure_master_file() -> None:
@@ -658,6 +668,10 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
             sync_embeddings=False,
         )
     write_id_counter(max(max_id, read_id_counter()))
+    # Chunks are keyed by post id and survive the wipe above on purpose (they're
+    # the cache the backfill resumes from) — but a post deleted while relay was
+    # down leaves ghosts that skew coverage and ranked results (AUDIT.md B-06).
+    await vectors.prune_orphan_chunks(db)
     await _load_tag_config(db)
     await db.commit()
     logger.info("Index rebuilt from %s — %d post(s)", vault_dir(), len(parsed))
@@ -714,19 +728,13 @@ async def run_backfill_task() -> None:
     of what used to be ``main.py``'s ``_embedding_backfill`` — factored out
     here so ``spawn_backfill`` (and thus ``POST /embeddings/backfill``) can
     reuse it instead of duplicating it."""
-    from . import database
+    from . import database  # deferred: database imports vault
 
     logger.info("Embedding backfill starting")
     try:
-        db = await aiosqlite.connect(settings.database_path)
-        db.row_factory = aiosqlite.Row
-        try:
-            if database.VEC_ENABLED:
-                await vectors.load_extension(db)
+        async with database.connect() as db:
             count = await backfill_embeddings(db)
-            logger.info("Embedding backfill complete — %d post(s) checked", count)
-        finally:
-            await db.close()
+        logger.info("Embedding backfill complete — %d post(s) checked", count)
     except Exception:
         logger.exception("Embedding backfill failed")
 
@@ -758,9 +766,16 @@ async def backfill_embeddings(db: aiosqlite.Connection) -> int:
     total = len(rows)
     _backfill_state.update(running=True, checked=0, total=total, started_at=utcnow_iso(), completed_at=None)
     last_logged = time.monotonic()
+    failed = 0
     for i, row in enumerate(rows, start=1):
-        await vectors.sync_post_chunks(db, post_id=row["id"], title=row["title"], content=row["content"])
-        await db.commit()
+        # sync_post_chunks never raises (see its docstring), but a SQL error
+        # here must not abort the whole run either — one bad post is one bad post.
+        try:
+            await vectors.sync_post_chunks(db, post_id=row["id"], title=row["title"], content=row["content"])
+            await db.commit()
+        except Exception:
+            failed += 1
+            logger.exception("Embedding backfill: post %s skipped", row["id"])
         _backfill_state["checked"] = i
         # Time-based, not count-based: a cache-hit-heavy run flies through
         # hundreds of posts in milliseconds, while a cold run can spend real
@@ -771,6 +786,8 @@ async def backfill_embeddings(db: aiosqlite.Connection) -> int:
             logger.info("Embedding backfill progress: %d/%d posts checked", i, total)
             last_logged = now
     _backfill_state.update(running=False, completed_at=utcnow_iso())
+    if failed:
+        logger.warning("Embedding backfill: %d post(s) could not be embedded", failed)
     return total
 
 
@@ -791,6 +808,9 @@ async def _load_tag_config(db: aiosqlite.Connection) -> None:
         return
     for tag, cfg in (data.items() if isinstance(data, dict) else []):
         cfg = cfg or {}
+        tag = re.sub(r"[^a-z0-9_-]", "", str(tag).strip().lower())
+        if not tag:
+            continue
         await db.execute(
             "INSERT OR REPLACE INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)",
             (tag, int(cfg.get("ttl_hours") or 0), cfg.get("expires_at")),

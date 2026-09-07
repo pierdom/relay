@@ -73,9 +73,11 @@ async def _vec_chunks_sql(db) -> str:
 
 async def _insert_fake_chunk(db, dim: int) -> None:
     """Simulate a chunk embedded by a prior run, at ``dim`` — used to prove a
-    later init_vec pass actually wipes (or actually preserves) it."""
+    later init_vec pass actually wipes (or actually preserves) it. Attached to
+    the master doc (id 0, always present): rebuild_index prunes chunks whose
+    post is gone, so a chunk for a phantom post would vanish for that reason."""
     await db.execute(
-        "INSERT INTO chunks (id, post_id, chunk_index, heading_path, content_hash) VALUES (999, 999, 0, '', 'x')"
+        "INSERT INTO chunks (id, post_id, chunk_index, heading_path, content_hash) VALUES (999, 0, 0, '', 'x')"
     )
     blob = sqlite_vec.serialize_float32([0.0] * dim)
     await db.execute("INSERT INTO vec_chunks(rowid, embedding) VALUES (999, ?)", (blob,))
