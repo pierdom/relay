@@ -327,20 +327,17 @@ def _revisions_sync(post_id: int, current_path: str | None, limit: int) -> list[
 def _truncate_at_creation(revs: list[Revision], post_id: int) -> list[Revision]:
     """Cut the history at this post's own creation.
 
-    ``allocate_id`` is ``MAX(id)+1``, so deleting the newest post hands its id
-    straight to the next one created. If that successor also takes the same title
-    it takes the same *path* too, and the walk runs back through the delete into
-    the previous occupant's revisions — which carry the same front-matter id, so
-    the check above cannot tell them apart. Restoring one would then overwrite the
-    live post with a stranger's body.
+    Ids are no longer reused (``vault.allocate_id`` keeps a high-water mark in
+    ``.relay/last_id``), but a vault that predates that counter can still hold two
+    posts that took the same id and title in turn — and thus the same *path*, so
+    a walk back through the delete lands in the previous occupant's revisions,
+    which carry the same front-matter id. Restoring one would overwrite the live
+    post with a stranger's body.
 
     A post's history starts at its `post <id> create:` commit; anything older
     belongs to a previous holder of that id. Posts that predate history, or that
     were created externally and indexed by the watcher, have no such commit — the
     list is then returned unchanged, which is the best that can be said about them.
-
-    The underlying id reuse is a separate defect; this keeps it from being
-    destructive here.
     """
     marker = f"post {post_id} create:"
     for i, rev in enumerate(revs):
@@ -405,7 +402,8 @@ def _parse_log_paths(out: str) -> list[tuple[str, str, str, list[str]]]:
             if sha:
                 out_rows.append((sha, when, message, paths))
             parts = line[1:].split(_FS)
-            sha, when, message, paths = (*parts, [])[:4] if len(parts) == 3 else (sha, when, message, [])
+            if len(parts) == 3:
+                sha, when, message = parts
             paths = []
             continue
         path = line.strip()

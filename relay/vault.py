@@ -472,12 +472,6 @@ async def allocate_id(db: aiosqlite.Connection) -> int:
     return new_id
 
 
-async def path_for_id(db: aiosqlite.Connection, post_id: int) -> Path | None:
-    async with db.execute("SELECT path FROM posts WHERE id = ?", (post_id,)) as cur:
-        row = await cur.fetchone()
-    return abspath(row[0]) if row is not None else None
-
-
 async def index_upsert(
     db: aiosqlite.Connection,
     *,

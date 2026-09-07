@@ -423,8 +423,8 @@ async def update_post(
         raise PostNotFound
 
     fields = body.model_fields_set
-    title = body.title if "title" in fields else row["title"]
-    content = body.content if "content" in fields else row["content"]
+    title: str = body.title if "title" in fields and body.title is not None else row["title"]
+    content: str = body.content if "content" in fields and body.content is not None else row["content"]
     tags = body.tags if "tags" in fields else _tags_from_sentinel(row["tags"])
     source = body.source if "source" in fields else row["source"]
     expires_at = body.expires_at if "expires_at" in fields else row["expires_at"]
@@ -434,8 +434,7 @@ async def update_post(
     # Auto-file out of Inbox: a note created without a domain tag lands in Inbox;
     # when its first domain tag arrives, move it (and its own attachments) to that
     # folder. Only ever *out of* Inbox — other folders stay human-owned.
-    rel = vault.relpath(old_path)
-    old_folder = rel.split("/", 1)[0] if "/" in rel else ""
+    old_folder = folders.folder_of(vault.relpath(old_path))
     move_to = None
     if "tags" in fields and old_folder == folders.INBOX:
         desired = folders.folder_for(post_id, tags or [])
@@ -693,7 +692,7 @@ async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> Post
     # passing the deleted post's old path would overwrite whatever now owns that
     # filename; folder placement keeps the original directory and still
     # collision-suffixes.
-    folder = match.path.split("/", 1)[0] if "/" in match.path else folders.INBOX
+    folder = folders.folder_of(match.path, default=folders.INBOX)
     now = vault.utcnow_iso()
     created_at = meta.get("created_at") or now
     async with vault.write_lock:
@@ -746,10 +745,9 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
     row = await _fetch(db, post_id)
     if row is None:
         raise PostNotFound
-    path_str = row["path"]
-    folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
+    folder = folders.folder_of(row["path"], default=folders.INBOX)
     async with vault.write_lock:
-        vault.delete_file(vault.abspath(path_str))
+        vault.delete_file(vault.abspath(row["path"]))
         await vault.index_delete(db, post_id)
         await db.commit()
     await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]))
@@ -894,8 +892,7 @@ async def add_attachment(
         row = await _fetch(db, post_id)
         if row is None:
             raise PostNotFound
-        path_str = row["path"]
-        target_folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
+        target_folder = folders.folder_of(row["path"], default=folders.INBOX)
     elif folder:
         target_folder = folder
     elif tags:
@@ -915,8 +912,8 @@ async def add_attachment(
     result_post_id = None
     if row is not None and embed:  # append outside the lock — update_post takes it itself
         new_content = row["content"].rstrip() + f"\n\n{ref}\n"
-        await update_post(db, post_id, PostUpdate(content=new_content))
-        result_post_id = post_id
+        await update_post(db, row["id"], PostUpdate(content=new_content))
+        result_post_id = row["id"]
 
     return AttachmentResponse(
         filename=written.name, ref=ref, folder=target_folder, post_id=result_post_id
@@ -932,8 +929,7 @@ async def list_attachments(
         row = await _fetch(db, post_id)
         if row is None:
             raise PostNotFound
-        path_str = row["path"]
-        folder = path_str.split("/", 1)[0] if "/" in path_str else folders.INBOX
+        folder = folders.folder_of(row["path"], default=folders.INBOX)
     items = [
         AttachmentInfo(filename=n, folder=f, bytes=s, ref=f"![[{n}]]")
         for (n, f, s) in vault.list_attachments(folder)

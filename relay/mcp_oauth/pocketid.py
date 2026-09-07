@@ -122,9 +122,3 @@ async def exchange_and_validate(code: str, verifier: str, nonce: str) -> dict:
     registry.validate(token.claims)  # enforces exp/nbf/iat + iss/aud/nonce
     return dict(token.claims)
 
-
-def reset_cache() -> None:
-    """Drop cached discovery/JWKS (used by tests)."""
-    global _metadata, _jwks
-    _metadata = None
-    _jwks = None

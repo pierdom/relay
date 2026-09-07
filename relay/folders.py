@@ -35,6 +35,12 @@ FALLBACK = {
 
 INBOX = "Inbox"
 
+
+def folder_of(relpath: str, *, default: str = "") -> str:
+    """First-level folder of a vault-relative path (``"Homelab/x.md"`` → ``"Homelab"``);
+    ``default`` for a root file such as the master document."""
+    return relpath.split("/", 1)[0] if "/" in relpath else default
+
 # tag/pseudo-domain -> on-disk folder name
 _FOLDER = {d: d.capitalize() for d in DOMAINS}
 _FOLDER["digests"] = "Digests"
