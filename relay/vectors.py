@@ -190,6 +190,19 @@ def _embed_documents(texts: list[str]) -> list[list[float]]:
 
 async def sync_post_chunks(db: aiosqlite.Connection, *, post_id: int, title: str, content: str) -> None:
     """Re-chunk a post and reconcile ``chunks``/``vec_chunks`` against it.
+    **Never raises**: embeddings are derived data, and this runs inline in every
+    write — a model that cannot load (download blocked, OOM) used to roll the
+    post's create back and 500 every update, turning the vault read-only while
+    embeddings were on (AUDIT.md B-02). A failure is logged; the backfill
+    catches the post up later. Commits are the caller's (B-07)."""
+    try:
+        await _sync_post_chunks(db, post_id=post_id, title=title, content=content)
+    except Exception:
+        logger.warning("Embedding sync skipped for post %s — will be retried by the backfill", post_id, exc_info=True)
+
+
+async def _sync_post_chunks(db: aiosqlite.Connection, *, post_id: int, title: str, content: str) -> None:
+    """Re-chunk a post and reconcile ``chunks``/``vec_chunks`` against it.
     A chunk whose body hash is already in ``embeddings_cache`` skips the model
     call entirely; only genuinely new/changed chunks get embedded. Stale chunk
     rows (edited/removed sections) are deleted.
@@ -260,8 +273,6 @@ async def sync_post_chunks(db: aiosqlite.Connection, *, post_id: int, title: str
         await db.execute("DELETE FROM vec_chunks WHERE rowid = ?", (chunk_id,))
         await db.execute("INSERT INTO vec_chunks(rowid, embedding) VALUES (?, ?)", (chunk_id, cached_vector))
 
-    await db.commit()
-
 
 async def delete_post_chunks(db: aiosqlite.Connection, post_id: int) -> None:
     """Remove a post's chunk rows. ``embeddings_cache`` rows are left alone —
@@ -277,7 +288,24 @@ async def delete_post_chunks(db: aiosqlite.Connection, post_id: int) -> None:
     for row in rows:
         await db.execute("DELETE FROM vec_chunks WHERE rowid = ?", (row[0],))
     await db.execute("DELETE FROM chunks WHERE post_id = ?", (post_id,))
-    await db.commit()
+
+
+async def prune_orphan_chunks(db: aiosqlite.Connection) -> int:
+    """Drop chunk/vector rows whose post no longer exists in the index. Run after
+    ``vault.rebuild_index``, which wipes ``posts`` but keeps ``chunks`` as the
+    cache the backfill resumes from — a post deleted while relay was down would
+    otherwise leave ghosts (negative ``posts_missing``, ranked results pointing
+    at ids no longer in ``posts``). Returns the number of chunk rows removed."""
+    from . import database
+
+    if not database.VEC_ENABLED:
+        return 0
+    async with db.execute("SELECT id FROM chunks WHERE post_id NOT IN (SELECT id FROM posts)") as cur:
+        orphans = [row[0] for row in await cur.fetchall()]
+    for chunk_id in orphans:
+        await db.execute("DELETE FROM vec_chunks WHERE rowid = ?", (chunk_id,))
+        await db.execute("DELETE FROM chunks WHERE id = ?", (chunk_id,))
+    return len(orphans)
 
 
 async def coverage(db: aiosqlite.Connection) -> tuple[int, int, int]:

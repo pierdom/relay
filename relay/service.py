@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 import re
 import time
 from collections import Counter
@@ -49,6 +50,8 @@ from .models import (
     UploadSlotResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class PostNotFound(Exception):
     """Raised when an operation targets a post id that does not exist."""
@@ -87,6 +90,12 @@ class InvalidSearchMode(Exception):
 
 class AttachmentError(Exception):
     """Raised when an attachment can't be stored (e.g. too large)."""
+
+
+class InvalidTag(Exception):
+    """Raised when a tag name normalises to nothing (``"!!"``) — it would
+    otherwise create a nameless ``tag_config`` row that ``list_tags`` shows
+    forever (AUDIT.md B-08)."""
 
 
 class AttachmentSourceError(Exception):
@@ -282,12 +291,23 @@ async def _list_posts_ranked(
     # signal if read first.
     cold_start = not embedding.is_loaded()
     t0 = time.monotonic()
-    semantic_results = await vectors.semantic_search(db, search, limit=pool_size, tag=tag, folder=folder)
+    degraded = False
+    try:
+        semantic_results = await vectors.semantic_search(db, search, limit=pool_size, tag=tag, folder=folder)
+    except Exception:
+        # The feature is on but the backend failed *now* (model download blocked,
+        # OOM, corrupt cache). Answer the query keyword-ranked and say so, rather
+        # than 500 — "configured off" stays a loud 503 above (AUDIT.md, Q3).
+        logger.warning("Semantic search failed at query time — answering keyword-only", exc_info=True)
+        semantic_results = []
+        degraded = True
     embedding_ms = round((time.monotonic() - t0) * 1000, 1)
-    search_timing = SearchTiming(cold_start=cold_start, embedding_ms=embedding_ms)
+    search_timing = SearchTiming(cold_start=cold_start, embedding_ms=embedding_ms, degraded=degraded)
 
     semantic_ranked = [pid for pid, _ in semantic_results]
-    if mode == "semantic":
+    if degraded:
+        ordered_ids = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder)
+    elif mode == "semantic":
         ordered_ids = semantic_ranked
     else:
         keyword_ranked = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder)
@@ -337,6 +357,10 @@ async def list_posts(
 ) -> PostListResponse | PostSummaryListResponse:
     if mode not in ("keyword", "semantic", "hybrid"):
         raise InvalidSearchMode
+    # ``?tag=`` / ``?search=`` (empty) mean "no filter", not "filter on nothing";
+    # without this the empty string skipped the master-doc pin while filtering
+    # on nothing (AUDIT.md B-14).
+    tag, folder, search = tag or None, folder or None, search or None
     if search and mode in ("semantic", "hybrid"):
         return await _list_posts_ranked(
             db, search=search, mode=mode, limit=limit, offset=offset, summary=summary, tag=tag, folder=folder
@@ -587,6 +611,10 @@ async def _resolve_revision(db: aiosqlite.Connection, post_id: int, sha: str):
         current_path=row["path"] if row is not None else None,
         limit=_RESTORE_SCAN_LIMIT,
     )
+    # REST enforces min_length=4 on the sha; MCP callers reach here unvalidated,
+    # and ``"".startswith("")`` would silently pick the newest revision (B-15).
+    if len(sha) < 4:
+        raise RevisionNotFound
     match = next((r for r in revs if r.sha == sha or r.sha.startswith(sha)), None)
     if match is None:
         raise RevisionNotFound
@@ -989,6 +1017,8 @@ async def list_tags(db: aiosqlite.Connection) -> TagListResponse:
 
 async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagListResponse:
     old = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
+    if not old or not new_name:
+        raise InvalidTag
     if old == new_name:
         return await list_tags(db)
 
@@ -1025,6 +1055,8 @@ async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagLi
 
 async def set_tag_config(db: aiosqlite.Connection, tag: str, body: TagConfigCreate) -> TagConfigResponse:
     clean_tag = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
+    if not clean_tag:
+        raise InvalidTag
     await db.execute(
         "INSERT INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)"
         " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours, expires_at = excluded.expires_at",

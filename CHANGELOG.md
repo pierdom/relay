@@ -6,6 +6,21 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ## [Unreleased]
 
+### Fixed
+- `expires_at` (posts and tag configs) is validated as ISO 8601 and normalised to `YYYY-MM-DDTHH:MM:SSZ`; offsets and date-only values are accepted, anything else is a 422. The cleanup sweep compares it lexically, so `"1 week"` sorted below every real date and **deleted the post at the next run**. The sweep now also ignores (and warns about) a non-ISO value hand-written into front-matter (AUDIT.md B-01).
+- An embedding backend failure (model download blocked, OOM) no longer fails the write: `vectors.sync_post_chunks` logs and returns, the backfill skips a failing post instead of aborting, and `embedding.get_backend` takes a lock so two cold calls don't build two models (B-02, B-11). It also no longer commits from inside the caller's transaction (B-07).
+- The watcher re-stamps an external file whose front-matter id is already indexed at another existing path (Obsidian "Duplicate note") instead of repointing the original's id at the copy (B-03).
+- Dot-directories (`.trash`, `.obsidian`, `.stversions`…) are excluded from the startup scan, the watcher and the `assets/` scan; Obsidian's trash used to resurrect deletes and could renumber a live note at startup (B-04).
+- `update_post` over the in-process MCP server can clear `expires_at` and `source` again: pass `""` (FastMCP cannot distinguish an omitted argument from `null`; the description that promised `null` was wrong on that surface). REST `PATCH` accepts `""` as a clear too (B-05).
+- `rebuild_index` prunes chunk/vector rows whose post no longer exists, so a post deleted while relay was down can't leave `posts_missing` negative or ghost ids in ranked results (B-06).
+- An empty tag name (`!!`) is a 422 on `POST /tags/{tag}/config` and `PATCH /tags/{tag}` instead of creating a nameless `tag_config` row (B-08); `tags.yml` keys are normalised on load (B-17).
+- One `database.connect()` opens the index everywhere (Row factory, `busy_timeout`, sqlite-vec); the SSE replay and the backfill task used to skip `busy_timeout` (B-09).
+- The TTL sweep runs under `vault.write_lock` like every other writer (B-13).
+- `?tag=`, `?folder=`, `?search=` with an empty value mean "no filter" and keep the master doc pinned (B-14).
+- A sha shorter than 4 characters cannot match a revision on the MCP `restore_post`/`get_post_revision` (REST already enforced it); `""` used to match the newest one (B-15).
+- SSE subscriber queues are bounded (256); a client that stops reading gets the stream closed and replays via `Last-Event-ID` instead of growing memory forever (S-06).
+- A ranked (`semantic`/`hybrid`) query whose embedding backend fails at query time answers keyword-ranked with `search_timing.degraded=true` instead of a 500. Embeddings configured off remain a 503.
+
 ---
 
 ## [1.5.0] — 2026-09-03

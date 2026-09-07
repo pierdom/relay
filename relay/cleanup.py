@@ -7,6 +7,7 @@ import aiosqlite
 
 from . import database, events, history, ingest, metrics, vault, vectors
 from .config import settings
+from .models import ISO_Z_RE
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +32,19 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         }
 
     now = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+    # The comparison below is lexical, so only a value in the canonical shape may
+    # take part. The API normalises everything to it (models.normalize_expires_at);
+    # this guards hand-edited front-matter, which could otherwise sort anywhere.
+    canonical = "expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z'"
     to_delete: set[int] = set()
 
     # Explicit per-post expiry (overrides tag/global TTL).
     to_delete |= await _ids_where(
-        db, f"id != 0 AND expires_at IS NOT NULL AND expires_at < {now}", []
+        db, f"id != 0 AND expires_at IS NOT NULL AND {canonical} AND expires_at < {now}", []
     )
+    odd = await _ids_where(db, f"id != 0 AND expires_at IS NOT NULL AND NOT {canonical}", [])
+    if odd:
+        logger.warning("Ignoring non-ISO expires_at on post(s) %s — fix the front-matter", sorted(odd))
 
     # Global TTL for posts without their own expires_at and without a configured tag.
     if settings.default_ttl_hours:
@@ -56,7 +64,9 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
 
     # Per-tag expiry (only posts without their own expires_at).
     for tag, cfg in tag_configs.items():
-        if cfg["expires_at"]:
+        if cfg["expires_at"] and not ISO_Z_RE.match(cfg["expires_at"]):
+            logger.warning("Ignoring non-ISO expires_at %r on tag %r — fix .relay/tags.yml", cfg["expires_at"], tag)
+        elif cfg["expires_at"]:
             to_delete |= await _ids_where(
                 db,
                 f"id != 0 AND expires_at IS NULL AND tags LIKE ? AND ? < {now}",
@@ -73,23 +83,25 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
     if not to_delete:
         return 0
 
-    # Unlink the canonical files, then drop the index rows.
-    async with db.execute(
-        f"SELECT id, path, tags FROM posts WHERE id IN ({','.join('?' * len(to_delete))})",
-        list(to_delete),
-    ) as cur:
-        expired = [(row["id"], row["path"], row["tags"]) for row in await cur.fetchall()]
-    for _id, rel, _tags in expired:
-        vault.delete_file(vault.abspath(rel))
-    await db.execute(
-        f"DELETE FROM posts WHERE id IN ({','.join('?' * len(to_delete))})", list(to_delete)
-    )
-    await db.commit()
-    # This path deletes via raw SQL, not vault.index_delete — chunk cleanup
-    # has to be called explicitly here too, or a TTL-expired post's chunks
-    # would silently outlive it.
-    for post_id in to_delete:
-        await vectors.delete_post_chunks(db, post_id)
+    # Unlink the canonical files, then drop the index rows — under the same lock
+    # every other writer takes, so a concurrent rename can't race the unlink.
+    async with vault.write_lock:
+        async with db.execute(
+            f"SELECT id, path, tags FROM posts WHERE id IN ({','.join('?' * len(to_delete))})",
+            list(to_delete),
+        ) as cur:
+            expired = [(row["id"], row["path"], row["tags"]) for row in await cur.fetchall()]
+        for _id, rel, _tags in expired:
+            vault.delete_file(vault.abspath(rel))
+        await db.execute(
+            f"DELETE FROM posts WHERE id IN ({','.join('?' * len(to_delete))})", list(to_delete)
+        )
+        # This path deletes via raw SQL, not vault.index_delete — chunk cleanup
+        # has to be called explicitly here too, or a TTL-expired post's chunks
+        # would silently outlive it.
+        for post_id in to_delete:
+            await vectors.delete_post_chunks(db, post_id)
+        await db.commit()
     # Tell live clients. The file unlink is self-delete-suppressed, so the watcher
     # won't emit for these — without this a TTL'd post lingers in every connected
     # UI/TUI until the next reload. Deletes stream without an SSE `id:`, so they
@@ -110,10 +122,7 @@ async def cleanup_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            async with aiosqlite.connect(settings.database_path) as db:
-                db.row_factory = aiosqlite.Row
-                if database.VEC_ENABLED:
-                    await vectors.load_extension(db)
+            async with database.connect() as db:
                 count = await _delete_expired(db)
                 if count:
                     metrics.cleanup_deletions.inc(count)
