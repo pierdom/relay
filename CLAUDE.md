@@ -33,7 +33,8 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST/GET | /posts | Publish / list (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`, `mode`). `sort`=`updated`(default)/`created`; `order`=`desc`(default)/`asc`; FTS `search` ranks by bm25. `summary=true` → metadata+excerpt only. `mode`=`keyword`(default)/`semantic`/`hybrid` (relay #253, proof of concept) — 503 if embeddings aren't enabled; can be combined with `tag`/`folder`. `semantic`/`hybrid` responses carry a `search_timing` field (cold-start latency) |
+| POST/GET | /posts | Publish / list (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`, `mode`). `sort`=`updated`(default)/`created`; `order`=`desc`(default)/`asc`; FTS `search` ranks by bm25. `summary=true` → metadata+excerpt only. `mode`=`keyword`(default)/`semantic`/`hybrid` (relay #253, proof of concept) — 503 if embeddings aren't enabled; can be combined with `tag`/`folder`. `semantic`/`hybrid` responses carry a `search_timing` field (cold-start latency). A bare id or `#id` as `search` (e.g. `42`) pins that post by id instead of ranking it as text |
+| GET | /id/{id} | Redirects to `/?post={id}`, which the UI picks up and opens on load — a deep link, not an API endpoint (no auth of its own) |
 | GET/PATCH/DELETE | /posts/{id} | Get / partial update / delete |
 | GET | /posts/deleted | Gone-but-restorable posts (id, title, sha, reason). **Declared before `/{id}`** or FastAPI parses `deleted` as an int |
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |

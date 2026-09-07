@@ -121,7 +121,7 @@ class PostListResponse(BaseModel):
     total: int
     limit: int
     offset: int
-    pinned: PostResponse | None = None  # master doc, on the home feed's first page
+    pinned: PostResponse | None = None  # master doc (unfiltered home feed) or a bare-id search hit, first page only
     search_timing: SearchTiming | None = None  # set only for mode="semantic"/"hybrid"
 
 
@@ -194,7 +194,7 @@ class PostSummaryListResponse(BaseModel):
     total: int
     limit: int
     offset: int
-    pinned: PostSummary | None = None  # master doc, on the home feed's first page
+    pinned: PostSummary | None = None  # master doc (unfiltered home feed) or a bare-id search hit, first page only
     search_timing: SearchTiming | None = None  # set only for mode="semantic"/"hybrid"
 
 

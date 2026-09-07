@@ -2,14 +2,15 @@
 
 All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may authenticate with the `relay_session` cookie instead of the bearer token; both are checked by the same dependency (cookie-authenticated writes additionally reject cross-site requests). Interactive docs (Swagger UI) at `/docs`.
 
-**Public, no auth:** `/health` (container healthcheck), the UI shell and its static files (`/`, `/ui`, `/static/*`, `/assets/*`, `/favicon.ico`), the API schema (`/docs`, `/redoc`, `/openapi.json` — it carries no secrets and this repository is public), the login bootstrap (`/auth/*`, `POST /session` which itself takes the key) and, when MCP OAuth is enabled, the OAuth AS metadata, `/register` and `/mcp/oauth/callback`. Every other path — including any unmatched one — answers 401.
+**Public, no auth:** `/health` (container healthcheck), the UI shell and its static files (`/`, `/ui`, `/id/{id}`, `/static/*`, `/assets/*`, `/favicon.ico`), the API schema (`/docs`, `/redoc`, `/openapi.json` — it carries no secrets and this repository is public), the login bootstrap (`/auth/*`, `POST /session` which itself takes the key) and, when MCP OAuth is enabled, the OAuth AS metadata, `/register` and `/mcp/oauth/callback`. Every other path — including any unmatched one — answers 401. `/id/{id}` is a redirect only (`/?post={id}`), not a lookup — it never touches the vault, so it needs no auth of its own; the UI fetches the post itself, authenticated, once it lands on `/`.
 
 ## Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/posts` | Publish a post |
-| GET | `/posts` | List posts (`tag`, `folder`, `search`, `summary`, `limit`, `offset`, `sort`, `order`, `mode`; master doc pinned on home feed). `mode` = `keyword` (default) / `semantic` / `hybrid` ranks a `search` and combines with `tag`/`folder`; 503 if embeddings are off. `sort` = `updated` (default, last-modified) or `created`; `order` = `desc` (default) or `asc`. A `search` ranks by relevance first and uses `sort`/`order` only as a tiebreak |
+| GET | `/posts` | List posts (`tag`, `folder`, `search`, `summary`, `limit`, `offset`, `sort`, `order`, `mode`; master doc pinned on home feed). `mode` = `keyword` (default) / `semantic` / `hybrid` ranks a `search` and combines with `tag`/`folder`; 503 if embeddings are off. `sort` = `updated` (default, last-modified) or `created`; `order` = `desc` (default) or `asc`. A `search` ranks by relevance first and uses `sort`/`order` only as a tiebreak. A bare id or `#id` as `search` (e.g. `42`, `#42`) pins that post by id — the same `#NNN` convention `/posts/{id}/backlinks` resolves — instead of ranking it as text |
+| GET | `/id/{id}` | Redirects to `/?post={id}` — the UI opens that post on load. A convenience for pasting a post id somewhere and landing directly on it, not an API endpoint (no auth, no body, `422` on a non-numeric id) |
 | GET | `/posts/{id}` | Get a single post |
 | PATCH | `/posts/{id}` | Partial update — omitted fields unchanged; `null` or `""` clears `expires_at`/`source` |
 | DELETE | `/posts/{id}` | Delete a post |
