@@ -1,11 +1,25 @@
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from . import folders
+
+
+def _decode_properties(value: str | None) -> dict:
+    """Read-only view of a post's non-relay front-matter keys (Obsidian
+    Properties, custom fields) — see ``frontmatter.parse``/``relay.vault``.
+    Tolerant of missing/invalid JSON (e.g. a pre-upgrade index row)."""
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 # The one shape every stored timestamp has (vault.utcnow_iso, frontmatter._to_iso,
 # and the cleanup loop's strftime('now') all agree on it). expires_at is compared
@@ -81,6 +95,11 @@ class PostResponse(BaseModel):
     created_at: str
     updated_at: str | None = None
     expires_at: str | None = None
+    properties: dict = Field(
+        default_factory=dict,
+        description="Non-relay front-matter keys (Obsidian Properties, custom fields) — read-only here; "
+        "edit them in Obsidian or hand-edit the file",
+    )
 
     @classmethod
     def from_row(cls, row) -> PostResponse:
@@ -93,6 +112,7 @@ class PostResponse(BaseModel):
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
+            properties=_decode_properties(row["properties"]),
         )
 
 
@@ -173,6 +193,10 @@ class PostSummary(BaseModel):
     created_at: str
     updated_at: str | None = None
     expires_at: str | None = None
+    properties: dict = Field(
+        default_factory=dict,
+        description="Non-relay front-matter keys (Obsidian Properties, custom fields) — read-only here",
+    )
 
     @classmethod
     def from_row(cls, row) -> PostSummary:
@@ -186,6 +210,7 @@ class PostSummary(BaseModel):
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
+            properties=_decode_properties(row["properties"]),
         )
 
 
@@ -478,6 +503,10 @@ class PostRevisionContent(BaseModel):
     content: str
     tags: list[str]
     source: str | None
+    properties: dict = Field(
+        default_factory=dict,
+        description="Non-relay front-matter keys as they were at this revision",
+    )
 
 
 class PostHistoryResponse(BaseModel):

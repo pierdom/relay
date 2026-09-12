@@ -21,7 +21,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from relay import cleanup, database, embedding, events, vault, vectors, watcher
+from relay import cleanup, database, embedding, events, frontmatter, vault, vectors, watcher
 from relay.auth import require_api_key
 from relay.config import settings
 from relay.main import app
@@ -165,6 +165,52 @@ async def test_external_copy_with_a_taken_id_gets_a_fresh_id(client, vault_dir):
     copies = (await client.get("/posts", params={"search": "copied"}, headers=AUTH)).json()["items"]
     assert len(copies) == 1 and copies[0]["id"] != post["id"]
     assert f"id: {copies[0]['id']}" in dup.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_external_edit_properties_survive_a_later_relay_write(client, vault_dir):
+    """An Obsidian Property (aliases, cssclasses, custom field) added by hand
+    must not be dropped the next time relay rewrites the file — covers the
+    watcher -> index -> update_post round trip (N-2)."""
+    post = await _create(client, title="Props", tags=["homelab"])
+    f = vault_dir / "Homelab" / "Props.md"
+    meta, body = frontmatter.parse(f.read_text(encoding="utf-8"))
+    f.write_text(frontmatter.serialize(meta, body, {"aliases": ["Alt"]}), encoding="utf-8")
+    await watcher._reconcile([str(f)])
+
+    got = (await client.get(f"/posts/{post['id']}", headers=AUTH)).json()
+    assert got["properties"] == {"aliases": ["Alt"]}
+
+    r = await client.patch(f"/posts/{post['id']}", json={"content": "edited"}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["properties"] == {"aliases": ["Alt"]}
+    meta2, _ = frontmatter.parse(f.read_text(encoding="utf-8"))
+    assert meta2["properties"] == {"aliases": ["Alt"]}
+
+
+@pytest.mark.asyncio
+async def test_external_edit_with_a_bare_date_property_does_not_crash_the_index(client, vault_dir):
+    """A custom front-matter property that looks like a date (`review_date:
+    2024-01-15`) is auto-parsed by YAML into a `datetime.date`, which used to
+    reach `json.dumps` in the index write and raise — the watcher's reconcile
+    (and any later relay write) must survive it (N-2)."""
+    post = await _create(client, title="Dated", tags=["homelab"])
+    f = vault_dir / "Homelab" / "Dated.md"
+    meta, body = frontmatter.parse(f.read_text(encoding="utf-8"))
+    text = frontmatter.serialize(meta, body, {"review_date": "2024-01-15"})
+    # serialize quotes string values; force an actual unquoted YAML date so
+    # yaml.safe_load auto-parses it into a `datetime.date`, as a human typing
+    # it bare in Obsidian would produce.
+    text = text.replace("review_date: '2024-01-15'", "review_date: 2024-01-15")
+    f.write_text(text, encoding="utf-8")
+    await watcher._reconcile([str(f)])  # must not raise
+
+    got = (await client.get(f"/posts/{post['id']}", headers=AUTH)).json()
+    assert got["properties"]["review_date"] == "2024-01-15T00:00:00Z"
+
+    r = await client.patch(f"/posts/{post['id']}", json={"content": "edited"}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["properties"]["review_date"] == "2024-01-15T00:00:00Z"
 
 
 @pytest.mark.asyncio

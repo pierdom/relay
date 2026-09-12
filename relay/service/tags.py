@@ -68,16 +68,17 @@ async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagLi
                 t = new_name if t == old else t
                 if t not in renamed:
                     renamed.append(t)
+            row_properties = vault.decode_properties(row["properties"])
             new_path = vault.write_file(
                 id=row["id"], title=row["title"], content=row["content"], tags=renamed,
                 source=row["source"], created_at=row["created_at"],
                 updated_at=row["updated_at"], expires_at=row["expires_at"],
-                old_path=vault.abspath(row["path"]),
+                old_path=vault.abspath(row["path"]), properties=row_properties,
             )
             await vault.index_upsert(
                 db, id=row["id"], title=new_path.stem, path=new_path, content=row["content"],
                 tags=renamed, source=row["source"], created_at=row["created_at"],
-                updated_at=row["updated_at"], expires_at=row["expires_at"],
+                updated_at=row["updated_at"], expires_at=row["expires_at"], properties=row_properties,
             )
         await db.execute("UPDATE tag_config SET tag = ? WHERE tag = ?", (new_name, old))
         await vault.write_tag_config(db)

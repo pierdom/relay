@@ -184,6 +184,56 @@ async def test_rebuild_adopts_idless_handmade_note(vault_dir):
     assert meta["id"] == row["id"]  # id stamped back into the file
 
 
+# ── unknown front-matter properties (N-2) ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_preserves_unknown_frontmatter_properties(client, vault_dir):
+    """Obsidian Properties (aliases, cssclasses, custom fields) must survive a
+    relay-initiated write, not be silently dropped."""
+    post = await _create_post(client, title="Props Note")
+    path = vault_dir / "Inbox" / "Props Note.md"
+    meta, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+    path.write_text(
+        frontmatter.serialize(meta, body, {"aliases": ["Alt Name"], "cssclasses": "wide"}),
+        encoding="utf-8",
+    )
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vault.rebuild_index(db)  # picks up the hand-edit, as a relay restart would
+
+    r = await client.patch(f"/posts/{post['id']}", json={"content": "edited via API"}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["properties"] == {"aliases": ["Alt Name"], "cssclasses": "wide"}
+
+    meta2, _ = frontmatter.parse(path.read_text(encoding="utf-8"))
+    assert meta2["properties"] == {"aliases": ["Alt Name"], "cssclasses": "wide"}
+
+
+@pytest.mark.asyncio
+async def test_create_leaves_properties_empty(client):
+    post = await _create_post(client, title="Fresh Note")
+    assert post["properties"] == {}
+
+
+@pytest.mark.asyncio
+async def test_idless_note_with_a_bare_date_property_does_not_crash_rebuild(vault_dir):
+    """A hand-made, id-less note (rebuild_index's needs_id stamping path) with a
+    custom property that YAML auto-parses into a `datetime.date` must not
+    crash the id-stamping write or the index insert."""
+    (vault_dir / "Hand Made.md").write_text(
+        "---\ntags: [dev]\nreview_date: 2024-01-15\n---\n\nbody\n", encoding="utf-8"
+    )
+    async with aiosqlite.connect(settings.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        await vault.rebuild_index(db)  # must not raise
+        async with db.execute("SELECT properties FROM posts WHERE title = 'Hand Made'") as cur:
+            row = await cur.fetchone()
+    assert vault.decode_properties(row["properties"]) == {"review_date": "2024-01-15T00:00:00Z"}
+    meta, _ = frontmatter.parse((vault_dir / "Hand Made.md").read_text(encoding="utf-8"))
+    assert meta["properties"] == {"review_date": "2024-01-15T00:00:00Z"}
+
+
 # ── folder placement (derive from primary tag; never auto-move) ──────────────
 
 

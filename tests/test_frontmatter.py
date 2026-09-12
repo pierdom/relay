@@ -4,6 +4,8 @@ coverage rather than relying on the integration tests to catch it indirectly.
 """
 from __future__ import annotations
 
+import json
+
 from relay.frontmatter import (
     parse,
     sanitize_attachment_name,
@@ -80,6 +82,50 @@ def test_parse_empty_tags_field_becomes_empty_list():
     assert meta["tags"] == []
 
 
+def test_parse_captures_unknown_keys_as_properties():
+    # Obsidian Properties / custom front-matter keys relay doesn't manage.
+    text = (
+        "---\nid: 1\ntags: [dev]\naliases: [\"My Alias\"]\ncssclasses: wide-page\n"
+        "status: active\n---\n\nbody\n"
+    )
+    meta, _ = parse(text)
+    assert meta["properties"] == {"aliases": ["My Alias"], "cssclasses": "wide-page", "status": "active"}
+
+
+def test_parse_properties_empty_when_only_known_keys_present():
+    text = "---\nid: 1\ntags: [dev]\n---\n\nbody\n"
+    meta, _ = parse(text)
+    assert meta["properties"] == {}
+
+
+def test_parse_normalises_bare_dates_in_properties_to_iso_strings():
+    # YAML auto-parses a bare-looking date/datetime into a datetime.date /
+    # datetime.datetime object — left as-is, json.dumps on the index write
+    # raises `TypeError: Object of type date is not JSON serializable` the
+    # moment a post carries a custom property like `review_date: 2024-01-15`.
+    text = (
+        "---\nid: 1\ntags: [dev]\nreview_date: 2024-01-15\n"
+        "reviewed_at: 2024-01-15T10:30:00Z\n---\n\nbody\n"
+    )
+    meta, _ = parse(text)
+
+    assert meta["properties"]["review_date"] == "2024-01-15T00:00:00Z"
+    assert meta["properties"]["reviewed_at"] == "2024-01-15T10:30:00Z"
+    json.dumps(meta["properties"])  # must not raise
+
+
+def test_parse_normalises_dates_nested_in_lists_and_dicts():
+    text = (
+        "---\nid: 1\ntags: [dev]\nnested:\n  due: 2024-06-01\n"
+        "  list_of_dates: [2024-01-01, 2024-02-02]\n---\n\nbody\n"
+    )
+    meta, _ = parse(text)
+
+    assert meta["properties"]["nested"]["due"] == "2024-06-01T00:00:00Z"
+    assert meta["properties"]["nested"]["list_of_dates"] == ["2024-01-01T00:00:00Z", "2024-02-02T00:00:00Z"]
+    json.dumps(meta["properties"])  # must not raise
+
+
 # ── serialize ─────────────────────────────────────────────────────────────────
 
 
@@ -129,6 +175,27 @@ def test_serialize_empty_tags_emits_empty_list():
             "updated_at": None, "expires_at": None}
     text = serialize(meta, "body")
     assert "tags: []" in text
+
+
+def test_serialize_round_trips_unknown_properties():
+    meta = {"id": 1, "tags": [], "source": None, "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": None, "expires_at": None}
+    properties = {"aliases": ["My Alias"], "status": "active"}
+    text = serialize(meta, "body", properties)
+    meta2, _ = parse(text)
+    assert meta2["properties"] == properties
+
+
+def test_serialize_relay_owned_keys_win_over_properties():
+    # A property dict can't smuggle in a fake `id`/`tags`/etc — those columns
+    # are relay's own and always come from `meta`, never `properties`.
+    meta = {"id": 1, "tags": ["dev"], "source": None, "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": None, "expires_at": None}
+    text = serialize(meta, "body", {"id": 999, "tags": ["hijacked"], "aliases": ["ok"]})
+    meta2, _ = parse(text)
+    assert meta2["id"] == 1
+    assert meta2["tags"] == ["dev"]
+    assert meta2["properties"] == {"aliases": ["ok"]}
 
 
 # ── sanitize_title ────────────────────────────────────────────────────────────

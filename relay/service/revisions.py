@@ -141,6 +141,7 @@ async def get_post_revision(
         content=body,
         tags=meta.get("tags") or [],
         source=meta.get("source"),
+        properties=meta.get("properties") or {},
     )
 
 
@@ -181,15 +182,17 @@ async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> Post
     folder = folders.folder_of(match.path, default=folders.INBOX)
     now = vault.utcnow_iso()
     created_at = meta.get("created_at") or now
+    properties = meta.get("properties")
     async with vault.write_lock:
         path = vault.write_file(
             id=post_id, title=title, content=body, tags=tags, source=source,
             created_at=created_at, updated_at=now, expires_at=expires_at,
-            move_to_folder=folder,
+            move_to_folder=folder, properties=properties,
         )
         await vault.index_insert(
             db, id=post_id, title=path.stem, path=path, content=body, tags=tags,
             source=source, created_at=created_at, updated_at=now, expires_at=expires_at,
+            properties=properties,
         )
         await db.commit()
     post = PostResponse.from_row(await _fetch(db, post_id))
