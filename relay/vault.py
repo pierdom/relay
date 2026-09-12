@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import hashlib
+import json
 import logging
 import os
 import re
@@ -128,6 +129,28 @@ def _tags_to_sentinel(tags: list[str]) -> str:
     return "," + ",".join(tags) + "," if tags else ""
 
 
+def encode_properties(properties: dict | None) -> str:
+    """JSON-encode unknown front-matter keys (see ``frontmatter.parse``) for the
+    index's ``properties`` column. ``default=str`` is a defensive fallback, not
+    the expected path — ``frontmatter.parse`` already makes every value
+    JSON-safe (``_json_safe``); this only guards a write against a future type
+    slipping through, the same way a post is never allowed to fail to index
+    over derived data (see ``vectors.sync_post_chunks``)."""
+    return json.dumps(properties or {}, ensure_ascii=False, default=str)
+
+
+def decode_properties(value: str | None) -> dict:
+    """Inverse of ``encode_properties`` — tolerant of missing/invalid JSON (e.g.
+    a pre-upgrade index row that predates the ``properties`` column)."""
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 # ── self-write suppression (used by the watcher) ────────────────────────────
 
 
@@ -196,6 +219,7 @@ def write_file(
     expires_at: str | None,
     old_path: Path | None = None,
     move_to_folder: str | None = None,
+    properties: dict | None = None,
 ) -> Path:
     """Write a post to disk; rename from ``old_path`` if the title changed.
 
@@ -203,6 +227,9 @@ def write_file(
     (``old_path``'s parent) — relay never relocates a post on retag, *except* when
     ``move_to_folder`` is given (used only for the Inbox→domain move on first tag).
     A brand-new file (no ``old_path``) is filed by ``folders.folder_for``.
+
+    ``properties`` are extra front-matter keys (Obsidian Properties, custom
+    fields) to preserve verbatim — see ``frontmatter.parse``/``serialize``.
 
     Returns the (possibly new) path. Records the write for watcher suppression.
     """
@@ -222,7 +249,7 @@ def write_file(
         "updated_at": updated_at,
         "expires_at": expires_at,
     }
-    text = frontmatter.serialize(meta, content)
+    text = frontmatter.serialize(meta, content, properties)
     _atomic_write(new_path, text)
     note_write(new_path, text)
     if old_path is not None and old_path.resolve() != new_path.resolve():
@@ -487,6 +514,7 @@ async def index_upsert(
     created_at: str,
     updated_at: str | None,
     expires_at: str | None,
+    properties: dict | None = None,
     sync_embeddings: bool = True,
 ) -> None:
     """``sync_embeddings=False`` skips the (possibly slow, cache-missing)
@@ -496,15 +524,15 @@ async def index_upsert(
     skipped (see its docstring for why the split exists)."""
     await db.execute(
         """
-        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at, properties)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, path=excluded.path, content=excluded.content,
             tags=excluded.tags, source=excluded.source, created_at=excluded.created_at,
-            updated_at=excluded.updated_at, expires_at=excluded.expires_at
+            updated_at=excluded.updated_at, expires_at=excluded.expires_at, properties=excluded.properties
         """,
         (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
-         created_at, updated_at, expires_at),
+         created_at, updated_at, expires_at, encode_properties(properties)),
     )
     if sync_embeddings:
         await vectors.sync_post_chunks(db, post_id=id, title=title, content=content)
@@ -522,6 +550,7 @@ async def index_insert(
     created_at: str,
     updated_at: str | None,
     expires_at: str | None,
+    properties: dict | None = None,
 ) -> None:
     """Plain INSERT for a brand-new post — **no** ``ON CONFLICT``.
 
@@ -532,11 +561,11 @@ async def index_insert(
     """
     await db.execute(
         """
-        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at, properties)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
-         created_at, updated_at, expires_at),
+         created_at, updated_at, expires_at, encode_properties(properties)),
     )
     await vectors.sync_post_chunks(db, post_id=id, title=title, content=content)
 
@@ -638,6 +667,7 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
             updated_at=meta.get("updated_at"),
             expires_at=meta.get("expires_at"),
             old_path=path,
+            properties=meta.get("properties"),
         )
         parsed.append((new_path, meta, body))
 
@@ -654,6 +684,7 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
             created_at=meta.get("created_at") or utcnow_iso(),
             updated_at=effective_updated_at(path, meta),
             expires_at=meta.get("expires_at"),
+            properties=meta.get("properties"),
             # Embedding sync is deliberately skipped here — see index_upsert's
             # and backfill_embeddings's docstrings. This loop runs inline
             # during app startup and must stay fast; main.py's lifespan kicks

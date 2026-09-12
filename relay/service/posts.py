@@ -419,6 +419,7 @@ async def update_post(
     tags = body.tags if "tags" in fields else _tags_from_sentinel(row["tags"])
     source = body.source if "source" in fields else row["source"]
     expires_at = body.expires_at if "expires_at" in fields else row["expires_at"]
+    properties = vault.decode_properties(row["properties"])
     now = vault.utcnow_iso()
     old_path = vault.abspath(row["path"])
 
@@ -436,12 +437,12 @@ async def update_post(
         new_path = vault.write_file(
             id=post_id, title=title, content=content, tags=tags or [], source=source,
             created_at=row["created_at"], updated_at=now, expires_at=expires_at,
-            old_path=old_path, move_to_folder=move_to,
+            old_path=old_path, move_to_folder=move_to, properties=properties,
         )
         await vault.index_upsert(
             db, id=post_id, title=new_path.stem, path=new_path, content=content,
             tags=tags or [], source=source, created_at=row["created_at"],
-            updated_at=now, expires_at=expires_at,
+            updated_at=now, expires_at=expires_at, properties=properties,
         )
         if new_path.stem != row["title"]:
             await _rewrite_inbound_wikilinks(db, old_title=row["title"], new_title=new_path.stem)
@@ -492,16 +493,17 @@ async def _rewrite_inbound_wikilinks(
         if not changed:
             continue
         row_tags = _tags_from_sentinel(row["tags"])
+        row_properties = vault.decode_properties(row["properties"])
         new_path = vault.write_file(
             id=row["id"], title=row["title"], content=new_content, tags=row_tags,
             source=row["source"], created_at=row["created_at"],
             updated_at=row["updated_at"], expires_at=row["expires_at"],
-            old_path=vault.abspath(row["path"]),
+            old_path=vault.abspath(row["path"]), properties=row_properties,
         )
         await vault.index_upsert(
             db, id=row["id"], title=new_path.stem, path=new_path, content=new_content,
             tags=row_tags, source=row["source"], created_at=row["created_at"],
-            updated_at=row["updated_at"], expires_at=row["expires_at"],
+            updated_at=row["updated_at"], expires_at=row["expires_at"], properties=row_properties,
         )
 
 

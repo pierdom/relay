@@ -36,6 +36,25 @@ def _to_iso(value: object) -> str | None:
     return str(value)
 
 
+def _json_safe(value: object) -> object:
+    """Make an arbitrary YAML-parsed value JSON-encodable, recursively.
+
+    YAML auto-parses bare-looking scalars into ``datetime.date``/``datetime``
+    objects (the same reason ``_to_iso`` exists for the known timestamp
+    fields) — a custom property like ``review_date: 2024-01-15`` would
+    otherwise reach ``json.dumps`` in the index and raise. Every other YAML
+    safe-load type (str/int/float/bool/None, and dict/list of those) is
+    already JSON-safe and passed through unchanged.
+    """
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (_dt.datetime, _dt.date)):
+        return _to_iso(value)
+    return value
+
+
 def parse(text: str) -> tuple[dict, str]:
     """Split a file's text into (metadata, body). No front-matter → ({}, text)."""
     m = _FM_RE.match(text)
@@ -57,17 +76,30 @@ def parse(text: str) -> tuple[dict, str]:
     meta["source"] = raw.get("source")
     for f in _DATETIME_FIELDS:
         meta[f] = _to_iso(raw.get(f))
+    # Anything else in the front-matter (Obsidian Properties like `aliases`,
+    # `cssclasses`, or a custom key) isn't a relay-owned field, but a human or
+    # Obsidian put it there — round-tripped verbatim by `serialize` rather than
+    # silently dropped on the next relay-initiated write.
+    meta["properties"] = {k: _json_safe(v) for k, v in raw.items() if k not in _FIELD_ORDER}
     return meta, m.group(2)
 
 
-def serialize(meta: dict, body: str) -> str:
-    """Render front-matter + body. ``meta`` uses the same keys ``parse`` returns."""
+def serialize(meta: dict, body: str, properties: dict | None = None) -> str:
+    """Render front-matter + body. ``meta`` uses the same keys ``parse`` returns.
+
+    ``properties`` are extra front-matter keys to preserve verbatim (see
+    ``parse``) — appended after the relay-owned fields, which always win on a
+    name collision.
+    """
     ordered: dict = {}
     for key in _FIELD_ORDER:
         val = meta.get(key)
         if key == "tags":
             ordered[key] = list(val or [])
         elif val is not None:
+            ordered[key] = val
+    for key, val in (properties or {}).items():
+        if key not in _FIELD_ORDER:
             ordered[key] = val
     fm = yaml.safe_dump(
         ordered,

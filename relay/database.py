@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS posts (
     source     TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT,
-    expires_at TEXT
+    expires_at TEXT,
+    properties TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts (created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_tags ON posts (tags);
@@ -109,6 +110,14 @@ async def init_db() -> None:
     async with aiosqlite.connect(settings.database_path) as db:
         db.row_factory = aiosqlite.Row
         await db.executescript(_SCHEMA)
+        # `properties` (N-2) added after some installs' index.db already exists —
+        # `CREATE TABLE IF NOT EXISTS` above is a no-op against an existing table,
+        # so add the column here for anyone upgrading. Harmless on a fresh table
+        # (already has it) or a rebuild (index.db is disposable either way).
+        try:
+            await db.execute("ALTER TABLE posts ADD COLUMN properties TEXT NOT NULL DEFAULT '{}'")
+        except aiosqlite.OperationalError:
+            pass
         await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA busy_timeout=5000;")
         # Drop any FTS objects a prior run left so rebuild_index's DELETE/INSERT

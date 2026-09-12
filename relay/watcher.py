@@ -131,6 +131,7 @@ async def _reconcile_file(db: aiosqlite.Connection, path: Path) -> None:
                 id=pid, title=path.stem, content=body, tags=meta.get("tags") or [],
                 source=meta.get("source"), created_at=meta.get("created_at") or vault.utcnow_iso(),
                 updated_at=meta.get("updated_at"), expires_at=meta.get("expires_at"), old_path=path,
+                properties=meta.get("properties"),
             )
         # An external editor rewrites the body but leaves the front-matter stamp
         # alone, so take the last-modified time from the file itself — otherwise
@@ -139,6 +140,7 @@ async def _reconcile_file(db: aiosqlite.Connection, path: Path) -> None:
             db, id=pid, title=path.stem, path=path, content=body, tags=meta.get("tags") or [],
             source=meta.get("source"), created_at=meta.get("created_at") or vault.utcnow_iso(),
             updated_at=vault.effective_updated_at(path, meta), expires_at=meta.get("expires_at"),
+            properties=meta.get("properties"),
         )
         await db.commit()
     post = await service.get_post(db, pid)
@@ -171,6 +173,7 @@ async def _reconcile_delete(db: aiosqlite.Connection, path: Path) -> None:
             id=vault.MASTER_ID, title=vault.MASTER_TITLE, content=row["content"], tags=[],
             source=row["source"], created_at=row["created_at"],
             updated_at=row["updated_at"], expires_at=None,
+            properties=vault.decode_properties(row["properties"]),
         )
         return
     await db.execute("DELETE FROM posts WHERE id = ?", (row["id"],))

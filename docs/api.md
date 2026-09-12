@@ -65,7 +65,7 @@ curl -X PATCH http://localhost:8000/posts/42 \
   -d '{"tags": ["news", "ai", "verified"]}'
 ```
 
-Only the fields you send are changed. `tags` replaces the list wholesale; an empty array clears all tags. `id` and `created_at` are never modified.
+Only the fields you send are changed. `tags` replaces the list wholesale; an empty array clears all tags. `id` and `created_at` are never modified. Any other front-matter key present in the file (Obsidian Properties like `aliases`/`cssclasses`, or a hand-added custom field) round-trips verbatim through every write and is returned read-only as `properties` — there is no way to set it over the API; edit it in Obsidian or by hand.
 
 ### Listing and search
 

@@ -8,6 +8,16 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.7.2] — 2026-09-12
+
+`frontmatter.parse` kept only relay's own six front-matter keys, and `serialize` rewrote every file from that narrowed dict — so an Obsidian Property (`aliases`, `cssclasses`, a custom field) or any hand-added YAML key was silently destroyed the next time relay wrote the file. A real hole in the "Obsidian-compatible" claim ([relay #198](https://github.com/pierdom/relay), N-2).
+
+### Fixed
+- Unknown front-matter keys now round-trip verbatim across every write path (`update_post`, tag rename, rename's wikilink rewrite, and the id-stamping pass in `rebuild_index`/the watcher) — relay's own keys always win on a name collision. Stored in a new `properties` column on the SQLite index (a pre-existing `index.db` picks it up via a defensive `ALTER TABLE`) and exposed read-only on `PostResponse`/`PostSummary`/`PostRevisionContent`. No write API for them; edit in Obsidian or by hand.
+- A custom property whose value looks like a bare date (`review_date: 2024-01-15`) is auto-parsed by YAML into a `datetime.date` — found while testing the fix above, this used to reach `json.dumps` on the index write and raise, breaking the write for any post carrying such a property. Dates found anywhere in a property value (including nested in lists/dicts) are now normalised to ISO strings, the same way `created_at`/`updated_at`/`expires_at` already were.
+
+---
+
 ## [1.7.1] — 2026-09-07
 
 A post's id was only useful over the API — nothing in the UI let you jump straight to one. Adds a `/id/<id>` link and teaches search to treat a bare id as "find this post", not text to rank.
