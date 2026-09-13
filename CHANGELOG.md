@@ -8,6 +8,40 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.9.2] — 2026-09-13
+
+A 5-way parallel audit (concurrency/data-integrity, auth/security, MCP/REST parity, search/embeddings, browser UI/TUI) run the same day as 1.9.0 turned up sixteen confirmed, reproduced defects — K-1 through K-16, tracked in the vault's own known-bugs register. Every one below was verified with a concrete repro or a regression test confirmed to fail against the pre-fix code, not a style nit.
+
+### Fixed — security
+- **SSRF guard closed against DNS rebinding** (K-1): `source_url` fetch (`POST /attachments`, `add_attachment`) validated a hostname's resolved IP once, then let httpx/httpcore/anyio resolve it again independently to actually connect — an attacker controlling DNS could answer the two lookups differently, passing a safe IP to the check and a blocked one (loopback, cloud metadata) to the real connection. Fixed with a custom `httpcore.AsyncNetworkBackend` whose `connect_tcp` is the *only* resolution that happens, so the validated address and the connected-to address are always the same lookup.
+
+### Fixed — data integrity & concurrency
+- **History-commit race no longer misattributes changelog rows** (K-2): every write path released `vault.write_lock` before calling `history.commit()` (which stages the whole work-tree) — a concurrent writer's own already-written, not-yet-committed file could get swept into another writer's commit, and `changes._ingest` would then record that commit's action for both posts, including the wrong one. `write_lock` now spans the entire write-then-commit sequence on every path (posts, tags, revisions, attachments, the watcher's batch reconcile, TTL cleanup).
+- **SSE reconnect no longer has a gap between catch-up and going live** (K-3): the reconnect handler ran its catch-up query to completion, then subscribed — a write landing in that gap was missed by both. `subscribe()` now runs first.
+- **`list_changes` clamps `limit`** (K-4): unbounded on a direct or MCP call (`limit=-1` returned the entire changelog; SQLite treats a negative `LIMIT` as unbounded), and `limit=0` looked indistinguishable from "nothing changed." REST was already protected by FastAPI's own `Query` bounds; the underlying function now enforces the same bounds itself.
+
+### Fixed — MCP/REST parity
+- **MCP `list_attachments` reports an invalid `folder` cleanly** (K-5) instead of raising uncaught.
+- **MCP `rename_tag` reports an invalid existing `tag` argument with an actual message** (K-6) instead of a blank one — `service.rename_tag` raises a message-less exception for this case, and nothing translated it to human words.
+
+### Fixed — search & embeddings
+- **The LIKE-fallback search (FTS5 unavailable) escapes `%`/`_`** (K-7) — `search="%"` used to match every post, the same bug class already fixed for `folder`/`tag` filters.
+- **A crashed embedding backfill no longer gets stuck reporting `running: true` forever** (K-8) — a `database.connect()` failure (disk error, exceeded busy-timeout, sqlite-vec extension failure) was swallowed without clearing the state, 409-ing every future `POST /embeddings/backfill` until a restart.
+- **`get_backend()` no longer has a window where a concurrent unload can hand a caller `None`** (K-9) — closed by capturing the backend into a local exactly once instead of re-reading the (unlocked) module global a second time.
+- **A post consisting solely of headings with no body text now still embeds** (K-10) — previously produced zero chunks (same never-searchable impact as an entirely-code-fenced post, just a different cause); a bare heading now falls back to its own title as chunk content.
+
+### Fixed — browser UI & TUI
+- **A blocked delete (e.g. the protected master document) no longer looks successful** (K-11) — the delete buttons used the never-throws `apiSend` and unconditionally removed the card; they now use a new `apiSendChecked` and show the failure.
+- **The history panel's "vault history is disabled" friendly message is reachable again** (K-12) — its `503` check tested the wrong thing and could never match; `apiFetch` now carries the real status code on its thrown error.
+- **Ranked search (`semantic`/`hybrid`) can be combined with a tag/folder filter in the browser UI** (K-14), matching server support shipped in 1.5.0 — five places were still forcibly clearing one or the other.
+- **One `innerHTML` sink now escapes its input** (K-15) — not exploitable today, but the one spot in the UI that skipped it.
+- **The Textual TUI's SSE reconnect cursor is never stamped with a post id** (K-13) — three call sites confused a post's database id with a `changes.seq`, which could cause an over-wide (not lossy) reconnect replay.
+
+### Removed
+- Dead code: `rewirePost` (K-16) and `hasApiKey` in the browser UI (found in a follow-up sweep) — both defined, neither called anywhere.
+
+---
+
 ## [1.9.0] — 2026-09-13
 
 Agents started a session by reading the master document and guessing what moved. Git history already recorded every write, but there was no queryable feed of it ([relay #198](https://github.com/pierdom/relay), N-4) — and no cursor able to represent "an existing post changed," which is why SSE reconnect only ever replayed brand-new posts (the September 2026 audit's B-10/G-07).

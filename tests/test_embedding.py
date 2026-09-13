@@ -165,6 +165,35 @@ def test_get_backend_updates_last_used_without_reconstructing(monkeypatch):
         _reset_module_state()
 
 
+def test_get_backend_survives_a_concurrent_unload_between_check_and_return(monkeypatch):
+    """K-9: `get_backend`'s fast path used to check ``_backend is None`` and
+    then separately re-read the module global at ``return _backend`` —
+    nothing guards the unload side (``unload_if_idle``/``force_unload`` can
+    clear ``_backend`` from a different thread at any point, with no lock at
+    all), so a concurrent unload landing in that exact window handed the
+    caller ``None`` to call ``.embed_documents()`` on. Simulated
+    deterministically: ``_backend`` is cleared as a side effect of the
+    ``time.monotonic()`` call that sits between the fast-path check and the
+    return — the result must still be the already-captured backend, not
+    ``None``."""
+    _reset_module_state()
+    try:
+        sentinel = object()
+        embedding._backend = sentinel
+
+        def _unload_then_time():
+            embedding._backend = None  # simulates a concurrent unload_if_idle()/force_unload()
+            return 100.0
+
+        monkeypatch.setattr(embedding.time, "monotonic", _unload_then_time)
+
+        result = embedding.get_backend()
+
+        assert result is sentinel, "a concurrent unload must not turn this call's result into None"
+    finally:
+        _reset_module_state()
+
+
 def test_unload_if_idle_noop_when_nothing_loaded():
     _reset_module_state()
     try:

@@ -61,6 +61,15 @@ def _split_on_headings(content: str) -> list[tuple[str, str]]:
 
         if body:
             sections.append((heading_path, body))
+        else:
+            # K-10: a heading with nothing under it (an outline/TOC-style stub,
+            # common when drafting in Obsidian) still carries real content —
+            # its own title — that used to be dropped entirely: this section
+            # was skipped outright, and a post consisting solely of such
+            # headings produced zero chunks from chunk_post, same
+            # never-becomes-searchable impact as the already-documented
+            # entirely-code-fenced case.
+            sections.append((heading_path, title))
 
     return sections
 

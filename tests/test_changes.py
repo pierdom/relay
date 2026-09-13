@@ -404,6 +404,52 @@ async def test_no_since_returns_most_recent_limit(client):
     assert items[0]["seq"] > items[1]["seq"]   # newest first
 
 
+# ── K-4: list_changes must clamp `limit` like every sibling paginated call ───
+#
+# REST is protected by FastAPI's own `Query(ge=1, le=200)`, but `changes.py`
+# itself never imported/applied the `_clamp` helper every other paginated
+# function (`list_posts`, `get_post_history`, `list_deleted_posts`) already
+# uses — so a direct call, or the MCP tool (which passes `limit` straight
+# through, no validation layer above it), was unprotected.
+
+
+def test_clamp_limit_bounds_negative_zero_and_huge_values():
+    assert changes._clamp_limit(-1) == 1
+    assert changes._clamp_limit(0) == 1
+    assert changes._clamp_limit(5) == 5
+    assert changes._clamp_limit(10_000) == changes._MAX_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_list_changes_limit_zero_is_not_silently_empty(client):
+    """`limit=0` used to pass straight through to SQL's `LIMIT 0` — silently
+    empty, indistinguishable from "nothing has changed"."""
+    await _create(client, "Nonzero Limit Check")
+    db = await _db()
+    rows = await changes.list_changes(db, limit=0)
+    await db.close()
+    assert rows, "limit=0 must not silently look like an empty changelog"
+
+
+@pytest.mark.asyncio
+async def test_list_changes_negative_limit_is_bounded_not_unbounded(client):
+    """SQLite treats a negative `LIMIT` as unbounded — `limit=-1` used to
+    return the *entire* changelog in one response."""
+    for i in range(3):
+        await _create(client, f"Negative Limit Check {i}")
+    db = await _db()
+    rows = await changes.list_changes(db, limit=-1)
+    await db.close()
+    assert len(rows) <= changes._MAX_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_list_changes_mcp_tool_clamps_limit(client):
+    await _create(client, "MCP Limit Check")
+    out = await mcp_server.list_changes(limit=-1)
+    assert len(out["items"]) <= 200
+
+
 # ── the regression test that matters most: SSE reconnect replays edits/deletes
 #    to posts that already existed, not just brand-new ones (audit B-10/G-07) ─
 
@@ -467,6 +513,54 @@ async def test_reconnect_respects_tag_filter_for_both_edits_and_deletes(client):
     assert frames[0]["event"] == "post"
 
 
+# ── K-3: SSE reconnect must subscribe before running catch-up ───────────────
+
+
+@pytest.mark.asyncio
+async def test_sse_reconnect_subscribes_before_running_catchup(client, monkeypatch):
+    """K-3: `stream_events` used to run the catch-up query to completion and
+    only *then* call `subscribe(tag)` — a write landing in that exact gap
+    (after the catch-up SELECT, before the live queue existed) was captured
+    by neither: missed by the query (already ran) and missed live (nothing
+    was listening yet). Fixed by subscribing first. Pinned directly: by the
+    time `catchup_frames` actually runs, this reconnect's queue must already
+    be registered.
+    """
+    from relay import events as events_mod
+    from relay.routes import events as routes_events
+
+    await _create(client, "Gap Check Post")
+    async with database.connect() as db:
+        last_seq = (await _all_rows(db))[-1]["seq"]
+
+    real_catchup = routes_events.catchup_frames
+    seen_count_during_catchup = None
+
+    async def _checking_catchup(db, *, last_seq, tag):
+        nonlocal seen_count_during_catchup
+        seen_count_during_catchup = events_mod.subscriber_count()
+        return await real_catchup(db, last_seq=last_seq, tag=tag)
+
+    monkeypatch.setattr(routes_events, "catchup_frames", _checking_catchup)
+
+    class _FakeRequest:
+        headers = {"last-event-id": str(last_seq)}
+
+        async def is_disconnected(self) -> bool:
+            return True  # end the live loop immediately once catch-up is done
+
+    before = events_mod.subscriber_count()
+    resp = await routes_events.stream_events(_FakeRequest(), tag=None)
+    async for _frame in resp.body_iterator:
+        pass  # drain to completion: catch-up runs, then the live loop exits
+
+    assert seen_count_during_catchup == before + 1, (
+        "catch-up ran before this reconnect's queue was subscribed — "
+        "a write in that gap would be missed by both catch-up and live delivery"
+    )
+    assert events_mod.subscriber_count() == before  # unsubscribed on the way out
+
+
 # ── live SSE delivery now fires on tag rename (previously silent) ────────────
 
 
@@ -511,3 +605,126 @@ async def test_list_changes_mcp_reports_history_disabled(client, monkeypatch):
     monkeypatch.setattr(settings, "history_enabled", False)
     out = await mcp_server.list_changes()
     assert "error" in out
+
+
+# ── K-2: history.commit must never run after write_lock is released ─────────
+#
+# Every write path used to release `vault.write_lock` before calling
+# `history.commit(...)`. `history.commit` stages the *whole* work-tree
+# (`git add -A`), so that gap let a concurrent writer's own already-written,
+# not-yet-committed file get swept into *this* commit — and `changes._ingest`
+# then attributes this commit's message/action to every post it touched,
+# including the other writer's. The fix holds `write_lock` across the entire
+# write-then-commit span everywhere; the two tests below pin that two ways:
+# directly, across every call site, and via a real concurrent repro of the
+# original misattribution.
+
+
+@pytest.mark.asyncio
+async def test_history_commit_always_runs_under_write_lock(client, monkeypatch):
+    from relay import cleanup, vault, watcher
+
+    real_commit = history.commit
+    seen_unlocked: list[str] = []
+
+    async def _checking_commit(message: str) -> bool:
+        if not vault.write_lock.locked():
+            seen_unlocked.append(message)
+        return await real_commit(message)
+
+    monkeypatch.setattr(history, "commit", _checking_commit)
+
+    # posts.py: create / update / edit / append / delete
+    post = await _create(client, "Lock Invariant Post", content="one two three", tags=("x",))
+    pid = post["id"]
+    await client.patch(f"/posts/{pid}", json={"content": "two"}, headers=AUTH)
+    await client.post(f"/posts/{pid}/edit", json={"old_str": "two", "new_str": "three"}, headers=AUTH)
+    await client.post(f"/posts/{pid}/append", json={"content": "four"}, headers=AUTH)
+
+    # tags.py: rename_tag
+    r = await client.patch("/tags/x", json={"new_name": "y"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+
+    # attachments.py: add / delete
+    r = await client.post(
+        "/attachments",
+        json={"filename": "lock-check.txt", "data": "aGVsbG8=", "folder": "Inbox"},
+        headers=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    r = await client.delete("/attachments/Inbox/assets/lock-check.txt", headers=AUTH)
+    assert r.status_code == 200, r.text
+
+    # revisions.py: restore_post (deleted-post recreation branch)
+    hist_resp = (await client.get(f"/posts/{pid}/history", headers=AUTH)).json()
+    sha = hist_resp["items"][-1]["sha"]
+    await client.delete(f"/posts/{pid}", headers=AUTH)
+    r = await client.post(f"/posts/{pid}/restore", json={"sha": sha}, headers=AUTH)
+    assert r.status_code == 200, r.text
+
+    # watcher.py: _reconcile (external edit batch)
+    edited_path = Path(settings.vault_path) / git("ls-files", "*Lock Invariant Post*.md")
+    edited_path.write_text(edited_path.read_text(encoding="utf-8") + "\nexternal line\n", encoding="utf-8")
+    await watcher._reconcile([str(edited_path)])
+
+    # cleanup.py: _delete_expired (TTL sweep)
+    db = await _db()
+    expiring = await _create(client, "Expiring Post")
+    await db.execute(
+        "UPDATE posts SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?", (expiring["id"],)
+    )
+    await db.commit()
+    assert await cleanup._delete_expired(db) == 1
+    await db.close()
+
+    assert seen_unlocked == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_create_and_update_do_not_misattribute_commits(client, monkeypatch):
+    """The original K-2 scenario, reproduced with real concurrency: post B
+    already exists; a delay is injected into the *create* commit (widening
+    the real race window that used to exist once `write_lock` was released),
+    while a create (post A) and an update (post B) run concurrently via
+    `asyncio.gather`. Before the fix, B's commit — not delayed — would run
+    first, `git add -A`-staging A's already-written-but-uncommitted file
+    alongside B's own change, and `changes._ingest` would then record post A
+    under B's "update" action instead of "create". After the fix,
+    `history.commit` runs while `write_lock` is still held, so B cannot even
+    start writing until A's whole create-then-commit span finishes.
+    """
+    existing = await _create(client, "Existing Post B", content="original")
+    pid_b = existing["id"]
+
+    real_commit = history.commit
+
+    async def _slow_commit(message: str) -> bool:
+        if "create" in message:
+            await asyncio.sleep(0.05)
+        return await real_commit(message)
+
+    monkeypatch.setattr(history, "commit", _slow_commit)
+
+    async def _create_a():
+        return await client.post(
+            "/posts", json={"title": "New Post A", "content": "a", "tags": []}, headers=AUTH
+        )
+
+    async def _update_b():
+        return await client.patch(f"/posts/{pid_b}", json={"content": "updated by B"}, headers=AUTH)
+
+    r_a, r_b = await asyncio.gather(_create_a(), _update_b())
+    assert r_a.status_code == 201, r_a.text
+    assert r_b.status_code == 200, r_b.text
+    pid_a = r_a.json()["id"]
+
+    db = await _db()
+    rows = await _all_rows(db)
+    await db.close()
+    a_rows = [r for r in rows if r["post_id"] == pid_a]
+    b_rows = [r for r in rows if r["post_id"] == pid_b]
+    assert len(a_rows) == 1, f"post A must have exactly one changes row, got {a_rows}"
+    assert a_rows[0]["action"] == "create", (
+        f"post A's own creation must never be recorded as anything else, got {a_rows[0]['action']!r}"
+    )
+    assert any(r["action"] == "update" for r in b_rows), f"post B's update must still be recorded, got {b_rows}"

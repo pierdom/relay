@@ -87,8 +87,14 @@ async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostRespons
                 if path is not None:
                     vault.delete_file(path)
                 raise
-    post = PostResponse.from_row(await _fetch(db, post_id))
-    await history.commit(f"post {post_id} create: {post.title}")
+        post = PostResponse.from_row(await _fetch(db, post_id))
+        # Committing while still holding `write_lock` (K-2): `history.commit`
+        # stages the *whole* work-tree, so calling it after releasing the lock
+        # left a gap where a concurrent writer's own already-written, not-yet-
+        # committed file could get swept into *this* commit — and then
+        # `changes._ingest` attributes this commit's message/action to every
+        # post it touched, including the other writer's.
+        await history.commit(f"post {post_id} create: {post.title}")
     seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
     await events.publish(post.model_dump(), seq=seq)
     return post
@@ -360,8 +366,15 @@ async def list_posts(
             # Query had only punctuation/operators → no searchable tokens.
             conditions.append("0")
         else:  # FTS5 unavailable — substring fallback
-            q = f"%{search}%"
-            conditions.append("(posts.title LIKE ? OR posts.content LIKE ? OR posts.source LIKE ?)")
+            # K-7: same bug class as the already-fixed S-16 (`folder=%` matching
+            # every post) — `search="%"` matched every post here too, since this
+            # was the one LIKE filter in the codebase not routed through
+            # `database.escape_like`.
+            q = f"%{database.escape_like(search)}%"
+            conditions.append(
+                "(posts.title LIKE ? ESCAPE '\\' OR posts.content LIKE ? ESCAPE '\\'"
+                " OR posts.source LIKE ? ESCAPE '\\')"
+            )
             params.extend([q, q, q])
 
     f_conds, f_params = database.tag_folder_filters(tag, folder)
@@ -464,8 +477,9 @@ async def update_post(
         if move_to:
             await _relocate_note_attachments(db, content, old_folder, move_to, post_id)
         await db.commit()
-    post = PostResponse.from_row(await _fetch(db, post_id))
-    await history.commit(commit_message or f"post {post_id} update: {post.title}")
+        post = PostResponse.from_row(await _fetch(db, post_id))
+        # K-2: commit while still holding `write_lock` — see create_post's comment.
+        await history.commit(commit_message or f"post {post_id} update: {post.title}")
     # Stream the edit so other live clients update in place. `seq` (relay
     # #198, N-4) is this write's changes-log row — every SSE frame carries
     # one now, monotonic by construction, so it can never rewind a
@@ -623,21 +637,24 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
         vault.delete_file(vault.abspath(row["path"]))
         await vault.index_delete(db, post_id)
         await db.commit()
-    # Orphan cleanup: drop the attachments *this post* referenced that no
-    # remaining post references. Scoped to the deleted post's own embeds on
-    # purpose — a folder's assets/ dir also holds files a human dropped in from
-    # Obsidian but hasn't embedded yet, and sweeping every unreferenced file in
-    # the folder would delete those bystanders. Shared assets (still referenced
-    # elsewhere) stay.
-    own = referenced_attachment_names(row["content"])
-    if own:
-        referenced = await _all_referenced_attachments(db)
-        for name, _f, _s in vault.list_attachments(folder):
-            lowered = name.lower()
-            if lowered in own and lowered not in referenced:
-                vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
-    # After the orphan sweep, so the note and the assets it took with it are one
-    # commit — restoring the post restores its images in the same revert.
-    await history.commit(f"post {post_id} delete: {row['title']}")
+        # Orphan cleanup: drop the attachments *this post* referenced that no
+        # remaining post references. Scoped to the deleted post's own embeds on
+        # purpose — a folder's assets/ dir also holds files a human dropped in from
+        # Obsidian but hasn't embedded yet, and sweeping every unreferenced file in
+        # the folder would delete those bystanders. Shared assets (still referenced
+        # elsewhere) stay. Stays under `write_lock` (K-2) along with the commit
+        # below, same reasoning as create_post's comment — otherwise these
+        # deletes could land uncommitted on disk for another writer's commit to
+        # sweep up and misattribute.
+        own = referenced_attachment_names(row["content"])
+        if own:
+            referenced = await _all_referenced_attachments(db)
+            for name, _f, _s in vault.list_attachments(folder):
+                lowered = name.lower()
+                if lowered in own and lowered not in referenced:
+                    vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
+        # After the orphan sweep, so the note and the assets it took with it are one
+        # commit — restoring the post restores its images in the same revert.
+        await history.commit(f"post {post_id} delete: {row['title']}")
     seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
     await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]), seq=seq)

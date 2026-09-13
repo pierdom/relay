@@ -346,7 +346,11 @@ export async function openPostHistory(postId, title) {
     panes.list.innerHTML = '';
     // 503 is the one expected failure — the server has history switched off, or no
     // git binary — and deserves plain words rather than a bare status line.
-    panes.list.appendChild(err.message.startsWith('503')
+    // K-12: this used to check `err.message.startsWith('503')`, which never
+    // matched — apiFetch always uses the server's `detail` sentence as the
+    // message, never a string starting with a status code — so this branch
+    // was dead and every failure fell through to the generic one below.
+    panes.list.appendChild(err.status === 503
       ? note('Vault history is not enabled on this server, so there is nothing to restore from.', 'sm-error')
       : note(`Could not load history: ${err.message}`, 'sm-error'));
     setPane(panes.pane, placeholder(''));

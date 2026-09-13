@@ -45,6 +45,21 @@ logger = logging.getLogger(__name__)
 _lock = asyncio.Lock()
 
 
+# Mirrors `service._common.MAX_HISTORY_LIMIT`/`_clamp` (also what REST's own
+# `Query(ge=1, le=200)` already enforces for this endpoint) — duplicated
+# rather than imported for the same reason `HistoryUnavailable` below is its
+# own class and not `service`'s: `changes.py` sits below `relay.service`
+# (which already imports `changes`), so importing `relay.service._common`
+# back into it would import the `relay.service` package first (running its
+# `__init__.py`, which imports `posts`, which imports `changes` — a real
+# cycle, not just a style mismatch).
+_MAX_LIMIT = 200
+
+
+def _clamp_limit(value: int) -> int:
+    return max(1, min(int(value), _MAX_LIMIT))
+
+
 class HistoryUnavailable(Exception):
     """Raised by `list_changes` when history is off or git is missing — the
     table would otherwise just look permanently empty rather than signalling
@@ -261,7 +276,7 @@ async def list_changes(
             conditions.append("at > ?")
             params.append(since)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    params.append(limit)
+    params.append(_clamp_limit(limit))
     async with db.execute(
         f"SELECT * FROM changes {where} ORDER BY seq DESC LIMIT ?", params
     ) as cur:

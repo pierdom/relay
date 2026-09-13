@@ -195,8 +195,10 @@ async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> Post
             properties=properties,
         )
         await db.commit()
-    post = PostResponse.from_row(await _fetch(db, post_id))
-    await history.commit(label)
+        post = PostResponse.from_row(await _fetch(db, post_id))
+        # K-2: commit while still holding `write_lock` — see posts.create_post's
+        # comment for why the two must never be split by a lock release.
+        await history.commit(label)
     seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
     await events.publish(post.model_dump(), seq=seq)
     return post

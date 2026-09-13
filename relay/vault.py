@@ -762,6 +762,15 @@ async def run_backfill_task() -> None:
         logger.info("Embedding backfill complete — %d post(s) checked", count)
     except Exception:
         logger.exception("Embedding backfill failed")
+        # K-8: the only other place `running` is cleared is the normal-completion
+        # path at the end of `backfill_embeddings` — an exception anywhere before
+        # that (most concretely, `database.connect()` itself failing: a disk
+        # error, exceeded busy-timeout, sqlite-vec extension failure) skips it
+        # entirely. `spawn_backfill` marks `running` eagerly and this except was
+        # the only place that could still clear it on a genuine crash; without
+        # this, `/status`'s `embeddings.backfill.running` is stuck `true` forever
+        # and every future `POST /embeddings/backfill` 409s until a restart.
+        _backfill_state.update(running=False, completed_at=utcnow_iso())
 
 
 async def backfill_embeddings(db: aiosqlite.Connection) -> int:

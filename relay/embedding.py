@@ -157,14 +157,31 @@ def get_backend() -> EmbeddingBackend:
 
     Records ``_last_used`` on every call (not just the first) — see
     ``unload_if_idle``, which reads it to decide whether the model has been
-    sitting unused long enough to give its memory back."""
+    sitting unused long enough to give its memory back.
+
+    K-9: reads the module-level ``_backend`` into a local exactly once and
+    uses that local for the rest of the call, rather than checking it (fast
+    path) and then separately re-reading it at ``return _backend`` — the
+    module global has no lock guarding it at all on the unload side
+    (``unload_if_idle``/``force_unload`` can run ``_do_unload()`` from a
+    different thread at any point), so that second, independent read could
+    observe a backend an unload had already cleared to ``None`` in between,
+    handing a caller ``None`` to call ``.embed_documents()`` on. Returning the
+    locally-captured instance instead means a concurrent unload can still
+    drop the *module's* reference, but never this call's already-in-hand one
+    — it keeps working for this call, at worst delaying that unload's memory
+    reclaim until this instance is no longer referenced.
+    """
     global _backend, _last_used
-    if _backend is None:
+    backend = _backend
+    if backend is None:
         with _load_lock:
-            if _backend is None:
-                _backend = FastEmbedBackend()
+            backend = _backend
+            if backend is None:
+                backend = FastEmbedBackend()
+                _backend = backend
     _last_used = time.monotonic()
-    return _backend
+    return backend
 
 
 def is_loaded() -> bool:

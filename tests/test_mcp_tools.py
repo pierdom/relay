@@ -182,6 +182,17 @@ async def test_rename_tag_normalises_and_rejects_an_empty_name(client):
 
 
 @pytest.mark.asyncio
+async def test_rename_tag_reports_an_invalid_existing_tag_argument(client):
+    """K-6: only `new_name` was validated/cleaned inline — `tag` (the existing
+    tag being renamed) reached `service.rename_tag` unchecked, which raises a
+    bare, message-less `InvalidTag` when it normalises to empty. Uncaught,
+    that surfaced as a completely blank error for the caller."""
+    out = await mcp_server.rename_tag(tag="!!!", new_name="valid")
+    assert "error" in out
+    assert out["error"], "the error message must not be blank"
+
+
+@pytest.mark.asyncio
 async def test_list_posts_can_browse_by_folder_and_reverse_the_sort(client):
     """Three parameters REST had and MCP did not: folder, sort, order."""
     await client.post("/posts", json={"title": "Radio One", "content": "x", "tags": ["radio"]},
@@ -312,3 +323,19 @@ async def test_initialize_announces_relays_own_version_and_branding():
     assert opts.server_version == __version__
     assert opts.website_url == settings.relay_base_url.rstrip("/")
     assert [i.mime_type for i in opts.icons] == ["image/svg+xml", "image/png"]
+
+
+# ── K-5: attachment tools must catch InvalidFolder, like REST already does ──
+
+
+@pytest.mark.asyncio
+async def test_list_attachments_reports_an_invalid_folder(client):
+    """K-5: only `PostNotFound` was caught — an invalid `folder` (one that
+    fails `folders.is_valid_name`, e.g. `".."`) reached the caller as an
+    uncaught exception instead of this codebase's own `{"error": ...}`
+    convention every other MCP error path follows. No traversal actually
+    occurs (the exception fires before any filesystem access); this is about
+    the error surfacing cleanly, not a path-traversal fix."""
+    out = await mcp_server.list_attachments(folder="..")
+    assert "error" in out
+    assert out["error"]
