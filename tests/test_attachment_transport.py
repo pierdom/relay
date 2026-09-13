@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import socket
 
 os.environ.setdefault("API_KEY", "test-key")
 
@@ -95,13 +96,65 @@ async def test_fetch_url_http_error(monkeypatch):
         await ingest.fetch_url("http://host.test/missing", max_bytes=1024)
 
 
-def test_guard_host_blocks_metadata_and_loopback():
+def test_resolve_guarded_blocks_metadata_and_loopback():
     # IP literals resolve without DNS, so these run offline.
     for blocked in ("169.254.169.254", "127.0.0.1", "0.0.0.0"):
         with pytest.raises(ingest.FetchError):
-            ingest._guard_host(blocked)
-    # a public IP passes the guard
-    ingest._guard_host("93.184.216.34")
+            ingest._resolve_guarded(blocked)
+    # a public IP passes the guard and is returned
+    assert ingest._resolve_guarded("93.184.216.34") == "93.184.216.34"
+
+
+@pytest.mark.asyncio
+async def test_guarded_backend_connects_to_the_address_it_validated(monkeypatch):
+    """K-1 regression: the fix must resolve the host exactly once and connect to
+    that exact address — not validate one lookup and then let a second, independent
+    lookup (which a DNS-rebinding attacker could answer differently) pick the
+    address that's actually connected to.
+    """
+    calls = []
+
+    def fake_getaddrinfo(host, *_a, **_kw):
+        calls.append(host)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(ingest.socket, "getaddrinfo", fake_getaddrinfo)
+
+    backend = ingest._GuardedNetworkBackend()
+    seen = {}
+
+    async def fake_inner_connect_tcp(host, port, **_kw):
+        seen["host"] = host
+        raise RuntimeError("stop before a real socket connect")
+
+    monkeypatch.setattr(backend._inner, "connect_tcp", fake_inner_connect_tcp)
+
+    with pytest.raises(RuntimeError):
+        await backend.connect_tcp("attacker.test", 443)
+
+    assert calls == ["attacker.test"]  # exactly one resolution — no second, racy lookup
+    assert seen["host"] == "93.184.216.34"  # connects to the address that was validated
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_rejects_real_loopback_end_to_end():
+    """Exercises the real transport (``_make_client`` unmocked) against an actual
+    loopback URL, proving the guard is wired all the way through ``fetch_url`` and
+    not just at the ``_GuardedNetworkBackend`` unit level.
+    """
+    with pytest.raises(ingest.FetchError):
+        await ingest.fetch_url("http://127.0.0.1:1/x", max_bytes=1024, timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_guarded_backend_rejects_blocked_address(monkeypatch):
+    def fake_getaddrinfo(host, *_a, **_kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+
+    monkeypatch.setattr(ingest.socket, "getaddrinfo", fake_getaddrinfo)
+    backend = ingest._GuardedNetworkBackend()
+    with pytest.raises(ingest.FetchError):
+        await backend.connect_tcp("attacker.test", 443)
 
 
 # ── source_url through the REST endpoint (fetch mocked at the seam) ───────────

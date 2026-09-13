@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+import anyio
+import httpcore
 import httpx
 
 from .config import settings
@@ -39,14 +41,28 @@ class FetchError(Exception):
 # ── source_url fetch ──────────────────────────────────────────────────────────
 
 
-def _guard_host(host: str) -> None:
-    """Reject URLs whose host resolves to a non-routable / metadata address.
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
 
-    Callers are already authenticated (bearer / OAuth), so this isn't a full
-    SSRF boundary — it's a guard against the classic pivots: the cloud metadata
-    endpoint (169.254.169.254), loopback, and other reserved space. Private LAN
-    ranges stay allowed on purpose so a homelab file server is fetchable. Runs on
-    every hop (redirects included) via the httpx request hook.
+
+def _resolve_guarded(host: str) -> str:
+    """Resolve ``host``, reject it if any address is a non-routable / metadata
+    address, and return the one address the connection will actually use.
+
+    Callers are already authenticated (bearer / OAuth), so this isn't a full SSRF
+    boundary — it's a guard against the classic pivots: the cloud metadata endpoint
+    (169.254.169.254), loopback, and other reserved space. Private LAN ranges stay
+    allowed on purpose so a homelab file server is fetchable.
+
+    This used to be a separate "check the host, then let httpx connect" step (an
+    ``event_hooks={"request": ...}`` hook) — but the actual TCP connect
+    (httpx -> httpcore -> anyio) performs its *own*, independent DNS resolution
+    moments later, so a DNS-rebinding attacker could answer the two lookups
+    differently: a safe/public IP for this check, then 127.0.0.1 or
+    169.254.169.254 for the real connection. Wiring this function in as
+    ``_GuardedNetworkBackend.connect_tcp`` (below) makes the validated lookup and
+    the connected-to address the *same* lookup — there's no second, independent
+    resolution left to race.
     """
     if not host:
         raise FetchError("source_url has no host")
@@ -54,23 +70,65 @@ def _guard_host(host: str) -> None:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         raise FetchError(f"could not resolve source_url host: {host}") from exc
+    resolved: list[str] = []
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
-        if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        if _is_blocked_ip(ip):
             raise FetchError(f"source_url host {host} resolves to a blocked address ({ip})")
+        resolved.append(str(ip))
+    if not resolved:
+        raise FetchError(f"could not resolve source_url host: {host}")
+    return resolved[0]
 
 
-async def _guard_request(request: httpx.Request) -> None:
-    _guard_host(request.url.host)
+class _GuardedNetworkBackend(httpcore.AsyncNetworkBackend):
+    """The default anyio backend, except ``connect_tcp`` resolves+validates the
+    host itself (via ``_resolve_guarded``) and connects to that exact address,
+    instead of handing the hostname to anyio and letting it resolve again.
+    """
+
+    def __init__(self) -> None:
+        self._inner: httpcore.AsyncNetworkBackend = httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: object = None,
+    ) -> httpcore.AsyncNetworkStream:
+        ip = await anyio.to_thread.run_sync(_resolve_guarded, host)
+        return await self._inner.connect_tcp(
+            ip, port, timeout=timeout, local_address=local_address, socket_options=socket_options
+        )
+
+    async def connect_unix_socket(
+        self, path: str, timeout: float | None = None, socket_options: object = None
+    ) -> httpcore.AsyncNetworkStream:
+        return await self._inner.connect_unix_socket(path, timeout=timeout, socket_options=socket_options)
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
+
+
+class _SSRFSafeTransport(httpx.AsyncHTTPTransport):
+    """An ``AsyncHTTPTransport`` pinned to ``_GuardedNetworkBackend`` so every
+    connection it makes (including redirects, each of which opens a fresh
+    connection to its own origin) is guarded at the point it actually connects.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=httpx.create_ssl_context(),
+            network_backend=_GuardedNetworkBackend(),
+        )
 
 
 def _make_client(timeout: float) -> httpx.AsyncClient:
-    """httpx client that SSRF-guards every request it makes, including redirects."""
-    return httpx.AsyncClient(
-        timeout=timeout,
-        follow_redirects=True,
-        event_hooks={"request": [_guard_request]},
-    )
+    """httpx client that SSRF-guards every connection it makes, including redirects."""
+    return httpx.AsyncClient(timeout=timeout, follow_redirects=True, transport=_SSRFSafeTransport())
 
 
 def _filename_from_response(url: str, resp: httpx.Response) -> str | None:
