@@ -20,9 +20,14 @@ from ..models import (
     PostSummaryListResponse,
     PostUpdate,
     SearchTiming,
+    etag_for_row,
 )
 from ._common import (
     MAX_PAGE_LIMIT,
+    ConcurrentModification,
+    EditNoChange,
+    EditTextNotFound,
+    EditTextNotUnique,
     InvalidSearchMode,
     PostNotFound,
     ProtectedPost,
@@ -409,31 +414,40 @@ async def get_post(db: aiosqlite.Connection, post_id: int) -> PostResponse | Non
 async def update_post(
     db: aiosqlite.Connection, post_id: int, body: PostUpdate, *, commit_message: str | None = None
 ) -> PostResponse:
-    row = await _fetch(db, post_id)
-    if row is None:
-        raise PostNotFound
-
-    fields = body.model_fields_set
-    title: str = body.title if "title" in fields and body.title is not None else row["title"]
-    content: str = body.content if "content" in fields and body.content is not None else row["content"]
-    tags = body.tags if "tags" in fields else _tags_from_sentinel(row["tags"])
-    source = body.source if "source" in fields else row["source"]
-    expires_at = body.expires_at if "expires_at" in fields else row["expires_at"]
-    properties = vault.decode_properties(row["properties"])
-    now = vault.utcnow_iso()
-    old_path = vault.abspath(row["path"])
-
-    # Auto-file out of Inbox: a note created without a domain tag lands in Inbox;
-    # when its first domain tag arrives, move it (and its own attachments) to that
-    # folder. Only ever *out of* Inbox — other folders stay human-owned.
-    old_folder = folders.folder_of(vault.relpath(old_path))
-    move_to = None
-    if "tags" in fields and old_folder == folders.INBOX:
-        desired = folders.folder_for(post_id, tags or [])
-        if desired and desired != folders.INBOX:
-            move_to = desired
-
+    # The fetch-and-derive-defaults step lives *inside* the lock (relay #198,
+    # N-1): reading `row` before acquiring `vault.write_lock` leaves a gap in
+    # which another writer (another caller, or the watcher reconciling an
+    # external Obsidian edit) could land a change that this call would then
+    # silently overwrite with stale defaults for whichever fields weren't
+    # explicitly provided. Holding the lock across the read closes that gap
+    # for every caller, not just ones that pass `if_match`.
     async with vault.write_lock:
+        row = await _fetch(db, post_id)
+        if row is None:
+            raise PostNotFound
+        if body.if_match is not None and body.if_match != etag_for_row(row):
+            raise ConcurrentModification
+
+        fields = body.model_fields_set
+        title: str = body.title if "title" in fields and body.title is not None else row["title"]
+        content: str = body.content if "content" in fields and body.content is not None else row["content"]
+        tags = body.tags if "tags" in fields else _tags_from_sentinel(row["tags"])
+        source = body.source if "source" in fields else row["source"]
+        expires_at = body.expires_at if "expires_at" in fields else row["expires_at"]
+        properties = vault.decode_properties(row["properties"])
+        now = vault.utcnow_iso()
+        old_path = vault.abspath(row["path"])
+
+        # Auto-file out of Inbox: a note created without a domain tag lands in Inbox;
+        # when its first domain tag arrives, move it (and its own attachments) to that
+        # folder. Only ever *out of* Inbox — other folders stay human-owned.
+        old_folder = folders.folder_of(vault.relpath(old_path))
+        move_to = None
+        if "tags" in fields and old_folder == folders.INBOX:
+            desired = folders.folder_for(post_id, tags or [])
+            if desired and desired != folders.INBOX:
+                move_to = desired
+
         new_path = vault.write_file(
             id=post_id, title=title, content=content, tags=tags or [], source=source,
             created_at=row["created_at"], updated_at=now, expires_at=expires_at,
@@ -457,6 +471,68 @@ async def update_post(
     await events.publish(post.model_dump())
     await history.commit(commit_message or f"post {post_id} update: {post.title}")
     return post
+
+
+async def edit_post(
+    db: aiosqlite.Connection, post_id: int, old_str: str, new_str: str, *, if_match: str | None = None
+) -> PostResponse:
+    """`str_replace`-style partial edit (relay #198, N-1): ``old_str`` must match
+    exactly once in the post's current content, like a code-agent Edit tool —
+    ``EditTextNotFound``/``EditTextNotUnique`` otherwise.
+
+    Delegates the actual write to ``update_post``, passing the etag captured at
+    *this* read as ``if_match`` regardless of whether the caller supplied one —
+    that's what makes this function's own read-modify-write safe: if anything
+    changed the post between this read and the write, ``update_post``'s own
+    fresh-under-the-lock check catches it and raises ``ConcurrentModification``
+    rather than silently applying the replace against stale content. A
+    caller-supplied ``if_match`` is an additional fast-fail pre-check against a
+    possibly-earlier-observed version.
+    """
+    if not old_str:
+        # str.count("") is len(content)+1, not 0 — PostEdit's min_length=1
+        # already rejects this on REST; MCP calls this function directly, so
+        # the guard has to live here too or an empty old_str would fall
+        # through to a confusing "matches N times" instead of a clear reject.
+        raise EditTextNotFound
+    if old_str == new_str:
+        raise EditNoChange
+    row = await _fetch(db, post_id)
+    if row is None:
+        raise PostNotFound
+    row_etag = etag_for_row(row)
+    if if_match is not None and if_match != row_etag:
+        raise ConcurrentModification
+    occurrences = row["content"].count(old_str)
+    if occurrences == 0:
+        raise EditTextNotFound
+    if occurrences > 1:
+        raise EditTextNotUnique(occurrences)
+    new_content = row["content"].replace(old_str, new_str, 1)
+    return await update_post(
+        db, post_id, PostUpdate(content=new_content, if_match=row_etag),
+        commit_message=f"post {post_id} edit: {row['title']}",
+    )
+
+
+async def append_post(
+    db: aiosqlite.Connection, post_id: int, content: str, *, if_match: str | None = None
+) -> PostResponse:
+    """Append to a post's content (relay #198, N-1) instead of resending the
+    whole body. See ``edit_post`` for why the read-time etag is always passed
+    through to ``update_post`` as ``if_match``."""
+    row = await _fetch(db, post_id)
+    if row is None:
+        raise PostNotFound
+    row_etag = etag_for_row(row)
+    if if_match is not None and if_match != row_etag:
+        raise ConcurrentModification
+    sep = "\n\n" if row["content"].strip() else ""
+    new_content = row["content"].rstrip("\n") + sep + content
+    return await update_post(
+        db, post_id, PostUpdate(content=new_content, if_match=row_etag),
+        commit_message=f"post {post_id} append: {row['title']}",
+    )
 
 
 async def _relocate_note_attachments(

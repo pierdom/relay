@@ -234,6 +234,205 @@ async def test_idless_note_with_a_bare_date_property_does_not_crash_rebuild(vaul
     assert meta["properties"] == {"review_date": "2024-01-15T00:00:00Z"}
 
 
+# ── partial edits + optimistic concurrency (N-1) ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_response_includes_an_etag(client):
+    post = await _create_post(client)
+    assert isinstance(post["etag"], str) and post["etag"]
+
+
+@pytest.mark.asyncio
+async def test_etag_header_matches_body_field_and_changes_after_a_write(client):
+    r = await client.post("/posts", json={"title": "Tagged", "content": "v1"}, headers=AUTH)
+    post = r.json()
+    assert r.headers["etag"] == f'"{post["etag"]}"'
+
+    r2 = await client.patch(f"/posts/{post['id']}", json={"content": "v2"}, headers=AUTH)
+    updated = r2.json()
+    assert r2.headers["etag"] == f'"{updated["etag"]}"'
+    assert updated["etag"] != post["etag"]
+
+
+@pytest.mark.asyncio
+async def test_patch_without_if_match_behaves_exactly_as_before(client):
+    """Backward compatibility is the load-bearing invariant here — every
+    existing caller omits if_match."""
+    post = await _create_post(client)
+    r = await client.patch(f"/posts/{post['id']}", json={"content": "new content"}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["content"] == "new content"
+
+
+@pytest.mark.asyncio
+async def test_patch_with_matching_if_match_succeeds(client):
+    post = await _create_post(client)
+    r = await client.patch(
+        f"/posts/{post['id']}", json={"content": "new content", "if_match": post["etag"]}, headers=AUTH
+    )
+    assert r.status_code == 200
+    assert r.json()["content"] == "new content"
+
+
+@pytest.mark.asyncio
+async def test_patch_with_stale_if_match_returns_409_with_current_post(client):
+    post = await _create_post(client)
+    stale_etag = post["etag"]
+    # Someone else updates the post first...
+    await client.patch(f"/posts/{post['id']}", json={"content": "from elsewhere"}, headers=AUTH)
+    # ...then a write based on the stale read is rejected, not silently applied.
+    r = await client.patch(
+        f"/posts/{post['id']}", json={"content": "clobber attempt", "if_match": stale_etag}, headers=AUTH
+    )
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["current"]["content"] == "from elsewhere"
+    # The clobbering write must never have landed.
+    current = (await client.get(f"/posts/{post['id']}", headers=AUTH)).json()
+    assert current["content"] == "from elsewhere"
+
+
+@pytest.mark.asyncio
+async def test_if_match_header_takes_precedence_over_body_field(client):
+    post = await _create_post(client)
+    stale_etag = post["etag"]
+    await client.patch(f"/posts/{post['id']}", json={"content": "from elsewhere"}, headers=AUTH)
+    # A matching body if_match would pass on its own; the stale header must win and 409.
+    r = await client.patch(
+        f"/posts/{post['id']}",
+        json={"content": "clobber attempt", "if_match": "whatever-matches-nothing"},
+        headers={**AUTH, "If-Match": f'"{stale_etag}"'},
+    )
+    assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_edit_post_replaces_the_unique_match(client):
+    post = await _create_post(client, content="one two three")
+    r = await client.post(f"/posts/{post['id']}/edit", json={"old_str": "two", "new_str": "TWO"}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["content"] == "one TWO three"
+
+
+@pytest.mark.asyncio
+async def test_edit_post_422_when_text_not_found(client):
+    post = await _create_post(client, content="one two three")
+    r = await client.post(f"/posts/{post['id']}/edit", json={"old_str": "nope", "new_str": "x"}, headers=AUTH)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_edit_post_422_when_text_matches_more_than_once(client):
+    post = await _create_post(client, content="two two")
+    r = await client.post(f"/posts/{post['id']}/edit", json={"old_str": "two", "new_str": "x"}, headers=AUTH)
+    assert r.status_code == 422
+    assert "2 times" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edit_post_rejects_identical_old_and_new(client):
+    post = await _create_post(client, content="one two three")
+    r = await client.post(f"/posts/{post['id']}/edit", json={"old_str": "two", "new_str": "two"}, headers=AUTH)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_edit_post_internal_protection_catches_a_race_without_caller_if_match(client, monkeypatch):
+    """The central safety claim of edit_post: it protects its own
+    read-modify-write even when the *caller* never opts into if_match, by
+    always passing the etag from its own read through to update_post. Proven
+    here by injecting a concurrent write between edit_post's read and its
+    eventual call into update_post — a real race would interleave here;
+    monkeypatching `_fetch` forces it deterministically instead of relying on
+    real (flaky) timing."""
+    from relay.service import posts as posts_module
+
+    post = await _create_post(client, content="one two three")
+    pid = post["id"]
+    original_fetch = posts_module._fetch
+    calls = {"n": 0}
+
+    async def racing_fetch(db, post_id):
+        calls["n"] += 1
+        row = await original_fetch(db, post_id)
+        if calls["n"] == 1 and post_id == pid:
+            # A concurrent writer completes here, between edit_post's own
+            # read (this call) and update_post's fresh re-read inside the lock.
+            await client.patch(f"/posts/{pid}", json={"content": "raced in"}, headers=AUTH)
+        return row
+
+    monkeypatch.setattr(posts_module, "_fetch", racing_fetch)
+    r = await client.post(f"/posts/{pid}/edit", json={"old_str": "two", "new_str": "TWO"}, headers=AUTH)
+    assert r.status_code == 409
+    # racing_fetch is a transparent passthrough for every call after the
+    # first, so no need to restore _fetch before this plain GET.
+    current = (await client.get(f"/posts/{pid}", headers=AUTH)).json()
+    assert current["content"] == "raced in"  # the edit never applied
+
+
+@pytest.mark.asyncio
+async def test_edit_post_stale_if_match_returns_409_and_does_not_apply(client):
+    post = await _create_post(client, content="one two three")
+    stale_etag = post["etag"]
+    await client.patch(f"/posts/{post['id']}", json={"content": "one two three, edited"}, headers=AUTH)
+    r = await client.post(
+        f"/posts/{post['id']}/edit",
+        json={"old_str": "two", "new_str": "TWO", "if_match": stale_etag},
+        headers=AUTH,
+    )
+    assert r.status_code == 409
+    current = (await client.get(f"/posts/{post['id']}", headers=AUTH)).json()
+    assert current["content"] == "one two three, edited"
+
+
+@pytest.mark.asyncio
+async def test_edit_post_history_diff_is_minimal(client, vault_dir):
+    """The whole point of edit_post over PATCH: only the target substring
+    changes on disk, not incidental reformatting of the rest of the body."""
+    post = await _create_post(client, title="Diff Check", content="line one\nline two\nline three\n")
+    await client.post(
+        f"/posts/{post['id']}/edit", json={"old_str": "line two", "new_str": "LINE TWO"}, headers=AUTH
+    )
+    text = (vault_dir / "Inbox" / "Diff Check.md").read_text(encoding="utf-8")
+    assert "line one" in text and "line three" in text and "LINE TWO" in text
+
+
+@pytest.mark.asyncio
+async def test_append_post_adds_a_blank_line_between_old_and_new(client):
+    post = await _create_post(client, content="first paragraph")
+    r = await client.post(f"/posts/{post['id']}/append", json={"content": "second paragraph"}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["content"] == "first paragraph\n\nsecond paragraph"
+
+
+@pytest.mark.asyncio
+async def test_append_post_to_empty_content_has_no_leading_blank_line(client):
+    post = await _create_post(client, content="")
+    r = await client.post(f"/posts/{post['id']}/append", json={"content": "first paragraph"}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["content"] == "first paragraph"
+
+
+@pytest.mark.asyncio
+async def test_append_post_stale_if_match_returns_409(client):
+    post = await _create_post(client, content="first")
+    stale_etag = post["etag"]
+    await client.patch(f"/posts/{post['id']}", json={"content": "changed elsewhere"}, headers=AUTH)
+    r = await client.post(
+        f"/posts/{post['id']}/append", json={"content": "second", "if_match": stale_etag}, headers=AUTH
+    )
+    assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_edit_and_append_404_on_missing_post(client):
+    r1 = await client.post("/posts/999999/edit", json={"old_str": "a", "new_str": "b"}, headers=AUTH)
+    assert r1.status_code == 404
+    r2 = await client.post("/posts/999999/append", json={"content": "x"}, headers=AUTH)
+    assert r2.status_code == 404
+
+
 # ── folder placement (derive from primary tag; never auto-move) ──────────────
 
 

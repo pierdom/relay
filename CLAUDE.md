@@ -35,7 +35,9 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 |--------|------|-------------|
 | POST/GET | /posts | Publish / list (`tag`, `folder`, `limit`, `offset`, `search`, `summary`, `sort`, `order`, `mode`). `sort`=`updated`(default)/`created`; `order`=`desc`(default)/`asc`; FTS `search` ranks by bm25. `summary=true` → metadata+excerpt only. `mode`=`keyword`(default)/`semantic`/`hybrid` (relay #253, proof of concept) — 503 if embeddings aren't enabled; can be combined with `tag`/`folder`. `semantic`/`hybrid` responses carry a `search_timing` field (cold-start latency). A bare id or `#id` as `search` (e.g. `42`) is a lookup, not a ranked search: answers with just that post as `pinned`, ignoring `mode`/`tag`/`folder`, whether or not embeddings are enabled |
 | GET | /id/{id} | Redirects to `/?post={id}`, which the UI picks up and opens on load — a deep link, not an API endpoint (no auth of its own; survives an OIDC login round trip) |
-| GET/PATCH/DELETE | /posts/{id} | Get / partial update / delete |
+| GET/PATCH/DELETE | /posts/{id} | Get / partial update / delete. `PATCH` accepts optional `if_match` (body field or `If-Match` header, header wins) — `409` with the current post if the post changed since (relay #198, N-1). Every single-post response carries an `etag` field + `ETag` header |
+| POST | /posts/{id}/edit | `str_replace`-style partial edit: `old_str` must match exactly once in current content and differ from `new_str`, else `422` (naming the match count if ambiguous) |
+| POST | /posts/{id}/append | Append `content` to the post instead of resending the whole body |
 | GET | /posts/deleted | Gone-but-restorable posts (id, title, sha, reason). **Declared before `/{id}`** or FastAPI parses `deleted` as an int |
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |
 | GET/POST | /posts/{id}/history · /posts/{id}/restore | Revisions / roll back to sha (recreates if deleted). 503 when history is off |
@@ -120,6 +122,7 @@ Two surfaces, **one tool definition**:
 | Tool | Description |
 |------|-------------|
 | `publish_post` / `update_post` / `get_post` / `delete_post` | CRUD (`id=0` = master doc, delete blocked). `update_post`: the MCP SDK's server cannot tell an omitted argument from `null`, so `""` is how `expires_at`/`source` are cleared — on both surfaces, and REST `PATCH` accepts it too |
+| `edit_post` / `append_post` | Partial edits (relay #198, N-1): `edit_post(id, old_str, new_str)` is `str_replace`-style (exactly-one-match, else an error naming the count); `append_post(id, content)` appends instead of resending the whole body. Both — and `update_post` — accept `if_match` (a prior response's `etag`) and reject with an error carrying `current` if the post changed since; `edit_post`/`append_post` always enforce this internally using their own read's etag, whether or not the caller passes one, since their read-modify-write would otherwise be unsafe against a write landing in between |
 | `list_posts` | List with filters; `summary` defaults true (metadata + excerpt, no bodies). `mode`=`keyword`(default)/`semantic`/`hybrid` (relay #253, proof of concept) — errors if embeddings aren't enabled; can be combined with `tag`/`folder` |
 | `add_attachment` / `create_upload` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD |
 | `get_post_history` / `get_post_revision` / `restore_post` | History browse / preview / restore |

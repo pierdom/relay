@@ -8,6 +8,21 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.8.0] — 2026-09-13
+
+`update_post` always replaced the whole body, so editing one line of a long post meant resending the full 10-20KB verbatim — expensive, and risky, because two writers (two agents, or an agent racing the watcher's debounced reconcile of a human's Obsidian edit) could silently clobber each other with no way to detect it ([relay #198](https://github.com/pierdom/relay), N-1).
+
+### Added
+- **`edit_post(id, old_str, new_str)`** (`POST /posts/{id}/edit` on REST, a new MCP tool) — a `str_replace`-style partial edit: `old_str` must match exactly once in the post's current content, like a code-agent Edit tool. Zero matches or more than one both reject with `422` (the latter naming the match count) rather than guessing.
+- **`append_post(id, content)`** (`POST /posts/{id}/append`, a new MCP tool) — appends to a post's content instead of resending the whole body; inserts a blank line separator unless the post is currently empty.
+- **Optimistic concurrency**: every `PostResponse`/`PostSummary` now carries an `etag` — an opaque token that changes whenever any mutable field of the post changes (title, content, tags, source, expiry, or an Obsidian Property). Pass it back as `if_match` on `update_post`/`edit_post`/`append_post` (REST body field, MCP parameter, or a real `If-Match` request header on REST — the header wins if both are given) to reject the write with `409` (carrying the post's current state) instead of silently overwriting a concurrent change. Every single-post REST response also carries a real `ETag` response header. Omitting `if_match` keeps today's exact behavior — nothing existing changes.
+- `edit_post`/`append_post` always enforce this internally using the etag from their own read, regardless of whether the caller passed `if_match` — this is what makes their read-modify-write pattern itself safe against a write landing in between, not just an opt-in nicety.
+
+### Fixed
+- `update_post` read the post and derived its "field not provided, keep current value" defaults *before* acquiring the write lock — a latent lost-update window (predating this release) where a concurrent write landing in that gap got silently reverted for whichever fields weren't part of the current request. The read now happens inside the lock, closing this for every caller, not just ones using `if_match`.
+
+---
+
 ## [1.7.2] — 2026-09-12
 
 `frontmatter.parse` kept only relay's own six front-matter keys, and `serialize` rewrote every file from that narrowed dict — so an Obsidian Property (`aliases`, `cssclasses`, a custom field) or any hand-added YAML key was silently destroyed the next time relay wrote the file. A real hole in the "Obsidian-compatible" claim ([relay #198](https://github.com/pierdom/relay), N-2).

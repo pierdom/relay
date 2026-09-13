@@ -12,7 +12,9 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may
 | GET | `/posts` | List posts (`tag`, `folder`, `search`, `summary`, `limit`, `offset`, `sort`, `order`, `mode`; master doc pinned on home feed). `mode` = `keyword` (default) / `semantic` / `hybrid` ranks a `search` and combines with `tag`/`folder`; 503 if embeddings are off. `sort` = `updated` (default, last-modified) or `created`; `order` = `desc` (default) or `asc`. A `search` ranks by relevance first and uses `sort`/`order` only as a tiebreak. A bare id or `#id` as `search` (e.g. `42`, `#42`) — the same `#NNN` convention `/posts/{id}/backlinks` resolves — is a lookup, not a ranked search: answers with just that post as `pinned` (`items` empty), ignoring `mode`/`tag`/`folder`, whether or not embeddings are enabled |
 | GET | `/id/{id}` | Redirects to `/?post={id}` — the UI opens that post on load. A convenience for pasting a post id somewhere and landing directly on it, not an API endpoint (no auth, no body, `422` on a non-numeric or negative id) |
 | GET | `/posts/{id}` | Get a single post |
-| PATCH | `/posts/{id}` | Partial update — omitted fields unchanged; `null` or `""` clears `expires_at`/`source` |
+| PATCH | `/posts/{id}` | Partial update — omitted fields unchanged; `null` or `""` clears `expires_at`/`source`. Optional `if_match` (body field or `If-Match` header) rejects the write with `409` if the post changed since |
+| POST | `/posts/{id}/edit` | `str_replace`-style partial edit: `{"old_str": …, "new_str": …}` — `old_str` must match exactly once in the current content and differ from `new_str`, or `422` (naming the match count if ambiguous) |
+| POST | `/posts/{id}/append` | Append `{"content": …}` to the post instead of resending the whole body; a blank line separates it from existing content |
 | DELETE | `/posts/{id}` | Delete a post |
 | GET | `/posts/{id}/backlinks` | Posts linking here via `[[title]]` or `#id` |
 | GET | `/status` | Runtime diagnostics: version, uptime, vault path + counts, effective feature state, embedding model/coverage/backfill diagnostics |
@@ -66,6 +68,24 @@ curl -X PATCH http://localhost:8000/posts/42 \
 ```
 
 Only the fields you send are changed. `tags` replaces the list wholesale; an empty array clears all tags. `id` and `created_at` are never modified. Any other front-matter key present in the file (Obsidian Properties like `aliases`/`cssclasses`, or a hand-added custom field) round-trips verbatim through every write and is returned read-only as `properties` — there is no way to set it over the API; edit it in Obsidian or by hand.
+
+### Partial edits and optimistic concurrency
+
+For editing part of a long post without resending the whole body:
+
+```bash
+# Replace one occurrence of a substring (422 if it's not found, or matches more than once)
+curl -X POST http://localhost:8000/posts/42/edit \
+  -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \
+  -d '{"old_str": "## Status: draft", "new_str": "## Status: published"}'
+
+# Append rather than replace
+curl -X POST http://localhost:8000/posts/42/append \
+  -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \
+  -d '{"content": "## New section\nMore text."}'
+```
+
+Every single-post response (`GET`/`PATCH`/`POST /posts`/`/edit`/`/append`/`/restore`) carries an `etag` — an opaque token that changes whenever any mutable field of the post changes — both in the JSON body and as an `ETag` response header. Pass it back as `if_match` (a body field on `PATCH`/`/edit`/`/append`, or an `If-Match` request header — the header wins if both are given) to detect a concurrent change: if the post no longer matches, the write is rejected with `409` and the response carries the post's current state (`{"detail": {"error": "...", "current": {...}}}`) instead of silently overwriting it. Omitting `if_match` is today's exact behavior — last write wins, unchanged.
 
 ### Listing and search
 

@@ -1,13 +1,15 @@
 # MCP server
 
-relay exposes the full feed API as **22 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
+relay exposes the full feed API as **24 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
 | `publish_post` | Publish a post (title, content, tags, source, expires_at) |
-| `update_post` | Partially update a post by ID — only provided fields change; pass `""` for `expires_at` or `source` to clear it |
+| `update_post` | Partially update a post by ID — only provided fields change; pass `""` for `expires_at` or `source` to clear it. Optional `if_match` (a prior response's `etag`) rejects the write if the post changed since — see [Partial edits and optimistic concurrency](#partial-edits-and-optimistic-concurrency) |
+| `edit_post` | `str_replace`-style partial edit: `old_str` must match exactly once in the post's current content and differ from `new_str`, like a code-agent Edit tool — errors (naming the match count) if it's missing or ambiguous |
+| `append_post` | Append content to a post instead of resending the whole body; a blank line separates it from existing content unless the post is currently empty |
 | `get_post` | Get a post by ID (`id=0` for the master document). Any other front-matter key found in the file (Obsidian Properties, a hand-added custom field) is returned read-only as `properties` — no write API for it |
 | `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default. `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) and combines with tag/folder — errors if embeddings aren't enabled. A bare id or `#id` as `search` (e.g. `42`) is a lookup, not a ranked search: answers with just that post as `pinned`, ignoring `mode`/`tag`/`folder`, whether or not embeddings are enabled |
 | `delete_post` | Delete a post by ID |
@@ -28,6 +30,40 @@ relay exposes the full feed API as **22 MCP tools** so Claude (or any MCP-capabl
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`); pass neither to remove it |
 | `rename_tag` | Rename a tag across every post that carries it, in one atomic pass |
+
+## Partial edits and optimistic concurrency
+
+Editing one line of a long post shouldn't mean resending the whole body:
+
+```
+edit_post(id=54, old_str="## Status: draft", new_str="## Status: published")
+append_post(id=54, content="## New section\nMore text.")
+```
+
+`edit_post` requires `old_str` to match exactly once in the post's *current*
+content — like this Edit tool's own `str_replace` semantics. Zero matches or more
+than one both come back as `{"error": …}` (the latter naming the match count)
+rather than guessing which occurrence you meant; add more surrounding context to
+disambiguate.
+
+Every post response carries an `etag` — an opaque token that changes whenever any
+mutable field of the post changes (title, content, tags, source, expiry, or an
+Obsidian Property). Pass it back as `if_match` on `update_post`/`edit_post`/
+`append_post` to detect a concurrent change instead of silently overwriting it:
+
+```
+post = get_post(id=54)
+...                                    # something else could edit post #54 here
+update_post(id=54, content="…", if_match=post["etag"])
+→ {"error": "post #54 has changed since if_match was captured", "current": {…}}
+```
+
+A conflict's `current` field is the post's live state, so you can decide whether
+to retry against it or ask a human. Omitting `if_match` is today's exact
+behavior — last write wins, unchanged; but `edit_post`/`append_post` always
+protect their own read-modify-write internally using the etag from their own
+read, whether or not you pass one, since a stale read there could otherwise
+apply a `str_replace` against content someone else already changed.
 
 ## Recovering a post
 
