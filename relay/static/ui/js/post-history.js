@@ -126,19 +126,41 @@ function renderRevisions(data, panes) {
   setPane(pane, placeholder('Select a revision to see how the post looked.'));
 }
 
-/* A line diff, LCS, no dependency — the app has no bundler and this is the only
- * place that needs one.
+/* A word diff, LCS, no dependency — the app has no bundler and this is the
+ * only place that needs one.
+ *
+ * Word (not line) granularity so a single-word edit_post replacement (relay
+ * #198, N-1) highlights just the word that changed, not the whole line it
+ * sits in — the point of str_replace-style edits is a small, surgical diff,
+ * and the history view should read that way too. `tokenize` preserves exact
+ * spacing and newlines so the diff round-trips losslessly (see below for why
+ * whitespace isn't its own independent token).
  *
  * Common prefix and suffix are trimmed first. That is not an optimisation for
  * its own sake: a post is usually edited in one place, so trimming turns the
- * O(n·m) table into something tiny for the realistic case, and the cap below
- * only ever trips on a genuinely wholesale rewrite.
+ * O(n·m) table into something tiny for the realistic case — smaller than the
+ * old line-level trim, in fact, since it now stops at the word boundary
+ * instead of the line boundary — and the cap below only ever trips on a
+ * genuinely wholesale rewrite.
+ *
+ * Each token is a word *plus its trailing whitespace*, not a standalone
+ * word/whitespace pair — tokenizing whitespace as its own independently
+ * matchable unit let the LCS spuriously match, say, the single space between
+ * two totally unrelated words, fragmenting one clean phrase replacement into
+ * an interleaved del/add/same/del/add zig-zag instead of one del run and one
+ * add run. Attaching whitespace to the word before it removes the spurious
+ * match without losing anything: a leading whitespace-only run (before the
+ * very first word) still gets its own token via the second alternative.
  */
-const DIFF_CAP = 1500;   // lines per side, after trimming
+const DIFF_CAP = 4000;   // tokens (word+trailing-whitespace runs) per side, after trimming
 
-function diffLines(before, after) {
-  const a = before.split('\n');
-  const b = after.split('\n');
+function tokenize(text) {
+  return text.match(/\S+\s*|\s+/g) || [];
+}
+
+function diffTokens(before, after) {
+  const a = tokenize(before);
+  const b = tokenize(after);
   let head = 0;
   while (head < a.length && head < b.length && a[head] === b[head]) head++;
   let tail = 0;
@@ -169,15 +191,25 @@ function diffLines(before, after) {
   }
   while (i < n) out.push(['del', midA[i++]]);
   while (j < m) out.push(['add', midB[j++]]);
-  return out;
+
+  // Merge consecutive runs of the same kind into one — one <span> per
+  // *change*, not per token, which reads better and keeps a contiguous
+  // replacement (no shared words) as a single removed/added phrase.
+  const merged = [];
+  for (const row of out) {
+    const last = merged[merged.length - 1];
+    if (last && last[0] === row[0]) last[1] += row[1];
+    else merged.push([row[0], row[1]]);
+  }
+  return merged;
 }
 
 function renderDiff(revisionText, currentText) {
-  const rows = diffLines(revisionText, currentText);
+  const rows = diffTokens(revisionText, currentText);
   const wrap = document.createElement('pre');
   wrap.className = 'hm-body-text hm-diff';
   if (rows === null) {
-    wrap.textContent = 'Too much changed to diff line by line — use Body to read the revision.';
+    wrap.textContent = 'Too much changed to diff word by word — use Body to read the revision.';
     return wrap;
   }
   if (!rows.length) {
@@ -185,12 +217,17 @@ function renderDiff(revisionText, currentText) {
     return wrap;
   }
   for (const [kind, text] of rows) {
-    const line = document.createElement('span');
-    line.className = `hm-d hm-d-${kind}`;
-    // The marker is a pseudo-element so copying the diff yields the text, not
-    // a column of +/- that would have to be stripped before pasting it back.
-    line.textContent = text || ' ';
-    wrap.appendChild(line);
+    if (kind === 'same') {
+      wrap.appendChild(document.createTextNode(text));
+      continue;
+    }
+    // No +/- marker: the accent/strikethrough treatment already says
+    // "added"/"removed", and leaving it out means a copied selection reads
+    // as plain text with nothing to strip before pasting it back.
+    const span = document.createElement('span');
+    span.className = `hm-d-${kind}`;
+    span.textContent = text;
+    wrap.appendChild(span);
   }
   return wrap;
 }
