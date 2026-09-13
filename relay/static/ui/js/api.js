@@ -13,7 +13,6 @@ let apiKey = '';
 
 export function setApiKey(key) { apiKey = key || ''; }
 export function clearApiKey() { apiKey = ''; }
-export function hasApiKey() { return Boolean(apiKey); }
 
 export async function apiFetch(path, opts = {}) {
   // Cookie carries the session by default; only add the bearer header on the
