@@ -12,7 +12,7 @@
  * deferred module.
  */
 
-import { apiFetch, apiSend, clearApiKey, setApiKey } from './api.js';
+import { apiFetch, apiSend, apiSendChecked, clearApiKey, setApiKey } from './api.js';
 import { closeStatusModal, fetchEmbeddingsEnabled, isStatusOpen } from './status.js';   // also self-wires its own controls
 import { query, resetPaging } from './feed-query.js';
 import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
@@ -68,10 +68,9 @@ const modeSelect      = document.getElementById('modeSelect');
 // confirms it's usable, 'keyword' otherwise (or before that check resolves).
 // Every place that resets the mode to "no particular ranking requested" reads
 // this instead of hardcoding 'keyword', so enabling embeddings makes hybrid
-// the standard rather than an opt-in extra. Tag/folder selection is the one
-// exception — mode there stays hardcoded 'keyword' (see selectTag/selectFolder
-// below), since the ranked path never applies those filters and the server
-// 400s the combination regardless of what the default would otherwise be.
+// the standard rather than an opt-in extra. Combines freely with an active
+// tag/folder filter (server-supported since v1.5.0) — see selectTag/selectFolder
+// below, which used to force a drop back to 'keyword' and no longer do (K-14).
 let defaultMode = 'keyword';
 const vtList          = document.getElementById('vtList');
 const vtGrid          = document.getElementById('vtGrid');
@@ -227,7 +226,10 @@ async function init() {
     // (relay #253). Every reset point below routes through defaultMode instead
     // of a hardcoded 'keyword' so this stays the standard, not a one-off.
     defaultMode = on ? 'hybrid' : 'keyword';
-    if (on && !query.tag && !query.folder) { query.mode = defaultMode; modeSelect.value = defaultMode; }
+    // K-14: used to only apply when no tag/folder was active — the server has
+    // accepted the combination since v1.5.0, so there's no reason left to
+    // withhold the better default just because a filter is set.
+    if (on) { query.mode = defaultMode; modeSelect.value = defaultMode; }
   });
   // openPostFromUrl has no dependency on tags/posts, so it runs concurrently
   // with those — but it does depend on loadLinkIndex: the modal renders the
@@ -561,11 +563,11 @@ searchInput.addEventListener('keydown', e => {
 searchClear.addEventListener('click', async () => {
   searchInput.value = '';
   query.search = null;
-  // defaultMode can be 'hybrid', but clearing search doesn't clear an active
-  // tag/folder filter — landing on 'hybrid' while one is still set would
-  // violate the same mutual exclusivity modeSelect's own change handler
-  // enforces below, and the server 400s the combination.
-  query.mode = (query.tag || query.folder) ? 'keyword' : defaultMode;
+  // mode is only ever sent alongside a search term (see loadPosts), so its
+  // value here doesn't affect the request — just land back on the default
+  // for whenever a search starts again. K-14: no longer downgraded to
+  // 'keyword' for an active tag/folder — the server accepts the combination.
+  query.mode = defaultMode;
   modeSelect.value = query.mode;
   searchBar.classList.remove('active');
   resetPaging();
@@ -575,12 +577,6 @@ searchClear.addEventListener('click', async () => {
 
 modeSelect.addEventListener('change', async () => {
   query.mode = modeSelect.value;
-  // Same mutual exclusivity as tag/folder with each other (the ranked path
-  // doesn't apply either filter — the server 400s the combination). Route
-  // through selectTag/selectFolder(null) rather than clearing query fields
-  // directly so the sidebar's "all" highlight stays in sync.
-  if (query.mode !== 'keyword' && query.folder) { await selectFolder(null); return; }
-  if (query.mode !== 'keyword' && query.tag) { await selectTag(null); return; }
   resetPaging();
   await loadPosts(true);
 });
@@ -758,9 +754,6 @@ function makeFolderItem(label, value, count) {
 async function selectFolder(folder) {
   closeSidebar();
   query.folder = folder; query.tag = null; resetPaging();
-  // Mirrors modeSelect's own change handler: mode and folder are mutually
-  // exclusive, so picking a real folder drops out of a ranked mode.
-  if (folder !== null && query.mode !== 'keyword') { query.mode = 'keyword'; modeSelect.value = 'keyword'; }
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
   const key = folder === null ? '__all__' : folder;
@@ -996,9 +989,6 @@ function startTagConfig(el, tagName) {
 async function selectTag(tag) {
   closeSidebar();
   query.tag = tag; query.folder = null; resetPaging();
-  // Mirrors modeSelect's own change handler: mode and tag are mutually
-  // exclusive, so picking a real tag drops out of a ranked mode.
-  if (tag !== null && query.mode !== 'keyword') { query.mode = 'keyword'; modeSelect.value = 'keyword'; }
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
   tagList.querySelectorAll('.tag-item').forEach(el => {
@@ -1053,7 +1043,12 @@ async function loadPosts(replace = false) {
     }
     loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
   } catch (e) {
-    if (replace) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${e.message}</p></div>`;
+    // K-15: escHtml, not raw interpolation — the one innerHTML sink in the
+    // whole UI that skipped it. No current server error path echoes
+    // attacker-controlled HTML into `detail` for this request, so this
+    // wasn't exploitable today, but it's the one spot a future change could
+    // turn into real XSS.
+    if (replace) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${escHtml(e.message)}</p></div>`;
   }
 }
 
@@ -1176,11 +1171,11 @@ function renderPost(post) {
     e.stopPropagation();
     if (!confirm('Delete this post?')) return;
     try {
-      await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
+      await apiSendChecked(`/posts/${post.id}`, { method: 'DELETE' });
       el.remove(); query.total--;
       loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
       refreshSidebarCounts();
-    } catch {}
+    } catch (err) { alert(`Delete failed: ${err.message}`); }
   });
   el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); enterEditMode(el, post); });
   if (post.id === 0) {
@@ -1309,26 +1304,6 @@ attachSheetDismiss({
   canDismiss: confirmDiscardEdit,
   onDismiss: closeEditModal,
 });
-
-function rewirePost(el, post) {
-  el.querySelectorAll('.tag-pill').forEach(pill =>
-    pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
-  );
-  // A broken/unauthorised thumbnail just drops the media block (text stays).
-  const mediaImg = el.querySelector('.post-media img');
-  if (mediaImg) mediaImg.addEventListener('error', () => el.querySelector('.post-media')?.remove());
-  el.querySelector('.btn-delete').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (!confirm('Delete this post?')) return;
-    try {
-      await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
-      el.remove(); query.total--;
-      loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
-      refreshSidebarCounts();
-    } catch {}
-  });
-  el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); enterEditMode(el, post); });
-}
 
 /* ── SSE ──────────────────────────────────────────────────── */
 function connectSSE() {
@@ -1568,13 +1543,13 @@ pmDelete.addEventListener('click', async () => {
   const post = _modalPost; if (!post) return;
   if (!confirm('Delete this post?')) return;
   try {
-    await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
+    await apiSendChecked(`/posts/${post.id}`, { method: 'DELETE' });
     closePostModal();
     const card = feed.querySelector(`[data-id="${post.id}"]`);
     if (card) { card.remove(); query.total--; }
     loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
     await loadTags();
-  } catch {}
+  } catch (err) { alert(`Delete failed: ${err.message}`); }
 });
 /* ── Keyboard shortcuts modal ─────────────────────────────── */
 const shortcutsModal = document.getElementById('shortcutsModal');

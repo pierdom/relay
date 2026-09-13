@@ -47,11 +47,6 @@ class SSESubscriber:
         """Signal the background thread to stop."""
         self._stop_event.set()
 
-    def set_last_id(self, id: int | None) -> None:
-        """Update the last received event ID for reconnect replay."""
-        with self._lock:
-            self._last_id = id
-
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _run(self) -> None:

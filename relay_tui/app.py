@@ -249,7 +249,12 @@ class RelayTuiApp(App):
     def _on_sse_post(self, post_data: dict) -> None:
         try:
             post = api.Post.from_dict(post_data)
-            self._sse.set_last_id(post.id)
+            # K-13: SSESubscriber._connect already sets _last_id from the
+            # frame's own `id:` (a changes.seq) right after this callback
+            # returns — calling set_last_id(post.id) here mixed a post's
+            # database id into a cursor that's supposed to be a seq, and
+            # since it's overwritten by the correct value moments later, it
+            # never did anything but look like a real cursor update.
             self.call_from_thread(self._prepend_post, post)
         except Exception:
             pass
@@ -302,8 +307,13 @@ class RelayTuiApp(App):
                 self._link_titles = dict(targets)
             except Exception:
                 pass
-            if posts:
-                self._sse.set_last_id(posts[0].id)  # newest real post (before pin)
+            # K-13: this used to call self._sse.set_last_id(posts[0].id) here —
+            # a post's database id is not a changes.seq, and stamping the SSE
+            # cursor with one caused an over-wide (not lossy) reconnect replay
+            # if a reconnect happened before the next real SSE frame's own
+            # `id:` overwrote it. Leaving the cursor alone (whatever the last
+            # real seq seen was, or None) is both simpler and type-correct;
+            # this reload already has a fresh, complete snapshot of its own.
             pinned_id = pinned.id if pinned is not None else None
             if pinned is not None:
                 posts = [pinned, *posts]  # master doc or a bare-id search hit, pinned on top
@@ -492,7 +502,10 @@ class RelayTuiApp(App):
     def _on_post_created(self, post: api.Post) -> None:
         if self._active_tag is None or self._active_tag in post.tags:
             self.query_one(PostPanel).prepend_post(post)
-        self._sse.set_last_id(post.id)
+        # K-13: no self._sse.set_last_id(post.id) here — a post's database id
+        # is not a changes.seq (see _reload's comment). The server broadcasts
+        # this create over SSE like any other write, so the real seq arrives
+        # via the live stream moments later and updates the cursor correctly.
         self.notify("Published", severity="information", timeout=3)
         self._refresh_tags()
 
