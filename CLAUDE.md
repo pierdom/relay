@@ -42,6 +42,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 | GET | /posts/{id}/backlinks | Posts linking here via `[[title]]` or `#id` |
 | GET/POST | /posts/{id}/history · /posts/{id}/restore | Revisions / roll back to sha (recreates if deleted). 503 when history is off |
 | GET | /posts/{id}/history/{sha} | Full body at one revision — short sha accepted |
+| GET | /changes | Vault changelog, newest first (relay #198, N-4) — `{seq, id, title, action, when, sha, author}`, `action` ∈ create/update/edit/append/delete/restore/tag_rename/external_edit/external_delete/expiry. `since` = a `seq` (page forward) or ISO timestamp. `author` always null until N-3. A materialized index over `history.git`, not a second store |
 | GET | /links | (id, title) index for wikilink resolution |
 | GET | /folders | First-level folders with post counts |
 | POST/GET | /attachments | Upload / list — bytes via `data` (base64), `source_url`, or `upload_id` |
@@ -50,7 +51,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 | GET/DELETE | /attachments/{path} | Serve / delete an attachment |
 | GET | /tags | Tags with counts |
 | POST/PATCH | /tags/{tag}[/config] | Set per-tag expiry / rename across all posts |
-| GET | /events | SSE stream (`?tag=` filter); replay via `Last-Event-ID` |
+| GET | /events | SSE stream (`?tag=` filter); `Last-Event-ID` is a `changes.seq` (relay #198, N-4) — reconnect replays every change since, including an edit/delete to an already-existing post (closes audit B-10/G-07; the old post-id cursor couldn't represent that) |
 | GET | /status | Runtime diagnostics — effective feature state, vault path + counts, embedding model/coverage/backfill diagnostics |
 | PATCH | /embeddings | Turn semantic/hybrid search on/off at runtime, no restart (in-memory only). 503 unavailable, 409 dimension mismatch |
 | POST | /embeddings/backfill | Re-run the embedding backfill without a restart (`force=true` wipes the cache). 503 unavailable, 409 already running |
@@ -70,6 +71,42 @@ Every write commits the vault to `<vault>/.relay/history.git` (detached git-dir,
 Coverage: every write path + TTL expiry + external edits (watcher commits each debounced batch). Recovery: `GET /posts/{id}/history` + `POST /posts/{id}/restore` — both work for deleted posts; restore keeps the original id. The restorable sha is `log -1 <delete>^ -- <path>` (the last commit that *touched* the file, not the delete commit itself).
 
 Manual recovery: `cd /vault && export GIT_DIR=.relay/history.git GIT_WORK_TREE=.` then plain git. Full runbook: [docs/recovery.md](docs/recovery.md).
+
+## Vault changelog & SSE reconnect (relay #198, N-4)
+
+`relay/changes.py`'s `changes` table is a **materialized index over
+`history.git`, not a second source of truth** — same disposable/re-derivable
+footing as `posts` (which is why it lives in `index.db` despite recording
+things `posts` itself can't, like a delete). `sync()` (startup) and
+`record_latest()` (after every existing `history.commit(...)` call) are both
+just `_catch_up`: ingest every commit in `{last recorded sha}..HEAD`, or the
+whole history if the table is empty. Powers `GET /changes`/`list_changes`
+and, via `seq` as the new `Last-Event-ID`, finally fixes audit **B-10/G-07**:
+the old cursor was a post id, which has no way to represent "an existing
+post changed", so SSE reconnect only ever replayed brand-new posts.
+
+- **`_catch_up` uses a *range*, not "just the latest commit" — this is load-bearing, not a style choice.** `history._lock` only wraps the git commit itself, not the read-and-insert after it, so two concurrent writers' `history.commit()` calls can land in either order relative to each other's catch-up call. An earlier version fetched only `git log -1 HEAD`, which had two real bugs from that same gap: calling it again with nothing new re-ingested the unchanged HEAD (`history.commit()` no-ops are called unconditionally at every site — `watcher._reconcile` in particular, when a whole debounced batch turns out to be self-writes), duplicating a row per extra call; and if *two* commits landed before either caller's turn, only the newer was ever looked at — the older commit's row was silently **lost** until the next restart's backfill. A range has neither failure mode. `record_latest(db, post_ids=...)` additionally guarantees each caller's *own* ids are in its return value (a direct fallback lookup if a racing caller's catch-up already recorded them first) — the changes-log row is never at risk either way, only which caller's return value reports the `seq`.
+- **`_catch_up`'s own read-then-insert needs a lock too, `changes._lock`** — a third bug in the same family, found only by live-testing genuine concurrent writers (5 parallel `POST /posts` produced 13 rows, several `(post_id, sha)` pairs duplicated 2-3x; no single-caller test caught it). The range fix above closes the *data-loss* failure mode of two commits racing ahead of a `-1` fetch; it does nothing about two callers both reading the same "last recorded sha" before either has inserted, both computing the identical range, and both redundantly re-ingesting it — a *duplicate*-row failure mode, not a lost-row one. `_lock` (module-level `asyncio.Lock`, the same pattern `vault.write_lock`/`history._lock` use for their own critical sections) wraps `_catch_up`'s entire body so the read and the insert are atomic with respect to every other caller. `tests/test_changes.py::test_concurrent_catch_up_calls_do_not_duplicate_rows` reproduces it deterministically via real `asyncio.gather` concurrency over independent connections (removing the lock makes it fail with 6x duplication, verified by hand).
+- **`history.commits()` never takes a git pathspec, even though every caller only wants `.md` paths.** An earlier version supported a `-N` count bound for the (now-removed) "just the latest commit" fetch, and `-N` combined with a pathspec on a plain ref makes git skip non-matching commits and keep walking further back — `-1 -- '*.md'` on an attachment-only commit silently returned an *older* commit that did touch a `.md` file. `-N` is gone now that every caller uses a range (which has no such landmine), but the filtering stayed in Python (`changes._ingest`, one `.endswith(".md")` check) rather than reintroducing pathspec churn for a marginal cleanup.
+- **A title rename produces both a `D` (old path) and an `A` (new path) for
+  the same post in one commit** (`write_file`'s unlink-then-write, with
+  `--no-renames` pinned so git never collapses them into one `R` status).
+  `_ingest` dedupes to the non-`D` side per post per commit.
+- **`changes.tags` is stored per row, not joined from `posts` at query
+  time** — a deleted post has no `posts` row left to join against, and a
+  tag-filtered SSE reconnect needs to filter *its* catch-up entry too.
+- **`watcher._reconcile` and `cleanup._delete_expired` publish live SSE
+  *before* their batch `history.commit()`** (unchanged by this feature — see
+  their own comments), so those specific live frames go out with `seq=None`
+  (no `id:`, same as pre-N-4). `record_latest` still runs after the commit
+  either way, so a *reconnecting* client's catch-up query sees them —
+  it's only the already-connected, live-delivery path for external
+  edits/deletes and the TTL sweep that don't get a cursor id.
+- **`rename_tag` gained its first-ever `events.publish` calls in this
+  change** — before N-4 a retagged post never reached a live SSE client at
+  all, not even without a cursor id. Found while wiring this up, fixed
+  alongside it.
+- **`changes.list_changes` 503s (`HistoryUnavailable`) when history is off**, same distinction `/posts/{id}/history` already draws — an empty list would look indistinguishable from "nothing has changed." A *separate* `HistoryUnavailable` from `service._common`'s: `changes.py` sits below `relay.service` (which already imports `changes`), so importing `service._common` back into it would be a real import cycle, not just a style mismatch.
 
 ## Cross-links
 
@@ -127,6 +164,7 @@ Two surfaces, **one tool definition**:
 | `add_attachment` / `create_upload` / `get_attachment` / `list_attachments` / `delete_attachment` | Attachment CRUD |
 | `get_post_history` / `get_post_revision` / `restore_post` | History browse / preview / restore |
 | `list_deleted_posts` | Restorable deleted posts (discovery — you need an id to restore) |
+| `list_changes` | Vault changelog, newest first (relay #198, N-4) — every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/expiry, paged by `since` (a `seq` or ISO timestamp). Same feed that closes B-10/G-07 for `/events` reconnect |
 | `get_status` | Version, uptime, vault path + counts, effective feature state, embedding model/coverage/backfill diagnostics |
 | `trigger_embedding_backfill` / `set_embeddings_enabled` | Runtime control of semantic search — re-embed, or pause/resume without a restart (in-memory only) |
 | `list_folders` | First-level folders with post counts (the `folder` filter's vocabulary) |
@@ -223,6 +261,7 @@ relay/
 ├── vault.py         # File layer: posts + attachments, id allocation, rebuild, tags.yml
 ├── watcher.py       # watchdog: external edits → reindex + SSE
 ├── history.py       # git commit per write → <vault>/.relay/history.git
+├── changes.py       # Vault changelog: materialized index over history.git (relay #198, N-4)
 ├── service/         # Shared logic: posts · revisions · attachments · tags (+ _common); relay.service re-exports
 ├── ingest.py        # Attachment byte transports
 ├── chunking.py      # H2/H3-aware post chunking (semantic search POC)

@@ -16,14 +16,15 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, embedding, history, metrics, vault, watcher
+from . import __version__, changes, embedding, history, metrics, vault, watcher
 from . import status as app_status
 from .cleanup import cleanup_loop
 from .config import settings
-from .database import init_db
+from .database import connect, init_db
 from .mcp_server import mcp, mcp_asgi_app
 from .routes.attachments import router as attachments_router
 from .routes.auth import router as auth_router
+from .routes.changes import router as changes_router
 from .routes.embeddings import router as embeddings_router
 from .routes.events import router as events_router
 from .routes.folders import router as folders_router
@@ -98,6 +99,11 @@ async def lifespan(app: FastAPI):
     # Vault history: baseline commit of the current tree, then a commit per write.
     # Runs after the index rebuild, which may itself stamp ids into id-less notes.
     await history.init()
+    # The changes log (relay #198, N-4) is derived from history, so it must
+    # catch up after history.init() — on a repo that didn't exist until the
+    # line above, an earlier attempt would just find nothing to read.
+    async with connect() as db:
+        await changes.sync(db)
     task = asyncio.create_task(cleanup_loop())
     # One-shot catch-up for posts the embedding cache doesn't cover yet — never
     # inline in init_db/rebuild_index above (see vault.backfill_embeddings's
@@ -305,6 +311,7 @@ app.include_router(attachments_router)
 app.include_router(metrics_router)
 app.include_router(status_router)
 app.include_router(embeddings_router)
+app.include_router(changes_router)
 
 # Remote MCP endpoint (Streamable HTTP). Any MCP client can connect to /mcp
 # with the relay bearer key; shares relay.service with the REST routes. The

@@ -15,7 +15,7 @@ import aiosqlite
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import database, events, frontmatter, history, service, vault
+from . import changes, database, events, frontmatter, history, service, vault
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -94,10 +94,18 @@ async def _reconcile(paths: list[str]) -> None:
             await _reconcile_file(db, path)
         for path in missing:
             await _reconcile_delete(db, path)
-    # One commit per debounced batch, so a bulk edit in Obsidian is one revision
-    # rather than a commit per file. This is the path that captures *human* edits
-    # — the ones relay never sees through its own API.
-    await history.commit(_batch_message(existing, missing))
+        # One commit per debounced batch, so a bulk edit in Obsidian is one
+        # revision rather than a commit per file. This is the path that
+        # captures *human* edits — the ones relay never sees through its own API.
+        await history.commit(_batch_message(existing, missing))
+        # relay #198, N-4: the batch commit — and so the changes-log row(s) it
+        # produces — only exists *after* every per-file events.publish above, so
+        # (unlike posts.py/tags.py/revisions.py) those live frames can't carry
+        # this write's `seq`; they keep going out with no `id:`, same as before
+        # this feature. What matters here is that the row still lands, so a
+        # *reconnecting* client's catch-up query (which reads this table, not the
+        # live broadcast) sees the external edit/delete either way.
+        await changes.record_latest(db)
 
 
 def _batch_message(existing: list[Path], missing: list[Path]) -> str:

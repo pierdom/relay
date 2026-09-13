@@ -5,7 +5,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from .. import events, folders, frontmatter, history, vault
+from .. import changes, events, folders, frontmatter, history, vault
 from ..models import (
     DeletedPost,
     DeletedPostsResponse,
@@ -196,8 +196,9 @@ async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> Post
         )
         await db.commit()
     post = PostResponse.from_row(await _fetch(db, post_id))
-    await events.publish(post.model_dump())
     await history.commit(label)
+    seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
+    await events.publish(post.model_dump(), seq=seq)
     return post
 
 

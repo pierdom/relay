@@ -46,6 +46,22 @@ CREATE TABLE IF NOT EXISTS tag_config (
     ttl_hours  INTEGER NOT NULL DEFAULT 0,
     expires_at TEXT
 );
+-- A materialized index over git history (relay.changes, relay #198 N-4),
+-- not a second source of truth: caught up from history.commits() at every
+-- startup, so — like `posts` — it is disposable and safe to lose. NOT
+-- touched by rebuild_index's `DELETE FROM posts`; it accumulates across
+-- restarts on the same footing as vectors.py's chunks/embeddings_cache.
+CREATE TABLE IF NOT EXISTS changes (
+    seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL,
+    title   TEXT NOT NULL,
+    tags    TEXT NOT NULL DEFAULT '',
+    action  TEXT NOT NULL,
+    at      TEXT NOT NULL,
+    sha     TEXT NOT NULL,
+    author  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_changes_post_id ON changes (post_id);
 """
 
 # External-content FTS5 index over the posts table. `content='posts'` means the

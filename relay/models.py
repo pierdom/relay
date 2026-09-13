@@ -587,6 +587,32 @@ class DeletedPostsResponse(BaseModel):
     items: list[DeletedPost]
 
 
+class ChangeEntry(BaseModel):
+    """One row of the vault changelog (relay #198, N-4) — a materialized,
+    queryable index over git history, not a second source of truth."""
+
+    seq: int = Field(description="Monotonic cursor — pass the last one seen as `since` to page forward")
+    id: int = Field(description="The post this change affects")
+    title: str
+    action: str = Field(
+        description="create|update|edit|append|delete|restore|tag_rename|external_edit|external_delete|expiry"
+    )
+    when: str
+    sha: str = Field(description="The commit this change was recorded from")
+    author: str | None = Field(default=None, description="Always null until relay #198's N-3 ships")
+
+    @classmethod
+    def from_row(cls, row) -> ChangeEntry:
+        return cls(
+            seq=row["seq"], id=row["post_id"], title=row["title"], action=row["action"],
+            when=row["at"], sha=row["sha"], author=row["author"],
+        )
+
+
+class ChangeListResponse(BaseModel):
+    items: list[ChangeEntry]
+
+
 class PostRestore(BaseModel):
     sha: str = Field(min_length=4, description="Revision to restore, from GET /posts/{id}/history")
 

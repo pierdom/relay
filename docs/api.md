@@ -26,6 +26,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may
 | GET | `/posts/{id}/history` | Revisions of a post from vault history, newest first; answers for a **deleted** post too (`exists:false`) |
 | GET | `/posts/{id}/history/{sha}` | The post as it was at that revision (preview before restoring) |
 | POST | `/posts/{id}/restore` | Roll a post back to a revision (`{"sha": …}`), recreating it if deleted |
+| GET | `/changes` | The vault changelog, newest first: every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, as `{seq, id, title, action, when, sha, author}`. `since` pages forward from a `seq` or filters by ISO timestamp; `author` is always `null` until per-agent identity ships. 503 if vault history is disabled |
 | GET | `/links` | `(id, title)` index for resolving `[[Title]]` wikilinks |
 | GET | `/folders` | First-level vault folders with post counts |
 | POST | `/attachments` | Store an attachment; bytes via `data` (base64), `source_url` (server fetches), or `upload_id` (filled slot). With `post_id`, appends `![[file]]` to that post |
@@ -37,7 +38,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may
 | GET | `/tags` | List tags with post counts |
 | POST | `/tags/{tag}/config` | Set per-tag TTL (`ttl_hours` and/or `expires_at`); an empty body `{}` removes the tag's config |
 | PATCH | `/tags/{tag}` | Rename a tag across all posts |
-| GET | `/events` | SSE stream (`?tag=` filter, `Last-Event-ID` replay) |
+| GET | `/events` | SSE stream (`?tag=` filter). `Last-Event-ID` (a `seq` from a prior frame's `id:`) replays every change since — including an edit or delete to a post that already existed, not just a new one |
 | POST/GET | `/mcp` | Streamable HTTP MCP endpoint (see [mcp.md](mcp.md)) |
 
 ---
