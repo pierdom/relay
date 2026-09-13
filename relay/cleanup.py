@@ -5,7 +5,7 @@ import logging
 
 import aiosqlite
 
-from . import database, events, history, ingest, metrics, vault, vectors
+from . import changes, database, events, history, ingest, metrics, vault, vectors
 from .config import settings
 from .models import ISO_Z_RE
 
@@ -109,6 +109,11 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
     for post_id, _rel, tags in expired:
         await events.publish_delete(post_id, [t for t in tags.split(",") if t])
     await history.commit(f"ttl expiry: {len(expired)} post(s)")
+    # relay #198, N-4: recorded after the fact, same reasoning as watcher.py's
+    # batch commit — the changes-log row(s) don't exist until this commit
+    # does, so the publishes above couldn't carry a `seq` either way. What
+    # matters is a *reconnecting* client's catch-up query still finds these.
+    await changes.record_latest(db)
     return len(to_delete)
 
 

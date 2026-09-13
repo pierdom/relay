@@ -414,6 +414,92 @@ def _parse_log_paths(out: str) -> list[tuple[str, str, str, list[str]]]:
     return out_rows
 
 
+@dataclass(frozen=True)
+class CommitPaths:
+    """One commit, with every path it touched (any extension — callers
+    filter) and how (`A`/`M`/`D`).
+
+    Distinct from `Revision`/`_parse_log_paths`: those two track one known
+    path (or every path with no status), which is enough for "this post's
+    history" and "what got deleted". Building a changelog of *every* post
+    across *every* commit (relay #198, N-4) needs to tell an add/edit from a
+    removal without a second `--diff-filter` pass, hence `--name-status`.
+    """
+
+    sha: str
+    when: str
+    message: str
+    changes: list[tuple[str, str]]   # (status, path)
+
+
+def _parse_commits(out: str) -> list[CommitPaths]:
+    """Parse `git log --name-status` output, oldest-first input expected
+    (pass `--reverse` to git) — the changelog assigns sequence numbers in
+    commit order, so callers should feed commits in that order."""
+    out_rows: list[CommitPaths] = []
+    sha = when = message = ""
+    changes: list[tuple[str, str]] = []
+    for line in out.split("\n"):
+        if line.startswith(_RS):
+            if sha:
+                out_rows.append(CommitPaths(sha, when, message, changes))
+            parts = line[1:].split(_FS)
+            if len(parts) == 3:
+                sha, when, message = parts
+            changes = []
+            continue
+        row = line.strip()
+        if not row or "\t" not in row:
+            continue
+        status, path = row.split("\t", 1)
+        # A rename would arrive as e.g. "R100" — --no-renames below keeps
+        # every change a plain add/modify/delete, so status is always a
+        # single letter and callers never need to special-case it.
+        if sha:
+            changes.append((status, path))
+    if sha:
+        out_rows.append(CommitPaths(sha, when, message, changes))
+    return out_rows
+
+
+def _commits_sync(range_or_single: str) -> list[CommitPaths]:
+    # Deliberately **no** `-- '*.md'` pathspec here, even though every caller
+    # only wants `.md` paths: `changes._catch_up` always asks for a *range*
+    # (`sha..HEAD`) or the full "HEAD" on a genuinely fresh table, never a
+    # count-bounded plain ref (`-N`) — but it got there by way of a bug: an
+    # earlier version of this function supported `-N` for "just the commit I
+    # made", and `-1 -- '*.md'` on a commit that only touched an attachment
+    # silently returned an *older* commit that did touch a `.md` file instead
+    # of an empty result, because `-N` combined with a pathspec on a plain
+    # ref makes git skip non-matching commits and keep walking further back.
+    # `-N` is gone now that every caller uses a range, so pathspec-at-the-git-
+    # level would be safe to reintroduce — left as Python-side filtering in
+    # `changes._ingest` for now rather than churning this again to save a
+    # `.endswith` call per path.
+    got = _run(
+        "log", "--reverse", "--no-renames", "--format=" + _LOG_FORMAT,
+        "--name-status", range_or_single,
+    )
+    if got.returncode:
+        return []
+    return _parse_commits(got.stdout)
+
+
+async def commits(range_or_single: str) -> list[CommitPaths]:
+    """Commits in `range_or_single` (a git revision range like `abc123..HEAD`,
+    or a plain ref like `HEAD` for the full history), oldest first, with
+    every path each touched and its add/modify/delete status. Not filtered
+    to `.md` here — see `_commits_sync`'s docstring for why; filter by
+    extension in the caller (`changes._ingest`)."""
+    if not _probe():
+        return []
+    try:
+        return await asyncio.to_thread(_commits_sync, range_or_single)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Vault history: could not list commits for %s — %s", range_or_single, exc)
+        return []
+
+
 def _deletions_sync(limit: int) -> list[Deletion]:
     """Posts whose file was removed, newest first, one entry per post.
 

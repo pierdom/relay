@@ -61,11 +61,20 @@ async def _broadcast(envelope: dict) -> None:
             notified.add(id(q))
 
 
-async def publish(post: dict) -> None:
-    """Broadcast a new-or-edited post to subscribers."""
-    await _broadcast({"type": "post", "tags": post.get("tags", []), "id": post["id"], "data": post})
+async def publish(post: dict, *, seq: int | None = None) -> None:
+    """Broadcast a new-or-edited post to subscribers.
+
+    ``seq`` (relay #198, N-4) is the row `changes.record_latest` just
+    assigned this write — the SSE frame's `id:` field, so every event
+    (not just a brand-new post id) carries a cursor that only ever moves
+    forward. ``None`` when the caller has no changes-log row for this
+    write (history disabled, or the call predates a `changes` wiring) —
+    the frame is then sent with no `id:`, same as today.
+    """
+    await _broadcast({"type": "post", "tags": post.get("tags", []), "id": post["id"], "data": post, "seq": seq})
 
 
-async def publish_delete(post_id: int, tags: list[str]) -> None:
-    """Broadcast a deletion so live clients can drop the post."""
-    await _broadcast({"type": "delete", "tags": tags, "id": post_id, "data": {"id": post_id}})
+async def publish_delete(post_id: int, tags: list[str], *, seq: int | None = None) -> None:
+    """Broadcast a deletion so live clients can drop the post. See ``publish``
+    for ``seq``."""
+    await _broadcast({"type": "delete", "tags": tags, "id": post_id, "data": {"id": post_id}, "seq": seq})

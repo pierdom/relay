@@ -22,10 +22,10 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import __version__, database, metrics, service, status, vault
+from . import __version__, changes, database, metrics, service, status, vault
 from .auth import bearer_matches
 from .config import settings
-from .models import AttachmentCreate, PostCreate, PostUpdate, TagConfigCreate
+from .models import AttachmentCreate, ChangeEntry, ChangeListResponse, PostCreate, PostUpdate, TagConfigCreate
 
 
 def _first_error(exc: ValidationError) -> str:
@@ -341,6 +341,28 @@ async def list_deleted_posts(limit: int = 50, include_expiry: bool = False) -> d
         except service.HistoryUnavailable:
             return {"error": "Vault history is disabled or git is unavailable."}
     return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "The vault changelog (relay #198, N-4): every post-affecting write, newest first — "
+        "create, update, edit, append, delete, restore, tag rename, an external Obsidian "
+        "edit/delete, or a TTL expiry. Each item has seq, id, title, action, when, sha (and "
+        "author, always null until per-agent identity ships). Pass since as a seq from a "
+        "prior response to page forward, or an ISO 8601 timestamp to see what moved after a "
+        "given time — e.g. 'what did the schedulers publish overnight'. Omit since for the "
+        "most recent `limit`. This is a flat feed over git history, not a second store — "
+        "reading it costs nothing extra."
+    )
+)
+async def list_changes(since: str | None = None, limit: int = 50) -> dict:
+    metrics.record_tool_call("list_changes")
+    async with _db() as db:
+        try:
+            rows = await changes.list_changes(db, since=since, limit=limit)
+        except changes.HistoryUnavailable:
+            return {"error": "Vault history is disabled or git is unavailable."}
+    return ChangeListResponse(items=[ChangeEntry.from_row(r) for r in rows]).model_dump()
 
 
 @mcp.tool(

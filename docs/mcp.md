@@ -1,6 +1,6 @@
 # MCP server
 
-relay exposes the full feed API as **24 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
+relay exposes the full feed API as **25 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
 
 ## Tools
 
@@ -18,6 +18,7 @@ relay exposes the full feed API as **24 MCP tools** so Claude (or any MCP-capabl
 | `restore_post` | Restore a post to a revision sha, recreating it if deleted; the restore is itself recorded |
 | `get_backlinks` | Posts that link here via `[[Title]]` or `#id` (linked mentions) |
 | `list_deleted_posts` | Posts that are gone but restorable — id, title, restorable sha, and why they went |
+| `list_changes` | The vault changelog, newest first — every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, with `seq`/`id`/`title`/`action`/`when`/`sha`. `since` pages forward from a `seq` or filters by ISO timestamp — see [The vault changelog](#the-vault-changelog). Errors if vault history is disabled |
 | `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio bridge also accepts `path` (a local file it uploads for you) |
 | `create_upload` | Mint a presigned upload slot (`upload_id` + `upload_url`); PUT the raw bytes there, then finalize with `add_attachment(upload_id=…)` |
 | `get_attachment` | Retrieve an attachment; images return as inline image content |
@@ -64,6 +65,36 @@ behavior — last write wins, unchanged; but `edit_post`/`append_post` always
 protect their own read-modify-write internally using the etag from their own
 read, whether or not you pass one, since a stale read there could otherwise
 apply a `str_replace` against content someone else already changed.
+
+## The vault changelog
+
+Starting a session by reading the master document and guessing what moved is
+error-prone — `list_changes` is a flat feed of every post-affecting write,
+sourced from the same git history everything else here reads:
+
+```
+list_changes(limit=20)
+→ [{seq, id, title, action, when, sha, author}, …] newest first
+```
+
+`action` is one of `create`, `update`, `edit`, `append`, `delete`, `restore`,
+`tag_rename`, `external_edit` (an Obsidian edit picked up by the watcher),
+`external_delete`, or `expiry` (a TTL sweep). `author` is always `null` today
+— it's reserved for relay #198's N-3 (per-agent identity), not yet shipped.
+
+Page forward with `since` set to the largest `seq` you've already seen, or
+answer "what happened since yesterday" with an ISO 8601 timestamp:
+
+```
+list_changes(since=1042)                        → everything after seq 1042
+list_changes(since="2026-09-14T00:00:00Z")       → everything since that time
+```
+
+This is a read over `history.git`, not a second store — it costs nothing
+extra to keep current, and it's also what closes the gap in SSE reconnect
+replay: `GET /events` used to only replay *new* posts on reconnect (a post id
+has no way to represent "an existing post changed"); it now uses this same
+feed, so an edit or delete made while you were disconnected replays too.
 
 ## Recovering a post
 

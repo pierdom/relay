@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from .. import database, embedding, events, folders, history, links, metrics, vault, vectors
+from .. import changes, database, embedding, events, folders, history, links, metrics, vault, vectors
 from ..config import settings
 from ..models import (
     BacklinksResponse,
@@ -88,8 +88,9 @@ async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostRespons
                     vault.delete_file(path)
                 raise
     post = PostResponse.from_row(await _fetch(db, post_id))
-    await events.publish(post.model_dump())
     await history.commit(f"post {post_id} create: {post.title}")
+    seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
+    await events.publish(post.model_dump(), seq=seq)
     return post
 
 
@@ -464,12 +465,15 @@ async def update_post(
             await _relocate_note_attachments(db, content, old_folder, move_to, post_id)
         await db.commit()
     post = PostResponse.from_row(await _fetch(db, post_id))
-    # Stream the edit so other live clients update in place. The SSE layer emits a
-    # `post` event without an `id:` field for a known id, so it can't rewind the
-    # reconnect cursor. Self-write suppression already covers the vault write, so
-    # this is the only path that propagates API/MCP edits (incl. Inbox→domain moves).
-    await events.publish(post.model_dump())
     await history.commit(commit_message or f"post {post_id} update: {post.title}")
+    # Stream the edit so other live clients update in place. `seq` (relay
+    # #198, N-4) is this write's changes-log row — every SSE frame carries
+    # one now, monotonic by construction, so it can never rewind a
+    # reconnecting client's cursor the way a re-sent post id could. Self-write
+    # suppression already covers the vault write, so this is the only path
+    # that propagates API/MCP edits (incl. Inbox→domain moves).
+    seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
+    await events.publish(post.model_dump(), seq=seq)
     return post
 
 
@@ -619,7 +623,6 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
         vault.delete_file(vault.abspath(row["path"]))
         await vault.index_delete(db, post_id)
         await db.commit()
-    await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]))
     # Orphan cleanup: drop the attachments *this post* referenced that no
     # remaining post references. Scoped to the deleted post's own embeds on
     # purpose — a folder's assets/ dir also holds files a human dropped in from
@@ -636,3 +639,5 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
     # After the orphan sweep, so the note and the assets it took with it are one
     # commit — restoring the post restores its images in the same revert.
     await history.commit(f"post {post_id} delete: {row['title']}")
+    seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
+    await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]), seq=seq)

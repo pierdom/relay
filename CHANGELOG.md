@@ -8,6 +8,27 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.9.0] — 2026-09-13
+
+Agents started a session by reading the master document and guessing what moved. Git history already recorded every write, but there was no queryable feed of it ([relay #198](https://github.com/pierdom/relay), N-4) — and no cursor able to represent "an existing post changed," which is why SSE reconnect only ever replayed brand-new posts (the September 2026 audit's B-10/G-07).
+
+### Added
+- **`GET /changes` / `list_changes`** — the vault changelog, newest first: every create/update/edit/append/delete/restore/tag rename/external edit/external delete/TTL expiry, as `{seq, id, title, action, when, sha, author}`. `since` pages forward from a `seq` or filters by an ISO 8601 timestamp (e.g. "what did the schedulers publish overnight"). `author` is always `null` until per-agent identity (N-3) ships. Backed by a small materialized index over `history.git` (`relay/changes.py`) — not a second source of truth, rebuilt/caught-up from git log exactly the way the post index is rebuilt from vault files.
+
+### Fixed
+- **SSE reconnect now replays edits and deletes to posts that already existed**, not just brand-new ones (closing audit B-10/G-07). `Last-Event-ID` moves from a post id (which only ever grows on creation) to a `seq` from the new changelog table, monotonic across every kind of change — every live frame carries one now too, retiring the old "only emit `id:` for a genuinely newer post id" special-casing entirely.
+- **Tag rename now publishes live SSE events for every retagged post** — found while wiring up the changelog: a connected client's post list previously went silently stale on a tag rename, since `rename_tag` never called `events.publish` at all.
+- `GET /changes`/`list_changes` now 503 (`HistoryUnavailable`) when vault history is disabled, matching `/posts/{id}/history` — an empty list would otherwise look indistinguishable from "nothing has changed."
+
+### Caught during review, before merge
+- The changelog's per-write update initially fetched only the single latest commit (`git log -1`). Two real bugs followed from that, both found by manually verifying the reconnect fix end-to-end rather than by the unit tests written alongside the feature: calling it again with nothing new re-ingested the *unchanged* latest commit and duplicated its row — `history.commit()` no-ops are called unconditionally at every site, most consequentially the file watcher's debounced reconcile, which runs it even when an entire batch turned out to be self-writes; and under two close-together concurrent writes, whichever commit *wasn't* the very latest by the time either side got around to recording it was silently **lost** until the next restart's backfill — a real risk given relay's explicit multi-agent design. Both are fixed by the same change: recording a *range* of commits since the last one already recorded, rather than only ever looking at the single newest — a range is naturally idempotent (empty when nothing changed) and naturally spans however many commits landed, no matter how many callers were racing to record them.
+- A third bug in the same family, caught only by testing genuine concurrent writers live (5 parallel `POST /posts` produced 13 changelog rows, several duplicated 2-3x): the range fetch above still read-then-inserted with no lock around the pair, so two truly concurrent callers could both read the same "last recorded sha" before either had inserted anything, both compute the identical range, and both redundantly re-ingest it — a duplicate-row failure the range fix alone doesn't touch. Fixed with a module-level lock around the read-and-insert, the same pattern the vault file layer and git-commit layer already use for their own critical sections; a new regression test reproduces the race deterministically with real `asyncio` concurrency.
+
+### Compatibility note
+A client holding a pre-upgrade `Last-Event-ID` (a post id) will send a stale value interpreted as a `seq` on its first reconnect after upgrading — worst case is one under- or over-replayed catch-up window, once, self-correcting from then on.
+
+---
+
 ## [1.8.1] — 2026-09-13
 
 The browser UI's "Diff vs current" history view diffed at line granularity, so a single changed word marked the *entire line* as removed/added rather than isolating the actual change — the case `edit_post` (v1.8.0, N-1) exists for.

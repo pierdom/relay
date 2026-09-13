@@ -6,16 +6,17 @@ from collections import Counter
 
 import aiosqlite
 
-from .. import history, vault
+from .. import changes, events, history, vault
 from ..models import (
     FolderCount,
     FolderListResponse,
+    PostResponse,
     TagConfigCreate,
     TagConfigResponse,
     TagCount,
     TagListResponse,
 )
-from ._common import InvalidTag, _tags_from_sentinel
+from ._common import InvalidTag, _fetch, _tags_from_sentinel
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
 
@@ -84,6 +85,15 @@ async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagLi
         await vault.write_tag_config(db)
         await db.commit()
     await history.commit(f"tag rename: {old} -> {new_name} ({len(affected)} post(s))")
+    # Every retagged post gets an SSE `post` event (relay #198, N-4) — this
+    # never happened before, live or on reconnect: a connected client's post
+    # list silently went stale on a tag rename, and a reconnecting one had no
+    # way to catch up on it either since renamed posts never touched the old
+    # `id > Last-Event-ID` cursor at all.
+    seqs = await changes.record_latest(db, post_ids=tuple(row["id"] for row in affected))
+    for row in affected:
+        post = PostResponse.from_row(await _fetch(db, row["id"]))
+        await events.publish(post.model_dump(), seq=seqs.get(row["id"]))
     return await list_tags(db)
 
 
