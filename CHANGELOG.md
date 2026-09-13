@@ -8,6 +8,16 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.8.1] — 2026-09-13
+
+The browser UI's "Diff vs current" history view diffed at line granularity, so a single changed word marked the *entire line* as removed/added rather than isolating the actual change — the case `edit_post` (v1.8.0, N-1) exists for.
+
+### Changed
+- The history panel's diff is now word-level, not line-level: a one-word `edit_post` change now highlights just that word — accent-colored with a soft highlight for additions, dimmed with strikethrough for deletions — while the rest of the line/paragraph reads as normal text. Still a hand-rolled dependency-free LCS, just retargeted at word tokens instead of lines.
+- Dependency bumps: `mcp` `>=2.1.1,<3.0.0` → `>=2.2.0,<3.0.0`, `sse-starlette` `>=3.4.8` → `>=3.4.11`, and the Docker image's pinned `astral-sh/uv` base `0.12.10` → `0.12.12`.
+
+---
+
 ## [1.8.0] — 2026-09-13
 
 `update_post` always replaced the whole body, so editing one line of a long post meant resending the full 10-20KB verbatim — expensive, and risky, because two writers (two agents, or an agent racing the watcher's debounced reconcile of a human's Obsidian edit) could silently clobber each other with no way to detect it ([relay #198](https://github.com/pierdom/relay), N-1).

@@ -151,8 +151,18 @@ function renderRevisions(data, panes) {
  * add run. Attaching whitespace to the word before it removes the spurious
  * match without losing anything: a leading whitespace-only run (before the
  * very first word) still gets its own token via the second alternative.
+ *
+ * The cap bounds *worst-case* cost (no shared prefix/suffix at all), which is
+ * strictly worse per token than the old line-based cap: the table is
+ * cap×cap cells regardless of whether a token is a word or a line, but a
+ * word represents far less text, so the same cap number covers far less
+ * content before bailing out. 2000 keeps the worst-case table (4,000,000
+ * cells) in the same ballpark as the old 1500-line cap's (2,250,000) while
+ * still covering a genuinely large wholesale rewrite (~2000 words) — this
+ * is a real, deliberate trade against how much can be word-diffed, not a
+ * straight carry-over of the old line-count number.
  */
-const DIFF_CAP = 4000;   // tokens (word+trailing-whitespace runs) per side, after trimming
+const DIFF_CAP = 2000;   // tokens (word+trailing-whitespace runs) per side, after trimming
 
 function tokenize(text) {
   return text.match(/\S+\s*|\s+/g) || [];
