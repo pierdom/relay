@@ -91,15 +91,24 @@ async def stream_events(
         except ValueError:
             last_seq = 0
 
-        # Catch-up: replay every change since last_seq.
-        if last_event_id and last_seq:
-            async with database.connect() as db:
-                for frame in await catchup_frames(db, last_seq=last_seq, tag=tag):
-                    yield frame
-
-        # Live subscription
+        # Subscribe *before* running catch-up (K-3): the reverse order left a
+        # gap where a write landing after the catch-up SELECT but before
+        # subscribe() registered this queue was captured by neither — missed
+        # by the query (already ran) and missed live (queue didn't exist yet).
+        # Subscribing first means every write from this point on reaches this
+        # queue even if it's *also* replayed by catch-up a moment later (a
+        # possible duplicate delivery of the same-or-newer state) — harmless,
+        # since this feed is "what does it look like now", not an
+        # exactly-once event log (see `catchup_frames`'s docstring).
         q = subscribe(tag)
         try:
+            # Catch-up: replay every change since last_seq.
+            if last_event_id and last_seq:
+                async with database.connect() as db:
+                    for frame in await catchup_frames(db, last_seq=last_seq, tag=tag):
+                        yield frame
+
+            # Live subscription
             while True:
                 if await request.is_disconnected():
                     break

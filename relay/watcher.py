@@ -90,14 +90,23 @@ async def _reconcile(paths: list[str]) -> None:
     existing = [Path(p) for p in paths if Path(p).exists()]
     missing = [Path(p) for p in paths if not Path(p).exists()]
     async with database.connect() as db:
-        for path in existing:
-            await _reconcile_file(db, path)
-        for path in missing:
-            await _reconcile_delete(db, path)
-        # One commit per debounced batch, so a bulk edit in Obsidian is one
-        # revision rather than a commit per file. This is the path that
-        # captures *human* edits — the ones relay never sees through its own API.
-        await history.commit(_batch_message(existing, missing))
+        # The whole batch — every per-file write plus the commit below — runs
+        # under one `write_lock` acquisition (K-2): committing after releasing
+        # the lock left a gap where another writer's own already-written,
+        # not-yet-committed file could get swept into *this* commit, and
+        # `changes._ingest` would then misattribute this batch's action to that
+        # other writer's post. `_reconcile_file_locked`/`_reconcile_delete`
+        # assume the lock is already held — only `_reconcile_file` (the direct
+        # single-file entry point tests use) acquires it itself.
+        async with vault.write_lock:
+            for path in existing:
+                await _reconcile_file_locked(db, path)
+            for path in missing:
+                await _reconcile_delete(db, path)
+            # One commit per debounced batch, so a bulk edit in Obsidian is one
+            # revision rather than a commit per file. This is the path that
+            # captures *human* edits — the ones relay never sees through its own API.
+            await history.commit(_batch_message(existing, missing))
         # relay #198, N-4: the batch commit — and so the changes-log row(s) it
         # produces — only exists *after* every per-file events.publish above, so
         # (unlike posts.py/tags.py/revisions.py) those live frames can't carry
@@ -117,6 +126,15 @@ def _batch_message(existing: list[Path], missing: list[Path]) -> str:
 
 
 async def _reconcile_file(db: aiosqlite.Connection, path: Path) -> None:
+    """Single-file entry point (used directly by tests): acquires `write_lock`
+    itself. `_reconcile`'s batch path calls `_reconcile_file_locked` instead,
+    holding one lock across the whole batch — see its comment."""
+    async with vault.write_lock:
+        await _reconcile_file_locked(db, path)
+
+
+async def _reconcile_file_locked(db: aiosqlite.Connection, path: Path) -> None:
+    """Body of `_reconcile_file`, assuming `vault.write_lock` is already held."""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -124,33 +142,32 @@ async def _reconcile_file(db: aiosqlite.Connection, path: Path) -> None:
     if vault.was_self_write(path, text):
         return
     meta, body = frontmatter.parse(text)
-    async with vault.write_lock:
-        pid = meta.get("id")
-        if pid is not None and await _id_taken_elsewhere(db, pid, path):
-            # A copy carrying another live note's id (Obsidian "Duplicate note", a
-            # backup dropped beside the original). Upserting would repoint the id
-            # at the copy and drop the original from the index (AUDIT.md B-03);
-            # stamp a fresh id instead, exactly as rebuild_index does at startup.
-            logger.warning("External note %s carries id %s already used by another file — re-stamping", path.name, pid)
-            pid = None
-        if pid is None:
-            pid = await vault.allocate_id(db)
-            path = vault.write_file(
-                id=pid, title=path.stem, content=body, tags=meta.get("tags") or [],
-                source=meta.get("source"), created_at=meta.get("created_at") or vault.utcnow_iso(),
-                updated_at=meta.get("updated_at"), expires_at=meta.get("expires_at"), old_path=path,
-                properties=meta.get("properties"),
-            )
-        # An external editor rewrites the body but leaves the front-matter stamp
-        # alone, so take the last-modified time from the file itself — otherwise
-        # an Obsidian edit never moves the post in the default "updated" sort.
-        await vault.index_upsert(
-            db, id=pid, title=path.stem, path=path, content=body, tags=meta.get("tags") or [],
+    pid = meta.get("id")
+    if pid is not None and await _id_taken_elsewhere(db, pid, path):
+        # A copy carrying another live note's id (Obsidian "Duplicate note", a
+        # backup dropped beside the original). Upserting would repoint the id
+        # at the copy and drop the original from the index (AUDIT.md B-03);
+        # stamp a fresh id instead, exactly as rebuild_index does at startup.
+        logger.warning("External note %s carries id %s already used by another file — re-stamping", path.name, pid)
+        pid = None
+    if pid is None:
+        pid = await vault.allocate_id(db)
+        path = vault.write_file(
+            id=pid, title=path.stem, content=body, tags=meta.get("tags") or [],
             source=meta.get("source"), created_at=meta.get("created_at") or vault.utcnow_iso(),
-            updated_at=vault.effective_updated_at(path, meta), expires_at=meta.get("expires_at"),
+            updated_at=meta.get("updated_at"), expires_at=meta.get("expires_at"), old_path=path,
             properties=meta.get("properties"),
         )
-        await db.commit()
+    # An external editor rewrites the body but leaves the front-matter stamp
+    # alone, so take the last-modified time from the file itself — otherwise
+    # an Obsidian edit never moves the post in the default "updated" sort.
+    await vault.index_upsert(
+        db, id=pid, title=path.stem, path=path, content=body, tags=meta.get("tags") or [],
+        source=meta.get("source"), created_at=meta.get("created_at") or vault.utcnow_iso(),
+        updated_at=vault.effective_updated_at(path, meta), expires_at=meta.get("expires_at"),
+        properties=meta.get("properties"),
+    )
+    await db.commit()
     post = await service.get_post(db, pid)
     if post is not None:
         await events.publish(post.model_dump())

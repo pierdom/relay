@@ -182,10 +182,13 @@ async def add_attachment(
     # uploads of the same filename can't resolve to the same path and clobber.
     async with vault.write_lock:
         written = vault.write_attachment(target_folder, filename, data)
+        # Before the embed below: the upload and the post edit that references it
+        # read as two steps in the log instead of the file appearing inside a
+        # post update. Committed while still holding `write_lock` (K-2) — see
+        # posts.create_post's comment for why the two must never be split by a
+        # lock release.
+        await history.commit(f"attachment add: {written.name}")
     ref = f"![[{written.name}]]"
-    # Before the embed below: the upload and the post edit that references it read
-    # as two steps in the log instead of the file appearing inside a post update.
-    await history.commit(f"attachment add: {written.name}")
 
     result_post_id = None
     if row is not None and embed:  # append outside the lock — update_post takes it itself
@@ -224,11 +227,13 @@ async def delete_attachment(db: aiosqlite.Connection, name: str) -> AttachmentDe
     still embed/link it (now dangling), or ``None`` if it didn't resolve."""
     async with vault.write_lock:
         removed = vault.delete_attachment(name)
-    if removed is None:
-        return None
-    fname = removed.name.lower()
-    async with db.execute("SELECT id, content FROM posts") as cur:
-        rows = await cur.fetchall()
-    referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
-    await history.commit(f"attachment delete: {removed.name}")
+        if removed is None:
+            return None
+        fname = removed.name.lower()
+        async with db.execute("SELECT id, content FROM posts") as cur:
+            rows = await cur.fetchall()
+        referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
+        # K-2: commit while still holding `write_lock` — see posts.create_post's
+        # comment for why the two must never be split by a lock release.
+        await history.commit(f"attachment delete: {removed.name}")
     return AttachmentDeleteResponse(filename=removed.name, referenced_by=sorted(referenced_by))

@@ -102,13 +102,18 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         for post_id in to_delete:
             await vectors.delete_post_chunks(db, post_id)
         await db.commit()
+        # K-2: commit while still holding `write_lock` — releasing it first (as
+        # this used to) left a gap where a concurrent writer's own already-
+        # written, not-yet-committed file could get swept into this commit, and
+        # `changes._ingest` would then attribute a "ttl expiry" action to that
+        # other writer's post too.
+        await history.commit(f"ttl expiry: {len(expired)} post(s)")
     # Tell live clients. The file unlink is self-delete-suppressed, so the watcher
     # won't emit for these — without this a TTL'd post lingers in every connected
     # UI/TUI until the next reload. Deletes stream without an SSE `id:`, so they
     # can't rewind a client's replay cursor.
     for post_id, _rel, tags in expired:
         await events.publish_delete(post_id, [t for t in tags.split(",") if t])
-    await history.commit(f"ttl expiry: {len(expired)} post(s)")
     # relay #198, N-4: recorded after the fact, same reasoning as watcher.py's
     # batch commit — the changes-log row(s) don't exist until this commit
     # does, so the publishes above couldn't carry a `seq` either way. What

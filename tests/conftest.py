@@ -5,6 +5,7 @@ real vault, whatever the machine running the suite has in its ``.env``.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 
 # Must precede the `relay.config` import below: Settings requires API_KEY, and CI
@@ -13,6 +14,7 @@ os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
 
+from relay import changes, history, vault
 from relay.config import settings
 
 
@@ -40,6 +42,22 @@ def isolated_vault(tmp_path, monkeypatch):
     # shells out to git on every write, which would make unrelated tests slower
     # and dependent on a git binary. tests/test_history.py turns it back on.
     monkeypatch.setattr(settings, "history_enabled", False)
+    # Fresh, never-yet-contended asyncio.Lock()s per test. `asyncio.Lock` only
+    # binds itself to a running event loop the first time it actually has to
+    # wait (an uncontended `acquire()` takes a fast path that never touches the
+    # loop at all — see `asyncio.locks.Lock.acquire`), and pytest-asyncio gives
+    # each test function its own fresh loop. A production process holds one
+    # event loop for its whole life, so these singletons are never reused
+    # across loops there — but two *different* tests that each genuinely
+    # contend one of them (real concurrent writers via `asyncio.gather`) bind
+    # it to two different loops, and the second one to run raises "bound to a
+    # different event loop". Reusing the module singletons directly, instead
+    # of resetting them here, made this a real, order-dependent full-suite
+    # failure the first time a second contending test existed (K-2's
+    # concurrency regression tests in test_changes.py).
+    monkeypatch.setattr(vault, "write_lock", asyncio.Lock())
+    monkeypatch.setattr(history, "_lock", asyncio.Lock())
+    monkeypatch.setattr(changes, "_lock", asyncio.Lock())
     yield
     # Runs before monkeypatch's undo (this fixture was set up first, so it tears
     # down last), meaning it sees whatever the test left in place — a test that

@@ -84,7 +84,9 @@ async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagLi
         await db.execute("UPDATE tag_config SET tag = ? WHERE tag = ?", (new_name, old))
         await vault.write_tag_config(db)
         await db.commit()
-    await history.commit(f"tag rename: {old} -> {new_name} ({len(affected)} post(s))")
+        # K-2: commit while still holding `write_lock` — see posts.create_post's
+        # comment for why the two must never be split by a lock release.
+        await history.commit(f"tag rename: {old} -> {new_name} ({len(affected)} post(s))")
     # Every retagged post gets an SSE `post` event (relay #198, N-4) — this
     # never happened before, live or on reconnect: a connected client's post
     # list silently went stale on a tag rename, and a reconnecting one had no
