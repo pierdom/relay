@@ -352,3 +352,15 @@ async def test_like_fallback_when_fts_disabled(client, monkeypatch):
     # a raw FTS operator must not blow up the LIKE path either
     r = await client.get("/posts", params={"search": 'quote " here'}, headers=AUTH)
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_like_fallback_wildcards_are_literal(client, monkeypatch):
+    """K-7: same bug class as the already-fixed S-16 (`folder=%` matching every
+    post) — the LIKE fallback built its query as plain `f"%{search}%"` with no
+    escaping, so `search="%"` matched every post regardless of content."""
+    monkeypatch.setattr(database, "FTS_ENABLED", False)
+    await _create(client, "Percent Post", "a literal % sign in here")
+    await _create(client, "Plain Post", "nothing special")
+    assert await _titles(client, "%") == ["Percent Post"]
+    assert await _titles(client, "_") == []

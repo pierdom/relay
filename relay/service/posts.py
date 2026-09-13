@@ -366,8 +366,15 @@ async def list_posts(
             # Query had only punctuation/operators → no searchable tokens.
             conditions.append("0")
         else:  # FTS5 unavailable — substring fallback
-            q = f"%{search}%"
-            conditions.append("(posts.title LIKE ? OR posts.content LIKE ? OR posts.source LIKE ?)")
+            # K-7: same bug class as the already-fixed S-16 (`folder=%` matching
+            # every post) — `search="%"` matched every post here too, since this
+            # was the one LIKE filter in the codebase not routed through
+            # `database.escape_like`.
+            q = f"%{database.escape_like(search)}%"
+            conditions.append(
+                "(posts.title LIKE ? ESCAPE '\\' OR posts.content LIKE ? ESCAPE '\\'"
+                " OR posts.source LIKE ? ESCAPE '\\')"
+            )
             params.extend([q, q, q])
 
     f_conds, f_params = database.tag_folder_filters(tag, folder)

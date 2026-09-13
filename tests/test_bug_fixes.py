@@ -150,6 +150,29 @@ async def test_backfill_skips_a_failing_post_and_continues(client, monkeypatch):
     assert vault.backfill_status()["running"] is False
 
 
+@pytest.mark.asyncio
+async def test_backfill_crash_before_the_loop_still_clears_running(monkeypatch):
+    """K-8: `spawn_backfill` marks `running=True` synchronously; the only
+    place that used to clear it was the normal-completion path at the end of
+    `backfill_embeddings` (or the cancelled-before-first-turn done-callback).
+    A crash anywhere before that — most concretely `database.connect()` itself
+    failing (a disk error, exceeded busy-timeout, sqlite-vec extension
+    failure) — was swallowed by `run_backfill_task`'s broad `except Exception`
+    and left `running` stuck `true` forever, 409-ing every future
+    `POST /embeddings/backfill` until a restart."""
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+
+    def _raising_connect():
+        raise RuntimeError("disk error")
+
+    monkeypatch.setattr(database, "connect", _raising_connect)
+
+    task = vault.spawn_backfill()
+    assert vault.backfill_status()["running"] is True
+    await task
+    assert vault.backfill_status()["running"] is False
+
+
 # ── B-03: an external duplicate does not steal the original's id ─────────────
 
 

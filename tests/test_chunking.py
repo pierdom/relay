@@ -81,6 +81,24 @@ def test_giant_section_splits_with_overlap():
     assert first_words & second_words
 
 
+def test_heading_only_post_still_yields_a_chunk():
+    """K-10: a post consisting solely of headings with no body text under any
+    of them (an outline/TOC-style stub) used to produce zero chunks — every
+    heading's section was skipped outright since its body was empty, same
+    never-becomes-searchable impact as the already-handled entirely-code-
+    fenced case, just from a different cause."""
+    chunks = chunk_post("Title", "## First Heading\n## Second Heading\n### Third Heading")
+    assert chunks, "a heading-only post must still produce at least one chunk"
+    assert "".join(c.body for c in chunks)  # not just whitespace
+
+
+def test_single_bare_heading_yields_a_chunk_of_its_own_title():
+    chunks = chunk_post("Title", "## Lonely Heading")
+    assert len(chunks) == 1
+    assert chunks[0].heading_path == "Lonely Heading"
+    assert "Lonely Heading" in chunks[0].body
+
+
 def test_embed_text_carries_title_body_does_not():
     content = "## Section\n" + "content word " * 20
     chunks = chunk_post("My Post", content)
