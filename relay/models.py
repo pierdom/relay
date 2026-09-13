@@ -1,12 +1,29 @@
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from . import folders
+
+
+def etag_for_row(row) -> str:
+    """Opaque version token for optimistic concurrency (relay #198, N-1) —
+    changes whenever any mutable field of the post changes. Deliberately not
+    derived from ``updated_at`` alone: that has one-second granularity, which
+    would miss the same-second races (an agent write landing the same second
+    as the watcher's debounced reconcile of a human's Obsidian edit) this
+    token exists to catch. Includes ``properties`` so an external Obsidian
+    edit to a Property (N-2) also invalidates a stale ``if_match``, not just
+    relay-initiated field changes."""
+    parts = [
+        row["title"], row["content"], row["tags"], row["source"] or "",
+        row["updated_at"] or row["created_at"], row["expires_at"] or "", row["properties"] or "{}",
+    ]
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
 def _decode_properties(value: str | None) -> dict:
@@ -100,6 +117,10 @@ class PostResponse(BaseModel):
         description="Non-relay front-matter keys (Obsidian Properties, custom fields) — read-only here; "
         "edit them in Obsidian or hand-edit the file",
     )
+    etag: str = Field(
+        description="Opaque version token (relay #198, N-1) — pass back as if_match on a write to detect "
+        "a concurrent change; changes whenever any mutable field of the post does"
+    )
 
     @classmethod
     def from_row(cls, row) -> PostResponse:
@@ -113,6 +134,7 @@ class PostResponse(BaseModel):
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
             properties=_decode_properties(row["properties"]),
+            etag=etag_for_row(row),
         )
 
 
@@ -197,6 +219,7 @@ class PostSummary(BaseModel):
         default_factory=dict,
         description="Non-relay front-matter keys (Obsidian Properties, custom fields) — read-only here",
     )
+    etag: str = Field(description="Opaque version token (relay #198, N-1) — pass back as if_match on a write")
 
     @classmethod
     def from_row(cls, row) -> PostSummary:
@@ -211,6 +234,7 @@ class PostSummary(BaseModel):
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
             properties=_decode_properties(row["properties"]),
+            etag=etag_for_row(row),
         )
 
 
@@ -229,6 +253,12 @@ class PostUpdate(BaseModel):
     tags: list[str] | None = None
     source: str | None = None
     expires_at: str | None = None
+    if_match: str | None = Field(
+        default=None,
+        description="Optimistic-concurrency token from a prior response's etag (relay #198, N-1). "
+        "If given and it no longer matches the post's current state, the write is rejected with a "
+        "conflict instead of silently overwriting a concurrent change. Omit for today's behavior.",
+    )
 
     @field_validator("title")
     @classmethod
@@ -251,6 +281,32 @@ class PostUpdate(BaseModel):
     @classmethod
     def blank_source_clears(cls, v: str | None) -> str | None:
         return v if v is None else (v.strip() or None)
+
+
+class PostEdit(BaseModel):
+    """A `str_replace`-style partial edit (relay #198, N-1): `old_str` must
+    match exactly once in the post's current content, like a code-agent Edit
+    tool — add more surrounding context to disambiguate rather than replacing
+    every occurrence."""
+
+    old_str: str = Field(min_length=1)
+    new_str: str
+    if_match: str | None = Field(default=None, description="See PostUpdate.if_match")
+
+    @model_validator(mode="after")
+    def must_actually_change(self) -> PostEdit:
+        if self.old_str == self.new_str:
+            raise ValueError("new_str must be different from old_str")
+        return self
+
+
+class PostAppend(BaseModel):
+    """Append to a post's content (relay #198, N-1) rather than resending the
+    whole body — a blank line is inserted before `content` unless the post is
+    currently empty."""
+
+    content: str
+    if_match: str | None = Field(default=None, description="See PostUpdate.if_match")
 
 
 class FolderCount(BaseModel):

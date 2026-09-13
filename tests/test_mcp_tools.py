@@ -201,6 +201,102 @@ async def test_list_posts_can_browse_by_folder_and_reverse_the_sort(client):
 
 
 @pytest.mark.asyncio
+async def test_the_new_n1_tools_are_advertised_to_clients():
+    names = {t.name for t in await mcp_server.mcp.list_tools()}
+    assert {"edit_post", "append_post"} <= names, f"not in the manifest: {sorted(names)}"
+
+
+@pytest.mark.asyncio
+async def test_edit_post_replaces_the_unique_match(client):
+    r = await client.post("/posts", json={"title": "MCP Edit", "content": "one two three",
+                                          "tags": ["homelab"]}, headers=HEADERS)
+    pid = r.json()["id"]
+    out = await mcp_server.edit_post(id=pid, old_str="two", new_str="TWO")
+    assert "error" not in out, out
+    assert out["content"] == "one TWO three"
+
+
+@pytest.mark.asyncio
+async def test_edit_post_reports_ambiguous_and_missing_matches(client):
+    r = await client.post("/posts", json={"title": "MCP Edit 2", "content": "two two",
+                                          "tags": ["homelab"]}, headers=HEADERS)
+    pid = r.json()["id"]
+    ambiguous = await mcp_server.edit_post(id=pid, old_str="two", new_str="x")
+    assert "error" in ambiguous and "2 times" in ambiguous["error"]
+
+    missing = await mcp_server.edit_post(id=pid, old_str="nope", new_str="x")
+    assert "error" in missing
+
+
+@pytest.mark.asyncio
+async def test_edit_post_rejects_identical_old_and_new_str(client):
+    """REST rejects this via PostEdit's validator; the MCP tool calls
+    service.edit_post directly, bypassing that model entirely — the check
+    must also live in the service layer or MCP would silently no-op instead
+    of erroring like REST does for the identical request."""
+    r = await client.post("/posts", json={"title": "MCP No-Op Edit", "content": "one two three",
+                                          "tags": ["homelab"]}, headers=HEADERS)
+    pid = r.json()["id"]
+    out = await mcp_server.edit_post(id=pid, old_str="two", new_str="two")
+    assert "error" in out, out
+
+
+@pytest.mark.asyncio
+async def test_edit_post_rejects_empty_old_str(client):
+    """str.count("") is len(content)+1, not 0 — without a guard this would
+    fall through to a confusing "matches N times" error instead of a clear
+    reject (REST catches this via PostEdit's min_length=1; MCP calls
+    service.edit_post directly, bypassing that model)."""
+    r = await client.post("/posts", json={"title": "MCP Empty Old Str", "content": "one two three",
+                                          "tags": ["homelab"]}, headers=HEADERS)
+    pid = r.json()["id"]
+    out = await mcp_server.edit_post(id=pid, old_str="", new_str="x")
+    assert "error" in out, out
+
+
+@pytest.mark.asyncio
+async def test_append_post_adds_a_blank_line(client):
+    r = await client.post("/posts", json={"title": "MCP Append", "content": "first",
+                                          "tags": ["homelab"]}, headers=HEADERS)
+    pid = r.json()["id"]
+    out = await mcp_server.append_post(id=pid, content="second")
+    assert "error" not in out, out
+    assert out["content"] == "first\n\nsecond"
+
+
+@pytest.mark.asyncio
+async def test_update_post_if_match_conflict_reports_current_content(client):
+    r = await client.post("/posts", json={"title": "MCP Conflict", "content": "v1",
+                                          "tags": ["homelab"]}, headers=HEADERS)
+    post = r.json()
+    stale_etag = post["etag"]
+    await client.patch(f"/posts/{post['id']}", json={"content": "v2 from elsewhere"}, headers=HEADERS)
+
+    out = await mcp_server.update_post(id=post["id"], content="clobber attempt", if_match=stale_etag)
+    assert "error" in out, out
+    assert out["current"]["content"] == "v2 from elsewhere"
+
+    # The clobbering write must never have landed.
+    live = await mcp_server.get_post(id=post["id"])
+    assert live["content"] == "v2 from elsewhere"
+
+
+@pytest.mark.asyncio
+async def test_edit_and_append_stale_if_match_are_rejected(client):
+    r = await client.post("/posts", json={"title": "MCP Race", "content": "one two three",
+                                          "tags": ["homelab"]}, headers=HEADERS)
+    post = r.json()
+    stale_etag = post["etag"]
+    await client.patch(f"/posts/{post['id']}", json={"content": "one two three, edited"}, headers=HEADERS)
+
+    edit_out = await mcp_server.edit_post(id=post["id"], old_str="two", new_str="TWO", if_match=stale_etag)
+    assert "error" in edit_out, edit_out
+
+    append_out = await mcp_server.append_post(id=post["id"], content="more", if_match=stale_etag)
+    assert "error" in append_out, append_out
+
+
+@pytest.mark.asyncio
 async def test_initialize_announces_relays_own_version_and_branding():
     """`serverInfo` is what a client shows beside the server's name.
 

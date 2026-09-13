@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from .. import service
 from ..auth import require_api_key
@@ -9,7 +9,9 @@ from ..database import get_db
 from ..models import (
     BacklinksResponse,
     DeletedPostsResponse,
+    PostAppend,
     PostCreate,
+    PostEdit,
     PostHistoryResponse,
     PostListResponse,
     PostResponse,
@@ -22,6 +24,40 @@ from ..models import (
 router = APIRouter(prefix="/posts", tags=["posts"])
 
 
+def _set_etag(response: Response, post: PostResponse) -> None:
+    response.headers["ETag"] = f'"{post.etag}"'
+
+
+def _resolve_if_match(header_value: str | None, body_value: str | None) -> str | None:
+    """Prefer a real `If-Match` request header over the JSON body's `if_match`
+    field when both are given (relay #198, N-1) — REST gets both mechanisms;
+    MCP has no headers, so the body field is the only one it can use. `*`
+    means "must currently exist", which every write path here already
+    guarantees by 404ing a missing post, so it needs no further check.
+
+    Handles a single value, quoted or not, with an optional weak-validator
+    `W/` prefix (relay never emits a weak etag itself, but a client's HTTP
+    library might normalise one). Does **not** parse a comma-separated list of
+    values — a real edge case per RFC 7232, but not one any client of this
+    single-vault, mostly-agent-driven API has hit; the JSON body field is the
+    primary mechanism and works identically for a client that needs it.
+    """
+    cleaned = header_value.strip() if header_value else None
+    if cleaned:
+        return None if cleaned == "*" else cleaned.removeprefix("W/").strip('"')
+    return body_value
+
+
+def _conflict(post_id: int, current: PostResponse | None) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "error": f"post #{post_id} has changed since if_match was captured",
+            "current": current.model_dump() if current is not None else None,
+        },
+    )
+
+
 @router.post(
     "",
     response_model=PostResponse,
@@ -30,9 +66,12 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 )
 async def create_post(
     body: PostCreate,
+    response: Response,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostResponse:
-    return await service.create_post(db, body)
+    post = await service.create_post(db, body)
+    _set_etag(response, post)
+    return post
 
 
 @router.get(
@@ -136,11 +175,13 @@ async def list_deleted_posts(
 )
 async def get_post(
     post_id: int,
+    response: Response,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostResponse:
     post = await service.get_post(db, post_id)
     if post is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+    _set_etag(response, post)
     return post
 
 
@@ -219,6 +260,7 @@ async def get_post_revision(
 async def restore_post(
     post_id: int,
     body: PostRestore,
+    response: Response,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostResponse:
     """Roll a post back to a revision from its history, recreating it if deleted.
@@ -226,7 +268,9 @@ async def restore_post(
     The restore is itself committed, so it can be undone the same way.
     """
     try:
-        return await service.restore_post(db, post_id, body.sha)
+        post = await service.restore_post(db, post_id, body.sha)
+        _set_etag(response, post)
+        return post
     except service.HistoryUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -247,12 +291,87 @@ async def restore_post(
 async def update_post(
     post_id: int,
     body: PostUpdate,
+    response: Response,
     db: aiosqlite.Connection = Depends(get_db),
+    if_match_header: str | None = Header(default=None, alias="If-Match"),
 ) -> PostResponse:
+    if_match = _resolve_if_match(if_match_header, body.if_match)
     try:
-        return await service.update_post(db, post_id, body)
+        post = await service.update_post(db, post_id, body.model_copy(update={"if_match": if_match}))
+        _set_etag(response, post)
+        return post
     except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
+    except service.ConcurrentModification:
+        current = await service.get_post(db, post_id)
+        raise _conflict(post_id, current) from None
+
+
+@router.post(
+    "/{post_id}/edit",
+    response_model=PostResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def edit_post(
+    post_id: int,
+    body: PostEdit,
+    response: Response,
+    db: aiosqlite.Connection = Depends(get_db),
+    if_match_header: str | None = Header(default=None, alias="If-Match"),
+) -> PostResponse:
+    """`str_replace`-style partial edit (relay #198, N-1): ``old_str`` must
+    match exactly once in the post's current content."""
+    if_match = _resolve_if_match(if_match_header, body.if_match)
+    try:
+        post = await service.edit_post(db, post_id, body.old_str, body.new_str, if_match=if_match)
+        _set_etag(response, post)
+        return post
+    except service.PostNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
+    except service.EditNoChange:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="new_str must be different from old_str",
+        ) from None
+    except service.EditTextNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"old_str not found in post #{post_id}'s content",
+        ) from None
+    except service.EditTextNotUnique as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"old_str matches {exc.count} times in post #{post_id}; must match exactly once",
+        ) from None
+    except service.ConcurrentModification:
+        current = await service.get_post(db, post_id)
+        raise _conflict(post_id, current) from None
+
+
+@router.post(
+    "/{post_id}/append",
+    response_model=PostResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def append_post(
+    post_id: int,
+    body: PostAppend,
+    response: Response,
+    db: aiosqlite.Connection = Depends(get_db),
+    if_match_header: str | None = Header(default=None, alias="If-Match"),
+) -> PostResponse:
+    """Append to a post's content (relay #198, N-1) instead of resending the
+    whole body."""
+    if_match = _resolve_if_match(if_match_header, body.if_match)
+    try:
+        post = await service.append_post(db, post_id, body.content, if_match=if_match)
+        _set_etag(response, post)
+        return post
+    except service.PostNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
+    except service.ConcurrentModification:
+        current = await service.get_post(db, post_id)
+        raise _conflict(post_id, current) from None
 
 
 @router.delete(

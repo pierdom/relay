@@ -14,6 +14,10 @@ from __future__ import annotations
 from ._common import (
     AttachmentError,
     AttachmentSourceError,
+    ConcurrentModification,
+    EditNoChange,
+    EditTextNotFound,
+    EditTextNotUnique,
     HistoryUnavailable,
     InvalidFolder,
     InvalidSearchMode,
@@ -34,8 +38,10 @@ from .attachments import (
 )
 from .posts import (
     _RANKED_POOL_CAP,
+    append_post,
     create_post,
     delete_post,
+    edit_post,
     get_backlinks,
     get_post,
     link_index,
@@ -46,12 +52,13 @@ from .revisions import get_post_history, get_post_revision, list_deleted_posts, 
 from .tags import list_folders, list_tags, rename_tag, set_tag_config
 
 __all__ = [
-    "AttachmentError", "AttachmentSourceError", "HistoryUnavailable", "InvalidFolder", "InvalidSearchMode",
+    "AttachmentError", "AttachmentSourceError", "ConcurrentModification", "EditNoChange", "EditTextNotFound",
+    "EditTextNotUnique", "HistoryUnavailable", "InvalidFolder", "InvalidSearchMode",
     "InvalidTag", "PostNotFound", "ProtectedPost", "RevisionNotFound", "SemanticSearchUnavailable",
     "add_attachment", "create_upload_slot", "decode_attachment_b64", "delete_attachment", "ingest_attachment",
     "list_attachments", "referenced_attachment_names",
-    "_RANKED_POOL_CAP", "create_post", "delete_post", "get_backlinks", "get_post", "link_index", "list_posts",
-    "update_post",
+    "_RANKED_POOL_CAP", "append_post", "create_post", "delete_post", "edit_post", "get_backlinks", "get_post",
+    "link_index", "list_posts", "update_post",
     "get_post_history", "get_post_revision", "list_deleted_posts", "restore_post",
     "list_folders", "list_tags", "rename_tag", "set_tag_config",
 ]

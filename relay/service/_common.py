@@ -16,6 +16,33 @@ class ProtectedPost(Exception):
     """Raised when an operation is not allowed on a reserved post (e.g. id=0)."""
 
 
+class ConcurrentModification(Exception):
+    """Raised when a write's if_match doesn't match the post's current state
+    (relay #198, N-1) — the caller last observed an earlier version."""
+
+
+class EditNoChange(Exception):
+    """Raised when edit_post's new_str equals old_str — checked here, not just
+    in PostEdit's REST-only validator, so the MCP surface (which calls
+    service.edit_post directly, bypassing that model) rejects it identically
+    instead of silently no-op'ing a str.replace against itself."""
+
+
+class EditTextNotFound(Exception):
+    """Raised when edit_post's old_str has zero occurrences in the post's
+    current content."""
+
+
+class EditTextNotUnique(Exception):
+    """Raised when edit_post's old_str matches more than once — add more
+    surrounding context to disambiguate, like a code-agent str_replace.
+    Carries the match count as ``args[0]``/``.count``."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__(count)
+        self.count = count
+
+
 class RevisionNotFound(Exception):
     """Raised when a restore names a revision that isn't in the post's history."""
 

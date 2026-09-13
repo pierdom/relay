@@ -207,7 +207,9 @@ async def get_post(id: int) -> dict:
     description=(
         "Update an existing post. Only provided fields change; omitted fields are left "
         "untouched. Providing tags replaces the list wholesale; an empty array clears them. "
-        "Pass an empty string for expires_at (or source) to clear it."
+        "Pass an empty string for expires_at (or source) to clear it. Pass if_match (a "
+        "post's etag from a prior response) to reject the write with a conflict if the "
+        "post has changed since — otherwise this silently overwrites like today."
     )
 )
 async def update_post(
@@ -217,6 +219,7 @@ async def update_post(
     tags: list[str] | None = None,
     source: str | None = None,
     expires_at: str | None = None,
+    if_match: str | None = None,
 ) -> dict:
     metrics.record_tool_call("update_post")
     # An omitted argument and an explicit null both arrive as None here, so a
@@ -228,6 +231,7 @@ async def update_post(
         "tags": tags,
         "source": source,
         "expires_at": expires_at,
+        "if_match": if_match,
     }
     body = PostUpdate(**{k: v for k, v in fields.items() if v is not None})
     async with _db() as db:
@@ -235,6 +239,67 @@ async def update_post(
             post = await service.update_post(db, id, body)
         except service.PostNotFound:
             return {"error": f"Post #{id} not found."}
+        except service.ConcurrentModification:
+            current = await service.get_post(db, id)
+            return {
+                "error": f"post #{id} has changed since if_match was captured",
+                "current": current.model_dump() if current is not None else None,
+            }
+    return post.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Partial edit: old_str must match exactly once in the post's current content "
+        "(like a code-agent str_replace) and is replaced with new_str — for changing a "
+        "line or paragraph without resending the whole body. Add more surrounding "
+        "context to old_str if it isn't unique. Pass if_match (a post's etag from a "
+        "prior response) to also reject the edit if the post changed since you read it."
+    )
+)
+async def edit_post(id: int, old_str: str, new_str: str, if_match: str | None = None) -> dict:
+    metrics.record_tool_call("edit_post")
+    async with _db() as db:
+        try:
+            post = await service.edit_post(db, id, old_str, new_str, if_match=if_match)
+        except service.PostNotFound:
+            return {"error": f"Post #{id} not found."}
+        except service.EditNoChange:
+            return {"error": "new_str must be different from old_str."}
+        except service.EditTextNotFound:
+            return {"error": f"old_str not found in post #{id}'s content."}
+        except service.EditTextNotUnique as exc:
+            return {"error": f"old_str matches {exc.count} times in post #{id}; must match exactly once."}
+        except service.ConcurrentModification:
+            current = await service.get_post(db, id)
+            return {
+                "error": f"post #{id} has changed since if_match was captured",
+                "current": current.model_dump() if current is not None else None,
+            }
+    return post.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Append content to the end of a post instead of resending the whole body. A "
+        "blank line is inserted before it unless the post is currently empty. Pass "
+        "if_match (a post's etag from a prior response) to reject the append if the "
+        "post changed since you read it."
+    )
+)
+async def append_post(id: int, content: str, if_match: str | None = None) -> dict:
+    metrics.record_tool_call("append_post")
+    async with _db() as db:
+        try:
+            post = await service.append_post(db, id, content, if_match=if_match)
+        except service.PostNotFound:
+            return {"error": f"Post #{id} not found."}
+        except service.ConcurrentModification:
+            current = await service.get_post(db, id)
+            return {
+                "error": f"post #{id} has changed since if_match was captured",
+                "current": current.model_dump() if current is not None else None,
+            }
     return post.model_dump()
 
 
