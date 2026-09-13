@@ -419,7 +419,12 @@ async def rename_tag(tag: str, new_name: str) -> dict:
     if not cleaned:
         return {"error": "new_name must contain at least one letter, digit, hyphen or underscore."}
     async with _db() as db:
-        result = await service.rename_tag(db, tag, cleaned)
+        try:
+            result = await service.rename_tag(db, tag, cleaned)
+        except service.InvalidTag:
+            # `InvalidTag` carries no message (REST supplies its own static
+            # detail too — see routes/tags.py) — `str(exc)` here would be "".
+            return {"error": "tag must contain at least one letter, digit, hyphen or underscore."}
     return result.model_dump()
 
 
@@ -637,6 +642,8 @@ async def list_attachments(post_id: int | None = None, folder: str | None = None
             result = await service.list_attachments(db, post_id=post_id, folder=folder)
         except service.PostNotFound:
             return {"error": f"Post #{post_id} not found."}
+        except service.InvalidFolder as exc:
+            return {"error": str(exc)}
     return result.model_dump()
 
 

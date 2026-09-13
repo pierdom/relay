@@ -404,6 +404,52 @@ async def test_no_since_returns_most_recent_limit(client):
     assert items[0]["seq"] > items[1]["seq"]   # newest first
 
 
+# ── K-4: list_changes must clamp `limit` like every sibling paginated call ───
+#
+# REST is protected by FastAPI's own `Query(ge=1, le=200)`, but `changes.py`
+# itself never imported/applied the `_clamp` helper every other paginated
+# function (`list_posts`, `get_post_history`, `list_deleted_posts`) already
+# uses — so a direct call, or the MCP tool (which passes `limit` straight
+# through, no validation layer above it), was unprotected.
+
+
+def test_clamp_limit_bounds_negative_zero_and_huge_values():
+    assert changes._clamp_limit(-1) == 1
+    assert changes._clamp_limit(0) == 1
+    assert changes._clamp_limit(5) == 5
+    assert changes._clamp_limit(10_000) == changes._MAX_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_list_changes_limit_zero_is_not_silently_empty(client):
+    """`limit=0` used to pass straight through to SQL's `LIMIT 0` — silently
+    empty, indistinguishable from "nothing has changed"."""
+    await _create(client, "Nonzero Limit Check")
+    db = await _db()
+    rows = await changes.list_changes(db, limit=0)
+    await db.close()
+    assert rows, "limit=0 must not silently look like an empty changelog"
+
+
+@pytest.mark.asyncio
+async def test_list_changes_negative_limit_is_bounded_not_unbounded(client):
+    """SQLite treats a negative `LIMIT` as unbounded — `limit=-1` used to
+    return the *entire* changelog in one response."""
+    for i in range(3):
+        await _create(client, f"Negative Limit Check {i}")
+    db = await _db()
+    rows = await changes.list_changes(db, limit=-1)
+    await db.close()
+    assert len(rows) <= changes._MAX_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_list_changes_mcp_tool_clamps_limit(client):
+    await _create(client, "MCP Limit Check")
+    out = await mcp_server.list_changes(limit=-1)
+    assert len(out["items"]) <= 200
+
+
 # ── the regression test that matters most: SSE reconnect replays edits/deletes
 #    to posts that already existed, not just brand-new ones (audit B-10/G-07) ─
 
