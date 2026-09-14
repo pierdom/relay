@@ -31,7 +31,7 @@ relay exposes the full feed API as **26 MCP tools** so Claude (or any MCP-capabl
 | `list_tags` | List all tags with post counts |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`); pass neither to remove it |
 | `rename_tag` | Rename a tag across every post that carries it, in one atomic pass |
-| `lint_vault` | Check the vault against the rules in #0 (relay #198, N-5): missing/zero tags, stale Inbox placement, broken links, H1/title drift, stale hub/plan, zero backlinks, unused tag config, zero embedding chunks, #0's stated post count. Read-only |
+| `lint_vault` | Check the vault against the rules in #0 (relay #198, N-5): missing/zero tags, stale Inbox placement, broken links/attachment embeds, missing/drifted H1, stale hub/plan, zero backlinks, unused tag config, zero embedding chunks, #0's stated post count. Link/heading scanning ignores code spans/fences. Read-only |
 
 ## Partial edits and optimistic concurrency
 

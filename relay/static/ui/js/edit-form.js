@@ -12,7 +12,7 @@
  */
 
 import { apiFetch, apiSend } from './api.js';
-import { escHtml, fmtBytes, toDatetimeLocal, toUtcIso } from './util.js';
+import { CODE_SPAN_RE, escHtml, fmtBytes, toDatetimeLocal, toUtcIso } from './util.js';
 
 // ── Attachment upload (drag/drop, paste, file picker) ──────────────────────
 
@@ -121,12 +121,24 @@ export async function confirmDeleteAttachment(name) {
 // this app makes.
 //
 // "Broken" here means the same thing GET /lint's broken_link rule means —
-// relay.links.WIKILINK_RE/IDREF_RE's definition, not the richer render-time
-// rules main.js's post-viewer uses (which treat an unresolved ![[x.png]] as
-// an attachment embed, not a broken link) — so what lights up here is
-// exactly what a lint finding would flag, not a superset or subset of it.
+// relay.links.WIKILINK_RE/IDREF_RE's definition (fenced/inline code excluded,
+// same as the lint scanner — relay #198 N-5 follow-up), not the richer
+// render-time rules main.js's post-viewer uses. Two things this overlay
+// deliberately does *not* replicate from the lint rule set: a bare #N below
+// 10 or above the id high-water mark still lights up here (this is a live
+// "does this resolve right now" check, not a "worth a vault-wide finding"
+// judgment), and a plain [[file.pdf]]-shaped wikilink lights up as broken
+// rather than distinguishing wikilink_to_filename — a second highlight
+// color for "wrong syntax" isn't worth it for what's meant to be a quick
+// visual nudge, not a rule browser.
+//
+// The negative lookbehind on WIKILINK_RE excludes a leading "!": an
+// attachment embed resolves against files, not post titles, and this
+// overlay has no attachment list to check it against — painting every
+// ![[real-image.png]] red regardless of whether the file exists would be
+// worse than not flagging embeds at all.
 
-const WIKILINK_RE = /\[\[([^\]|#]+?)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g;
+const WIKILINK_RE = /(?<!!)\[\[([^\]|#\n]+?)(?:#[^\]|\n]+)?(?:\|[^\]\n]+)?\]\]/g;
 const IDREF_RE = /(?<![\w#])#(\d{1,5})\b/g;
 
 // Cached across calls: browsing the lint pane opens a fresh buildEditForm per
@@ -157,16 +169,24 @@ async function loadLinkIndex() {
  * wikilink target shaped like a bare number could in principle also match
  * the id-ref pattern inside its own brackets — sorted by start and any span
  * starting before the previous one's end is dropped rather than nested,
- * since malformed markup is worse here than the one dropped highlight. */
+ * since malformed markup is worse here than the one dropped highlight.
+ * A match starting inside a fenced/inline code span is dropped outright: a
+ * post documenting relay's own link syntax must not paint its own examples
+ * as broken (relay #198 N-5 follow-up). */
 function findLinkSpans(text, linkIndex) {
+  const codeSpans = [...text.matchAll(CODE_SPAN_RE)].map(m => [m.index, m.index + m[0].length]);
+  const inCode = (pos) => codeSpans.some(([start, end]) => pos >= start && pos < end);
+
   const raw = [];
   let m;
   WIKILINK_RE.lastIndex = 0;
   while ((m = WIKILINK_RE.exec(text))) {
+    if (inCode(m.index)) continue;
     raw.push({ start: m.index, end: m.index + m[0].length, broken: !linkIndex.titles.has(m[1].trim().toLowerCase()) });
   }
   IDREF_RE.lastIndex = 0;
   while ((m = IDREF_RE.exec(text))) {
+    if (inCode(m.index)) continue;
     raw.push({ start: m.index, end: m.index + m[0].length, broken: !linkIndex.ids.has(Number(m[1])) });
   }
   raw.sort((a, b) => a.start - b.start);

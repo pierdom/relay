@@ -8,6 +8,22 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.10.4] — 2026-09-14
+
+A second real-vault run of `lint_vault` found `h1_title_mismatch` false-positiving on ~20 of 32 findings, plus duplicate findings for a repeated broken ref. Root-caused, fixed, and used as the occasion for a full audit of every lint-adjacent file touched this cycle (relay #198, N-5 follow-up round 2).
+
+### Added
+- `wikilink_to_filename` — a *plain* `[[...]]` wikilink whose target is a filename (should be an embed or attachment) is its own warning, not `broken_link`
+- `LintFinding.occurrences` — the four link rules now report one finding per distinct broken target per post, not one per mention; the lint panel shows a `(×N)` suffix when it's above 1
+- `link_to_deleted_post` is suppressed when the deleted post carried a rotation tag (`digest`, etc.) at deletion time — read from its last revision — since a link to a routinely-rotated post is expected to keep "breaking" forever
+
+### Fixed
+- `h1_title_mismatch`: the H1-vs-title comparison stripped inline code spans from the H1 with blanks but never touched the title, so any H1 containing backticked text (a real, common style) always compared unequal — reported drift on ~20 of 32 findings in one real vault, none of them genuine. Now compares with backticks removed (not blanked) on both sides and displays the literal raw H1 in `detail`, which used to show the corrupted blanked form
+- The lint panel's `RULE_LABELS` map and the `lint_vault` MCP description hadn't been updated for the last two rounds' new rules — findings for `h1_missing`/`broken_attachment_embed` rendered with a raw rule id and no filter chip
+- `edit-form.js`'s broken-link highlighter (independent of `lint_vault`, found during the audit) never excluded `![[embeds]]` or fenced/inline code — a valid image embed painted red, and a post documenting relay's own `[[wikilink]]` syntax highlighted its own examples. Now shares the same code-span exclusion (`util.js`'s `CODE_SPAN_RE`, also adopted by `main.js`) and skips embeds outright
+
+---
+
 ## [1.10.3] — 2026-09-14
 
 `lint_vault`'s first run against a real 132-post vault produced ~230 findings, ~70% false positives, all on `broken_link` — relay #198's N-5 follow-up (L-1..L-8).

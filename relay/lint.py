@@ -13,50 +13,25 @@ cheap follow-up queries, no writes. A rule that depends on a feature that is
 off (history, embeddings) is skipped and named in ``LintReport.skipped_rules``
 rather than raising — a lint pass should degrade like ``/status``, not 503.
 
-``LintFinding.match`` carries the exact matched substring (``link.raw``, e.g.
-``"[[Title]]"`` or ``"#42"``) for ``broken_link``/``link_to_deleted_post``/
-``broken_attachment_embed`` — the rules with a single, unambiguous spot in
-the content to point at — so a client can jump straight to it instead of
-making someone search a long post for a wikilink that looks just like the
-surrounding text. Every other rule leaves it ``None``: there is no single
-substring "missing a domain tag" is about.
+``LintFinding.match`` carries the exact matched substring for the four link
+rules (``broken_link``, ``link_to_deleted_post``, ``broken_attachment_embed``,
+``wikilink_to_filename``) — the ones with a single, unambiguous spot in the
+content to point at — so a client can jump straight to it instead of making
+someone search a long post for a wikilink that looks just like the
+surrounding text. Every other rule leaves it ``None``. Those same four rules
+report one finding per distinct ``(rule, match)`` pair per post, not one per
+mention, with the real count in ``occurrences`` — see the per-post link loop
+in ``run()`` for why and how (relay #198 N-5 follow-up, L-10).
 
-Link scanning (``relay.links.extract_links``, used below) runs against
-``markdown_scan.strip_code``-ped content, not the raw post — relay #198's
-N-5 follow-up (first real run against a 132-post vault, ~230 findings, ~70%
-false positives, all on ``broken_link``) found that a post *documenting*
-relay's own link syntax got flagged for its own examples, and a post with a
-fenced shell/TOML snippet containing ``[[...]]`` got flagged for that
-snippet's syntax. Two more id-ref false positives from the same run don't
-need code-exclusion: a bare ``#N`` below 10 or above the vault's current
-id high-water-mark (``vault.read_id_counter()``) is excluded from
-``broken_link``/``link_to_deleted_post`` entirely, on the read that a
-footnote marker, a procedure step, or a GitHub issue/PR number collides
-with a real post id far more often than a genuine cross-link does at either
-end of that range — ids 1-9 predate this vault's own conventions, and
-nothing above the high-water mark has ever been issued to anything.
-``!``-prefixed refs with a file extension (``![[photo.png]]``) are Obsidian
-attachment embeds, not post links — resolved against the attachment table
-(``vault.list_attachments``) instead, under their own rule,
-``broken_attachment_embed``, so an unresolved one reads as what it is
-rather than as a link to a nonexistent post. An extension-less embed
-(``![[Some Note]]``, a note transclusion) still resolves against post
-titles like an ordinary wikilink, matching main.js's own renderer.
-
-The master document (id=0) is exempt from the *convention* rules — see
-``lint_this_post`` in ``run()``: ``zero_tags``/``missing_domain_tag``/
-``missing_type_tag``, ``stale_inbox``, ``h1_missing``/``h1_title_mismatch``,
-``stale_last_updated``, and ``zero_chunks`` — since a root index reasonably
-breaks tag, folder, H1 and staleness conventions an ordinary post follows
-(no domain tag by design, possibly zero tags at all, a stylized H1), and its
-embedding coverage is no more a convention than any of those. It is not
-exempt from link checks (``broken_link``/``link_to_deleted_post``): those
-are factual defects, not conventions #0 might reasonably skip, and arguably
-matter more there than anywhere else — an index's whole job is linking
-correctly. It is also still walked for outbound links regardless (so posts
-it references get credit for the backlink) and still covered by
-``master_doc_post_count``, which checks its own stated claim against
-reality.
+The master document (id=0) is exempt from every *convention* rule —
+``zero_tags``/``missing_domain_tag``/``missing_type_tag``, ``stale_inbox``,
+``h1_missing``/``h1_title_mismatch``, ``stale_last_updated``, ``zero_chunks``
+— since a root index reasonably breaks tag, folder, H1 and staleness
+conventions an ordinary post follows. It is *not* exempt from the link
+rules: a broken cross-link is a factual defect there too, arguably more so
+(an index's whole job is linking correctly), and it's still walked for
+outbound links so posts it references get backlink credit. See
+``lint_this_post`` in ``run()``.
 """
 from __future__ import annotations
 
@@ -65,7 +40,7 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
-from . import database, folders, history, links, markdown_scan, vault, vectors
+from . import database, folders, frontmatter, history, links, markdown_scan, vault, vectors
 from .config import settings
 from .models import LintFinding, LintReport
 from .service._common import _tags_from_sentinel
@@ -79,6 +54,9 @@ TYPE_TAGS = {"reference", "plan", "briefing", "digest", "project", "profile", "h
 # on these is normal, not a finding. Mirrors folders.FALLBACK's digest-shaped
 # entries exactly (daily-digest/news-digest included) — that table already
 # names every tag this vault treats as "routes to Digests/, not linked back to".
+# Reused below for link_to_deleted_post: a deleted post that carried one of
+# these tags was never going to stay linkable either — same "dated, expected
+# to rot" judgment, one constant for both.
 _BACKLINK_EXEMPT_TAGS = {"digest", "news", "daily-digest", "news-digest", "briefing", "financial-analyst"}
 
 # Hub/plan posts are meant to be kept current; flag one that hasn't been
@@ -87,9 +65,8 @@ _BACKLINK_EXEMPT_TAGS = {"digest", "news", "daily-digest", "news-digest", "brief
 STALE_HUB_PLAN_DAYS = 60
 
 # An unresolved #N below this is excluded from broken_link/link_to_deleted_post
-# entirely — see the module docstring's L-5 paragraph. Single digits predate
-# this vault's own conventions and collide completely with footnote markers
-# and procedure steps in ordinary prose.
+# entirely: single digits predate this vault's own conventions and collide
+# completely with footnote markers and procedure steps in ordinary prose.
 _MIN_MEANINGFUL_ID_REF = 10
 
 # Requires a middot/dash immediately before the number — #0's own convention
@@ -99,13 +76,35 @@ _MIN_MEANINGFUL_ID_REF = 10
 # breakdown mentioned before the real total).
 _POST_COUNT_RE = re.compile(r"[·-]\s*(\d+)\s*post\b", re.IGNORECASE)
 _H1_RE = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
+_WHITESPACE_RE = re.compile(r"\s+")
+
+# Per-post link findings, keyed by (rule, exact matched text) so a target
+# mentioned several times collapses into one finding with occurrences > 1
+# instead of one per mention. Severity and detail wording live together here
+# rather than at each append site.
+_LINK_RULES: dict[str, tuple[str, str]] = {
+    "broken_link": ("error", "{match} does not resolve to any existing post."),
+    "link_to_deleted_post": ("error", "{match} points at a deleted post — restore it or drop the link."),
+    "broken_attachment_embed": ("error", "{match} does not resolve to any existing attachment."),
+    "wikilink_to_filename": (
+        "warning",
+        "{match} is a plain wikilink to a filename — embed it (![[...]]) or attach and drop the link.",
+    ),
+}
+
+
+def _collapse_whitespace(text: str) -> str:
+    return _WHITESPACE_RE.sub(" ", text).strip()
 
 
 def _finding(
     rule: str, severity: str, detail: str, *,
-    post_id: int | None = None, title: str | None = None, match: str | None = None,
+    post_id: int | None = None, title: str | None = None, match: str | None = None, occurrences: int = 1,
 ) -> LintFinding:
-    return LintFinding(rule=rule, severity=severity, post_id=post_id, title=title, detail=detail, match=match)
+    return LintFinding(
+        rule=rule, severity=severity, post_id=post_id, title=title,
+        detail=detail, match=match, occurrences=occurrences,
+    )
 
 
 def _days_since(iso: str | None) -> float | None:
@@ -134,16 +133,33 @@ async def run(db: aiosqlite.Connection) -> LintReport:
     # Deleted-post lookup, for classifying a broken link as "points at
     # something that used to exist" rather than a plain typo. Best-effort:
     # skipped (not an error) when history is off, same as /status's approach
-    # to a degraded feature.
-    deleted_ids: set[int] = set()
-    deleted_titles: set[str] = set()
+    # to a degraded feature. Keyed by id and by normalized title, both to the
+    # same Deletion, so a link_to_deleted_post candidate can look up what
+    # tags that post carried when it went away — see _is_ephemeral below.
+    deleted_by_id: dict[int, history.Deletion] = {}
+    deleted_by_title: dict[str, history.Deletion] = {}
     if history.enabled():
         for d in await history.deletions(limit=200):
             if d.post_id not in ids:
-                deleted_ids.add(d.post_id)
-                deleted_titles.add(links.norm_title(d.title))
+                deleted_by_id[d.post_id] = d
+                deleted_by_title[links.norm_title(d.title)] = d
     else:
         skipped.append("link_to_deleted_post: vault history is disabled")
+
+    # A link to a deleted post that carried a rotation/expiry tag (the same
+    # ones zero_backlinks already exempts, above) is expected to keep
+    # happening — a digest referencing last week's now-retention-deleted
+    # digests, forever — so it's suppressed rather than re-reported every
+    # run. Best-effort (a blob read can fail) and memoized per post id: more
+    # than one referencing post can point at the same deleted one.
+    _ephemeral_cache: dict[int, bool] = {}
+
+    async def _is_ephemeral(d: history.Deletion) -> bool:
+        if d.post_id not in _ephemeral_cache:
+            text = await history.blob(d.sha, d.path)
+            tags = frontmatter.parse(text)[0]["tags"] if text is not None else []
+            _ephemeral_cache[d.post_id] = any(t in _BACKLINK_EXEMPT_TAGS for t in tags)
+        return _ephemeral_cache[d.post_id]
 
     # Zero-chunk posts (relay #253's own posts_missing_ids, reused rather than
     # re-deriving chunking here — see vectors.unembedded_post_ids).
@@ -161,17 +177,8 @@ async def run(db: aiosqlite.Connection) -> LintReport:
             row["updated_at"], row["created_at"],
         )
         tags = _tags_from_sentinel(tags_raw)
-        # The master document is exempt from every rule gated on this flag
-        # below (tags, folder placement, H1/title, staleness, and embedding
-        # coverage) — a root index reasonably breaks conventions an ordinary
-        # post follows (no domain tag by design, possibly zero tags at all,
-        # a stylized H1). It is NOT exempt from the link checks further down
-        # (those run unconditionally): a broken cross-link is a factual
-        # defect, not a convention #0 might reasonably skip. It is also
-        # still walked for outbound links regardless, so posts it references
-        # count their backlink from it, and master_doc_post_count (below,
-        # after this loop) still checks its own stated count against
-        # reality — that rule is about #0's accuracy, not a convention either.
+        # Gates every convention rule below, but not the link checks further
+        # down (those run unconditionally) — see the module docstring for why.
         lint_this_post = pid != 0
 
         if lint_this_post:
@@ -200,25 +207,43 @@ async def run(db: aiosqlite.Connection) -> LintReport:
                     post_id=pid, title=title,
                 ))
 
-            # Scans stripped content: three of the L-6 follow-up's "no H1"
-            # false readings (posts 193, 257, 269) were the rule picking up
-            # the first heading-shaped line inside a fenced code block —
-            # e.g. a banner comment like "# --- SYSTEM METRICS ---" — instead
-            # of correctly finding no real H1 at all.
-            h1_match = _H1_RE.search(markdown_scan.strip_code(content))
+            # strip_fences, not strip_code: a heading-shaped line inside a
+            # fenced block must not count as the real H1 (posts 193, 257, 269
+            # in the L-6 follow-up), but a real H1 containing inline code is
+            # real content of that line, not a syntax example — strip_code's
+            # inline-span blanking corrupted the comparison below for any
+            # post whose H1 legitimately had one (relay #198 N-5, L-9).
+            h1_match = _H1_RE.search(markdown_scan.strip_fences(content))
             if h1_match is None:
                 findings.append(_finding(
                     "h1_missing", "warning",
                     "No H1 in the body at all — legacy post, predates the H1/title convention.",
                     post_id=pid, title=title,
                 ))
-            elif h1_match.group(1).strip() != title.strip():
-                findings.append(_finding(
-                    "h1_title_mismatch", "warning",
-                    f"H1 reads {h1_match.group(1).strip()!r}, filename/title is {title!r} — "
-                    "drifted after a rename (a sanitized filename does not rewrite the body's H1).",
-                    post_id=pid, title=title,
-                ))
+            else:
+                # A backtick is markdown formatting on an otherwise-matching
+                # word, not sanitizer-relevant content — the title side is
+                # implicitly backtick-free already (the filename sanitizer
+                # strips them), so comparing raw text on both sides made an
+                # H1 that legitimately styles part of itself as code compare
+                # unequal to a title that never had backticks to begin with
+                # (relay #198 N-5, L-9). Stripped only for *this* comparison:
+                # the finding below still quotes raw_h1 (backticks and all)
+                # once it decides there's a real mismatch, since that's the
+                # exact text a person needs to see to diagnose it (P1 of the
+                # same follow-up — the old blanked-and-collapsed detail text
+                # was what made these false positives hard to tell apart
+                # from real drift).
+                raw_h1 = _collapse_whitespace(h1_match.group(1))
+                h1_text = raw_h1.replace("`", "")
+                title_text = _collapse_whitespace(title)
+                if h1_text != title_text:
+                    findings.append(_finding(
+                        "h1_title_mismatch", "warning",
+                        f"H1 reads {raw_h1!r}, filename/title is {title_text!r} — "
+                        "drifted after a rename (a sanitized filename does not rewrite the body's H1).",
+                        post_id=pid, title=title,
+                    ))
 
             if ("hub" in tags or "plan" in tags):
                 # updated_at is NULL until a post's first edit (service/posts.py
@@ -241,45 +266,61 @@ async def run(db: aiosqlite.Connection) -> LintReport:
         # a factual defect in #0 too (arguably more worth catching there: an
         # index's whole job is to link correctly), not a convention #0 might
         # reasonably not follow.
+        #
+        # Collected per post as (rule, match) -> occurrences rather than
+        # appended straight to findings: a footnote-style ref repeated
+        # several times in one post used to produce one identical finding
+        # per mention (relay #198 N-5 follow-up, L-10). Emitted below once
+        # this post's links are all classified.
+        link_hits: dict[tuple[str, str], int] = {}
+        deleted_hit_source: dict[str, history.Deletion] = {}
         for link in links.extract_links(content, title_to_id, ids):
             if link.kind == "embed":
                 # Attachment embeds never count as a post backlink and never
                 # go through the id-ref/deleted-post classification below —
                 # they resolve against files, not posts.
                 if link.target not in attachment_names:
-                    findings.append(_finding(
-                        "broken_attachment_embed", "error",
-                        f"{link.raw} does not resolve to any existing attachment.",
-                        post_id=pid, title=title, match=link.raw,
-                    ))
+                    key = ("broken_attachment_embed", link.raw)
+                    link_hits[key] = link_hits.get(key, 0) + 1
                 continue
             if link.resolved_id is not None:
                 inbound_counts[link.resolved_id] = inbound_counts.get(link.resolved_id, 0) + 1
                 continue
             if link.kind == "id" and not (_MIN_MEANINGFUL_ID_REF <= int(link.target) <= high_water_mark):
-                # Below _MIN_MEANINGFUL_ID_REF or above the id high-water
-                # mark: not a plausible post reference at all (footnote,
-                # procedure step, GitHub issue/PR, or an id never issued) —
-                # see the module docstring's L-5 paragraph. Excluded outright
-                # rather than downgraded to a warning: a false positive
-                # softened to a lower severity is still a false positive.
+                # Not a plausible post reference at all (footnote, procedure
+                # step, GitHub issue/PR, or an id never issued) — excluded
+                # outright rather than downgraded to a warning: a false
+                # positive softened to a lower severity is still one.
                 continue
-            points_at_deleted = (
-                (link.kind == "id" and int(link.target) in deleted_ids)
-                or (link.kind == "wiki" and links.norm_title(link.target) in deleted_titles)
+            if link.kind == "wiki" and links.ATTACHMENT_EXT_RE.search(link.target):
+                # A *plain* [[...]] whose target is a filename was never
+                # going to resolve as a post title — the wrong syntax, not a
+                # missing post (relay #198 N-5 follow-up, L-7).
+                key = ("wikilink_to_filename", link.raw)
+                link_hits[key] = link_hits.get(key, 0) + 1
+                continue
+            deletion = (
+                deleted_by_id.get(int(link.target)) if link.kind == "id"
+                else deleted_by_title.get(links.norm_title(link.target))
             )
-            if points_at_deleted:
-                findings.append(_finding(
-                    "link_to_deleted_post", "error",
-                    f"{link.raw} points at a deleted post — restore it or drop the link.",
-                    post_id=pid, title=title, match=link.raw,
-                ))
-            else:
-                findings.append(_finding(
-                    "broken_link", "error",
-                    f"{link.raw} does not resolve to any existing post.",
-                    post_id=pid, title=title, match=link.raw,
-                ))
+            rule = "link_to_deleted_post" if deletion is not None else "broken_link"
+            key = (rule, link.raw)
+            link_hits[key] = link_hits.get(key, 0) + 1
+            if deletion is not None:
+                deleted_hit_source[link.raw] = deletion
+
+        for (rule, match), occurrences in link_hits.items():
+            if rule == "link_to_deleted_post" and await _is_ephemeral(deleted_hit_source[match]):
+                # A digest linking to last week's already-rotated digests
+                # will make this finding again next week, forever — the
+                # vault-side fix is separate; this is defence in depth
+                # against re-reporting the same expected rot every run.
+                continue
+            severity, template = _LINK_RULES[rule]
+            findings.append(_finding(
+                rule, severity, template.format(match=match),
+                post_id=pid, title=title, match=match, occurrences=occurrences,
+            ))
 
         if lint_this_post and pid in zero_chunk_ids:
             # "likely a code-only body" is a real cause but not the only

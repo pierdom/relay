@@ -650,6 +650,13 @@ class LintFinding(BaseModel):
             "locate and jump to it. Absent for findings with no single in-content location."
         ),
     )
+    occurrences: int = Field(
+        default=1,
+        description=(
+            "How many times this exact (rule, match) pair appears in the post — a link rule "
+            "reports one finding per distinct broken target per post, not one per mention."
+        ),
+    )
 
 
 class LintReport(BaseModel):

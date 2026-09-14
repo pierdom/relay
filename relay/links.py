@@ -35,6 +35,17 @@ IDREF_RE = re.compile(r"(?<![\w#])#(\d{1,5})\b")
 # an actual file and belongs to the attachment table instead of the posts
 # table — same split main.js's renderer already makes.
 _HAS_EXT_RE = re.compile(r"\.[a-z0-9]{1,12}$", re.IGNORECASE)
+# A curated extension list, not _HAS_EXT_RE's generic one: this flags a
+# *plain* [[...]] wikilink (no "!") whose target is a filename — the wrong
+# syntax (should be an embed, or dropped), lint.py's wikilink_to_filename.
+# _HAS_EXT_RE would also catch a dotted note title like [[Section 2.1]], which
+# is not a file — main.js's own plain-wikilink path (linkifySegment's
+# ATTACH_EXT_RE) draws the same curated line for the same reason.
+ATTACHMENT_EXT_RE = re.compile(
+    r"\.(png|jpe?g|gif|webp|svg|avif|bmp|pdf|canvas|docx?|xlsx?|pptx?|csv|txt"
+    r"|rtf|odt|ods|zip|epub|mp3|m4a|wav|flac|ogg|aac|opus|mp4|mov|webm|mkv|avi)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)

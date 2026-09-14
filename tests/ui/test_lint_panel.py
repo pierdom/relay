@@ -302,6 +302,27 @@ def test_filter_chips_narrow_the_list_to_one_rule(page, relay_server):
     assert all(t.strip() == label for t in rows_text), f"filter did not narrow to one rule: {rows_text}"
 
 
+def test_a_repeated_broken_ref_shows_its_occurrence_count(page, relay_server):
+    """relay #198 N-5 follow-up: the same broken wikilink mentioned three
+    times in one post is one finding with occurrences=3, not three identical
+    rows — that count still has to be visible, or fixing the one visible
+    mention could leave the other two unnoticed. A wikilink, not a #N id-ref:
+    the latter's high-water-mark exclusion would need a specific id range
+    this session-scoped, ever-growing vault can't guarantee across a full
+    test run."""
+    made = _api_post(relay_server, {
+        "title": "Lint Occurrences Target", "tags": ["homelab", "reference"],
+        "content": "See [[Nonexistent Lint Target]] here, [[Nonexistent Lint Target]] again, "
+                   "and once more: [[Nonexistent Lint Target]].",
+    })
+
+    page.reload()
+    open_lint(page)
+    row = page.locator(f'.lm-finding[data-post-id="{made["id"]}"]')
+    row.first.wait_for(timeout=10_000)
+    assert "(×3)" in row.first.inner_text()
+
+
 def test_selecting_a_broken_link_finding_selects_and_highlights_the_broken_text(page, relay_server):
     """The whole point of `LintFinding.match`: land on the exact spot that's
     wrong in a long post, not just the post it's in."""

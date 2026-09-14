@@ -32,9 +32,12 @@ const RULE_LABELS = {
   missing_domain_tag: 'Missing domain tag',
   missing_type_tag: 'Missing type tag',
   stale_inbox: 'Stuck in Inbox',
+  h1_missing: 'H1 missing',
   h1_title_mismatch: 'H1 / title mismatch',
   broken_link: 'Broken link',
   link_to_deleted_post: 'Links to a deleted post',
+  broken_attachment_embed: 'Broken attachment embed',
+  wikilink_to_filename: 'Wikilink to a filename',
   master_doc_post_count: '#0 post count is stale',
   stale_last_updated: 'Stale hub/plan',
   zero_backlinks: 'Zero backlinks',
@@ -181,7 +184,11 @@ function findingRow(item, panes) {
   dot.className = `sm-dot ${item.severity === 'error' ? 'bad' : 'warn'}`;
   const rule = document.createElement('span');
   rule.className = 'hm-msg';
-  rule.textContent = RULE_LABELS[item.rule] || item.rule;
+  // occurrences > 1: the same broken target mentioned several times in one
+  // post is one finding, not one per mention (relay #198 N-5 follow-up) —
+  // the count still needs to be visible somewhere, or "fixed the one ref"
+  // could leave the other mentions behind unnoticed.
+  rule.textContent = (RULE_LABELS[item.rule] || item.rule) + (item.occurrences > 1 ? ` (×${item.occurrences})` : '');
   head.append(dot, rule);
 
   const sub = document.createElement('span');
