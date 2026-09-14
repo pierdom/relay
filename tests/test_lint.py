@@ -7,6 +7,7 @@ relay.vectors). One test per rule, written to fail before the rule exists.
 """
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 
@@ -17,12 +18,13 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from relay import database, embedding, history, mcp_server, vectors
+from relay import database, embedding, history, mcp_server, vault, vectors
 from relay.auth import require_api_key
 from relay.config import settings
 from relay.main import app
 
 AUTH = {"Authorization": "Bearer test-key"}
+PNG = base64.b64encode(b"\x89PNG\r\n\x1a\nhello").decode()
 
 
 @pytest_asyncio.fixture
@@ -74,7 +76,7 @@ async def test_clean_vault_has_no_findings(client):
     # tags out of the box — give it some, as a real vault's #0 would have.
     r = await client.patch("/posts/0", json={"tags": ["index", "meta", "reference"]}, headers=AUTH)
     assert r.status_code == 200, r.text
-    await _create(client, title="Fine", tags=["homelab", "reference"])
+    await _create(client, title="Fine", content="# Fine\n\nbody", tags=["homelab", "reference"])
     # Link to it from #0 so it isn't also flagged zero_backlinks.
     r = await client.patch("/posts/0", json={"content": "# Master Document\n\nSee [[Fine]].\n"}, headers=AUTH)
     assert r.status_code == 200, r.text
@@ -96,7 +98,7 @@ async def test_master_doc_is_exempt_from_convention_rules(client):
     report = await _lint(client)
     for rule in (
         "zero_tags", "missing_domain_tag", "missing_type_tag",
-        "stale_inbox", "h1_title_mismatch", "stale_last_updated", "zero_backlinks",
+        "stale_inbox", "h1_missing", "h1_title_mismatch", "stale_last_updated", "zero_backlinks",
     ):
         assert _find(report, rule, 0) is None, f"{rule} fired on the exempt master document"
 
@@ -106,9 +108,11 @@ async def test_master_doc_is_not_exempt_from_link_checks(client):
     """The convention exemption is partial: a broken cross-link in #0 is a
     factual defect, not a convention #0 might reasonably skip, and matters
     more there than anywhere else — an index's whole job is linking right."""
+    vault.write_id_counter(50)  # #37 must be *plausible* (below the high-water
+    # mark) to count as broken rather than excluded as never-issued — see L-5.
     r = await client.patch(
         "/posts/0",
-        json={"content": "# Master Document\n\nSee [[Nonexistent Post]] and #99999.\n"},
+        json={"content": "# Master Document\n\nSee [[Nonexistent Post]] and #37.\n"},
         headers=AUTH,
     )
     assert r.status_code == 200, r.text
@@ -175,10 +179,12 @@ async def test_h1_title_mismatch_after_rename(client):
 
 @pytest.mark.asyncio
 async def test_broken_wikilink_and_idref(client):
+    vault.write_id_counter(50)  # #37: plausible (below the high-water mark),
+    # not single-digit — a genuine miss, not one of L-5's excluded classes.
     post = await _create(
         client,
         title="Linker",
-        content="See [[Nonexistent Post]] and #99999.",
+        content="See [[Nonexistent Post]] and #37.",
         tags=["dev", "reference"],
     )
     report = await _lint(client)
@@ -186,18 +192,176 @@ async def test_broken_wikilink_and_idref(client):
     assert len(broken) == 2
 
 
+# ── N-5 follow-up (relay #198, L-1..L-8): the first real run's false positives ──
+
+
+@pytest.mark.asyncio
+async def test_fenced_toml_is_not_scanned_for_wikilinks(client):
+    """L-2: a Telegraf config's `[[inputs.cpu]]` table-array headers are TOML
+    syntax, not wikilinks — the false positive that alone produced ~25
+    findings on one real post."""
+    await _create(
+        client, title="Telegraf Config", tags=["homelab", "reference"],
+        content="```toml\n[[inputs.cpu]]\npercpu = true\n\n[[outputs.influxdb_v2]]\nurl = \"x\"\n```\n",
+    )
+    report = await _lint(client)
+    assert not [i for i in report["items"] if i["rule"] == "broken_link"]
+
+
+@pytest.mark.asyncio
+async def test_fenced_bash_test_syntax_is_not_scanned(client):
+    """L-2: `[[ -n $VAR ]]` is a bash conditional, not a wikilink."""
+    await _create(
+        client, title="Deploy Script", tags=["homelab", "reference"],
+        content='```bash\nif [[ -n $HC_URL ]]; then\n  curl "$HC_URL"\nfi\n```\n',
+    )
+    report = await _lint(client)
+    assert not [i for i in report["items"] if i["rule"] == "broken_link"]
+
+
+@pytest.mark.asyncio
+async def test_backticked_wikilink_syntax_example_is_not_scanned(client):
+    """L-3: a post documenting relay's own link syntax (like #0, or this
+    very test file's subject) must not be flagged for its own examples."""
+    await _create(
+        client, title="Link Syntax Docs", tags=["dev", "reference"],
+        content="Wikilinks look like `[[Title]]` or `[[Title|alias]]`.\n",
+    )
+    report = await _lint(client)
+    assert not [i for i in report["items"] if i["rule"] == "broken_link"]
+
+
+@pytest.mark.asyncio
+async def test_wikilink_match_never_spans_more_than_one_line(client):
+    """L-4: an unclosed "[[" in prose used to keep matching across paragraphs
+    looking for the next "]]" anywhere in the file, producing a ~900-char
+    match. Confining every group to a single line makes that impossible."""
+    vault.write_id_counter(50)
+    await _create(
+        client, title="Unbalanced Bracket", tags=["dev", "reference"],
+        content="This mentions a lone [[ bracket in prose.\n\n" + ("filler text.\n\n" * 5) + "See #37.\n",
+    )
+    report = await _lint(client)
+    for item in report["items"]:
+        if item["match"]:
+            assert "\n" not in item["match"], f"match spans multiple lines: {item['match']!r}"
+
+
+@pytest.mark.asyncio
+async def test_single_digit_id_ref_in_a_numbered_list_is_ignored(client):
+    """L-5: `#3` in a procedure/footnote context collides completely with a
+    real post id — excluded on principle rather than reported broken."""
+    await _create(
+        client, title="Procedure", tags=["homelab", "reference"],
+        content="Steps:\n\n1. First #1\n2. Second #2\n3. Third #3\n",
+    )
+    report = await _lint(client)
+    assert not [i for i in report["items"] if i["rule"] in ("broken_link", "link_to_deleted_post")]
+
+
+@pytest.mark.asyncio
+async def test_id_ref_above_the_high_water_mark_is_ignored(client):
+    """L-5: `#9999` is above anything this vault has ever issued — a GitHub
+    issue/PR number or similar, not a plausible post reference."""
+    await _create(
+        client, title="External Ref", tags=["dev", "reference"], content="See relay #9999 upstream.",
+    )
+    report = await _lint(client)
+    assert not [i for i in report["items"] if i["rule"] in ("broken_link", "link_to_deleted_post")]
+
+
+@pytest.mark.asyncio
+async def test_valid_attachment_embed_produces_no_finding(client):
+    """L-1: a real, existing attachment embed is not a post link and must
+    not be checked against post titles at all."""
+    r = await client.post("/attachments", json={"filename": "chart.png", "data": PNG}, headers=AUTH)
+    assert r.status_code == 201, r.text
+    await _create(client, title="Has A Chart", tags=["homelab", "reference"], content="![[chart.png]]\n")
+    report = await _lint(client)
+    assert not [i for i in report["items"] if i["rule"] in ("broken_link", "broken_attachment_embed")]
+
+
+@pytest.mark.asyncio
+async def test_dangling_attachment_embed_is_its_own_rule(client):
+    """L-1: an embed of a file that doesn't exist is a real defect, but the
+    fix is different from a broken post link — its own rule name."""
+    post = await _create(
+        client, title="Missing Attachment", tags=["homelab", "reference"], content="![[nope.png]]\n",
+    )
+    report = await _lint(client)
+    assert _find(report, "broken_link", post["id"]) is None
+    finding = _find(report, "broken_attachment_embed", post["id"])
+    assert finding is not None
+    assert finding["match"] == "![[nope.png]]"
+
+
+@pytest.mark.asyncio
+async def test_backticked_attachment_embed_syntax_example_is_not_scanned(client):
+    """L-3/L-7 (lint side): the exact false positive that motivated this
+    fix — an attachment name written as a literal syntax example."""
+    await _create(
+        client, title="Embed Syntax Docs", tags=["dev", "reference"],
+        content="Attachment embeds look like `![[watch_collection.png]]`.\n",
+    )
+    report = await _lint(client)
+    assert not [i for i in report["items"] if i["rule"] in ("broken_link", "broken_attachment_embed")]
+
+
+@pytest.mark.asyncio
+async def test_post_with_no_h1_gets_its_own_rule(client):
+    """L-6, Class B: a legacy post with no H1 at all is a different defect
+    from a drifted one, and the old rule reported a misleading 'mismatch'
+    against whatever heading it found first."""
+    post = await _create(
+        client, title="Reload systemd to pick up the new unit", tags=["homelab", "reference"],
+        content="## Steps\n\nRun the command.\n",
+    )
+    report = await _lint(client)
+    assert _find(report, "h1_title_mismatch", post["id"]) is None
+    assert _find(report, "h1_missing", post["id"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_sanitizer_stripped_h1_is_still_a_title_mismatch(client):
+    """L-6, Class A: the cosmetic case (a rename-stripped character) is a
+    real drift, distinct from having no H1 at all — must not collapse into
+    h1_missing."""
+    post = await _create(
+        client, title="Old: Title", content="# Old: Title\n\nbody", tags=["dev", "reference"]
+    )
+    r = await client.patch(f"/posts/{post['id']}", json={"title": "Old Title"}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    report = await _lint(client)
+    assert _find(report, "h1_missing", post["id"]) is None
+    assert _find(report, "h1_title_mismatch", post["id"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_h1_inside_a_fenced_block_does_not_count_as_the_real_h1(client):
+    """L-6: three of the original false readings (posts 193, 257, 269) came
+    from a heading-shaped line inside a fenced code block."""
+    post = await _create(
+        client, title="Disaster Recovery", tags=["homelab", "reference"],
+        content="```\n# ------- SYSTEM METRICS -------\n```\n\nReal body text.\n",
+    )
+    report = await _lint(client)
+    assert _find(report, "h1_title_mismatch", post["id"]) is None
+    assert _find(report, "h1_missing", post["id"]) is not None
+
+
 @pytest.mark.asyncio
 async def test_broken_link_findings_carry_the_exact_matched_text(client):
     """`match` is what a client (the lint pane's editor) locates in the
     content to jump straight to the broken span — it must be the literal
     substring, not a paraphrase, or a naive `content.indexOf(match)` misses."""
+    vault.write_id_counter(50)
     await _create(
-        client, title="Linker Two", content="See [[Nonexistent Post]] and #99999.", tags=["dev", "reference"],
+        client, title="Linker Two", content="See [[Nonexistent Post]] and #37.", tags=["dev", "reference"],
     )
     report = await _lint(client)
     broken = [i for i in report["items"] if i["rule"] == "broken_link"]
     matches = {i["match"] for i in broken}
-    assert matches == {"[[Nonexistent Post]]", "#99999"}
+    assert matches == {"[[Nonexistent Post]]", "#37"}
 
     # Every other rule has no single in-content location to point at.
     for item in report["items"]:
@@ -227,6 +391,19 @@ async def test_zero_backlinks_cleared_by_a_wikilink(client):
     await _create(client, title="Linker Two", content="See [[Linked Target]].", tags=["dev", "reference"])
     report = await _lint(client)
     assert _find(report, "zero_backlinks", target["id"]) is None
+
+
+@pytest.mark.asyncio
+async def test_findings_are_ordered_by_post_id_not_grouped_by_rule(client):
+    """zero_backlinks used to be computed in its own pass after every other
+    rule and landed grouped at the end regardless of post id, while
+    everything else was interleaved by post id purely by accident of loop
+    order — not a useful order to work through as a queue."""
+    await _create(client, title="Zero Tags One", tags=[])
+    await _create(client, title="Zero Tags Two", tags=[])
+    report = await _lint(client)
+    post_ids = [i["post_id"] for i in report["items"] if i["post_id"] is not None]
+    assert post_ids == sorted(post_ids), f"not ordered by post id: {post_ids}"
 
 
 @pytest.mark.asyncio
@@ -370,17 +547,24 @@ async def git_client(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs a git binary")
 async def test_link_to_deleted_post_is_distinguished_from_a_plain_broken_link(git_client):
+    # Filler posts push "Gone Post"'s own id past L-5's single-digit
+    # exclusion floor, so its #id reference is a genuine candidate rather
+    # than one excluded on sight for looking like a footnote marker.
+    for i in range(10):
+        await _create(git_client, title=f"Filler {i}", tags=["dev", "reference"])
     gone = await _create(git_client, title="Gone Post", tags=["dev", "reference"])
     r = await git_client.delete(f"/posts/{gone['id']}", headers=AUTH)
     assert r.status_code in (200, 204), r.text
+    vault.write_id_counter(50)  # #37: plausible (below the high-water mark)
+    # and never issued — a genuine miss, not one of L-5's excluded classes.
     await _create(
         git_client,
         title="Refers To Gone",
-        content=f"See [[Gone Post]] and #{gone['id']}, also #99999.",
+        content=f"See [[Gone Post]] and #{gone['id']}, also #37.",
         tags=["dev", "reference"],
     )
     report = await _lint(git_client)
     to_deleted = [i for i in report["items"] if i["rule"] == "link_to_deleted_post"]
     broken = [i for i in report["items"] if i["rule"] == "broken_link"]
     assert len(to_deleted) == 2  # [[Gone Post]] and #<gone id>
-    assert len(broken) == 1  # #99999, never existed
+    assert len(broken) == 1  # #37, never existed

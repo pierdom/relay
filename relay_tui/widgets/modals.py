@@ -72,8 +72,11 @@ def _linkify_markdown(content: str, index: dict[str, int]) -> str:
             return f"[{opt or name}](relay:{pid})" if pid is not None else (opt or name)
 
         def wiki(m: re.Match) -> str:
-            target = m.group(1).strip()
-            alias = (m.group(3) or target).strip()
+            # group(1) is links.WIKILINK_RE's own embed-marker capture — always
+            # None here, since _EMBED_RE.sub above already consumed every
+            # "![[...]]" before this pattern ever runs.
+            target = m.group(2).strip()
+            alias = (m.group(4) or target).strip()
             pid = index.get(target.lower())
             if pid is not None:
                 return f"[{alias}](relay:{pid})"
@@ -104,7 +107,7 @@ def _outbound_link_ids(content: str, index: dict[str, int]) -> list[int]:
             continue
         hits: list[tuple[int, int]] = []
         for m in _WIKI_RE.finditer(part):
-            pid = index.get(m.group(1).strip().lower())
+            pid = index.get(m.group(2).strip().lower())
             if pid is not None:
                 hits.append((m.start(), pid))
         for m in _IDREF_RE.finditer(part):

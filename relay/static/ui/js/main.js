@@ -281,9 +281,17 @@ async function loadLinkIndex() {
 const SANITIZE_OPTS = { ADD_ATTR: ['target', 'rel', 'loading'] };
 const renderBody = (md) => DOMPurify.sanitize(marked.parse(preprocessLinks(md)), SANITIZE_OPTS);
 
+// Fenced block or single-line inline code span — shared by preprocessLinks
+// (below) and extractMedia (relay #198 N-5 follow-up, L-7): a post
+// *documenting* embed syntax as a literal example (`` `![[photo.png]]` ``)
+// had that example resolved as a real embed and promoted to the post's own
+// feed-card thumbnail, because extractMedia scanned raw content with no such
+// exclusion at all — the one spot in this file that never got it.
+const CODE_SPLIT_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
+
 // Convert wikilinks / id-refs to anchors, leaving fenced + inline code untouched.
 function preprocessLinks(md) {
-  return md.split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+  return md.split(CODE_SPLIT_RE)
     .map((seg, i) => (i % 2 === 1) ? seg : linkifySegment(seg)).join('');
 }
 
@@ -336,13 +344,16 @@ function linkifySegment(text) {
 // Non-image embeds (pdf, note transclusions) are left in place.
 function extractMedia(content) {
   let thumb = null, count = 0;
-  const stripped = content.replace(/!\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]/g, (m, target) => {
-    const name = target.trim();
-    if (!IMAGE_EXT_RE.test(name)) return m;
-    count++;
-    if (!thumb) thumb = attUrl(name);
-    return '';
-  });
+  const stripped = content.split(CODE_SPLIT_RE).map((seg, i) => {
+    if (i % 2 === 1) return seg;   // code — never a real embed, leave untouched
+    return seg.replace(/!\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]/g, (m, target) => {
+      const name = target.trim();
+      if (!IMAGE_EXT_RE.test(name)) return m;
+      count++;
+      if (!thumb) thumb = attUrl(name);
+      return '';
+    });
+  }).join('');
   return { thumb, count, stripped };
 }
 

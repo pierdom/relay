@@ -115,15 +115,17 @@ post changed", so SSE reconnect only ever replayed brand-new posts.
 
 - `zero_tags` / `missing_domain_tag` / `missing_type_tag` — no tags at all, or missing one axis (not double-counted against each other)
 - `stale_inbox` — a domain-tagged post still filed in `Inbox/` (`folders.py`'s move-on-first-tag invariant)
-- `h1_title_mismatch` — H1 no longer matches the title (classic cause: `frontmatter.sanitize_title` strips a rename character like `:` that the H1 still has)
-- `broken_link` / `link_to_deleted_post` — a `#NNN`/`[[wikilink]]` that doesn't resolve, or resolves to a post `history.deletions()` says used to exist. Both carry `LintFinding.match`, the exact broken text, for jumping straight to it
+- `h1_missing` / `h1_title_mismatch` — no H1 in the body at all (a legacy post predating the convention) vs. an H1 present but no longer matching the title (classic cause: `frontmatter.sanitize_title` strips a rename character like `:` that the H1 still has) — two different defects, split rather than one rule reporting a misleading "mismatch" against the first heading it happens to find
+- `broken_link` / `link_to_deleted_post` / `broken_attachment_embed` — a `#NNN`/`[[wikilink]]` that doesn't resolve, resolves to a post `history.deletions()` says used to exist, or (an `![[embed]]` with a file extension) doesn't resolve to any existing attachment. All three carry `LintFinding.match`, the exact broken text, for jumping straight to it
 - `stale_last_updated` — a `hub`/`plan` post untouched for `STALE_HUB_PLAN_DAYS` (60)
 - `zero_backlinks` — exempt: `digest`/`news`/`daily-digest`/`news-digest`/`briefing`/`financial-analyst`-tagged posts (dated snapshots nobody links back to)
 - `empty_tag_config` — a `tags.yml` entry with zero live posts
-- `zero_chunks` — embedded to zero chunks (reuses `vectors.unembedded_post_ids`)
+- `zero_chunks` — embedded to zero chunks (reuses `vectors.unembedded_post_ids`); detail text distinguishes an empty body from a code-only one rather than asserting the code-fence cause unconditionally
 - `master_doc_post_count` — #0's stated `<N> post` count vs. reality; silently skipped if #0 states none
 
 **#0 is exempt from every rule above except the link checks** (`lint_this_post` in `run()`) — a root index reasonably breaks tag/folder/H1/staleness/embedding conventions, but a broken link there is a factual defect, not a convention. It's still walked for outbound links (posts it references get backlink credit either way), and `master_doc_post_count` still applies to it — that's about its own accuracy, not a convention.
+
+**Link/embed/heading scanning runs against `markdown_scan.strip_code`-ped content, not raw markdown** (relay #198 N-5 follow-up, L-1..L-8: first real run against a 132-post vault produced ~230 findings, ~70% false positives, all on `broken_link`). A post *documenting* relay's own link syntax, or a fenced shell/TOML snippet containing `[[...]]`, used to get flagged for its own examples — `relay.links.extract_links` and the H1 scanner share one helper (`markdown_scan.strip_code`) that blanks fenced blocks and inline code spans while preserving every newline, so a multiline `^...$` regex still sees valid line boundaries. `WIKILINK_RE` also confines every capture group to a single line (no `\n` allowed), closing a real case where a stray, never-closed `[[` in prose let a match's reach cross paragraph after paragraph looking for the next `]]` anywhere in the file. Two more false-positive classes needed no code-exclusion: a bare `#N` below 10 or above `vault.read_id_counter()` (the id high-water mark) is excluded from `broken_link`/`link_to_deleted_post` outright — footnote markers, procedure steps and GitHub issue/PR numbers collide with real ids far more at either extreme than a genuine cross-link does — and `![[target]]` is only resolved as an attachment when `target` has a file extension (matching `main.js`'s own `HAS_EXT_RE` split); an extension-less embed is still a note-transclusion link to a post, like an ordinary wikilink. Findings are sorted by post id (`zero_backlinks` used to land grouped at the end purely by loop order). The renderer has the equivalent JS-side gap fixed too: `main.js`'s `extractMedia` (feed-card thumbnail picker) now shares `preprocessLinks`'s code-split (`CODE_SPLIT_RE`) instead of scanning raw content — a backticked `` `![[photo.png]]` `` syntax example was being promoted to the post's own card thumbnail.
 
 Read-only, one pass over `posts` plus a handful of cheap follow-ups — safe to run on every lint check rather than a background job. A rule that needs a disabled feature (history for `link_to_deleted_post`, embeddings for `zero_chunks`) is skipped and named in `LintReport.skipped_rules` rather than the endpoint 503ing — a lint pass should degrade like `/status`, not fail outright over one unavailable rule.
 
@@ -282,6 +284,7 @@ relay/
 ├── frontmatter.py   # YAML front-matter + Obsidian filename rules
 ├── folders.py       # Folder placement policy
 ├── links.py         # Wikilink/#id resolver + rename rewrite
+├── markdown_scan.py # Blank fenced/inline code before scanning content (links.py, lint.py's H1 scanner)
 ├── vault.py         # File layer: posts + attachments, id allocation, rebuild, tags.yml
 ├── watcher.py       # watchdog: external edits → reindex + SSE
 ├── history.py       # git commit per write → <vault>/.relay/history.git
