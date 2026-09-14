@@ -305,10 +305,14 @@ def test_filter_chips_narrow_the_list_to_one_rule(page, relay_server):
 def test_selecting_a_broken_link_finding_selects_and_highlights_the_broken_text(page, relay_server):
     """The whole point of `LintFinding.match`: land on the exact spot that's
     wrong in a long post, not just the post it's in."""
+    # A real H1 matching the title, or this post also fires h1_missing (no
+    # heading anywhere in the body) — a second finding on the same post_id
+    # that could sort before broken_link and make `.first` below land on the
+    # wrong row.
     filler = "Some unrelated prose to push the link well past the fold.\n\n" * 20
     made = _api_post(relay_server, {
         "title": "Lint Me Locate",
-        "content": f"{filler}See [[Nonexistent Post]] for details.\n",
+        "content": f"# Lint Me Locate\n\n{filler}See [[Nonexistent Post]] for details.\n",
         "tags": ["homelab", "reference"],
     })
 
