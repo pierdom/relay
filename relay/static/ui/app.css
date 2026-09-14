@@ -1523,9 +1523,18 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   display: flex; flex-direction: column; gap: 2px;
   overflow-y: auto; min-height: 0; padding-right: 12px;
 }
+/* `overflow-y: auto`, same as `.lm-list` right above: `#lintModal .sm-body`
+   turns off the body-level scroll every other `.sm-*` modal gets for free
+   (the base `.sm-body` rule) so the two panes can scroll independently
+   instead of one scrolling both out of sync. `.lm-list` got that treatment;
+   this one didn't, and the editor form (title/tags/source/expires/content/
+   attachments/Save-Cancel) is tall enough to overflow the pane's allotted
+   share of a mobile sheet — with nothing here to scroll it, the excess was
+   just clipped by `.sm-body`'s `overflow: hidden` and unreachable. */
 .lm-pane {
   display: flex; flex-direction: column; min-height: 0; min-width: 0;
   border-left: 1px solid var(--border); padding-left: 16px; gap: 10px;
+  overflow-y: auto;
 }
 /* `.hm-rev`'s row shell (padding, hover/active state) fits a finding row as-is
    — scoped by `#hmBody` everywhere it is asserted, so an `.lm-finding` row
@@ -2022,13 +2031,15 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .pm-body {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px;
 }
-.pm-body, .sm-body, .hm-list, .hm-body-text, .lm-list {
+.pm-body, .sm-body, .hm-list, .hm-body-text, .lm-list, .lm-pane {
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 }
 .pm-body::-webkit-scrollbar, .sm-body::-webkit-scrollbar,
-.hm-list::-webkit-scrollbar, .hm-body-text::-webkit-scrollbar, .lm-list::-webkit-scrollbar { width: 4px; }
+.hm-list::-webkit-scrollbar, .hm-body-text::-webkit-scrollbar, .lm-list::-webkit-scrollbar,
+.lm-pane::-webkit-scrollbar { width: 4px; }
 .pm-body::-webkit-scrollbar-thumb, .sm-body::-webkit-scrollbar-thumb,
-.hm-list::-webkit-scrollbar-thumb, .hm-body-text::-webkit-scrollbar-thumb, .lm-list::-webkit-scrollbar-thumb {
+.hm-list::-webkit-scrollbar-thumb, .hm-body-text::-webkit-scrollbar-thumb, .lm-list::-webkit-scrollbar-thumb,
+.lm-pane::-webkit-scrollbar-thumb {
   background: var(--border); border-radius: 2px;
 }
 /* One reading column, and everything lives in it — prose, headings, rules,
@@ -2331,9 +2342,10 @@ kbd {
   .hm-inner, .lm-inner { height: 88vh; }
   /* dvh, not vh. `vh` is the *large* viewport and ignores the software
      keyboard, so focusing the edit sheet's textarea pushed Save and Cancel
-     underneath the keyboard with no way to reach them. Lint has no text input
-     to protect, but sizing it the same as history keeps the two panels
-     matching rather than diverging for no reason. */
+     underneath the keyboard with no way to reach them. Lint's pane hosts the
+     same editor (`.lm-pane`'s own `overflow-y: auto`, above, is what actually
+     keeps Save/Cancel reachable when the form doesn't fit — dvh here just
+     keeps the two panels sized the same rather than diverging for no reason). */
   @supports (height: 100dvh) {
     .pm-inner { max-height: calc(94dvh - env(safe-area-inset-top, 0px)); }
     .em-inner { height: 92dvh; }
@@ -2342,7 +2354,7 @@ kbd {
 
   /* Reaching the end of a modal's scroll handed the gesture to the page behind
      it, which on iOS shows as the whole sheet rubber-banding. */
-  .pm-body, .sm-body, .hm-list, .hm-body-text, .lm-list { overscroll-behavior: contain; }
+  .pm-body, .sm-body, .hm-list, .hm-body-text, .lm-list, .lm-pane { overscroll-behavior: contain; }
 
   /* Touch targets. Measured before this: the close button was 13x22 on three of
      the four sheets, the post footer's actions 22px tall, Save/Cancel 29px.
