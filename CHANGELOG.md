@@ -8,6 +8,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.10.2] — 2026-09-14
+
+### Fixed
+- `lint_vault` and `get_backlinks` worked correctly but were unfindable by keyword search — neither tool's description ever used the word ("lint", "backlinks") that a search for it would use, only the tool's own name did. Audited all 26 MCP tools for the same pattern; these were the only two. Added a regression test scanning every tool's description for its own name's distinctive words.
+
+---
+
 ## [1.10.1] — 2026-09-14
 
 ### Fixed
