@@ -112,9 +112,12 @@ def open_lint(page):
 
 def open_shortcuts(page):
     # No button opens this one — "?" is the only trigger (main.js's keydown
-    # handler). Click the feed first so the key lands on the page, not a
-    # still-focused input from a previous step.
-    page.locator(".feed").click()
+    # handler), which only needs focus off a text input, not on anywhere
+    # specific. Blurring beats clicking the feed to get there: a card can sit
+    # at the feed container's own center, and a click that lands on one opens
+    # a post modal that this opener has no way to know to close — it stayed
+    # open into whatever ran next, once something did.
+    page.evaluate("document.activeElement && document.activeElement.blur()")
     page.keyboard.press("?")
     page.wait_for_selector("#shortcutsModal.open")
 

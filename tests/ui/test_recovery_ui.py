@@ -44,6 +44,14 @@ def test_recovery_sits_with_the_thing_that_decides_whether_it_is_possible(page, 
     page.locator("#statusBtn").click()
     page.locator("#statusModal.open").wait_for(timeout=10_000)
     page.locator("#smBrowseDeleted").wait_for(timeout=10_000)
+    # The button existing only means the section rendered its "Checking…"
+    # placeholder — the headline this test reads is filled in by the
+    # `fetchDeleted()` response, same async gap `_open_recovery` already
+    # waits out before it clicks.
+    page.wait_for_function(
+        "() => { const b = document.getElementById('smBrowseDeleted'); return b && !b.disabled; }",
+        timeout=10_000,
+    )
 
     titles = [t.strip().lower() for t in page.locator(".sm-section-title").all_inner_texts()]
     assert "health" in titles and "recovery" in titles, f"sections are {titles}"
