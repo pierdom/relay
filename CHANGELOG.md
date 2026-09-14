@@ -8,6 +8,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.10.1] — 2026-09-14
+
+### Fixed
+- Vault lint's editor pane had no scroll container on mobile — `#lintModal .sm-body` deliberately turns off the body-level scroll every other status-panel modal gets by default so the list and pane can scroll independently, but only `.lm-list` was ever given one. A form tall enough to overflow the pane's share of the sheet (which is most of them, once title/tags/source/expires/content/attachments/Save-Cancel are all present) was silently clipped and unreachable.
+
+---
+
 ## [1.10.0] — 2026-09-14
 
 The rules in #0 were enforced from memory — [relay #198](https://github.com/pierdom/relay), N-5. 132 posts and five schedulers writing to them made that untenable.
