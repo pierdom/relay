@@ -69,6 +69,16 @@ def _api_attachment(base_url: str, filename: str) -> dict:
 def test_feed_renders_seeded_posts(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
     assert page.locator(".feed .post").count() >= 4
+    # Searching rather than relying on default-page visibility: the seed
+    # fixture's posts are the vault's oldest (created once, never updated),
+    # and the session-scoped vault is shared with every other UI test file —
+    # by the time this file's own later tests keep adding posts, "Smoke Post
+    # 0" can fall off the feed's default updated-desc page.
+    page.locator("#searchInput").fill("Smoke Post 0")
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.feed .post')].some(p => p.textContent.includes('Smoke Post 0'))",
+        timeout=10_000,
+    )
     assert page.get_by_text("Smoke Post 0").first.is_visible()
 
 
@@ -113,6 +123,13 @@ def test_search_filters_the_feed(page):
 
 def test_post_modal_opens_with_the_body(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
+    # Same pagination fragility as test_feed_renders_seeded_posts above —
+    # search for it rather than assuming it's on the default first page.
+    page.locator("#searchInput").fill("Smoke Post 1")
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.feed .post')].some(p => p.textContent.includes('Smoke Post 1'))",
+        timeout=10_000,
+    )
     page.get_by_text("Smoke Post 1").first.click()
     page.locator("#postModal.open").wait_for(timeout=10_000)
     assert "Smoke Post 1" in page.locator("#pmTitle").inner_text()

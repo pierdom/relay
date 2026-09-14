@@ -309,10 +309,15 @@ def test_a_repeated_broken_ref_shows_its_occurrence_count(page, relay_server):
     mention could leave the other two unnoticed. A wikilink, not a #N id-ref:
     the latter's high-water-mark exclusion would need a specific id range
     this session-scoped, ever-growing vault can't guarantee across a full
-    test run."""
+    test run. A real H1 matching the title, or this post also fires
+    h1_missing — a second finding on the same post_id, appended earlier in
+    lint.py's per-post loop, that the row-per-post_id locator below would
+    match instead (same trap as test_selecting_a_broken_link_finding_selects
+    _and_highlights_the_broken_text above)."""
     made = _api_post(relay_server, {
         "title": "Lint Occurrences Target", "tags": ["homelab", "reference"],
-        "content": "See [[Nonexistent Lint Target]] here, [[Nonexistent Lint Target]] again, "
+        "content": "# Lint Occurrences Target\n\n"
+                   "See [[Nonexistent Lint Target]] here, [[Nonexistent Lint Target]] again, "
                    "and once more: [[Nonexistent Lint Target]].",
     })
 
