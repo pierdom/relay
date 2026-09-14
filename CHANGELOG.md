@@ -8,6 +8,25 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.10.0] — 2026-09-14
+
+The rules in #0 were enforced from memory — [relay #198](https://github.com/pierdom/relay), N-5. 132 posts and five schedulers writing to them made that untenable.
+
+### Added
+- **`GET /lint` / `lint_vault`** — checks the vault against #0's own rules: missing/zero tags, stale Inbox placement, broken `[[wikilinks]]`/`#NNN` refs (and specifically links to a deleted post), H1/title drift, stale hub/plan posts, zero backlinks, unused tag config, zero embedding chunks, and #0's own stated post count. The master document is exempt from every rule except the link checks. `broken_link`/`link_to_deleted_post` findings carry the exact broken text (`match`) for jumping straight to it.
+- **Vault lint browser UI** — a two-pane modal (findings list + editor) reached from the status panel, stacking over it the way the history modal stacks over a post. Selecting a finding loads the real post editor, not a preview; saving re-checks the list live and moves to the next thing worth fixing. Broken links are highlighted red in the editor's content field — everywhere the editor appears, since it's one shared implementation.
+- The post editor (`edit-form.js`) is now shared between the standalone Edit modal and the lint pane instead of duplicated, with a single dirty-check and discard guard.
+- The post modal's existing "← previous post" breadcrumb now also reads "← Vault lint" when opened from there, restoring the same filter and finding on the way back.
+
+### Fixed
+- `stale_last_updated` never fired for a hub/plan post created once and never edited again — `updated_at` stays `NULL` until a post's first edit, and the rule only checked that field.
+- The editor's unsaved-changes guard only checked the content field — an edit limited to Tags (the lint pane's most common fix) could be silently discarded when switching findings or closing the pane.
+- `master_doc_post_count` could match an unrelated number mentioned before #0's actual stated count.
+- `zero_backlinks`'s dated-snapshot exemption was missing `daily-digest`/`news-digest`.
+- A post opened from the lint pane could leave a stale "← Vault lint" breadcrumb on an unrelated later post, if closed via the browser's native Back button.
+
+---
+
 ## [1.9.2] — 2026-09-13
 
 A 5-way parallel audit (concurrency/data-integrity, auth/security, MCP/REST parity, search/embeddings, browser UI/TUI) run the same day as 1.9.0 turned up sixteen confirmed, reproduced defects — K-1 through K-16, tracked in the vault's own known-bugs register. Every one below was verified with a concrete repro or a regression test confirmed to fail against the pre-fix code, not a style nit.

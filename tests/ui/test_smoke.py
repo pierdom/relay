@@ -339,11 +339,13 @@ def test_history_panel_does_not_resize_when_switching_revisions(page, relay_serv
     assert len(seen) == 1, f"panel changed size while switching revisions: {sorted(seen)}"
 
 
-def test_history_panel_keeps_the_revision_list_visible_while_previewing(page):
+def test_history_panel_keeps_the_revision_list_visible_while_previewing(page, relay_server):
     """Two panes, not a stacked list-then-preview: the list has to stay on screen
     so versions can actually be compared."""
-    page.locator(".feed .post").first.wait_for(timeout=10_000)
-    page.get_by_text("Smoke Post 0").first.click()
+    _api_post(relay_server, {"title": "History Layout Check", "content": "v1", "tags": ["homelab"]})
+    page.reload()
+    page.get_by_text("History Layout Check").first.wait_for(timeout=10_000)
+    page.get_by_text("History Layout Check").first.click()
     page.locator("#postModal.open").wait_for(timeout=10_000)
     page.locator("#pmHistory").click()
     page.locator("#historyModal.open").wait_for(timeout=10_000)
@@ -389,9 +391,11 @@ def test_history_revision_rows_show_the_whole_message(page, relay_server):
     assert page.locator("#hmBody .hm-badge").count() == 1
 
 
-def test_history_panel_closes_on_escape(page):
-    page.locator(".feed .post").first.wait_for(timeout=10_000)
-    page.get_by_text("Smoke Post 0").first.click()
+def test_history_panel_closes_on_escape(page, relay_server):
+    _api_post(relay_server, {"title": "History Escape Check", "content": "v1", "tags": ["homelab"]})
+    page.reload()
+    page.get_by_text("History Escape Check").first.wait_for(timeout=10_000)
+    page.get_by_text("History Escape Check").first.click()
     page.locator("#postModal.open").wait_for(timeout=10_000)
     page.locator("#pmHistory").click()
     page.locator("#historyModal.open").wait_for(timeout=10_000)
@@ -580,9 +584,11 @@ def test_editing_from_the_modal_saves_and_updates_the_card(page, relay_server):
     )
 
 
-def test_cancelling_an_untouched_edit_closes_without_a_prompt(page):
-    page.locator(".feed .post").first.wait_for(timeout=10_000)
-    _edit_first_card(page, "Smoke Post 0")
+def test_cancelling_an_untouched_edit_closes_without_a_prompt(page, relay_server):
+    _api_post(relay_server, {"title": "Untouched Edit Check", "content": "v1", "tags": ["homelab"]})
+    page.reload()
+    page.get_by_text("Untouched Edit Check").first.wait_for(timeout=10_000)
+    _edit_first_card(page, "Untouched Edit Check")
     page.locator("#emBody .btn-cancel").click()
     page.locator("#editModal.open").wait_for(state="detached", timeout=5_000)
 

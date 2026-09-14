@@ -32,6 +32,7 @@ SHEETS = [
     ("edit", "open_edit", "#editModal"),
     ("history", "open_history", "#historyModal"),
     ("shortcuts", "open_shortcuts", "#shortcutsModal"),
+    ("lint", "open_lint", "#lintModal"),
 ]
 
 # Dispatches a real touch sequence on an element. Playwright's touchscreen API
@@ -103,11 +104,20 @@ def open_history(page):
     page.wait_for_selector("#historyModal.open")
 
 
+def open_lint(page):
+    from .test_lint_panel import open_lint as _open_lint
+
+    _open_lint(page)
+
+
 def open_shortcuts(page):
     # No button opens this one — "?" is the only trigger (main.js's keydown
-    # handler). Click the feed first so the key lands on the page, not a
-    # still-focused input from a previous step.
-    page.locator(".feed").click()
+    # handler), which only needs focus off a text input, not on anywhere
+    # specific. Blurring beats clicking the feed to get there: a card can sit
+    # at the feed container's own center, and a click that lands on one opens
+    # a post modal that this opener has no way to know to close — it stayed
+    # open into whatever ran next, once something did.
+    page.evaluate("document.activeElement && document.activeElement.blur()")
     page.keyboard.press("?")
     page.wait_for_selector("#shortcutsModal.open")
 
@@ -260,8 +270,8 @@ def test_every_desktop_modal_shares_the_same_chrome(page):
         )
         page.keyboard.press("Escape")
         page.wait_for_timeout(200)
-        if name in ("edit", "history"):
-            page.keyboard.press("Escape")  # the post modal underneath
+        if name in ("edit", "history", "lint"):
+            page.keyboard.press("Escape")  # the post/status modal underneath
             page.wait_for_timeout(200)
 
     distinct = set(seen.values())

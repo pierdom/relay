@@ -631,3 +631,31 @@ class TagConfigResponse(BaseModel):
     tag: str
     ttl_hours: int | None
     expires_at: str | None = None
+
+
+class LintFinding(BaseModel):
+    """One thing ``lint.run`` found wrong — see ``relay/lint.py`` for the rule
+    set (relay #198, N-5)."""
+
+    rule: str = Field(description="Machine-stable rule id, e.g. 'missing_domain_tag'")
+    severity: str = Field(description="'error' or 'warning'")
+    post_id: int | None = Field(default=None, description="Absent for vault-wide findings")
+    title: str | None = None
+    detail: str
+    match: str | None = Field(
+        default=None,
+        description=(
+            "The exact substring in the post's content this finding is about — e.g. the raw "
+            "'[[Title]]' or '#NNN' text for broken_link/link_to_deleted_post — so a client can "
+            "locate and jump to it. Absent for findings with no single in-content location."
+        ),
+    )
+
+
+class LintReport(BaseModel):
+    items: list[LintFinding]
+    checked_posts: int
+    skipped_rules: list[str] = Field(
+        default_factory=list,
+        description="Rules that could not run this pass, and why (e.g. history or embeddings disabled)",
+    )

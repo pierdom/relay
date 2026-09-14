@@ -1299,12 +1299,13 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ── Edit / Compose form ─────────────────────────────── */
 .edit-form { display: flex; flex-direction: column; gap: 10px; }
-.edit-form input, .edit-form textarea, .edit-form select {
+.edit-form input, .edit-form textarea, .edit-form select, .ef-content-backdrop {
   background: var(--bg); border: 1px solid var(--border); color: var(--text);
   padding: 7px 10px; border-radius: 4px; font-size: 12px; font-family: inherit; width: 100%;
   transition: border-color 0.15s;
 }
 .edit-form textarea       { resize: vertical; min-height: 120px; line-height: 1.65; }
+.ef-content-backdrop      { line-height: 1.65; }
 .edit-form input:focus,
 .edit-form textarea:focus,
 .edit-form select:focus   { outline: none; border-color: var(--accent); }
@@ -1313,6 +1314,31 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   display: block; text-transform: uppercase; letter-spacing: 0.12em;
 }
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
+
+/* Broken-link highlighting (edit-form.js's buildEditForm): a textarea can't
+   style individual substrings, so `.ef-content-backdrop` is a same-sized
+   <pre> behind it — this rule gives both layers the identical box model
+   (padding/border/font/line-height) the alignment depends on, box-sizing:
+   border-box (inherited from `*` presumably elsewhere, kept explicit here
+   since it's load-bearing) so the border width is included the same way on
+   both. Layering and the two layers' own colour/interaction differences
+   (background is one paints the other hides, text is only ever drawn once)
+   are below, next to `.ef-content-highlight`. */
+.ef-content-highlight { position: relative; flex: 1; min-height: 0; display: flex; }
+.ef-content-highlight .ef-content-backdrop,
+.ef-content-highlight .ef-content {
+  position: absolute; inset: 0; box-sizing: border-box; margin: 0;
+  white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;
+}
+.ef-content-backdrop {
+  z-index: 0; color: transparent; overflow: hidden; pointer-events: none;
+  border-color: transparent;
+}
+.ef-content-highlight .ef-content { z-index: 1; background: transparent; }
+.ef-broken-link {
+  background: color-mix(in srgb, var(--red) 35%, transparent);
+  border-radius: 2px;
+}
 
 .btn-save {
   background: var(--accent); border: none; color: var(--on-accent);
@@ -1436,9 +1462,118 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   /* `.sm-body .btn-edit` reaches the Recovery section's own button too — it is
      not inside `.del-actions`, and the sheet touch-floor smoke caught it at
      132x23 rather than my noticing. */
-  .del-actions button, .del-filter, .sm-back, .sm-body .btn-edit {
+  .del-actions button, .del-filter, .sm-back, .sm-body .btn-edit, .lm-filter, .lm-open {
     min-height: 44px; display: inline-flex; align-items: center;
   }
+  /* `.hm-rev`'s own two-line content (message + meta) clears 44px on its own;
+     a lint finding row is shorter (one short rule label, one short sub line),
+     so it needs the floor stated explicitly rather than relying on content. */
+  .lm-finding { min-height: 44px; justify-content: center; }
+}
+
+/* ── Vault lint modal (`#lintModal`) ───────────────────── */
+/* Its own modal, stacked over the status modal — not a drill-down replacing
+   that panel's body. A fixed two-pane shell (list left, pane right — mirrors
+   `.hm-layout`/`.hm-list`/`.hm-pane`, the post-history modal's own shape)
+   keeps the finding and the post it is about on screen together. The pane
+   hosts the editor directly (`.lm-editor`, `buildEditForm` from
+   ./js/edit-form.js) rather than a read-only preview — the point of this
+   panel is fixing what a finding flags, not just reading about it, and a
+   preview plus a button leading to a *different* modal (an earlier version)
+   cost you your place in the list every time you actually acted on one.
+   "Open post" (`.lm-open`) survives as a smaller, secondary action for what
+   the inline editor doesn't cover — Delete, History, backlinks. Distinct
+   `.lm-*` names rather than reusing `.hm-*` outright: `.hm-inner` (declared
+   further down, in the Post history panel section) is asserted bare/unscoped
+   in a couple of tests (`.bounding_box()` expects exactly one match), and
+   this modal coexisting with history in the DOM would break that.
+
+   `.lm-inner`'s own size rule lives further down, next to `.hm-inner`'s —
+   not here, next to everything else lint-specific. `.sm-inner`'s base rule
+   (`max-width: 560px`, the default status-panel size) is declared *after*
+   this point in the file at equal specificity, so a `.lm-inner` override
+   placed here would lose to it on source order — the exact `.em-inner`/
+   `.hm-inner` trap this file's own history block already documents. Placing
+   it after `.sm-inner` instead, where `.hm-inner`/`.em-inner` already sit,
+   is the actual fix; a rule stated here would look right and render wrong. */
+#lintModal .sm-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.lm-filters { flex-shrink: 0; margin-bottom: 10px; }
+.lint-skipped {
+  font-size: 11px; color: var(--muted); margin-bottom: 8px;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+}
+.lm-chips, .del-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.lm-filter, .del-filter {
+  background: none; cursor: pointer; font: inherit; font-size: 10px;
+  letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
+  transition: color 0.15s, border-color 0.15s;
+}
+.lm-filter:hover, .del-filter:hover { color: var(--text); }
+.lm-filter.active, .del-filter.active { color: var(--accent); border-color: var(--accent); }
+
+.lm-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+.lm-list {
+  display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto; min-height: 0; padding-right: 12px;
+}
+.lm-pane {
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  border-left: 1px solid var(--border); padding-left: 16px; gap: 10px;
+}
+/* `.hm-rev`'s row shell (padding, hover/active state) fits a finding row as-is
+   — scoped by `#hmBody` everywhere it is asserted, so an `.lm-finding` row
+   living under `#lmBody` instead cannot collide with those. */
+.lm-finding-head { display: flex; align-items: center; gap: 6px; }
+.lm-finding .hm-meta { color: var(--muted); font-size: 10.5px; }
+
+/* The selected finding's own rule + detail, pinned above the post preview so
+   the reason this pane is open never scrolls out of view. Same visual shape
+   as a lint finding got in the flat-list design this replaced, just one at a
+   time instead of many. */
+.lint-card {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 14px; flex-shrink: 0;
+}
+.lint-card.lint-error { background: color-mix(in srgb, var(--red) 4%, transparent); }
+.lint-card.lint-warning { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.lint-rule { font-size: 11px; font-weight: 600; color: var(--text); }
+.lint-detail { font-size: 11.5px; margin-top: 4px; }
+/* Secondary now that the pane hosts the editor directly — Save/Cancel down in
+   the form are the primary actions, this is only for what they don't cover
+   (Delete, History, backlinks). Same look as `.sm-back`'s breadcrumb text. */
+.lm-open {
+  align-self: flex-start; background: none; border: none;
+  color: var(--muted); cursor: pointer; font-family: inherit;
+  font-size: 11px; padding: 0; flex-shrink: 0; transition: color 0.15s;
+}
+.lm-open:hover { color: var(--accent); }
+
+/* The editor itself (buildEditForm, ./js/edit-form.js) — same treatment
+   `#editModal .edit-form` gives it, just against `.lm-pane`'s geometry
+   instead of the standalone modal's. No footer bar breaking out to full
+   bleed here: `.lm-pane` doesn't own its own edge-to-edge padding the way
+   `.sm-body` does in the standalone modal, so Save/Cancel just sit inline at
+   the form's own width with a top border for separation instead. */
+.lm-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.lm-editor .edit-form { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 10px; }
+.lm-editor .edit-form > .ef-content-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.lm-editor .edit-form .ef-content-highlight { flex: 1; min-height: 100px; }
+.lm-editor .edit-form textarea.ef-content { resize: none; }
+.lm-editor .edit-form .ef-attachments { max-height: 16vh; overflow-y: auto; }
+.lm-editor .edit-actions { border-top: 1px solid var(--border); padding-top: 10px; }
+
+@media (max-width: 860px) {
+  .lm-inner { height: 88vh; }
+  .lm-layout { grid-template-columns: 1fr; grid-template-rows: minmax(0, 40%) 1fr; }
+  .lm-list { padding-right: 0; padding-bottom: 10px; }
+  .lm-pane { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 12px; }
 }
 
 /* ── Search bar ─────────────────────────────────────── */
@@ -1629,8 +1764,11 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 /* Touch devices: always show post actions (no hover) */
 @media (hover: none) {
   .post-actions { opacity: 1; }
-  /* Prevent iOS auto-zoom on input focus (triggered when font-size < 16px) */
-  input, textarea, select { font-size: 16px !important; }
+  /* Prevent iOS auto-zoom on input focus (triggered when font-size < 16px).
+     `.ef-content-backdrop` is a <pre>, not matched by `textarea` — it needs
+     the same bump explicitly or its text stops lining up with the real
+     textarea's the moment this rule fires and only that one's font grows. */
+  input, textarea, select, .ef-content-backdrop { font-size: 16px !important; }
 }
 
 @media (max-width: 400px) {
@@ -1804,7 +1942,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .sm-dot.bad  { background: var(--red); }
 .sm-dot.off  { background: var(--muted); }
 .sm-feat-note { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
-.sm-recovery-line { font-size: 12.5px; color: var(--text); margin-bottom: 10px; }
+.sm-recovery-line, .lint-summary-line { font-size: 12.5px; color: var(--text); margin-bottom: 10px; }
 .sm-error { font-size: 12.5px; color: var(--red); }
 .sm-embed-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .sm-embed-controls .btn-edit:disabled { opacity: 0.5; cursor: default; }
@@ -1884,13 +2022,13 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .pm-body {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px;
 }
-.pm-body, .sm-body, .hm-list, .hm-body-text {
+.pm-body, .sm-body, .hm-list, .hm-body-text, .lm-list {
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 }
 .pm-body::-webkit-scrollbar, .sm-body::-webkit-scrollbar,
-.hm-list::-webkit-scrollbar, .hm-body-text::-webkit-scrollbar { width: 4px; }
+.hm-list::-webkit-scrollbar, .hm-body-text::-webkit-scrollbar, .lm-list::-webkit-scrollbar { width: 4px; }
 .pm-body::-webkit-scrollbar-thumb, .sm-body::-webkit-scrollbar-thumb,
-.hm-list::-webkit-scrollbar-thumb, .hm-body-text::-webkit-scrollbar-thumb {
+.hm-list::-webkit-scrollbar-thumb, .hm-body-text::-webkit-scrollbar-thumb, .lm-list::-webkit-scrollbar-thumb {
   background: var(--border); border-radius: 2px;
 }
 /* One reading column, and everything lives in it — prose, headings, rules,
@@ -2041,6 +2179,20 @@ kbd {
 }
 #historyModal .sm-body { flex: 1; min-height: 0; overflow: hidden; }
 
+/* `.lm-inner`'s size rule, not up with the rest of the Vault lint modal's CSS —
+   see the comment there. Must stay after `.sm-inner`'s base rule (above) to
+   win the cascade: equal specificity, so source order decides, and a copy of
+   this placed earlier in the file renders at 560px regardless of what it says.
+   Matches `.pm-inner`'s width exactly (94%/1320px), not a cap of its own —
+   an uncapped, full-width first version made the post modal visibly shrink
+   every time "Open post" led there, and shrink back on the way "← Vault
+   lint" returns. Same width, no resize, whichever direction you go. */
+.lm-inner {
+  width: 94%;
+  max-width: 1320px;
+  height: min(92vh, 1000px);
+}
+
 .hm-layout {
   display: grid;
   grid-template-columns: minmax(260px, 340px) 1fr;
@@ -2135,7 +2287,8 @@ kbd {
 /* The content field takes whatever is left, so a long note gets the whole panel
    rather than a fixed few rows. */
 #editModal .edit-form > .ef-content-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-#editModal .edit-form textarea.ef-content { flex: 1; min-height: 140px; resize: none; }
+#editModal .edit-form .ef-content-highlight { flex: 1; min-height: 140px; }
+#editModal .edit-form textarea.ef-content { resize: none; }
 #editModal .edit-form .ef-attachments { max-height: 22vh; overflow-y: auto; }
 #editModal .edit-actions {
   margin: 4px -20px -18px; padding: 12px 20px; flex-shrink: 0;
@@ -2175,19 +2328,21 @@ kbd {
      on the one panel that comes close to the top, rather than on every header. */
   .pm-inner { max-height: calc(94vh - env(safe-area-inset-top, 0px)); }
   .em-inner { height: 92vh; }
-  .hm-inner { height: 88vh; }
+  .hm-inner, .lm-inner { height: 88vh; }
   /* dvh, not vh. `vh` is the *large* viewport and ignores the software
      keyboard, so focusing the edit sheet's textarea pushed Save and Cancel
-     underneath the keyboard with no way to reach them. */
+     underneath the keyboard with no way to reach them. Lint has no text input
+     to protect, but sizing it the same as history keeps the two panels
+     matching rather than diverging for no reason. */
   @supports (height: 100dvh) {
     .pm-inner { max-height: calc(94dvh - env(safe-area-inset-top, 0px)); }
     .em-inner { height: 92dvh; }
-    .hm-inner { height: 88dvh; }
+    .hm-inner, .lm-inner { height: 88dvh; }
   }
 
   /* Reaching the end of a modal's scroll handed the gesture to the page behind
      it, which on iOS shows as the whole sheet rubber-banding. */
-  .pm-body, .sm-body, .hm-list, .hm-body-text { overscroll-behavior: contain; }
+  .pm-body, .sm-body, .hm-list, .hm-body-text, .lm-list { overscroll-behavior: contain; }
 
   /* Touch targets. Measured before this: the close button was 13x22 on three of
      the four sheets, the post footer's actions 22px tall, Save/Cancel 29px.
@@ -2203,12 +2358,14 @@ kbd {
   }
   .pm-footer button,
   #editModal .edit-actions button,
+  #lintModal .edit-actions button,
   .btn-attach {
     min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
   }
   /* Delete sits next to Edit; a wider gap is cheap insurance now that both are
-     comfortable to hit. */
-  .pm-footer, #editModal .edit-actions { gap: 12px; }
+     comfortable to hit. Same reasoning for Save/Cancel in the lint pane's
+     inline editor (edit-form.js's buildEditForm, shared with #editModal). */
+  .pm-footer, #editModal .edit-actions, #lintModal .edit-actions { gap: 12px; }
   .sm-body { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
   #editModal .edit-actions {
     padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
@@ -2219,7 +2376,7 @@ kbd {
      here: `@media (hover: none)` already forces 16px on every input to stop
      iOS zooming the page on focus, and that keys on the device rather than on
      a narrow window, which is the better test. */
-  .edit-form input, .edit-form textarea, .edit-form select { padding: 10px 12px; }
+  .edit-form input, .edit-form textarea, .edit-form select, .ef-content-backdrop { padding: 10px 12px; }
   .edit-form input, .edit-form select { min-height: 44px; }
 
   /* The attachment list's delete × was 17x15 — the touch floor never reached it

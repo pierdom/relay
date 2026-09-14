@@ -29,6 +29,7 @@ from .routes.embeddings import router as embeddings_router
 from .routes.events import router as events_router
 from .routes.folders import router as folders_router
 from .routes.links import router as links_router
+from .routes.lint import router as lint_router
 from .routes.metrics import router as metrics_router
 from .routes.posts import router as posts_router
 from .routes.status import router as status_router
@@ -312,6 +313,7 @@ app.include_router(metrics_router)
 app.include_router(status_router)
 app.include_router(embeddings_router)
 app.include_router(changes_router)
+app.include_router(lint_router)
 
 # Remote MCP endpoint (Streamable HTTP). Any MCP client can connect to /mcp
 # with the relay bearer key; shares relay.service with the REST routes. The

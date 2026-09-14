@@ -68,6 +68,8 @@ Add `expires_at` or a per-tag TTL (via `set_tag_config`) for ephemeral tags.
 
 Update the Master Document via `PATCH /posts/0` or `update_post(id=0, content=…)`.
 
+Check the vault against these rules anytime with `GET /lint` or `lint_vault` — missing tags, stale Inbox placement, broken links, H1/title drift, and more.
+
 ---
 
 ## Tagging strategy

@@ -13,6 +13,7 @@ import { apiFetch } from './api.js';
 import { fmtBytes, fmtUptime } from './util.js';
 import { attachSheetDismiss } from './sheet.js';
 import { fetchDeleted, recoverableCount, renderDeleted } from './deleted.js';
+import { fetchLint, issueCount, openLintModal } from './lint.js';
 
 /** Whether mode='semantic'/'hybrid' is actually usable on this relay — main.js
  * calls this once at startup to decide whether the search bar's mode select is
@@ -208,6 +209,50 @@ function renderRecovery(historyWorks) {
   return smSection('Recovery', wrap);
 }
 
+/* The check itself is cheap (one pass over `posts` plus a few follow-up
+ * queries — see relay/lint.py), so it runs on every panel open rather than on
+ * demand behind a button. Skipped rules (a disabled feature, e.g. no
+ * embeddings) fold into the headline count so a quiet vault doesn't need a
+ * second look to notice something didn't run at all. */
+function renderLintSummary() {
+  const wrap = document.createElement('div');
+  const line = document.createElement('div');
+  // Not `.sm-recovery-line`: tests/ui/test_status_panel.py selects that class
+  // expecting the Recovery section's line uniquely, and this section now sits
+  // earlier in the DOM — a shared class would make it grab this one instead.
+  line.className = 'lint-summary-line';
+  wrap.appendChild(line);
+
+  line.textContent = 'Checking…';
+  const btn = document.createElement('button');
+  btn.className = 'btn-edit';
+  btn.id = 'smBrowseLint';
+  btn.textContent = 'Browse issues →';
+  btn.disabled = true;
+  wrap.appendChild(btn);
+
+  fetchLint().then(r => {
+    const n = issueCount(r);
+    let text = n
+      ? `${n} issue${n === 1 ? '' : 's'} across ${r.checked_posts} posts`
+      : `No issues — ${r.checked_posts} post${r.checked_posts === 1 ? '' : 's'} checked`;
+    if (r.skipped_rules.length) {
+      text += ` (${r.skipped_rules.length} rule${r.skipped_rules.length === 1 ? '' : 's'} skipped)`;
+    }
+    line.textContent = text;
+    btn.disabled = false;
+    // A separate modal (lint.js), not a drill-down replacing this panel's own
+    // body — a finding needs its own two-pane list+preview, and stacking a
+    // second modal on top (closed on its own) is what lets Escape or its
+    // close button bring you back here instead of the main feed.
+    btn.onclick = () => openLintModal();
+  }).catch(() => {
+    line.textContent = 'Could not run the vault lint.';
+  });
+
+  return smSection('Vault lint', wrap);
+}
+
 /** Drill down into the recovery browser, replacing the panel's contents.
  *
  * The panel keeps its 560px width: the cards are built for it (the full path is
@@ -264,6 +309,8 @@ function renderStatus(d) {
     ['OIDC login', d.features.auth.oidc ? 'enabled' : 'off'],
     ['MCP OAuth', d.features.auth.mcp_oauth ? 'enabled' : 'off'],
   ])));
+
+  smBody.appendChild(renderLintSummary());
 
   // Last, and deliberately so. Health/Vault/Server are what you open this panel
   // *for*; recovery is the one section that acts rather than reports, and it is
