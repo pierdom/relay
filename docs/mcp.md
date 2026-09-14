@@ -16,7 +16,7 @@ relay exposes the full feed API as **26 MCP tools** so Claude (or any MCP-capabl
 | `get_post_history` | List a post's revisions from vault history; works for a deleted post (`exists:false`) |
 | `get_post_revision` | Read a post exactly as it was at one revision — preview before restoring |
 | `restore_post` | Restore a post to a revision sha, recreating it if deleted; the restore is itself recorded |
-| `get_backlinks` | Posts that link here via `[[Title]]` or `#id` (linked mentions) |
+| `get_backlinks` | A post's backlinks — posts that link here via `[[Title]]` or `#id` |
 | `list_deleted_posts` | Posts that are gone but restorable — id, title, restorable sha, and why they went |
 | `list_changes` | The vault changelog, newest first — every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, with `seq`/`id`/`title`/`action`/`when`/`sha`. `since` pages forward from a `seq` or filters by ISO timestamp — see [The vault changelog](#the-vault-changelog). Errors if vault history is disabled |
 | `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio bridge also accepts `path` (a local file it uploads for you) |
