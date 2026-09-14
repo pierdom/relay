@@ -54,6 +54,38 @@ async def test_the_tool_is_advertised_to_clients():
     assert "list_deleted_posts" in names, f"not in the manifest: {sorted(names)}"
 
 
+# A tool's name is not part of what a keyword-searching agent sees — only the
+# description is (found live: `lint_vault` and `get_backlinks` both existed and
+# worked, but an agent searching "lint" or "backlinks" couldn't find either one,
+# because neither word ever appeared outside the tool's own name). Generic
+# verbs shared by half the surface (get/list/set/…) are excluded — they carry
+# no signal about *which* tool matched — leaving each name's distinctive
+# domain word(s), stemmed to five characters to tolerate a plural or -ing/-ed
+# form, checked against the description text a search would actually match on.
+_GENERIC_NAME_WORDS = {
+    "get", "list", "set", "create", "add", "update", "delete", "trigger", "new", "post", "posts",
+}
+
+
+def _stem(word: str) -> str:
+    return word[:5] if len(word) > 5 else word
+
+
+@pytest.mark.asyncio
+async def test_every_tools_description_mentions_its_own_distinctive_name_words():
+    for tool in await mcp_server.mcp.list_tools():
+        description = (tool.description or "").lower()
+        for word in tool.name.split("_"):
+            if len(word) <= 2 or word in _GENERIC_NAME_WORDS:
+                continue
+            stem = _stem(word)
+            assert stem in description, (
+                f"{tool.name}: {word!r} (from its own name) doesn't appear anywhere in its "
+                f"description — a keyword search for it would miss this tool. description: "
+                f"{tool.description!r}"
+            )
+
+
 @pytest.mark.asyncio
 async def test_an_agent_can_discover_a_deleted_post_and_restore_it(client):
     """The round trip an agent has to be able to make unaided."""

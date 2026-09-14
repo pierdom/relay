@@ -388,7 +388,7 @@ async def get_post_revision(id: int, sha: str) -> dict:
 
 @mcp.tool(
     description=(
-        "List the posts that link to this one via [[Title]] or #id — its linked mentions. "
+        "List a post's backlinks — the other posts that link to it via [[Title]] or #id. "
         "Check this before rewriting or deleting a post: relay keeps one canonical post per "
         "topic and cross-links by id, so the posts listed here are the ones that break if it "
         "goes away or is renamed. Returns an error if the post does not exist."
@@ -466,8 +466,8 @@ async def get_status() -> dict:
 
 @mcp.tool(
     description=(
-        "Check the vault against the rules already written down in #0 instead of relying on "
-        "someone reading every post (relay #198, N-5): posts missing a domain and/or type tag, "
+        "Lint the vault: check it against the rules already written down in #0 instead of "
+        "relying on someone reading every post (relay #198, N-5): posts missing a domain and/or type tag, "
         "a post with zero tags, notes stuck in Inbox despite carrying a domain tag, broken #NNN "
         "refs and dangling [[wikilinks]] (and specifically links pointing at a deleted post), an "
         "H1 that drifted from the title (the classic case: relay's filename sanitizer strips a "
