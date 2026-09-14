@@ -8,6 +8,25 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.10.3] — 2026-09-14
+
+`lint_vault`'s first run against a real 132-post vault produced ~230 findings, ~70% false positives, all on `broken_link` — relay #198's N-5 follow-up (L-1..L-8).
+
+### Added
+- `broken_attachment_embed` — a dangling `![[file]]` embed, split out of `broken_link` since the fix is different (it points at a file, not a post)
+- `h1_missing` — a post with no H1 at all, split out of `h1_title_mismatch` (which now only fires when an H1 is present but drifted from the title)
+
+### Fixed
+- `relay.links.extract_links` and `lint.py`'s H1 scanner now scan `markdown_scan.strip_code`-ped content (new shared helper): a post documenting relay's own link syntax, or a fenced shell/TOML snippet containing `[[...]]`, no longer gets flagged for its own examples
+- The wikilink regex confined every capture group to a single line — a stray, never-closed `[[` in prose used to keep matching across paragraphs looking for the next `]]` anywhere in the file, producing a `match` field up to ~900 characters long
+- `![[file.png]]` embeds were resolved against post titles (as `broken_link`) instead of the attachment table — every one of a real vault's 11 attachments was flagged as a broken post link
+- A bare `#N` below 10 or above the vault's id high-water mark is no longer treated as a post reference at all — footnote markers, procedure steps and GitHub issue/PR numbers were colliding with real post ids
+- `zero_chunks`'s detail text asserted a fenced-code-only body as the cause even when the body was simply empty
+- Findings are now ordered by post id throughout — `zero_backlinks` used to be computed in a separate pass and landed grouped at the end regardless of which post each row was about
+- `main.js`'s `extractMedia` (feed-card thumbnail picker) had none of `preprocessLinks`'s code-span exclusion — a backticked `` `![[photo.png]]` `` syntax example was promoted to the post's own card thumbnail
+
+---
+
 ## [1.10.2] — 2026-09-14
 
 ### Fixed

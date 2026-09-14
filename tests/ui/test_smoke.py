@@ -58,6 +58,25 @@ def test_feed_renders_seeded_posts(page):
     assert page.get_by_text("Smoke Post 0").first.is_visible()
 
 
+def test_backticked_attachment_embed_syntax_is_not_rendered_as_an_image(page, relay_server):
+    """relay #198 N-5 follow-up, L-7: extractMedia (the feed-card thumbnail
+    picker) used to scan raw post content with no code-span exclusion at
+    all, unlike preprocessLinks (the full post-body renderer, which already
+    excluded code). A post documenting embed syntax as a literal example —
+    `` `![[photo.png]]` `` — had that example resolved as a real embed and
+    promoted to its own card's thumbnail."""
+    made = _api_post(relay_server, {
+        "title": "Embed Syntax Card Check",
+        "content": "Attachment embeds look like `![[chart.png]]` in the raw file.",
+        "tags": ["homelab"],
+    })
+    page.reload()
+    card = page.locator(f'.feed .post[data-id="{made["id"]}"]')
+    card.wait_for(timeout=10_000)
+    assert card.locator(".post-media img").count() == 0, "backticked embed rendered as a card thumbnail"
+    assert "![[chart.png]]" in card.inner_text(), "literal syntax example should still read as plain text"
+
+
 def test_tag_filter_narrows_the_feed(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
     page.locator(".tag-item", has_text="radio").first.click()

@@ -14,16 +14,38 @@ off (history, embeddings) is skipped and named in ``LintReport.skipped_rules``
 rather than raising — a lint pass should degrade like ``/status``, not 503.
 
 ``LintFinding.match`` carries the exact matched substring (``link.raw``, e.g.
-``"[[Title]]"`` or ``"#42"``) for ``broken_link``/``link_to_deleted_post`` —
-the one rule pair with a single, unambiguous spot in the content to point at
-— so a client can jump straight to it instead of making someone search a
-long post for a wikilink that looks just like the surrounding text. Every
-other rule leaves it ``None``: there is no single substring "missing a
-domain tag" is about.
+``"[[Title]]"`` or ``"#42"``) for ``broken_link``/``link_to_deleted_post``/
+``broken_attachment_embed`` — the rules with a single, unambiguous spot in
+the content to point at — so a client can jump straight to it instead of
+making someone search a long post for a wikilink that looks just like the
+surrounding text. Every other rule leaves it ``None``: there is no single
+substring "missing a domain tag" is about.
+
+Link scanning (``relay.links.extract_links``, used below) runs against
+``markdown_scan.strip_code``-ped content, not the raw post — relay #198's
+N-5 follow-up (first real run against a 132-post vault, ~230 findings, ~70%
+false positives, all on ``broken_link``) found that a post *documenting*
+relay's own link syntax got flagged for its own examples, and a post with a
+fenced shell/TOML snippet containing ``[[...]]`` got flagged for that
+snippet's syntax. Two more id-ref false positives from the same run don't
+need code-exclusion: a bare ``#N`` below 10 or above the vault's current
+id high-water-mark (``vault.read_id_counter()``) is excluded from
+``broken_link``/``link_to_deleted_post`` entirely, on the read that a
+footnote marker, a procedure step, or a GitHub issue/PR number collides
+with a real post id far more often than a genuine cross-link does at either
+end of that range — ids 1-9 predate this vault's own conventions, and
+nothing above the high-water mark has ever been issued to anything.
+``!``-prefixed refs with a file extension (``![[photo.png]]``) are Obsidian
+attachment embeds, not post links — resolved against the attachment table
+(``vault.list_attachments``) instead, under their own rule,
+``broken_attachment_embed``, so an unresolved one reads as what it is
+rather than as a link to a nonexistent post. An extension-less embed
+(``![[Some Note]]``, a note transclusion) still resolves against post
+titles like an ordinary wikilink, matching main.js's own renderer.
 
 The master document (id=0) is exempt from the *convention* rules — see
 ``lint_this_post`` in ``run()``: ``zero_tags``/``missing_domain_tag``/
-``missing_type_tag``, ``stale_inbox``, ``h1_title_mismatch``,
+``missing_type_tag``, ``stale_inbox``, ``h1_missing``/``h1_title_mismatch``,
 ``stale_last_updated``, and ``zero_chunks`` — since a root index reasonably
 breaks tag, folder, H1 and staleness conventions an ordinary post follows
 (no domain tag by design, possibly zero tags at all, a stylized H1), and its
@@ -43,7 +65,7 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
-from . import database, folders, history, links, vectors
+from . import database, folders, history, links, markdown_scan, vault, vectors
 from .config import settings
 from .models import LintFinding, LintReport
 from .service._common import _tags_from_sentinel
@@ -63,6 +85,12 @@ _BACKLINK_EXEMPT_TAGS = {"digest", "news", "daily-digest", "news-digest", "brief
 # touched in this long. No config surface yet (#198 N-5 floats moving this to
 # tags.yml) — a single constant until a second caller needs it configurable.
 STALE_HUB_PLAN_DAYS = 60
+
+# An unresolved #N below this is excluded from broken_link/link_to_deleted_post
+# entirely — see the module docstring's L-5 paragraph. Single digits predate
+# this vault's own conventions and collide completely with footnote markers
+# and procedure steps in ordinary prose.
+_MIN_MEANINGFUL_ID_REF = 10
 
 # Requires a middot/dash immediately before the number — #0's own convention
 # is "*Last updated: <date> · N post*" — rather than a bare `\d+\s*post\b`,
@@ -100,6 +128,8 @@ async def run(db: aiosqlite.Connection) -> LintReport:
     title_to_id = {links.norm_title(r["title"]): r["id"] for r in rows}
     ids = {r["id"] for r in rows}
     inbound_counts = dict.fromkeys(ids, 0)
+    attachment_names = {name for name, _folder, _size in vault.list_attachments()}
+    high_water_mark = vault.read_id_counter()
 
     # Deleted-post lookup, for classifying a broken link as "points at
     # something that used to exist" rather than a plain typo. Best-effort:
@@ -170,8 +200,19 @@ async def run(db: aiosqlite.Connection) -> LintReport:
                     post_id=pid, title=title,
                 ))
 
-            h1_match = _H1_RE.search(content)
-            if h1_match and h1_match.group(1).strip() != title.strip():
+            # Scans stripped content: three of the L-6 follow-up's "no H1"
+            # false readings (posts 193, 257, 269) were the rule picking up
+            # the first heading-shaped line inside a fenced code block —
+            # e.g. a banner comment like "# --- SYSTEM METRICS ---" — instead
+            # of correctly finding no real H1 at all.
+            h1_match = _H1_RE.search(markdown_scan.strip_code(content))
+            if h1_match is None:
+                findings.append(_finding(
+                    "h1_missing", "warning",
+                    "No H1 in the body at all — legacy post, predates the H1/title convention.",
+                    post_id=pid, title=title,
+                ))
+            elif h1_match.group(1).strip() != title.strip():
                 findings.append(_finding(
                     "h1_title_mismatch", "warning",
                     f"H1 reads {h1_match.group(1).strip()!r}, filename/title is {title!r} — "
@@ -201,8 +242,27 @@ async def run(db: aiosqlite.Connection) -> LintReport:
         # index's whole job is to link correctly), not a convention #0 might
         # reasonably not follow.
         for link in links.extract_links(content, title_to_id, ids):
+            if link.kind == "embed":
+                # Attachment embeds never count as a post backlink and never
+                # go through the id-ref/deleted-post classification below —
+                # they resolve against files, not posts.
+                if link.target not in attachment_names:
+                    findings.append(_finding(
+                        "broken_attachment_embed", "error",
+                        f"{link.raw} does not resolve to any existing attachment.",
+                        post_id=pid, title=title, match=link.raw,
+                    ))
+                continue
             if link.resolved_id is not None:
                 inbound_counts[link.resolved_id] = inbound_counts.get(link.resolved_id, 0) + 1
+                continue
+            if link.kind == "id" and not (_MIN_MEANINGFUL_ID_REF <= int(link.target) <= high_water_mark):
+                # Below _MIN_MEANINGFUL_ID_REF or above the id high-water
+                # mark: not a plausible post reference at all (footnote,
+                # procedure step, GitHub issue/PR, or an id never issued) —
+                # see the module docstring's L-5 paragraph. Excluded outright
+                # rather than downgraded to a warning: a false positive
+                # softened to a lower severity is still a false positive.
                 continue
             points_at_deleted = (
                 (link.kind == "id" and int(link.target) in deleted_ids)
@@ -222,9 +282,17 @@ async def run(db: aiosqlite.Connection) -> LintReport:
                 ))
 
         if lint_this_post and pid in zero_chunk_ids:
+            # "likely a code-only body" is a real cause but not the only
+            # one — an empty body chunks to zero rows too, and asserting the
+            # code-fence cause there is simply wrong (found on a post with no
+            # content at all, relay #198 N-5 follow-up L-8). Only claim the
+            # specific cause when the body isn't just empty.
+            reason = (
+                "the body is empty" if not content.strip()
+                else "likely a body that is entirely a fenced code block"
+            )
             findings.append(_finding(
-                "zero_chunks", "warning",
-                "Embedded to zero chunks — likely a body that is entirely a fenced code block.",
+                "zero_chunks", "warning", f"Embedded to zero chunks — {reason}.",
                 post_id=pid, title=title,
             ))
 
@@ -258,5 +326,14 @@ async def run(db: aiosqlite.Connection) -> LintReport:
                 f"#0 says {m.group(1)} post(s), vault actually has {len(rows)}.",
                 post_id=0, title=master_row["title"],
             ))
+
+    # Post id ascending, not insertion order: zero_backlinks used to be
+    # computed (and therefore appended) in its own pass after every other
+    # rule, so it landed grouped at the end regardless of which post each
+    # row was about — everything else was already interleaved by post id
+    # purely by accident of loop order. A rule with no single post it's
+    # about (empty_tag_config) sorts last; sort() is stable, so findings
+    # that share a post id keep their original relative order.
+    findings.sort(key=lambda f: (f.post_id is None, f.post_id or 0))
 
     return LintReport(items=findings, checked_posts=len(rows), skipped_rules=skipped)
