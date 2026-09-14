@@ -32,6 +32,7 @@ SHEETS = [
     ("edit", "open_edit", "#editModal"),
     ("history", "open_history", "#historyModal"),
     ("shortcuts", "open_shortcuts", "#shortcutsModal"),
+    ("lint", "open_lint", "#lintModal"),
 ]
 
 # Dispatches a real touch sequence on an element. Playwright's touchscreen API
@@ -101,6 +102,12 @@ def open_history(page):
     open_post(page)
     page.locator("#pmHistory").click()
     page.wait_for_selector("#historyModal.open")
+
+
+def open_lint(page):
+    from .test_lint_panel import open_lint as _open_lint
+
+    _open_lint(page)
 
 
 def open_shortcuts(page):
@@ -260,8 +267,8 @@ def test_every_desktop_modal_shares_the_same_chrome(page):
         )
         page.keyboard.press("Escape")
         page.wait_for_timeout(200)
-        if name in ("edit", "history"):
-            page.keyboard.press("Escape")  # the post modal underneath
+        if name in ("edit", "history", "lint"):
+            page.keyboard.press("Escape")  # the post/status modal underneath
             page.wait_for_timeout(200)
 
     distinct = set(seen.values())

@@ -28,6 +28,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may
 | POST | `/posts/{id}/restore` | Roll a post back to a revision (`{"sha": …}`), recreating it if deleted |
 | GET | `/changes` | The vault changelog, newest first: every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, as `{seq, id, title, action, when, sha, author}`. `since` pages forward from a `seq` or filters by ISO timestamp; `author` is always `null` until per-agent identity ships. 503 if vault history is disabled |
 | GET | `/links` | `(id, title)` index for resolving `[[Title]]` wikilinks |
+| GET | `/lint` | Check the vault against the rules in #0: missing/zero tags, stale Inbox placement, broken links, H1/title drift, stale hub/plan, zero backlinks, unused tag config, zero embedding chunks, #0's stated post count. `#0` is exempt from everything except the link checks |
 | GET | `/folders` | First-level vault folders with post counts |
 | POST | `/attachments` | Store an attachment; bytes via `data` (base64), `source_url` (server fetches), or `upload_id` (filled slot). With `post_id`, appends `![[file]]` to that post |
 | POST | `/attachments/uploads` | Mint a presigned upload slot (`upload_id` + `upload_url`) |

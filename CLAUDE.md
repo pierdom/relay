@@ -43,6 +43,7 @@ All endpoints need `Authorization: Bearer <API_KEY>`.
 | GET/POST | /posts/{id}/history · /posts/{id}/restore | Revisions / roll back to sha (recreates if deleted). 503 when history is off |
 | GET | /posts/{id}/history/{sha} | Full body at one revision — short sha accepted |
 | GET | /changes | Vault changelog, newest first (relay #198, N-4) — `{seq, id, title, action, when, sha, author}`, `action` ∈ create/update/edit/append/delete/restore/tag_rename/external_edit/external_delete/expiry. `since` = a `seq` (page forward) or ISO timestamp. `author` always null until N-3. A materialized index over `history.git`, not a second store |
+| GET | /lint | Vault lint (relay #198, N-5) — checks the vault against the rules already written down in #0 rather than relying on someone reading every post. Read-only |
 | GET | /links | (id, title) index for wikilink resolution |
 | GET | /folders | First-level folders with post counts |
 | POST/GET | /attachments | Upload / list — bytes via `data` (base64), `source_url`, or `upload_id` |
@@ -108,6 +109,24 @@ post changed", so SSE reconnect only ever replayed brand-new posts.
   alongside it.
 - **`changes.list_changes` 503s (`HistoryUnavailable`) when history is off**, same distinction `/posts/{id}/history` already draws — an empty list would look indistinguishable from "nothing has changed." A *separate* `HistoryUnavailable` from `service._common`'s: `changes.py` sits below `relay.service` (which already imports `changes`), so importing `service._common` back into it would be a real import cycle, not just a style mismatch.
 
+## Vault lint (relay #198, N-5)
+
+`relay/lint.py`'s `run(db)` — behind `GET /lint` and the `lint_vault` MCP tool — transcribes rules already in #0's prose, not new policy:
+
+- `zero_tags` / `missing_domain_tag` / `missing_type_tag` — no tags at all, or missing one axis (not double-counted against each other)
+- `stale_inbox` — a domain-tagged post still filed in `Inbox/` (`folders.py`'s move-on-first-tag invariant)
+- `h1_title_mismatch` — H1 no longer matches the title (classic cause: `frontmatter.sanitize_title` strips a rename character like `:` that the H1 still has)
+- `broken_link` / `link_to_deleted_post` — a `#NNN`/`[[wikilink]]` that doesn't resolve, or resolves to a post `history.deletions()` says used to exist. Both carry `LintFinding.match`, the exact broken text, for jumping straight to it
+- `stale_last_updated` — a `hub`/`plan` post untouched for `STALE_HUB_PLAN_DAYS` (60)
+- `zero_backlinks` — exempt: `digest`/`news`/`daily-digest`/`news-digest`/`briefing`/`financial-analyst`-tagged posts (dated snapshots nobody links back to)
+- `empty_tag_config` — a `tags.yml` entry with zero live posts
+- `zero_chunks` — embedded to zero chunks (reuses `vectors.unembedded_post_ids`)
+- `master_doc_post_count` — #0's stated `<N> post` count vs. reality; silently skipped if #0 states none
+
+**#0 is exempt from every rule above except the link checks** (`lint_this_post` in `run()`) — a root index reasonably breaks tag/folder/H1/staleness/embedding conventions, but a broken link there is a factual defect, not a convention. It's still walked for outbound links (posts it references get backlink credit either way), and `master_doc_post_count` still applies to it — that's about its own accuracy, not a convention.
+
+Read-only, one pass over `posts` plus a handful of cheap follow-ups — safe to run on every lint check rather than a background job. A rule that needs a disabled feature (history for `link_to_deleted_post`, embeddings for `zero_chunks`) is skipped and named in `LintReport.skipped_rules` rather than the endpoint 503ing — a lint pass should degrade like `/status`, not fail outright over one unavailable rule.
+
 ## Cross-links
 
 - **`[[Title]]` / `[[Title|alias]]`** — case-insensitive; renaming rewrites inbound links across the vault.
@@ -170,6 +189,7 @@ Two surfaces, **one tool definition**:
 | `list_folders` | First-level folders with post counts (the `folder` filter's vocabulary) |
 | `list_tags` / `set_tag_config` / `rename_tag` | Tag management |
 | `get_backlinks` | Posts linking here — check before rewriting or deleting |
+| `lint_vault` | Vault lint (relay #198, N-5) — same report as `GET /lint` |
 
 ```bash
 # Remote (recommended):
@@ -199,9 +219,13 @@ Single-page app on the REST API + SSE. ES modules, no build step — nothing is 
 - **Draggable elements**: `animation-fill-mode: backwards` and no `to` keyframe. A `both` fill + explicit `to` outranks inline styles and swallows drag transforms.
 - **Markdown content rules must go through `.post-body`** — a rule on `.pm-body` directly matches nothing (the rendered markdown is wrapped).
 - **`min-width: 0` on every grid tile area.** A `1fr` track's automatic minimum is min-content; any non-shrinkable child overflows the card.
-- **Five modals share chrome.** `test_every_desktop_modal_shares_the_same_chrome` asserts they agree as a set — change the look once. The keyboard-shortcuts modal shipped later and was excluded from `SHEETS` (`tests/ui/test_sheets.py`) until it was found in the exact "grab handle renders, `attachSheetDismiss` never wired" state the file's own docstring warns about — sharing `.sm-inner` means it was never actually at risk of *looking* different, just untested.
+- **Six modals share chrome** (post, status, edit, history, shortcuts, lint). `test_every_desktop_modal_shares_the_same_chrome` asserts they agree as a set — change the look once. Both the keyboard-shortcuts and lint modals shipped after the other four and had to be added to `SHEETS` (`tests/ui/test_sheets.py`) by hand — the shortcuts modal was found in the exact "grab handle renders, `attachSheetDismiss` never wired" state that file's docstring warns about; sharing `.sm-inner` means a new modal is never at risk of *looking* different, just untested until it's added.
 - **`apiSend` for DELETEs only** (no `Content-Type`, never throws on non-ok). Use `apiFetch` for anything that sends a body and needs to know if it worked.
 - **Deleted post recovery lives in the status panel**, not the sidebar. It's a read over `history.git`, not a trash can.
+- **Vault lint's UI is its own modal, not a status-panel drill-down** (`relay/static/ui/js/lint.js`, `#lintModal`). Status's "Vault lint" section runs the check on every panel open and headlines a count; "Browse issues →" opens `#lintModal`, which stacks over the status modal like `#historyModal` stacks over the post modal — closes on its own (Escape/×), added to `SHEETS` in `tests/ui/test_sheets.py`. Two-pane: findings list left, editor right. `.lm-inner` matches `.pm-inner`'s width (`94%`/`1320px`) so opening/closing a post from it doesn't resize the frame — deliberately not full-bleed, and not `.hm-inner`'s smaller cap either. `.lm-*` classes are distinct from `.hm-*` where a test asserts the latter bare/unscoped (`.hm-inner`); structural pieces scoped by parent id everywhere they're asserted (`.hm-rev`/`.hm-body-text` under `#hmBody`) were safe to reuse directly.
+- **The lint pane hosts the real editor, not a preview.** `edit-form.js`'s `buildEditForm(container, post, {onSave, onCancel})` is shared by the standalone Edit modal and the lint pane — one implementation, one dirty-check, returned as `{isDirty}` for each caller's own close-time guard (`tryCloseEditModal` / `tryCloseLintModal`). `isDirty()` diffs every field (title/content/tags/source/expires) against its own starting value, not just content — the pane's main use is a tags-only fix. "Open post" (`.lm-open`) is a smaller, secondary action for what inline editing doesn't reach — Delete, History, backlinks.
+- **Broken links are highlighted red in the editor, everywhere it appears** — a transparent-text `<pre class="ef-content-backdrop">` behind the textarea paints `.ef-broken-link`'s background where a `GET /links` fetch (cached in `edit-form.js`, invalidated on save) says a `[[wikilink]]`/`#id` doesn't resolve — the same definition `relay.links` uses, not main.js's richer render-time rules (which treat `![[x.png]]` as an embed, not broken). Both layers must share every box-model property or the highlight misaligns. Selecting a `broken_link`/`link_to_deleted_post` finding also calls `scrollToMatch` on `LintFinding.match` (the exact broken text) to jump straight to it; other rules leave `match` `None`.
+- **The post modal's "← previous post" breadcrumb doubles as "← Vault lint"** — opening a post from the lint pane sets `_externalOrigin`; `reopenLintModal` (not `openLintModal`) restores the same filter/selection on the way back rather than a fresh list.
 - **History panel is fixed height** — panes built once, only contents swap. `min(82vh, 860px)`.
 - **Header control order is a safety property**: `+ New Post` · theme · status · disconnect. Primary action and session-kill must not be adjacent. `test_header_controls_are_one_visual_set` pins this.
 - **Use inline SVG, not glyphs or emoji** for icons. Colour emoji ignores CSS `color`; Unicode glyphs render unpredictably at small sizes.
@@ -262,6 +286,7 @@ relay/
 ├── watcher.py       # watchdog: external edits → reindex + SSE
 ├── history.py       # git commit per write → <vault>/.relay/history.git
 ├── changes.py       # Vault changelog: materialized index over history.git (relay #198, N-4)
+├── lint.py          # Vault lint: #0's rules, machine-checked (relay #198, N-5)
 ├── service/         # Shared logic: posts · revisions · attachments · tags (+ _common); relay.service re-exports
 ├── ingest.py        # Attachment byte transports
 ├── chunking.py      # H2/H3-aware post chunking (semantic search POC)
@@ -277,7 +302,7 @@ relay_mcp/server.py              # stdio ↔ Streamable HTTP bridge (no tool def
 relay/static/index.html          # Browser UI markup (210 lines)
 relay/static/ui/app.css          # UI stylesheet
 relay/static/ui/js/main.js       # App entry point (ES module)
-relay/static/ui/js/{util,api,status,feed-query,view-prefs,post-history,sheet,theme}.js
+relay/static/ui/js/{util,api,status,feed-query,view-prefs,post-history,sheet,theme,deleted,lint,edit-form}.js
 relay_tui/                       # Textual TUI — app.py · api.py · sse.py · theme.py · palettes/ · widgets/
 scripts/export_vault.py          # Pull a live relay into a fresh vault
 ```

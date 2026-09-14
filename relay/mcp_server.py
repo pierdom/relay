@@ -22,7 +22,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import __version__, changes, database, metrics, service, status, vault
+from . import __version__, changes, database, lint, metrics, service, status, vault
 from .auth import bearer_matches
 from .config import settings
 from .models import AttachmentCreate, ChangeEntry, ChangeListResponse, PostCreate, PostUpdate, TagConfigCreate
@@ -461,6 +461,32 @@ async def get_status() -> dict:
     metrics.record_tool_call("get_status")
     async with _db() as db:
         result = await status.build(db)
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "Check the vault against the rules already written down in #0 instead of relying on "
+        "someone reading every post (relay #198, N-5): posts missing a domain and/or type tag, "
+        "a post with zero tags, notes stuck in Inbox despite carrying a domain tag, broken #NNN "
+        "refs and dangling [[wikilinks]] (and specifically links pointing at a deleted post), an "
+        "H1 that drifted from the title (the classic case: relay's filename sanitizer strips a "
+        "character like ':' that the body's H1 still has), a hub/plan post not updated in a "
+        "while, a post with zero backlinks, a tags.yml entry with zero posts, a post that "
+        "embedded to zero chunks, and #0's own stated post count going stale. The master document "
+        "(id=0) is exempt from the tag/folder/H1/staleness/embedding-coverage rules — a root index "
+        "reasonably breaks conventions an ordinary post follows — but not from the link checks: a broken cross-link "
+        "in #0 is a factual defect, not a convention, and matters more there than anywhere else. "
+        "broken_link and link_to_deleted_post findings carry a match field — the exact broken "
+        "'[[Title]]' or '#NNN' text — for jumping straight to it in an editor. Read-only. A rule "
+        "that needs a disabled feature (history, embeddings) is skipped and named in "
+        "skipped_rules rather than erroring."
+    )
+)
+async def lint_vault() -> dict:
+    metrics.record_tool_call("lint_vault")
+    async with _db() as db:
+        result = await lint.run(db)
     return result.model_dump()
 
 

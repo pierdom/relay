@@ -12,15 +12,17 @@
  * deferred module.
  */
 
-import { apiFetch, apiSend, apiSendChecked, clearApiKey, setApiKey } from './api.js';
+import { apiFetch, apiSendChecked, clearApiKey, setApiKey } from './api.js';
 import { closeStatusModal, fetchEmbeddingsEnabled, isStatusOpen } from './status.js';   // also self-wires its own controls
 import { query, resetPaging } from './feed-query.js';
 import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
 import { attachSheetDismiss } from './sheet.js';
 import { initDeleted } from './deleted.js';
+import { initLint, isLintOpen, reopenLintModal, tryCloseLintModal } from './lint.js';
+import { buildEditForm, confirmDeleteAttachment, wireAttachments } from './edit-form.js';
 import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
-import { escHtml, fmtBytes, relativeTime, toDatetimeLocal, toUtcIso } from './util.js';
+import { escHtml, fmtBytes, relativeTime, toUtcIso } from './util.js';
 const LIMIT = 20;
 // The break-glass API key now lives in ./api.js (setApiKey/clearApiKey).
 let authed = false;    // true once a session exists (cookie or key) — the real "logged in" flag
@@ -344,8 +346,8 @@ function extractMedia(content) {
   return { thumb, count, stripped };
 }
 
-async function openPostById(id, { onError } = {}) {
-  try { openPostModal(await apiFetch(`/posts/${id}`)); }
+async function openPostById(id, { onError, origin } = {}) {
+  try { openPostModal(await apiFetch(`/posts/${id}`), { origin }); }
   catch (e) { if (onError) onError(e); }
 }
 
@@ -427,116 +429,11 @@ function closeCompose() {
 }
 
 /* ── Attachment upload ─────────────────────────────────────── */
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(',', 2)[1] || '');
-    r.onerror = () => reject(new Error('could not read file'));
-    r.readAsDataURL(file);
-  });
-}
-function insertAtCursor(ta, text) {
-  const s = ta.selectionStart ?? ta.value.length, e = ta.selectionEnd ?? ta.value.length;
-  ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
-  ta.selectionStart = ta.selectionEnd = s + text.length;
-  ta.focus();
-}
-// At/above this size, skip base64 (which inflates the JSON body ~33% and buffers
-// the whole blob as a string) and stream the raw bytes through a presigned slot:
-// POST a slot → PUT the file bytes → finalize with the upload_id.
-const PRESIGNED_MIN_BYTES = 4 * 1024 * 1024;   // 4 MB
-
-async function postAttachment(name, file, extra) {
-  if (file.size >= PRESIGNED_MIN_BYTES) {
-    const slot = await apiFetch('/attachments/uploads', { method: 'POST' });
-    // Relative, same-origin path so the session cookie authenticates the PUT.
-    const put = await apiSend(`/attachments/uploads/${encodeURIComponent(slot.upload_id)}`,
-                              { method: 'PUT', body: file });
-    if (!put.ok) throw new Error(`upload ${put.status} ${put.statusText}`);
-    return apiFetch('/attachments', { method: 'POST',
-      body: JSON.stringify({ upload_id: slot.upload_id, filename: name, ...extra }) });
-  }
-  const data = await fileToBase64(file);
-  return apiFetch('/attachments', { method: 'POST',
-    body: JSON.stringify({ filename: name, data, ...extra }) });
-}
-
-// Upload one file, then insert its ![[ref]] at the cursor. `getExtra` supplies the
-// placement fields: an existing post ({post_id, embed:false} — server files it in
-// the post's folder, UI places the ref) or a new note ({tags} — server derives the
-// folder the note will use, so the image lands beside it instead of in Inbox).
-async function uploadOne(file, ta, statusEl, getExtra) {
-  const name = file.name || `pasted-${Date.now()}.png`;
-  statusEl.classList.remove('error');
-  statusEl.textContent = `Uploading ${name}…`;
-  try {
-    const res = await postAttachment(name, file, getExtra());
-    // ![[…]] embed for everything: images render inline, other files as a 📎 link.
-    insertAtCursor(ta, `\n![[${res.filename}]]\n`);
-    statusEl.textContent = `Attached ${res.filename} → ${res.folder}/assets`;
-  } catch (e) {
-    statusEl.classList.add('error');
-    statusEl.textContent = `Upload failed: ${e.message}`;
-  }
-}
-async function uploadMany(files, ta, statusEl, getExtra) {
-  for (const f of files) await uploadOne(f, ta, statusEl, getExtra);
-}
-function wireAttachments(ta, fileInput, attachBtn, statusEl, getExtra) {
-  attachBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    await uploadMany([...fileInput.files], ta, statusEl, getExtra);
-    fileInput.value = '';
-  });
-  ta.addEventListener('dragover', e => { e.preventDefault(); ta.classList.add('drag-over'); });
-  ta.addEventListener('dragleave', () => ta.classList.remove('drag-over'));
-  ta.addEventListener('drop', async e => {
-    if (!e.dataTransfer?.files?.length) return;
-    e.preventDefault(); ta.classList.remove('drag-over');
-    await uploadMany([...e.dataTransfer.files], ta, statusEl, getExtra);
-  });
-  ta.addEventListener('paste', async e => {
-    const files = [...(e.clipboardData?.items || [])]
-      .filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
-    if (!files.length) return;   // let normal text paste through
-    e.preventDefault();
-    await uploadMany(files, ta, statusEl, getExtra);
-  });
-}
+// The upload pipeline and the edit-form builder now live in ./edit-form.js —
+// shared with the vault-lint pane (lint.js), which hosts the same editor
+// inline instead of a read-only preview plus a button leading away from it.
 
 const parseTagsField = (v) => v.split(',').map(s => s.trim()).filter(Boolean);
-
-// Confirm + DELETE an attachment; alerts if posts still reference it. Returns
-// true when the file was removed (callers refresh their own view).
-async function confirmDeleteAttachment(name) {
-  if (!confirm(`Delete "${name}" from the vault? This removes the file itself.`)) return false;
-  try {
-    const r = await apiFetch(`/attachments/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    if (r.referenced_by?.length)
-      alert(`Deleted. Still referenced by ${r.referenced_by.map(i => '#' + i).join(', ')} — those embeds are now broken.`);
-    return true;
-  } catch (e) { alert(`Delete failed: ${e.message}`); return false; }
-}
-
-// Edit-form list of the post-folder's attachments, each with a delete (×) button.
-async function renderEditAttachments(el, postId) {
-  const box = el.querySelector('.ef-attachments');
-  if (!box) return;
-  let d;
-  try { d = await apiFetch(`/attachments?post_id=${postId}`); } catch { box.innerHTML = ''; return; }
-  if (!d.items.length) { box.innerHTML = ''; return; }
-  box.innerHTML = `<div class="ef-attach-head">Files in ${escHtml(d.items[0].folder)}/assets</div>` +
-    d.items.map(a => `<div class="ef-attach-item" data-name="${escHtml(a.filename)}">
-      <span class="ef-attach-name">${escHtml(a.filename)}</span>
-      <span class="ef-attach-size">${fmtBytes(a.bytes)}</span>
-      <button type="button" class="ef-attach-del" title="Delete file from vault">×</button></div>`).join('');
-  box.querySelectorAll('.ef-attach-del').forEach(btn =>
-    btn.addEventListener('click', async () => {
-      const name = btn.closest('.ef-attach-item').dataset.name;
-      if (await confirmDeleteAttachment(name)) await renderEditAttachments(el, postId);
-    }));
-}
 
 wireAttachments(
   document.getElementById('cpContent'), document.getElementById('cpFile'),
@@ -723,6 +620,33 @@ for (const [name, id] of Object.entries(SIDEBAR_TABS)) {
 // A restore puts a post back in the feed, so the feed has to hear about it.
 // The recovery browser itself lives in the status panel (`js/status.js`).
 initDeleted(() => { resetPaging(); loadPosts(true); loadTags(); });
+initLint({
+  // "Open post" needs to leave both the lint modal and the status modal
+  // beneath it — the post modal renders under both otherwise (they share a
+  // higher z-index) — before opening the real post. tryCloseLintModal (not
+  // the raw close) first: the pane's editor may have unsaved changes, and a
+  // decline there must cancel this whole navigation, not just skip a step of
+  // it. The post modal's own "← Vault lint" breadcrumb (`_externalOrigin`
+  // below) is how you get back: reopenLintModal, not openLintModal, so it's
+  // the same filter and finding you left, not a fresh full list. Status is
+  // deliberately not reopened behind it on the way back — the lint modal
+  // never needed it open beneath it technically, only entered that way, and
+  // closing lint from here falls through to the feed same as closing any
+  // other modal does.
+  openPost: id => {
+    if (!tryCloseLintModal()) return;
+    if (isStatusOpen()) closeStatusModal();
+    openPostById(id, { origin: { label: 'Vault lint', onBack: reopenLintModal } });
+  },
+  // The pane's own editor (edit-form.js, shared with the standalone Edit
+  // modal) saves directly against the post — this is the feed/sidebar half
+  // of that, the same refresh enterEditMode's onSave does.
+  onSaved: updated => {
+    const card = feed.querySelector(`[data-id="${updated.id}"]`);
+    if (card) card.replaceWith(renderPost(updated));
+    refreshSidebarCounts();
+  },
+});
 
 async function loadFolders() {
   if (!authed) return;
@@ -1205,7 +1129,7 @@ function renderPost(post) {
 const editModal = document.getElementById('editModal');
 const emBody = document.getElementById('emBody');
 const emTitle = document.getElementById('emTitle');
-let editingPost = null;
+let editForm = null;   // { isDirty } from the current buildEditForm, or null
 
 function isEditOpen() {
   return editModal.classList.contains('open');
@@ -1215,16 +1139,16 @@ function closeEditModal() {
   editModal.classList.remove('open');
   if (!postModal.classList.contains('open')) document.body.style.overflow = '';
   emBody.innerHTML = '';
-  editingPost = null;
+  editForm = null;
 }
 
 /** True unless there are unsaved changes the user declines to throw away.
- *  Split out of tryCloseEditModal so the swipe gesture can ask *before* it
- *  animates the sheet away — a dismissal that gets vetoed has to spring back. */
+ *  Used by the swipe gesture (which must ask *before* it animates the sheet
+ *  away — a dismissal that gets vetoed has to spring back) and by Escape/the
+ *  × button; the Cancel button inside the form asks this same question
+ *  itself, via buildEditForm, before ever calling back here. */
 function confirmDiscardEdit() {
-  const field = emBody.querySelector('.ef-content');
-  const dirty = editingPost && field && field.value !== editingPost.content;
-  return !dirty || confirm('Discard your changes to this post?');
+  return !editForm?.isDirty() || confirm('Discard your changes to this post?');
 }
 
 /** Close, asking first if the body was touched — the modal is easy to dismiss. */
@@ -1234,53 +1158,12 @@ function tryCloseEditModal() {
 }
 
 function enterEditMode(_el, post) {
-  editingPost = post;
   editModal.classList.add('open');
   document.body.style.overflow = 'hidden';
   emTitle.textContent = `#${post.id}`;
-  emBody.innerHTML = `
-    <div class="edit-form">
-      <div><label for="efTitle">Title</label><input id="efTitle" class="ef-title" type="text" value="${escHtml(post.title || '')}"></div>
-      <div class="ef-content-wrap"><label for="efContent">Content</label><textarea id="efContent" class="ef-content">${escHtml(post.content)}</textarea>
-        <div class="attach-row">
-          <input type="file" class="ef-file" multiple style="display:none">
-          <button type="button" class="btn-attach ef-attach">📎 Attach</button>
-          <span class="attach-status ef-attach-status"></span>
-        </div>
-        <div class="ef-attachments"></div>
-      </div>
-      <div><label for="efTags">Tags</label><input id="efTags" class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></div>
-      <div><label for="efSource">Source</label><input id="efSource" class="ef-source" type="text" value="${escHtml(post.source || '')}"></div>
-      <div><label for="efExpires">Expires</label><input id="efExpires" class="ef-expires" type="datetime-local" value="${toDatetimeLocal(post.expires_at || '')}"></div>
-      <div class="edit-actions">
-        <button class="btn-cancel">Cancel</button>
-        <button class="btn-save">Save</button>
-      </div>
-    </div>`;
-
-  wireAttachments(
-    emBody.querySelector('.ef-content'), emBody.querySelector('.ef-file'),
-    emBody.querySelector('.ef-attach'), emBody.querySelector('.ef-attach-status'),
-    () => ({ post_id: post.id, embed: false }),
-  );
-  renderEditAttachments(emBody, post.id);
-  emBody.querySelector('.ef-title').focus();
-
-  emBody.querySelector('.btn-cancel').addEventListener('click', tryCloseEditModal);
-  emBody.querySelector('.btn-save').addEventListener('click', async () => {
-    const newTitle = emBody.querySelector('.ef-title').value.trim();
-    if (!newTitle) { alert('Title is required'); return; }
-    const body = {
-      title:      newTitle,
-      content:    emBody.querySelector('.ef-content').value,
-      tags:       emBody.querySelector('.ef-tags').value.split(',').map(s => s.trim()).filter(Boolean),
-      source:     emBody.querySelector('.ef-source').value.trim() || null,
-      expires_at: toUtcIso(emBody.querySelector('.ef-expires').value) || null,
-    };
-    const btn = emBody.querySelector('.btn-save');
-    btn.disabled = true; btn.textContent = 'Saving…';
-    try {
-      const updated = await apiFetch(`/posts/${post.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  editForm = buildEditForm(emBody, post, {
+    onCancel: closeEditModal,   // buildEditForm already confirmed the discard
+    onSave: updated => {
       // The card is looked up rather than held: the feed may have re-rendered
       // (a filter, a sort, an SSE push) while the modal was open.
       const card = feed.querySelector(`[data-id="${post.id}"]`);
@@ -1288,10 +1171,7 @@ function enterEditMode(_el, post) {
       closeEditModal();
       if (postModal.classList.contains('open')) openPostModal(updated, { pushHistory: false });
       refreshSidebarCounts();
-    } catch (e) {
-      alert(`Save failed: ${e.message}`);
-      btn.disabled = false; btn.textContent = 'Save';
-    }
+    },
   });
 }
 
@@ -1397,9 +1277,25 @@ let _modalPost        = null;
 let _modalStack       = [];   // entries: { post, scrollTop }
 let _historyDepth     = 0;
 let _suppressPopstate = false;
+// Set when the post modal is entered from somewhere other than another post
+// (currently: the lint pane's "Open post" button) — { label, onBack }. Only
+// consulted once the in-modal stack above is empty: navigating via wikilinks
+// still shows "← <previous post>" as it always has, and popping back through
+// all of those eventually reaches this instead of closing outright, the same
+// way `_modalStack` reaching empty falls through to a plain close today.
+// Cleared by closePostModal (a full session ending), never by pushing onto
+// the stack — so it survives however deep a wikilink chain goes and is still
+// there once you unwind back to the root post.
+let _externalOrigin = null;
 
 function syncBackButton() {
   if (_modalStack.length === 0) {
+    if (_externalOrigin) {
+      pmBack.textContent = `← ${_externalOrigin.label}`;
+      pmBack.style.display = 'inline-flex';
+      pmInner.classList.add('has-back');
+      return;
+    }
     pmBack.style.display = '';
     pmBack.textContent = '← back';
     pmInner.classList.remove('has-back');
@@ -1411,13 +1307,17 @@ function syncBackButton() {
   pmInner.classList.add('has-back');
 }
 
-function openPostModal(post, { pushHistory = true } = {}) {
+function openPostModal(post, { pushHistory = true, origin } = {}) {
   if (pushHistory && _modalPost) {
     _modalStack.push({ post: _modalPost, scrollTop: pmBody.scrollTop });
     history.replaceState({ postId: _modalPost.id }, '');
     history.pushState({ postId: post.id }, '');
     _historyDepth++;
   }
+  // `origin` is only ever passed by a fresh open from outside the post modal
+  // (never by the wikilink-navigation or back/forward paths below, which omit
+  // it) — undefined there leaves whatever origin is already set untouched.
+  if (origin !== undefined) _externalOrigin = origin;
   _modalPost = post;
   pmTitle.textContent = post.title || '';
   pmTitle.style.display = post.title ? '' : 'none';
@@ -1486,6 +1386,7 @@ function updateModalFade() {
 
 function closePostModal() {
   _modalStack = [];
+  _externalOrigin = null;
   if (_historyDepth > 0) {
     _suppressPopstate = true;
     history.go(-_historyDepth);
@@ -1501,7 +1402,15 @@ function closePostModal() {
 }
 
 function popPostModal() {
-  if (_modalStack.length === 0) { closePostModal(); return; }
+  if (_modalStack.length === 0) {
+    // Same "unwind one step" gesture that pops the in-modal stack below, just
+    // leaving the post modal entirely for wherever the breadcrumb points —
+    // the lint pane, currently — instead of a plain close.
+    const origin = _externalOrigin;
+    closePostModal();
+    if (origin) origin.onBack();
+    return;
+  }
   const { post, scrollTop } = _modalStack.pop();
   if (_historyDepth > 0) {
     _suppressPopstate = true;
@@ -1639,10 +1548,13 @@ pmBody.addEventListener('mouseout', e => {
 document.addEventListener('keydown', e => {
   const typing = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
 
-  // Escape priority: most transient first.
+  // Escape priority: most transient first. Lint stacks over status the same
+  // way history/edit stack over the post modal, so it is checked first —
+  // closing it must reveal status, not fall through to closing that too.
   if (e.key === 'Escape' && isThemeMenuOpen())  { closeThemeMenu(); return; }
   if (e.key === 'Escape' && isEditOpen())        { tryCloseEditModal(); return; }
   if (e.key === 'Escape' && isShortcutsOpen())   { shortcutsModal.classList.remove('open'); return; }
+  if (e.key === 'Escape' && isLintOpen())        { tryCloseLintModal(); return; }
   if (e.key === 'Escape' && isStatusOpen())      { closeStatusModal(); return; }
   if (e.key === 'Escape' && isHistoryOpen())     { closeHistoryModal(); return; }
   if (e.key === 'Escape' && postModal.classList.contains('open')) { popPostModal(); return; }
@@ -1661,7 +1573,7 @@ document.addEventListener('keydown', e => {
 
   // Feed navigation — only when no modal is open.
   const noModal = !isThemeMenuOpen() && !isEditOpen() && !isStatusOpen() && !isHistoryOpen()
-               && !postModal.classList.contains('open') && !isShortcutsOpen();
+               && !isLintOpen() && !postModal.classList.contains('open') && !isShortcutsOpen();
   if (noModal) {
     if (e.key === 'j') { e.preventDefault(); moveFeedFocus(1);  return; }
     if (e.key === 'k') { e.preventDefault(); moveFeedFocus(-1); return; }
@@ -1689,6 +1601,12 @@ window.addEventListener('popstate', e => {
   } else {
     _historyDepth = 0;
     _modalStack = [];
+    // Mirrors closePostModal's own reset (not a call to it: that function
+    // also drives `history.go()`, which would fight the back-navigation
+    // already in progress here). _externalOrigin needs the same reset this
+    // duplicates it into by hand, or a lint-opened post closed this way
+    // leaves the breadcrumb pointed at lint for whatever post opens next.
+    _externalOrigin = null;
     postModal.classList.remove('open');
     document.body.style.overflow = '';
     pmBody.innerHTML = '';

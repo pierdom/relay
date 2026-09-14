@@ -235,6 +235,21 @@
   </div>
 </div>
 
+<!-- Reached from the status panel's "Browse issues" button; stacks on top of
+     it in the DOM (both share the .status-modal z-index, so source order
+     decides which paints on top — this must stay after #statusModal). -->
+<div class="status-modal" id="lintModal">
+  <div class="pm-backdrop" id="lmBackdrop"></div>
+  <div class="sm-inner lm-inner">
+    <div class="sm-head">
+      <span class="sm-name">Vault lint</span>
+      <span class="sm-version" id="lmVersion"></span>
+      <button class="sm-close" id="lmClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="sm-body" id="lmBody"></div>
+  </div>
+</div>
+
 <div class="post-modal" id="postModal">
   <div class="pm-backdrop" id="pmBackdrop"></div>
   <div class="pm-inner">
