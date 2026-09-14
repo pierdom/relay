@@ -349,6 +349,73 @@ async def test_h1_inside_a_fenced_block_does_not_count_as_the_real_h1(client):
     assert _find(report, "h1_missing", post["id"]) is not None
 
 
+# ── N-5 follow-up round 2 (relay #198, L-9/L-10): asymmetric H1 normalization
+# and duplicate findings, found on a real 132-post vault's second lint run ──
+
+
+@pytest.mark.asyncio
+async def test_h1_with_inline_code_matching_the_title_produces_no_finding(client):
+    """L-9: the H1 scanner used to blank inline code spans before comparing
+    the H1 to the title, but never touched the title itself — an H1 that is
+    identical to the title, just with part of it in backticks, compared a
+    space-riddled string against a clean one and always lost."""
+    post = await _create(
+        client, title="CT101 monitoring (InfluxDB + Grafana) su scarif", tags=["homelab", "reference"],
+        content="# CT101 `monitoring` (InfluxDB + Grafana) su scarif\n\nbody\n",
+    )
+    report = await _lint(client)
+    assert _find(report, "h1_title_mismatch", post["id"]) is None
+
+
+@pytest.mark.asyncio
+async def test_h1_with_inline_code_that_genuinely_differs_is_reported_with_raw_text(client):
+    """L-9 continued: fixing the false positive above must not also hide a
+    real drift, and the reported H1 must be the literal text (backticks
+    included) — quoting the old blanked-and-collapsed form is what made
+    these false positives hard to diagnose in the first place (P1)."""
+    post = await _create(
+        client, title="Old Title", tags=["dev", "reference"],
+        content="# New `Title` Entirely\n\nbody\n",
+    )
+    report = await _lint(client)
+    finding = _find(report, "h1_title_mismatch", post["id"])
+    assert finding is not None
+    assert "New `Title` Entirely" in finding["detail"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_id_ref_occurrences_collapse_into_one_finding(client):
+    """L-10: a footnote-style #N repeated several times in one post used to
+    produce one identical finding per mention."""
+    vault.write_id_counter(50)
+    post = await _create(
+        client, title="Repeats", tags=["dev", "reference"],
+        content="See #37 here, #37 again, and once more: #37.\n",
+    )
+    report = await _lint(client)
+    broken = [i for i in report["items"] if i["rule"] == "broken_link" and i["post_id"] == post["id"]]
+    assert len(broken) == 1, f"expected one deduped finding, got {broken}"
+    assert broken[0]["occurrences"] == 3
+
+
+@pytest.mark.asyncio
+async def test_wikilink_to_a_filename_is_not_reported_as_a_broken_link(client):
+    """L-7 (round 2): a *plain* [[...]] whose target is a filename was never
+    going to resolve as a post title — wrong syntax, not a missing post. The
+    fix is different (embed it, or drop the link), so it needs its own rule
+    rather than reading as an ordinary broken_link."""
+    post = await _create(
+        client, title="Exam Notes", tags=["dev", "reference"],
+        content="See [[LibroExamen.pdf]] for details.\n",
+    )
+    report = await _lint(client)
+    assert _find(report, "broken_link", post["id"]) is None
+    finding = _find(report, "wikilink_to_filename", post["id"])
+    assert finding is not None
+    assert finding["match"] == "[[LibroExamen.pdf]]"
+    assert finding["severity"] == "warning"
+
+
 @pytest.mark.asyncio
 async def test_broken_link_findings_carry_the_exact_matched_text(client):
     """`match` is what a client (the lint pane's editor) locates in the
@@ -568,3 +635,46 @@ async def test_link_to_deleted_post_is_distinguished_from_a_plain_broken_link(gi
     broken = [i for i in report["items"] if i["rule"] == "broken_link"]
     assert len(to_deleted) == 2  # [[Gone Post]] and #<gone id>
     assert len(broken) == 1  # #37, never existed
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs a git binary")
+async def test_link_to_a_deleted_digest_is_suppressed(git_client):
+    """L-8: a digest referencing last week's now-retention-deleted digests
+    will keep triggering this rule forever — the vault-side fix is separate,
+    but the tag the deleted post carried *at deletion time* is still on
+    record in its last revision, so the rule can recognise its own future
+    false positive and skip it."""
+    gone = await _create(git_client, title="Daily Digest 2026-01-01", tags=["daily-digest"])
+    r = await git_client.delete(f"/posts/{gone['id']}", headers=AUTH)
+    assert r.status_code in (200, 204), r.text
+    await _create(
+        git_client, title="This Week's Digest",
+        content=f"Yesterday: [[Daily Digest 2026-01-01]] (#{gone['id']}).",
+        tags=["daily-digest"],
+    )
+    report = await _lint(git_client)
+    assert not [i for i in report["items"] if i["rule"] == "link_to_deleted_post"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs a git binary")
+async def test_link_to_a_deleted_non_ephemeral_post_is_still_reported(git_client):
+    """The suppression above must not swallow every link_to_deleted_post
+    finding — only ones pointing at a post that actually carried an
+    ephemeral tag when it was deleted."""
+    # Filler posts push the id past L-5's single-digit exclusion floor — see
+    # the identical note on test_link_to_deleted_post_is_distinguished_from_
+    # a_plain_broken_link above.
+    for i in range(10):
+        await _create(git_client, title=f"Filler {i}", tags=["dev", "reference"])
+    gone = await _create(git_client, title="Real Reference Post", tags=["dev", "reference"])
+    r = await git_client.delete(f"/posts/{gone['id']}", headers=AUTH)
+    assert r.status_code in (200, 204), r.text
+    await _create(
+        git_client, title="Refers To Real Post",
+        content=f"See [[Real Reference Post]] (#{gone['id']}).",
+        tags=["dev", "reference"],
+    )
+    report = await _lint(git_client)
+    assert len([i for i in report["items"] if i["rule"] == "link_to_deleted_post"]) == 2

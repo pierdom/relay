@@ -36,6 +36,14 @@ export function escHtml(str) {
 
 export const fmtBytes = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 
+// A fenced block or a single-line inline code span. Shared by main.js
+// (preprocessLinks, extractMedia) and edit-form.js (the broken-link
+// highlighter) — every place in the UI that must not mistake a syntax
+// example for a live wikilink/embed/id-ref splits on this same pattern,
+// rather than each maintaining its own copy that can drift out of sync
+// with what GET /lint considers code (relay #198 N-5 follow-up).
+export const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
+
 export function fmtUptime(sec) {
   if (sec < 60) return `${sec}s`;
   const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);

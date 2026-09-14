@@ -10,6 +10,7 @@ to skip them.
 """
 from __future__ import annotations
 
+import base64
 import json
 import urllib.request
 
@@ -18,6 +19,8 @@ import pytest
 from .conftest import API_KEY
 
 pytestmark = pytest.mark.ui
+
+PNG = base64.b64encode(b"\x89PNG\r\n\x1a\nhello").decode()
 
 
 def _api_patch(base_url: str, post_id: int, payload: dict) -> dict:
@@ -52,9 +55,30 @@ def _api_delete(base_url: str, post_id: int) -> None:
         pass
 
 
+def _api_attachment(base_url: str, filename: str) -> dict:
+    req = urllib.request.Request(
+        f"{base_url}/attachments",
+        data=json.dumps({"filename": filename, "data": PNG}).encode(),
+        headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
 def test_feed_renders_seeded_posts(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
     assert page.locator(".feed .post").count() >= 4
+    # Searching rather than relying on default-page visibility: the seed
+    # fixture's posts are the vault's oldest (created once, never updated),
+    # and the session-scoped vault is shared with every other UI test file —
+    # by the time this file's own later tests keep adding posts, "Smoke Post
+    # 0" can fall off the feed's default updated-desc page.
+    page.locator("#searchInput").fill("Smoke Post 0")
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.feed .post')].some(p => p.textContent.includes('Smoke Post 0'))",
+        timeout=10_000,
+    )
     assert page.get_by_text("Smoke Post 0").first.is_visible()
 
 
@@ -99,6 +123,13 @@ def test_search_filters_the_feed(page):
 
 def test_post_modal_opens_with_the_body(page):
     page.locator(".feed .post").first.wait_for(timeout=10_000)
+    # Same pagination fragility as test_feed_renders_seeded_posts above —
+    # search for it rather than assuming it's on the default first page.
+    page.locator("#searchInput").fill("Smoke Post 1")
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.feed .post')].some(p => p.textContent.includes('Smoke Post 1'))",
+        timeout=10_000,
+    )
     page.get_by_text("Smoke Post 1").first.click()
     page.locator("#postModal.open").wait_for(timeout=10_000)
     assert "Smoke Post 1" in page.locator("#pmTitle").inner_text()
@@ -581,6 +612,41 @@ def test_editing_opens_a_roomy_modal_in_both_views(page, relay_server):
         assert page.locator(".feed .post .edit-form").count() == 0
         page.locator("#emBody .btn-cancel").click()
         page.locator("#editModal.open").wait_for(state="detached", timeout=5_000)
+
+
+def test_broken_link_highlight_ignores_a_valid_attachment_embed(page, relay_server):
+    """The highlighter's WIKILINK_RE used to match a leading "!" too, so a
+    genuine ![[attachment]] embed — checked against post titles, since the
+    overlay has no attachment list — always read as broken and painted every
+    valid image/file embed red (relay #198 N-5 follow-up, found auditing the
+    editor alongside the lint_vault false-positive fixes)."""
+    _api_attachment(relay_server, "chart.png")
+    _api_post(relay_server, {
+        "title": "Embed Highlight Check", "tags": ["homelab"],
+        "content": "See the chart: ![[chart.png]]\n",
+    })
+    page.reload()
+    page.get_by_text("Embed Highlight Check").first.wait_for(timeout=10_000)
+    _edit_first_card(page, "Embed Highlight Check")
+    page.locator("#emBody .ef-content").wait_for(timeout=10_000)
+    page.wait_for_timeout(500)   # loadLinkIndex() + repaint
+    assert page.locator("#emBody .ef-broken-link").count() == 0
+
+
+def test_broken_link_highlight_ignores_a_backticked_syntax_example(page, relay_server):
+    """Same false positive the lint scanner had (relay #198 N-5 follow-up):
+    a post documenting relay's own [[wikilink]] syntax must not have its own
+    examples painted as broken links."""
+    _api_post(relay_server, {
+        "title": "Syntax Highlight Check", "tags": ["dev"],
+        "content": "Wikilinks look like `[[Nonexistent Post]]`.\n",
+    })
+    page.reload()
+    page.get_by_text("Syntax Highlight Check").first.wait_for(timeout=10_000)
+    _edit_first_card(page, "Syntax Highlight Check")
+    page.locator("#emBody .ef-content").wait_for(timeout=10_000)
+    page.wait_for_timeout(500)
+    assert page.locator("#emBody .ef-broken-link").count() == 0
 
 
 def test_editing_from_the_modal_saves_and_updates_the_card(page, relay_server):
