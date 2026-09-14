@@ -45,11 +45,16 @@ def test_recovery_sits_with_the_thing_that_decides_whether_it_is_possible(page, 
     page.locator("#statusModal.open").wait_for(timeout=10_000)
     page.locator("#smBrowseDeleted").wait_for(timeout=10_000)
     # The button existing only means the section rendered its "Checking…"
-    # placeholder — the headline this test reads is filled in by the
-    # `fetchDeleted()` response, same async gap `_open_recovery` already
-    # waits out before it clicks.
+    # placeholder — the headline this test reads is filled in later by the
+    # `fetchDeleted()` response. Waiting on the button's disabled state (as
+    # `_open_recovery` does) doesn't work here: it legitimately stays
+    # disabled forever when there's nothing to restore, which is exactly the
+    # "nothing" case this test accepts. Wait on the headline text itself.
     page.wait_for_function(
-        "() => { const b = document.getElementById('smBrowseDeleted'); return b && !b.disabled; }",
+        """() => {
+            const l = document.querySelector('.sm-recovery-line');
+            return l && l.textContent.trim().toLowerCase() !== 'checking…';
+        }""",
         timeout=10_000,
     )
 
