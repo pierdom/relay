@@ -273,18 +273,30 @@ def test_escape_closes_lint_before_status(page, relay_server):
 
 
 def test_filter_chips_narrow_the_list_to_one_rule(page, relay_server):
+    """Self-contained rather than picking "whatever chip is at index 1": the
+    vault (`relay_server`) is session-scoped and shared across every UI test
+    file, so which rule that index lands on — and how many rows it has —
+    depends on what every other test has created and fixed by the time this
+    one runs. A post with exactly one, known rule removes that dependency."""
+    made = _api_post(relay_server, {"title": "Lint Filter Target", "content": "x", "tags": ["homelab"]})
+
     page.reload()
     open_lint(page)
     page.locator(".lm-finding").first.wait_for(timeout=10_000)
 
-    chips = page.locator(".lm-filter")
-    assert chips.count() >= 2, "expected an 'all' chip plus at least one rule chip"
+    label = "Missing type tag"
+    chip = page.locator(".lm-filter", has_text=label).first
+    chip.wait_for(timeout=10_000)
+    chip.click()
 
-    rule_chip = chips.nth(1)
-    label = rule_chip.inner_text().rsplit(" ", 1)[0]
-    rule_chip.click()
-    page.wait_for_timeout(200)
-
+    row = page.locator(f'.lm-finding[data-post-id="{made["id"]}"]')
+    row.wait_for(timeout=10_000)
+    page.wait_for_function(
+        """(label) => [...document.querySelectorAll('.lm-finding .hm-msg')]
+                       .every(el => el.textContent.trim() === label)""",
+        arg=label,
+        timeout=10_000,
+    )
     rows_text = page.locator(".lm-finding .hm-msg").all_inner_texts()
     assert rows_text, "filtering left no rows"
     assert all(t.strip() == label for t in rows_text), f"filter did not narrow to one rule: {rows_text}"

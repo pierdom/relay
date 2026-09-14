@@ -275,7 +275,7 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
       <div class="ef-content-wrap"><label>Content</label>
         <div class="ef-content-highlight">
           <pre class="ef-content-backdrop" aria-hidden="true"></pre>
-          <textarea class="ef-content" spellcheck="false">${escHtml(post.content)}</textarea>
+          <textarea class="ef-content" spellcheck="false" aria-label="Content">${escHtml(post.content)}</textarea>
         </div>
         <div class="attach-row">
           <input type="file" class="ef-file" multiple style="display:none">
