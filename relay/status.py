@@ -105,6 +105,7 @@ async def embedding_status(db: aiosqlite.Connection, posts_total: int) -> Embedd
             # underneath a running process without a restart.
             pass
     posts_with_chunks, chunks_total, cache_entries = await vectors.coverage(db)
+    posts_excluded = await vectors.excluded_post_count(db)
     missing_ids = await vectors.unembedded_post_ids(db)
     backfill = vault.backfill_status()
     return EmbeddingStatus(
@@ -118,7 +119,8 @@ async def embedding_status(db: aiosqlite.Connection, posts_total: int) -> Embedd
         threads=settings.embedding_threads,
         posts_total=posts_total,
         posts_embedded=posts_with_chunks,
-        posts_missing=posts_total - posts_with_chunks,
+        posts_excluded=posts_excluded,
+        posts_missing=posts_total - posts_with_chunks - posts_excluded,
         posts_missing_ids=missing_ids,
         chunks_total=chunks_total,
         cache_entries=cache_entries,

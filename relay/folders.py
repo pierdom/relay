@@ -35,6 +35,14 @@ FALLBACK = {
 
 INBOX = "Inbox"
 
+# Dated, disposable snapshot tags (relay #198 O-4/N-5): briefings and digests
+# that pile up near-identical week over week. Nothing is expected to link back
+# to a specific day's issue (lint.py's zero_backlinks/link_to_deleted_post
+# exemption) and their volume would otherwise dominate embedding similarity
+# (vectors.py excludes them from embedding entirely) — one constant, one
+# judgment call, reused by both.
+DISPOSABLE_TAGS = {"digest", "news", "daily-digest", "news-digest", "briefing", "financial-analyst"}
+
 
 def folder_of(relpath: str, *, default: str = "") -> str:
     """First-level folder of a vault-relative path (``"Homelab/x.md"`` → ``"Homelab"``);

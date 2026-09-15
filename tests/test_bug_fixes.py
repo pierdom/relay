@@ -135,7 +135,7 @@ async def test_backfill_skips_a_failing_post_and_continues(client, monkeypatch):
     monkeypatch.setattr(settings, "embedding_enabled", True)
     calls: list[int] = []
 
-    async def flaky(db, *, post_id, title, content):
+    async def flaky(db, *, post_id, title, content, tags):
         calls.append(post_id)
         if post_id == 1:
             raise RuntimeError("boom")

@@ -17,7 +17,7 @@ import logging
 import aiosqlite
 import sqlite_vec
 
-from . import chunking, embedding
+from . import chunking, embedding, folders
 from .config import settings
 from .embedding import EMBEDDING_DIM
 
@@ -188,7 +188,9 @@ def _embed_documents(texts: list[str]) -> list[list[float]]:
     return embedding.get_backend().embed_documents(texts)
 
 
-async def sync_post_chunks(db: aiosqlite.Connection, *, post_id: int, title: str, content: str) -> None:
+async def sync_post_chunks(
+    db: aiosqlite.Connection, *, post_id: int, title: str, content: str, tags: list[str]
+) -> None:
     """Re-chunk a post and reconcile ``chunks``/``vec_chunks`` against it.
     **Never raises**: embeddings are derived data, and this runs inline in every
     write — a model that cannot load (download blocked, OOM) used to roll the
@@ -196,12 +198,14 @@ async def sync_post_chunks(db: aiosqlite.Connection, *, post_id: int, title: str
     embeddings were on (AUDIT.md B-02). A failure is logged; the backfill
     catches the post up later. Commits are the caller's (B-07)."""
     try:
-        await _sync_post_chunks(db, post_id=post_id, title=title, content=content)
+        await _sync_post_chunks(db, post_id=post_id, title=title, content=content, tags=tags)
     except Exception:
         logger.warning("Embedding sync skipped for post %s — will be retried by the backfill", post_id, exc_info=True)
 
 
-async def _sync_post_chunks(db: aiosqlite.Connection, *, post_id: int, title: str, content: str) -> None:
+async def _sync_post_chunks(
+    db: aiosqlite.Connection, *, post_id: int, title: str, content: str, tags: list[str]
+) -> None:
     """Re-chunk a post and reconcile ``chunks``/``vec_chunks`` against it.
     A chunk whose body hash is already in ``embeddings_cache`` skips the model
     call entirely; only genuinely new/changed chunks get embedded. Stale chunk
@@ -220,6 +224,15 @@ async def _sync_post_chunks(db: aiosqlite.Connection, *, post_id: int, title: st
     from . import database  # deferred: database imports vault imports this module
 
     if not (database.VEC_ENABLED and settings.embedding_enabled):
+        return
+
+    if any(t in folders.DISPOSABLE_TAGS for t in tags):
+        # relay #198, O-4: months of near-identical digests/briefings pollute
+        # similarity ranking far more than they'd ever usefully match against.
+        # Drop any chunks embedded before the post carried this tag (a retag
+        # can move a post into this set after it was already embedded) rather
+        # than leave stale vectors behind.
+        await delete_post_chunks(db, post_id)
         return
 
     chunks = chunking.chunk_post(title, content)
@@ -343,16 +356,43 @@ async def unembedded_post_ids(db: aiosqlite.Connection, *, limit: int = 50) -> l
     race and not a partial failure: ``sync_post_chunks`` is awaited inline on
     every write, and ``backfill_embeddings``'s loop has no per-post
     try/except to swallow an error silently. So there's exactly one root
-    cause to report, and it doesn't need computing per id here."""
+    cause to report, and it doesn't need computing per id here.
+
+    Excludes posts carrying a ``folders.DISPOSABLE_TAGS`` tag (relay #198,
+    O-4) — those are never embedded on purpose (see ``_sync_post_chunks``),
+    so listing them here would misreport a deliberate exclusion as a
+    diagnosable failure. See ``excluded_post_count`` for that count instead.
+    Filtered in Python rather than in SQL (tags are a sentinel-comma string,
+    not a joinable column) — fine at this vault's scale (hundreds of posts)."""
     from . import database
 
     if not database.VEC_ENABLED:
         return []
     async with db.execute(
-        "SELECT id FROM posts WHERE id NOT IN (SELECT DISTINCT post_id FROM chunks) ORDER BY id LIMIT ?",
-        (limit,),
+        "SELECT id, tags FROM posts WHERE id NOT IN (SELECT DISTINCT post_id FROM chunks) ORDER BY id"
     ) as cur:
-        return [row[0] for row in await cur.fetchall()]
+        rows = await cur.fetchall()
+    result = []
+    for row in rows:
+        if any(t in folders.DISPOSABLE_TAGS for t in row["tags"].split(",") if t):
+            continue
+        result.append(row["id"])
+        if len(result) >= limit:
+            break
+    return result
+
+
+async def excluded_post_count(db: aiosqlite.Connection) -> int:
+    """Posts deliberately never embedded because of a ``folders.DISPOSABLE_TAGS``
+    tag (relay #198, O-4) — subtracted out of ``/status``'s ``posts_missing``
+    so an intentional exclusion doesn't read as an embedding failure."""
+    from . import database
+
+    if not database.VEC_ENABLED:
+        return 0
+    async with db.execute("SELECT tags FROM posts") as cur:
+        rows = await cur.fetchall()
+    return sum(1 for row in rows if any(t in folders.DISPOSABLE_TAGS for t in row["tags"].split(",") if t))
 
 
 async def current_schema_dim(db: aiosqlite.Connection) -> int:
@@ -454,6 +494,60 @@ async def semantic_search(
         if post_id not in best or distance < best[post_id]:
             best[post_id] = distance
     return sorted(best.items(), key=lambda kv: kv[1])[:limit]
+
+
+def similarity_score(distance: float) -> float:
+    """L2 distance between unit vectors -> cosine similarity
+    (‖a-b‖² = 2 − 2·cos(a,b), see ``_normalize``): 1.0 identical, 0 orthogonal,
+    negative dissimilar. Friendlier for a caller than raw distance — used
+    wherever a similarity is surfaced outside this module (relay #198, N-7)."""
+    return round(1 - (distance**2) / 2, 4)
+
+
+# Advisory duplicate-guard / related-posts threshold (relay #198, N-7).
+# Provisional: unlike _CONFIDENT_DISTANCE below, this has no golden-set sweep
+# behind it yet — there is no labeled "these posts are duplicates" dataset to
+# tune against. Picked conservatively tight (well inside the "confident match"
+# threshold) because the cost of a false positive here is a human glancing at
+# an unrelated suggestion, not a wrong search result — revisit once real usage
+# shows whether it's too tight or too loose.
+_SIMILAR_DISTANCE_THRESHOLD = 0.9
+_SIMILAR_LIMIT = 5
+
+
+async def find_similar_posts(
+    db: aiosqlite.Connection,
+    *,
+    exclude_post_id: int,
+    title: str,
+    content: str,
+    limit: int = _SIMILAR_LIMIT,
+    threshold: float = _SIMILAR_DISTANCE_THRESHOLD,
+) -> list[tuple[int, float]]:
+    """``(post_id, distance)`` pairs close enough to ``title``/``content`` to be
+    worth a human glance, ascending distance — the shared lookup behind
+    ``create_post``'s advisory duplicate-guard and ``GET /posts/{id}/related``
+    (relay #198, N-7). ``exclude_post_id`` drops the post itself (a caller
+    reusing its own title/content, or checking an already-created post's own
+    row, would otherwise always rank as its own closest match at distance 0).
+
+    **Never raises** — this must never fail a publish over an unrelated
+    embedding hiccup ("a 3am digest must not fail", relay #198 backlog). Empty
+    (not an error) when embeddings aren't enabled at all, distinct from a
+    query-time backend failure, which is also swallowed to empty here: unlike
+    ``_list_posts_ranked``'s ranked search, there is no caller who explicitly
+    asked for semantic-only results and needs to know it degraded — this is
+    pure advisory enrichment on top of an otherwise-successful write or read."""
+    from . import database
+
+    if not (database.VEC_ENABLED and settings.embedding_enabled):
+        return []
+    try:
+        results = await semantic_search(db, f"{title}\n\n{content}", limit=limit + 1)
+    except Exception:
+        logger.warning("Similar-posts lookup failed — continuing without it", exc_info=True)
+        return []
+    return [(pid, d) for pid, d in results if pid != exclude_post_id and d <= threshold][:limit]
 
 
 # Semantic's top-1 L2 distance (unit-normalized vectors, so 0=identical,

@@ -138,6 +138,29 @@ class PostResponse(BaseModel):
         )
 
 
+class SimilarPost(BaseModel):
+    """One entry in an advisory duplicate-guard/related-posts list (relay #198,
+    N-7). ``score`` is cosine similarity derived from embedding distance
+    (``vectors.similarity_score``) — 1.0 identical, 0 orthogonal, negative
+    dissimilar — friendlier for a caller than raw distance."""
+
+    id: int
+    title: str
+    score: float
+
+
+class PostCreateResponse(PostResponse):
+    """``POST /posts``'s response: a plain ``PostResponse`` plus an advisory
+    ``similar`` list (relay #198, N-7) — posts already in the vault whose
+    embedding is close enough to this one to be worth a glance before
+    duplicating work or forgetting to cross-link. Empty, never an error, when
+    embeddings aren't enabled or nothing clears the threshold — this never
+    blocks or slows down the publish it rides along with; see
+    ``vectors.find_similar_posts``."""
+
+    similar: list[SimilarPost] = Field(default_factory=list)
+
+
 class SearchTiming(BaseModel):
     """Cold-start observability for a ranked (semantic/hybrid) search (relay
     #253 usage report, Issue 5): with the embedding model idle-unloaded
@@ -331,6 +354,16 @@ class BacklinksResponse(BaseModel):
     items: list[LinkTarget]
 
 
+class RelatedPostsResponse(BaseModel):
+    """``GET /posts/{id}/related`` (relay #198, N-7): posts whose embedding is
+    close enough to be worth a glance *and* that this post doesn't already
+    cross-link in either direction — a to-do list of missing ``[[wikilinks]]``,
+    not a general "more like this". Empty (never an error) when nothing clears
+    the similarity threshold, or when every similar post is already linked."""
+
+    items: list[SimilarPost]
+
+
 class AttachmentCreate(BaseModel):
     # Exactly one byte source: inline base64 (`data`), a URL the server fetches
     # (`source_url`), or a presigned upload slot already filled (`upload_id`).
@@ -510,7 +543,14 @@ class EmbeddingStatus(BaseModel):
     threads: int = Field(description="EMBEDDING_THREADS")
     posts_total: int
     posts_embedded: int = Field(description="Posts with at least one chunk currently embedded")
-    posts_missing: int = Field(description="posts_total minus posts_embedded")
+    posts_excluded: int = Field(
+        description=(
+            "Posts deliberately never embedded because they carry a digest/news/briefing-shaped "
+            "tag (relay #198, O-4) — near-identical, dated snapshots that would otherwise pollute "
+            "similarity ranking. Not counted toward posts_missing."
+        )
+    )
+    posts_missing: int = Field(description="posts_total minus posts_embedded minus posts_excluded")
     posts_missing_ids: list[int] = Field(
         default_factory=list,
         description=(

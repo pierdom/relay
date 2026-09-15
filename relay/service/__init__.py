@@ -44,6 +44,7 @@ from .posts import (
     edit_post,
     get_backlinks,
     get_post,
+    get_related,
     link_index,
     list_posts,
     update_post,
@@ -58,7 +59,7 @@ __all__ = [
     "add_attachment", "create_upload_slot", "decode_attachment_b64", "delete_attachment", "ingest_attachment",
     "list_attachments", "referenced_attachment_names",
     "_RANKED_POOL_CAP", "append_post", "create_post", "delete_post", "edit_post", "get_backlinks", "get_post",
-    "link_index", "list_posts", "update_post",
+    "get_related", "link_index", "list_posts", "update_post",
     "get_post_history", "get_post_revision", "list_deleted_posts", "restore_post",
     "list_folders", "list_tags", "rename_tag", "set_tag_config",
 ]

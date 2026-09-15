@@ -6,6 +6,11 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ## [Unreleased]
 
+### Added
+- Digest/news/briefing-shaped posts (`folders.DISPOSABLE_TAGS`) are excluded from embedding entirely (relay #198, O-4) — months of near-identical dated snapshots were dominating similarity ranking. `/status`'s `embeddings` gains `posts_excluded`, subtracted out of `posts_missing` so the exclusion doesn't read as a failure; `lint_vault`'s `zero_chunks` no longer flags them either, since it reuses the same `vectors.unembedded_post_ids`
+- `GET /posts/{id}/related` / `get_related` MCP tool (relay #198, N-7): posts similar by embedding that aren't already cross-linked in either direction — an automatic to-do list of missing `[[wikilinks]]`. 503/errors if embeddings aren't enabled
+- `POST /posts` / `publish_post`'s response gains `similar` (relay #198, N-7): an advisory duplicate-guard listing existing posts close enough to be worth a glance. Always empty without embeddings enabled, and never blocks or slows the publish — a lookup failure is logged and swallowed, same as `sync_post_chunks`'s own never-raises guarantee
+
 ---
 
 ## [1.10.4] — 2026-09-14

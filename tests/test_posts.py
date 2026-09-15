@@ -250,3 +250,102 @@ async def test_list_deleted_posts_is_503_when_history_disabled(client):
     # conftest sets history_enabled=False; the route must surface that as 503
     r = await client.get("/posts/deleted", headers=AUTH)
     assert r.status_code == 503
+
+
+# ── advisory duplicate-guard + related posts (relay #198, N-7) ─────────────
+
+
+@pytest_asyncio.fixture
+async def fake_embeddings(monkeypatch):
+    from relay import embedding
+    from relay.config import settings as _settings
+
+    assert database.VEC_ENABLED, "sqlite-vec should load in this dev/CI environment"
+    monkeypatch.setattr(_settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", lambda: embedding.FakeBackend())
+
+
+@pytest.mark.asyncio
+async def test_create_post_similar_field_is_empty_without_embeddings(client):
+    r = await client.post("/posts", json={"title": "Alpha", "content": "hello", "tags": ["dev"]}, headers=AUTH)
+    assert r.status_code == 201, r.text
+    assert r.json()["similar"] == []
+
+
+@pytest.mark.asyncio
+async def test_create_post_surfaces_a_similar_existing_post(client, fake_embeddings, monkeypatch):
+    from relay import vectors
+
+    first = (await client.post("/posts", json={"title": "Alpha", "content": "x", "tags": ["dev"]}, headers=AUTH)).json()
+
+    # The similarity lookup itself is stubbed (already covered end to end in
+    # tests/test_vectors.py, including the self-exclusion FakeBackend can't
+    # exercise across differently-titled posts) — this test is only about
+    # create_post wiring the result into its response as `similar`.
+    async def fake_similar(db, *, exclude_post_id, title, content, **kwargs):
+        assert exclude_post_id != first["id"]  # the new (not-yet-known) post's own id
+        return [(first["id"], 0.2)]
+
+    monkeypatch.setattr(vectors, "find_similar_posts", fake_similar)
+
+    r = await client.post("/posts", json={"title": "Alpha Two", "content": "x", "tags": ["dev"]}, headers=AUTH)
+    assert r.status_code == 201, r.text
+    similar = r.json()["similar"]
+    assert similar == [{"id": first["id"], "title": "Alpha", "score": vectors.similarity_score(0.2)}]
+
+
+@pytest.mark.asyncio
+async def test_related_404s_for_a_missing_post(client, fake_embeddings):
+    r = await client.get("/posts/999999/related", headers=AUTH)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_related_is_503_without_embeddings(client):
+    r = await client.post("/posts", json={"title": "Alpha", "content": "hello", "tags": ["dev"]}, headers=AUTH)
+    pid = r.json()["id"]
+    r = await client.get(f"/posts/{pid}/related", headers=AUTH)
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_related_excludes_an_already_linked_post(client, fake_embeddings, monkeypatch):
+    a = (await client.post("/posts", json={"title": "Alpha", "content": "x", "tags": ["dev"]}, headers=AUTH)).json()
+    # B cross-links A explicitly — already made the relationship, so it must
+    # not also show up as an unlinked "related" suggestion. The similarity
+    # lookup itself is stubbed (already covered end to end in
+    # tests/test_vectors.py) so this test is only about the link-exclusion
+    # logic in service.get_related, not FakeBackend's hash behavior.
+    b = (await client.post(
+        "/posts", json={"title": "Alpha Linked", "content": "[[Alpha]]\n\nx", "tags": ["dev"]}, headers=AUTH
+    )).json()
+
+    from relay import vectors
+
+    async def fake_similar(db, *, exclude_post_id, title, content, **kwargs):
+        return [(a["id"], 0.1)]
+
+    monkeypatch.setattr(vectors, "find_similar_posts", fake_similar)
+
+    r = await client.get(f"/posts/{b['id']}/related", headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_related_surfaces_an_unlinked_similar_post(client, fake_embeddings, monkeypatch):
+    a = (await client.post("/posts", json={"title": "Alpha", "content": "x", "tags": ["dev"]}, headers=AUTH)).json()
+    b = (await client.post("/posts", json={"title": "Beta", "content": "y", "tags": ["dev"]}, headers=AUTH)).json()
+
+    from relay import vectors
+
+    async def fake_similar(db, *, exclude_post_id, title, content, **kwargs):
+        return [(a["id"], 0.1)]
+
+    monkeypatch.setattr(vectors, "find_similar_posts", fake_similar)
+
+    r = await client.get(f"/posts/{b['id']}/related", headers=AUTH)
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert [item["id"] for item in items] == [a["id"]]
+    assert items[0]["score"] == vectors.similarity_score(0.1)

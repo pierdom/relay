@@ -129,7 +129,15 @@ async def master_document() -> str:
     return post.content if post is not None else "Master document not found."
 
 
-@mcp.tool(description="Publish a post to the relay feed. Subscribers receive it in real time.")
+@mcp.tool(
+    description=(
+        "Publish a post to the relay feed. Subscribers receive it in real time. The response's "
+        "'similar' field (relay #198, N-7) is an advisory duplicate-guard: other posts already in "
+        "the vault whose embedding is close enough to be worth a glance before you duplicate work "
+        "— always empty if this relay hasn't got embeddings enabled, and never blocks or slows down "
+        "the publish itself."
+    )
+)
 async def publish_post(
     title: str,
     content: str,
@@ -401,6 +409,27 @@ async def get_backlinks(id: int) -> dict:
             result = await service.get_backlinks(db, id)
         except service.PostNotFound:
             return {"error": f"Post #{id} not found."}
+    return result.model_dump()
+
+
+@mcp.tool(
+    description=(
+        "List posts related to this one by embedding similarity that it does NOT already "
+        "cross-link via [[Title]] or #id, in either direction (relay #198, N-7) — an automatic "
+        "to-do list of missing wikilinks, not a general 'more like this'. A post already linked "
+        "has already had its relationship made explicit and won't show up here. Returns an error "
+        "if the post doesn't exist or this relay hasn't got embeddings enabled."
+    )
+)
+async def get_related(id: int) -> dict:
+    metrics.record_tool_call("get_related")
+    async with _db() as db:
+        try:
+            result = await service.get_related(db, id)
+        except service.PostNotFound:
+            return {"error": f"Post #{id} not found."}
+        except service.SemanticSearchUnavailable:
+            return {"error": "Semantic search is not enabled on this relay."}
     return result.model_dump()
 
 
