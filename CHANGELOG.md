@@ -6,6 +6,12 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ## [Unreleased]
 
+### Added
+- Digest/news/briefing-shaped posts (`folders.DISPOSABLE_TAGS`) are excluded from embedding entirely (relay #198, O-4) — months of near-identical dated snapshots were dominating similarity ranking. `/status`'s `embeddings` gains `posts_excluded`, subtracted out of `posts_missing` so the exclusion doesn't read as a failure; `lint_vault`'s `zero_chunks` no longer flags them either, since it reuses the same `vectors.unembedded_post_ids`
+- `GET /posts/{id}/related` / `get_related` MCP tool (relay #198, N-7): posts similar by embedding that aren't already cross-linked in either direction — an automatic to-do list of missing `[[wikilinks]]`. 503/errors if embeddings aren't enabled
+- `POST /posts` / `publish_post`'s response gains `similar` (relay #198, N-7): an advisory duplicate-guard listing existing posts close enough to be worth a glance. Always empty without embeddings enabled, and never blocks or slows the publish — a lookup failure is logged and swallowed, same as `sync_post_chunks`'s own never-raises guarantee
+- Per-client consent gate for MCP OAuth (relay #313): a DCR client relay hasn't seen a human approve is now routed through a new, unauthenticated `GET/POST /mcp/oauth/consent` page before ever reaching the IdP, closing a confused-deputy gap where the IdP's own skip-consent behavior let *any* relay-registered client — attacker's or legitimate — ride an already-authenticated IdP session with zero prompt. A signed, `__Host-`/`Secure`/`HttpOnly`/`SameSite=Lax` cookie binds the browser that viewed the prompt to the one that submits it. Approval is granted only after the IdP login actually completes and the identity clears the allowlist — not on the consent click itself — so a client can't be self-approved by registering it and clicking through its own prompt with no real login at all.
+
 ---
 
 ## [1.10.4] — 2026-09-14

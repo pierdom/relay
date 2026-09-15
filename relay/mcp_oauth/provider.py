@@ -41,6 +41,12 @@ logger = logging.getLogger(__name__)
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
+def _consent_url(txn_id: str) -> str:
+    """relay's own consent-gate page for an unapproved client (relay #313
+    Stopgap) — see ``relay/mcp_oauth/consent.py``."""
+    return f"{settings.relay_base_url.rstrip('/')}/mcp/oauth/consent?txn_id={txn_id}"
+
+
 def _redirect_uri_allowed(uri: AnyUrl) -> bool:
     """DCR redirect-URI policy. http is loopback-only (native apps, RFC 8252).
     https is restricted to the ``MCP_ALLOWED_REDIRECT_HOSTS`` allowlist so an
@@ -89,8 +95,19 @@ class RelayOAuthProvider:
 
     # --- Authorize (broker to PocketID) -------------------------------------
     async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
-        """Persist the pending client authorization and hand the human off to
-        PocketID; the return leg lands on ``/mcp/oauth/callback``."""
+        """Persist the pending client authorization and hand the human off —
+        to PocketID directly for a previously-approved client, or to relay's
+        own consent gate first for one that hasn't been (relay #313 Stopgap).
+
+        Without the gate, a freshly-DCR-registered client (attacker or
+        legitimate) rides straight through on a live PocketID session:
+        PocketID skips its own consent screen for a client the user has
+        already approved once, and relay registers exactly one static client
+        with PocketID — so *every* relay client looks pre-approved to
+        PocketID regardless of whether a human has ever seen it. The return
+        leg (after PocketID, or after consent-gate approval) lands on
+        ``/mcp/oauth/callback``.
+        """
         txn_id = new_secret(24)
         verifier, _ = pocketid.pkce_pair()
         nonce = pocketid.new_nonce()
@@ -109,7 +126,9 @@ class RelayOAuthProvider:
             up_nonce=nonce,
         )
         await self._store.save_pending(txn_id, pending, ttl_seconds=600)
-        return await pocketid.build_authorize_url(txn_id, verifier, nonce)
+        if await self._store.is_client_approved(client.client_id):
+            return await pocketid.build_authorize_url(txn_id, verifier, nonce)
+        return _consent_url(txn_id)
 
     # --- Authorization code exchange ----------------------------------------
     async def load_authorization_code(

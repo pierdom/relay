@@ -51,13 +51,12 @@ TYPE_TAGS = {"reference", "plan", "briefing", "digest", "project", "profile", "h
 
 # Tags whose posts are dated, disposable snapshots (briefings, daily digests):
 # nothing is expected to link back to a specific day's issue, so zero backlinks
-# on these is normal, not a finding. Mirrors folders.FALLBACK's digest-shaped
-# entries exactly (daily-digest/news-digest included) — that table already
-# names every tag this vault treats as "routes to Digests/, not linked back to".
+# on these is normal, not a finding. folders.DISPOSABLE_TAGS is the same
+# judgment call shared with vectors.py's embedding exclusion (relay #198 O-4).
 # Reused below for link_to_deleted_post: a deleted post that carried one of
 # these tags was never going to stay linkable either — same "dated, expected
 # to rot" judgment, one constant for both.
-_BACKLINK_EXEMPT_TAGS = {"digest", "news", "daily-digest", "news-digest", "briefing", "financial-analyst"}
+_BACKLINK_EXEMPT_TAGS = folders.DISPOSABLE_TAGS
 
 # Hub/plan posts are meant to be kept current; flag one that hasn't been
 # touched in this long. No config surface yet (#198 N-5 floats moving this to

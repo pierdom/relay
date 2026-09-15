@@ -24,7 +24,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from relay import database, history, mcp_server
+from relay import database, embedding, history, mcp_server, vectors
 from relay.config import settings
 from relay.main import app
 
@@ -178,6 +178,34 @@ async def test_an_agent_can_see_what_links_to_a_post_before_breaking_it(client):
     assert titles == {"By Title", "By Id"}, titles   # both link syntaxes, and only those
 
     assert "error" in await mcp_server.get_backlinks(id=999_999)
+
+
+@pytest.mark.asyncio
+async def test_an_agent_can_find_related_posts_missing_a_wikilink(client, monkeypatch):
+    """relay #198, N-7: a post similar enough to be worth a glance that isn't
+    already cross-linked — the similarity lookup itself is exercised end to
+    end in tests/test_vectors.py; this is about the tool wiring through to it
+    and applying the link-exclusion."""
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(embedding, "get_backend", lambda: embedding.FakeBackend())
+
+    a = (await client.post("/posts", json={"title": "Alpha", "content": "x", "tags": ["homelab"]},
+                           headers=HEADERS)).json()
+    b = (await client.post("/posts", json={"title": "Beta", "content": "y", "tags": ["homelab"]},
+                           headers=HEADERS)).json()
+
+    async def fake_similar(db, *, exclude_post_id, title, content, **kwargs):
+        return [(a["id"], 0.1)]
+
+    monkeypatch.setattr(vectors, "find_similar_posts", fake_similar)
+
+    out = await mcp_server.get_related(id=b["id"])
+    assert [item["id"] for item in out["items"]] == [a["id"]]
+
+    assert "error" in await mcp_server.get_related(id=999_999)
+
+    monkeypatch.setattr(settings, "embedding_enabled", False)
+    assert "error" in await mcp_server.get_related(id=b["id"])
 
 
 @pytest.mark.asyncio

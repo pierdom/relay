@@ -166,3 +166,5 @@ Lets remote MCP clients (Claude.ai, ChatGPT, etc.) authenticate via OAuth + Dyna
 In the client's connector dialog, fill only the **name** and **URL** (`<RELAY_BASE_URL>/mcp`). Dynamic Client Registration self-registers the client. The static `API_KEY` keeps working alongside OAuth.
 
 > Tokens are opaque and hashed at rest, audience-bound to `/mcp`, single-use on auth codes and refresh tokens, and revoking one cascades to the whole client+user token family.
+
+**First connection from a new client shows a consent screen.** Before relay hands off to your IdP, it routes an unrecognized client through its own `/mcp/oauth/consent` page — naming the client (self-reported, not verified) and its redirect target, with Approve/Deny. This is expected, not an error: it's a deliberate check against a client silently riding an already-authenticated IdP session (relay #313). Approving forwards you on to your IdP's own login as normal; the client only becomes permanently trusted once you've actually completed that login. A client you've connected before skips straight to the IdP, same as today.

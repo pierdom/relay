@@ -416,6 +416,127 @@ async def test_backfill_embeddings_logs_progress_on_a_time_based_cadence(db, bac
     assert progress == [f"Embedding backfill progress: {i}/{total} posts checked" for i in range(1, total + 1)]
 
 
+# ── digest/news exclusion from embedding (relay #198, O-4) ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_digest_tagged_post_is_never_embedded(db, backend):
+    post = await service.create_post(db, PostCreate(
+        title="Daily Briefing", content=f"## Section\n{LONG_SECTION}", tags=["news", "digest"],
+    ))
+    assert await _chunk_rows(db, post.id) == []
+    assert backend.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_retag_into_disposable_drops_existing_chunks(db, backend):
+    post = await service.create_post(db, PostCreate(
+        title="Post A", content=f"## Section\n{LONG_SECTION}", tags=["dev"],
+    ))
+    assert len(await _chunk_rows(db, post.id)) == 1
+
+    await service.update_post(db, post.id, PostUpdate(tags=["news"]))
+    assert await _chunk_rows(db, post.id) == []
+
+
+@pytest.mark.asyncio
+async def test_retag_out_of_disposable_embeds_it(db, backend):
+    post = await service.create_post(db, PostCreate(
+        title="Post A", content=f"## Section\n{LONG_SECTION}", tags=["news"],
+    ))
+    assert await _chunk_rows(db, post.id) == []
+
+    await service.update_post(db, post.id, PostUpdate(tags=["dev"]))
+    assert len(await _chunk_rows(db, post.id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_unembedded_post_ids_excludes_disposable_tagged_posts(db, backend):
+    post = await service.create_post(db, PostCreate(
+        title="Briefing", content=f"## S\n{LONG_SECTION}", tags=["briefing"],
+    ))
+    assert post.id not in await vectors.unembedded_post_ids(db)
+
+
+@pytest.mark.asyncio
+async def test_excluded_post_count_counts_disposable_tagged_posts(db, backend):
+    base = await vectors.excluded_post_count(db)
+    await service.create_post(db, PostCreate(title="Briefing", content="x", tags=["briefing"]))
+    await service.create_post(db, PostCreate(title="Normal", content="x", tags=["dev"]))
+    assert await vectors.excluded_post_count(db) == base + 1
+
+
+# ── find_similar_posts / similarity_score (relay #198, N-7) ────────────────
+
+
+def test_similarity_score_zero_distance_is_identical():
+    assert vectors.similarity_score(0.0) == 1.0
+
+
+def test_similarity_score_opposite_distance_is_minus_one():
+    assert vectors.similarity_score(2.0) == -1.0
+
+
+@pytest.mark.asyncio
+async def test_find_similar_posts_finds_an_exact_duplicate(db, backend):
+    # FakeBackend hashes literal text with no semantic notion of "similar but
+    # not identical" (see test_semantic_search_ranks_exact_match_first's own
+    # comment) — exact text reuse is the one shape this fixture can exercise;
+    # a real model's embedding is what makes near-duplicate *phrasing* rank
+    # close too.
+    a = await service.create_post(db, PostCreate(title="Alpha", content=f"{LONG_SECTION} alpha", tags=["dev"]))
+
+    similar = await vectors.find_similar_posts(
+        db, exclude_post_id=999_999, title="Alpha", content=f"{LONG_SECTION} alpha"
+    )
+    assert similar
+    assert similar[0][0] == a.id
+    assert similar[0][1] == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_find_similar_posts_excludes_the_post_itself(db, backend):
+    a = await service.create_post(db, PostCreate(title="Alpha", content=f"{LONG_SECTION} alpha", tags=["dev"]))
+
+    # threshold=0.0: the only candidate that could survive is an exact
+    # (distance ~0) match, which is `a` itself — excluded. Anything else in
+    # the fixture vault (e.g. the seeded master doc) is an unrelated hash
+    # vector, not a real near-match, so a wide default threshold would risk
+    # picking up incidental noise unrelated to what this test checks.
+    similar = await vectors.find_similar_posts(
+        db, exclude_post_id=a.id, title="Alpha", content=f"{LONG_SECTION} alpha", threshold=0.0,
+    )
+    assert similar == []
+
+
+@pytest.mark.asyncio
+async def test_find_similar_posts_empty_when_embeddings_disabled(db, backend, monkeypatch):
+    monkeypatch.setattr(settings, "embedding_enabled", False)
+    assert await vectors.find_similar_posts(db, exclude_post_id=1, title="x", content="y") == []
+
+
+@pytest.mark.asyncio
+async def test_find_similar_posts_never_raises_on_backend_failure(db, backend, monkeypatch):
+    async def boom(*args, **kwargs):
+        raise RuntimeError("model download failed")
+
+    monkeypatch.setattr(vectors, "semantic_search", boom)
+    assert await vectors.find_similar_posts(db, exclude_post_id=1, title="x", content="y") == []
+
+
+@pytest.mark.asyncio
+async def test_find_similar_posts_respects_threshold(db, backend):
+    a = await service.create_post(db, PostCreate(title="Alpha", content=f"{LONG_SECTION} alpha", tags=["dev"]))
+    await service.create_post(db, PostCreate(title="Beta", content=f"{LONG_SECTION} beta", tags=["dev"]))
+
+    similar = await vectors.find_similar_posts(
+        db, exclude_post_id=999_999, title="Alpha", content=f"{LONG_SECTION} alpha", threshold=0.0,
+    )
+    # Only the exact match (distance ~0) survives a threshold of 0 — Beta's
+    # unrelated hash vector is essentially never that close by chance.
+    assert [pid for pid, _ in similar] == [a.id]
+
+
 # ── watcher: same code path as the API ───────────────────────────────────────
 
 
@@ -519,7 +640,7 @@ async def test_sync_post_chunks_does_not_block_the_event_loop(db, backend, monke
             ticks += 1
 
     ticker_task = asyncio.create_task(ticker())
-    await vectors.sync_post_chunks(db, post_id=1, title="Slow", content=f"## S\n{LONG_SECTION}")
+    await vectors.sync_post_chunks(db, post_id=1, title="Slow", content=f"## S\n{LONG_SECTION}", tags=["dev"])
     assert ticks >= 10, "ticker made no progress while sync_post_chunks ran — embedding call is blocking the loop"
     await ticker_task
 

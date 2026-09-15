@@ -14,12 +14,15 @@ from ..models import (
     LinkIndexResponse,
     LinkTarget,
     PostCreate,
+    PostCreateResponse,
     PostListResponse,
     PostResponse,
     PostSummary,
     PostSummaryListResponse,
     PostUpdate,
+    RelatedPostsResponse,
     SearchTiming,
+    SimilarPost,
     etag_for_row,
 )
 from ._common import (
@@ -42,7 +45,29 @@ from .attachments import _all_referenced_attachments, referenced_attachment_name
 # ── Posts ─────────────────────────────────────────────────────────────────────
 
 
-async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostResponse:
+async def _similar_posts(
+    db: aiosqlite.Connection, *, exclude_post_id: int, title: str, content: str
+) -> list[SimilarPost]:
+    """Shared by ``create_post``'s advisory duplicate-guard and
+    ``get_related`` (relay #198, N-7): resolve ``vectors.find_similar_posts``'
+    ``(id, distance)`` pairs into ``SimilarPost``s, dropping any id that
+    vanished between the search and this lookup (theoretically possible, not
+    worth failing over) rather than raising."""
+    similar = await vectors.find_similar_posts(db, exclude_post_id=exclude_post_id, title=title, content=content)
+    if not similar:
+        return []
+    ids = [pid for pid, _ in similar]
+    placeholders = ",".join("?" for _ in ids)
+    async with db.execute(f"SELECT id, title FROM posts WHERE id IN ({placeholders})", ids) as cur:
+        title_by_id = {r["id"]: r["title"] for r in await cur.fetchall()}
+    return [
+        SimilarPost(id=pid, title=title_by_id[pid], score=vectors.similarity_score(distance))
+        for pid, distance in similar
+        if pid in title_by_id
+    ]
+
+
+async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostCreateResponse:
     now = vault.utcnow_iso()
     # Allocate the id and claim it in one atomic step. `allocate_id` is
     # `SELECT MAX(id)+1`, so two writers that read it before either inserts would
@@ -97,7 +122,12 @@ async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostRespons
         await history.commit(f"post {post_id} create: {post.title}")
     seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
     await events.publish(post.model_dump(), seq=seq)
-    return post
+    # Advisory duplicate-guard (relay #198, N-7): computed after the write and
+    # its SSE publish, not inside write_lock — this is a read-only enrichment
+    # that must never slow down or fail the create it rides along with (see
+    # vectors.find_similar_posts's own never-raises guarantee).
+    similar = await _similar_posts(db, exclude_post_id=post.id, title=post.title, content=post.content)
+    return PostCreateResponse(**post.model_dump(), similar=similar)
 
 
 # bm25 column weights (title, content, source, tags) — title/tags outrank body
@@ -623,6 +653,42 @@ async def get_backlinks(db: aiosqlite.Connection, post_id: int) -> BacklinksResp
     ]
     items.sort(key=lambda t: t.id)
     return BacklinksResponse(items=items)
+
+
+async def get_related(db: aiosqlite.Connection, post_id: int) -> RelatedPostsResponse:
+    """``GET /posts/{id}/related`` (relay #198, N-7): posts similar enough to
+    be worth a glance that ``post_id`` doesn't already cross-link, in either
+    direction — an automatic to-do list of missing ``[[wikilinks]]``, not a
+    general "more like this" (a post already linked has already had its
+    relationship made explicit; that's not a gap to flag).
+
+    Raises ``SemanticSearchUnavailable`` rather than answering an empty list
+    (same distinction ``mode=semantic`` search draws) — a caller asking for
+    this on a relay with no embeddings enabled should see a loud "not
+    available", not an indistinguishable "nothing similar"."""
+    row = await _fetch(db, post_id)
+    if row is None:
+        raise PostNotFound
+    if not (database.VEC_ENABLED and settings.embedding_enabled):
+        raise SemanticSearchUnavailable
+
+    candidates = await _similar_posts(db, exclude_post_id=post_id, title=row["title"], content=row["content"])
+    if not candidates:
+        return RelatedPostsResponse(items=[])
+
+    async with db.execute("SELECT id, title, content FROM posts") as cur:
+        rows = await cur.fetchall()
+    title_to_id = {links.norm_title(r["title"]): r["id"] for r in rows}
+    ids = {r["id"] for r in rows}
+    outbound = links.target_ids(row["content"], title_to_id, ids)
+    inbound = {
+        r["id"] for r in rows
+        if r["id"] != post_id and post_id in links.target_ids(r["content"], title_to_id, ids)
+    }
+    already_linked = outbound | inbound
+
+    items = [c for c in candidates if c.id not in already_linked]
+    return RelatedPostsResponse(items=items)
 
 
 

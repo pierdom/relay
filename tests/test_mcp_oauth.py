@@ -2,7 +2,8 @@
 
 Covers the store (hashing, single-use, expiry, revoke), the provider state
 machine (DCR, authorize-broker, code/token exchange, refresh rotation, static-key
-fallback, audience binding), and the broker callback (allowlist reuse).
+fallback, audience binding), the broker callback (allowlist reuse), and the
+per-client consent gate (relay #313 Stopgap).
 """
 from __future__ import annotations
 
@@ -93,6 +94,25 @@ async def test_pending_is_single_use_and_expiring(store):
 
     await store.save_pending("txn2", _pending(), ttl_seconds=-1)  # already expired
     assert await store.pop_pending("txn2") is None
+
+
+@pytest.mark.asyncio
+async def test_pending_get_does_not_consume(store):
+    # Unlike pop_pending, get_pending is a peek: the consent gate needs to
+    # read it on GET and again on POST-approve without burning it early.
+    await store.save_pending("txn-peek", _pending(), ttl_seconds=600)
+    assert await store.get_pending("txn-peek") is not None
+    assert await store.get_pending("txn-peek") is not None  # still there
+    assert await store.pop_pending("txn-peek") is not None  # now consumed
+    assert await store.get_pending("txn-peek") is None
+
+
+@pytest.mark.asyncio
+async def test_client_approval_persists(store):
+    assert await store.is_client_approved("c1") is False
+    await store.approve_client("c1")
+    assert await store.is_client_approved("c1") is True
+    assert await store.is_client_approved("c2") is False  # per-client, not global
 
 
 @pytest.mark.asyncio
@@ -192,23 +212,30 @@ async def test_access_token_wrong_audience_rejected(provider, store):
 
 
 # --- provider: authorize broker --------------------------------------------
+def _params(**overrides):
+    from mcp.server.auth.provider import AuthorizationParams
+
+    defaults = {
+        "state": "client-state",
+        "scopes": ["relay"],
+        "code_challenge": "the-challenge",
+        "redirect_uri": AnyUrl("https://claude.ai/cb"),
+        "redirect_uri_provided_explicitly": True,
+        "resource": settings.mcp_resource_url,
+    }
+    defaults.update(overrides)
+    return AuthorizationParams(**defaults)
+
+
 @pytest.mark.asyncio
-async def test_authorize_persists_pending_and_redirects_upstream(provider, store, monkeypatch):
+async def test_authorize_of_approved_client_persists_pending_and_redirects_upstream(provider, store, monkeypatch):
     async def fake_build(txn_id, verifier, nonce):
         return f"https://id.example.com/authorize?state={txn_id}"
 
     monkeypatch.setattr(pocketid, "build_authorize_url", fake_build)
-    from mcp.server.auth.provider import AuthorizationParams
+    await store.approve_client("c1")  # previously approved -> skips the consent gate
 
-    params = AuthorizationParams(
-        state="client-state",
-        scopes=["relay"],
-        code_challenge="the-challenge",
-        redirect_uri=AnyUrl("https://claude.ai/cb"),
-        redirect_uri_provided_explicitly=True,
-        resource=settings.mcp_resource_url,
-    )
-    url = await provider.authorize(_client(), params)
+    url = await provider.authorize(_client(), _params())
     assert url.startswith("https://id.example.com/authorize?state=")
     txn_id = url.rsplit("=", 1)[1]
     pending = await store.pop_pending(txn_id)
@@ -216,6 +243,20 @@ async def test_authorize_persists_pending_and_redirects_upstream(provider, store
     assert pending.code_challenge == "the-challenge"
     assert pending.client_state == "client-state"
     assert pending.redirect_uri == "https://claude.ai/cb"
+
+
+@pytest.mark.asyncio
+async def test_authorize_of_unapproved_client_routes_to_consent_gate(provider, store):
+    # relay #313 Stopgap: a client with no prior human approval must not reach
+    # PocketID directly, regardless of whether the human's PocketID session is
+    # already live (which is exactly the confused-deputy shape §0 describes).
+    url = await provider.authorize(_client(), _params())
+    assert url.startswith(f"{settings.relay_base_url.rstrip('/')}/mcp/oauth/consent?txn_id=")
+    txn_id = url.rsplit("=", 1)[1]
+    # the pending auth still exists (unconsumed) so the consent page can read it
+    pending = await store.get_pending(txn_id)
+    assert pending is not None
+    assert pending.client_id == "c1"
 
 
 # --- provider: code + token exchange ---------------------------------------
@@ -409,3 +450,249 @@ async def test_broker_callback_unknown_state_is_400(store, monkeypatch):
     monkeypatch.setattr(broker, "get_store", lambda: store)
     resp = await broker.handle_callback(_request("state=nonexistent&code=c"))
     assert resp.status_code == 400
+
+
+# --- consent gate (relay #313 Stopgap) ---------------------------------------
+def _consent_get_request(query: str):
+    from starlette.requests import Request
+
+    scope = {"type": "http", "method": "GET", "query_string": query.encode(), "headers": []}
+    return Request(scope)
+
+
+def _consent_post_request(form: dict, cookie: str | None = None):
+    from urllib.parse import urlencode
+
+    from starlette.requests import Request
+
+    body = urlencode(form).encode()
+    headers = [(b"content-type", b"application/x-www-form-urlencoded")]
+    if cookie is not None:
+        headers.append((b"cookie", cookie.encode()))
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {"type": "http", "method": "POST", "headers": headers}
+    return Request(scope, receive)
+
+
+@pytest.mark.asyncio
+async def test_consent_get_unknown_txn_is_400(store, monkeypatch):
+    from relay.mcp_oauth import consent
+
+    monkeypatch.setattr(consent, "get_store", lambda: store)
+    resp = await consent.handle_consent_get(_consent_get_request("txn_id=nonexistent"))
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_consent_get_renders_prompt_and_sets_binding_cookie(store, monkeypatch):
+    from relay.mcp_oauth import consent
+
+    monkeypatch.setattr(consent, "get_store", lambda: store)
+    await store.register_client(
+        "c1", '{"client_id": "c1", "client_name": "Evil Corp Connector", "redirect_uris": []}'
+    )
+    await store.save_pending("txn-gate", _pending(), ttl_seconds=600)
+
+    resp = await consent.handle_consent_get(_consent_get_request("txn_id=txn-gate"))
+    assert resp.status_code == 200
+    assert b"Evil Corp Connector" in resp.body
+    assert b"claude.ai/cb" in resp.body
+    # the pending auth is untouched by a mere GET (still readable, not burned)
+    assert await store.get_pending("txn-gate") is not None
+
+    set_cookie = resp.headers.get("set-cookie", "")
+    assert consent._cookie_name() in set_cookie
+    assert "httponly" in set_cookie.lower()
+    assert "samesite=lax" in set_cookie.lower()
+
+
+@pytest.mark.asyncio
+async def test_consent_post_approve_without_binding_cookie_is_rejected(store, monkeypatch):
+    from relay.mcp_oauth import consent
+
+    monkeypatch.setattr(consent, "get_store", lambda: store)
+    await store.save_pending("txn-nocookie", _pending(), ttl_seconds=600)
+
+    resp = await consent.handle_consent_post(_consent_post_request({"txn_id": "txn-nocookie", "action": "approve"}))
+    assert resp.status_code == 403
+    # rejected before ever touching approval state or the pending auth
+    assert await store.is_client_approved("c1") is False
+    assert await store.get_pending("txn-nocookie") is not None
+
+
+@pytest.mark.asyncio
+async def test_consent_post_approve_with_mismatched_cookie_is_rejected(store, monkeypatch):
+    # Simulates a captured consent URL opened in a different browser: that
+    # browser never saw the GET, so it has no cookie bound to this txn_id.
+    from relay.mcp_oauth import consent
+
+    monkeypatch.setattr(consent, "get_store", lambda: store)
+    await store.save_pending("txn-a", _pending(), ttl_seconds=600)
+    await store.save_pending("txn-b", _pending(client_id="c2"), ttl_seconds=600)
+
+    wrong_cookie = f"{consent._cookie_name()}={consent._sign('txn-b')}"
+    resp = await consent.handle_consent_post(
+        _consent_post_request({"txn_id": "txn-a", "action": "approve"}, cookie=wrong_cookie)
+    )
+    assert resp.status_code == 403
+    assert await store.is_client_approved("c1") is False
+
+
+@pytest.mark.asyncio
+async def test_consent_post_approve_forwards_upstream_without_granting_approval(store, monkeypatch):
+    # Consent's own POST must NOT itself grant approval (relay #313 audit
+    # finding): it only proves same-browser continuity with the GET, which an
+    # attacker can satisfy against their own DCR registration with zero relay
+    # credentials. Approval is earned later, in broker.handle_callback, only
+    # after a real PocketID login clears the allowlist.
+    from relay.mcp_oauth import consent, pocketid
+
+    monkeypatch.setattr(consent, "get_store", lambda: store)
+
+    async def fake_build(txn_id, verifier, nonce):
+        assert verifier == "up-verifier" and nonce == "up-nonce"
+        return f"https://id.example.com/authorize?state={txn_id}"
+
+    monkeypatch.setattr(pocketid, "build_authorize_url", fake_build)
+
+    await store.save_pending("txn-approve", _pending(), ttl_seconds=600)
+    cookie = f"{consent._cookie_name()}={consent._sign('txn-approve')}"
+
+    resp = await consent.handle_consent_post(
+        _consent_post_request({"txn_id": "txn-approve", "action": "approve"}, cookie=cookie)
+    )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "https://id.example.com/authorize?state=txn-approve"
+    assert await store.is_client_approved("c1") is False
+    # approval does not itself consume the pending auth — the broker callback
+    # (after PocketID) still needs to pop it.
+    assert await store.get_pending("txn-approve") is not None
+
+
+@pytest.mark.asyncio
+async def test_self_approval_attack_is_blocked(provider, store, monkeypatch):
+    """The confirmed relay #313 audit finding: an attacker who registers their
+    own client and clicks through their own consent page (no relay
+    credentials, no PocketID login) must NOT be able to grant that client
+    permanent approval. A subsequent authorize() call for the same client
+    must still be gated — an unrelated victim must still see the prompt."""
+    from relay.mcp_oauth import consent, pocketid
+
+    monkeypatch.setattr(consent, "get_store", lambda: store)
+
+    async def fake_build(txn_id, verifier, nonce):
+        return f"https://id.example.com/authorize?state={txn_id}"
+
+    monkeypatch.setattr(pocketid, "build_authorize_url", fake_build)
+
+    # "attacker" runs the entire consent gate against their own client, alone.
+    url = await provider.authorize(_client(), _params())
+    txn_id = url.rsplit("=", 1)[1]
+    cookie = f"{consent._cookie_name()}={consent._sign(txn_id)}"
+    approve_resp = await consent.handle_consent_post(
+        _consent_post_request({"txn_id": txn_id, "action": "approve"}, cookie=cookie)
+    )
+    assert approve_resp.status_code == 302  # forwarded to PocketID...
+    assert await store.is_client_approved("c1") is False  # ...but never approved
+
+    # a later authorize() for the same client (e.g. a link sent to a victim)
+    # is still gated to consent — the attacker's self-click bought them nothing.
+    url2 = await provider.authorize(_client(), _params())
+    assert "/mcp/oauth/consent?txn_id=" in url2
+
+
+@pytest.mark.asyncio
+async def test_consent_post_deny_discards_pending_and_redirects_with_error(store, monkeypatch):
+    from relay.mcp_oauth import consent
+
+    monkeypatch.setattr(consent, "get_store", lambda: store)
+    await store.save_pending("txn-deny", _pending(), ttl_seconds=600)
+    cookie = f"{consent._cookie_name()}={consent._sign('txn-deny')}"
+
+    resp = await consent.handle_consent_post(
+        _consent_post_request({"txn_id": "txn-deny", "action": "deny"}, cookie=cookie)
+    )
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith("https://claude.ai/cb?")
+    assert "error=access_denied" in resp.headers["location"]
+    assert await store.is_client_approved("c1") is False
+    assert await store.get_pending("txn-deny") is None  # discarded, not just unapproved
+
+
+@pytest.mark.asyncio
+async def test_full_stopgap_flow_unapproved_then_approved(provider, store, monkeypatch):
+    """End-to-end: an unapproved client is gated to consent; a human clicking
+    Approve and then *actually completing PocketID login as an allowlisted
+    user* is what lets the *next* authorize() call for the same client skip
+    straight to PocketID. Consent's Approve click alone is not enough —
+    matches broker.handle_callback granting approval, not consent.py."""
+    from relay.mcp_oauth import broker, consent, pocketid
+
+    monkeypatch.setattr(consent, "get_store", lambda: store)
+    monkeypatch.setattr(broker, "get_store", lambda: store)
+    monkeypatch.setattr(broker, "get_provider", lambda: provider)
+
+    async def fake_build(txn_id, verifier, nonce):
+        return f"https://id.example.com/authorize?state={txn_id}"
+
+    monkeypatch.setattr(pocketid, "build_authorize_url", fake_build)
+
+    async def fake_validate(code, verifier, nonce):
+        # provider.authorize() (unlike the _pending() fixture) generates a real
+        # PKCE verifier/nonce, so just accept whatever it produced.
+        return {"sub": "user-42", "email": "me@x.com", "email_verified": True}
+
+    monkeypatch.setattr(broker.pocketid, "exchange_and_validate", fake_validate)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-42")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    # first authorize(): unapproved -> routed to the consent gate
+    url = await provider.authorize(_client(), _params())
+    assert "/mcp/oauth/consent?txn_id=" in url
+    txn_id = url.rsplit("=", 1)[1]
+
+    # human clicks Approve in-browser...
+    cookie = f"{consent._cookie_name()}={consent._sign(txn_id)}"
+    approve_resp = await consent.handle_consent_post(
+        _consent_post_request({"txn_id": txn_id, "action": "approve"}, cookie=cookie)
+    )
+    assert approve_resp.status_code == 302
+    assert approve_resp.headers["location"].startswith("https://id.example.com/authorize?state=")
+    assert await store.is_client_approved("c1") is False  # not yet — still needs real login
+
+    # ...and then actually completes PocketID login as an allowlisted user.
+    callback_resp = await broker.handle_callback(_request(f"state={txn_id}&code=upstream-code"))
+    assert callback_resp.status_code == 302
+    assert await store.is_client_approved("c1") is True  # now granted
+
+    # second authorize() for the same client: now pre-approved, straight to PocketID
+    url2 = await provider.authorize(_client(), _params())
+    assert url2.startswith("https://id.example.com/authorize?state=")
+
+
+@pytest.mark.asyncio
+async def test_broker_callback_denied_login_does_not_grant_approval(provider, store, monkeypatch):
+    # An unauthorized sub reaching the callback (e.g. someone without a
+    # relay-allowlisted PocketID identity) must not grant approval either —
+    # only a successful, allowlisted login does.
+    from relay.mcp_oauth import broker
+
+    monkeypatch.setattr(broker, "get_store", lambda: store)
+    monkeypatch.setattr(broker, "get_provider", lambda: provider)
+
+    async def fake_validate(code, verifier, nonce):
+        return {"sub": "intruder", "email": "e@x.com", "email_verified": True}
+
+    monkeypatch.setattr(broker.pocketid, "exchange_and_validate", fake_validate)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-42")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    await store.save_pending("txn-denied", _pending(), ttl_seconds=600)
+    resp = await broker.handle_callback(_request("state=txn-denied&code=c"))
+
+    assert resp.status_code == 302
+    assert "error=access_denied" in resp.headers["location"]
+    assert await store.is_client_approved("c1") is False

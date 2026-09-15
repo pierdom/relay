@@ -11,6 +11,7 @@ from ..models import (
     DeletedPostsResponse,
     PostAppend,
     PostCreate,
+    PostCreateResponse,
     PostEdit,
     PostHistoryResponse,
     PostListResponse,
@@ -19,6 +20,7 @@ from ..models import (
     PostRevisionContent,
     PostSummaryListResponse,
     PostUpdate,
+    RelatedPostsResponse,
 )
 
 router = APIRouter(prefix="/posts", tags=["posts"])
@@ -60,7 +62,7 @@ def _conflict(post_id: int, current: PostResponse | None) -> HTTPException:
 
 @router.post(
     "",
-    response_model=PostResponse,
+    response_model=PostCreateResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_api_key)],
 )
@@ -68,7 +70,7 @@ async def create_post(
     body: PostCreate,
     response: Response,
     db: aiosqlite.Connection = Depends(get_db),
-) -> PostResponse:
+) -> PostCreateResponse:
     post = await service.create_post(db, body)
     _set_etag(response, post)
     return post
@@ -198,6 +200,30 @@ async def get_backlinks(
         return await service.get_backlinks(db, post_id)
     except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
+
+
+@router.get(
+    "/{post_id}/related",
+    response_model=RelatedPostsResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_related(
+    post_id: int,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> RelatedPostsResponse:
+    """Posts similar enough to be worth a glance that this post doesn't
+    already cross-link, in either direction (relay #198, N-7) — an automatic
+    to-do list of missing ``[[wikilinks]]``, not a general "more like this".
+    """
+    try:
+        return await service.get_related(db, post_id)
+    except service.PostNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
+    except service.SemanticSearchUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Semantic search is not enabled on this relay",
+        ) from None
 
 
 @router.get(

@@ -535,7 +535,7 @@ async def index_upsert(
          created_at, updated_at, expires_at, encode_properties(properties)),
     )
     if sync_embeddings:
-        await vectors.sync_post_chunks(db, post_id=id, title=title, content=content)
+        await vectors.sync_post_chunks(db, post_id=id, title=title, content=content, tags=tags)
 
 
 async def index_insert(
@@ -567,7 +567,7 @@ async def index_insert(
         (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
          created_at, updated_at, expires_at, encode_properties(properties)),
     )
-    await vectors.sync_post_chunks(db, post_id=id, title=title, content=content)
+    await vectors.sync_post_chunks(db, post_id=id, title=title, content=content, tags=tags)
 
 
 async def index_delete(db: aiosqlite.Connection, post_id: int) -> None:
@@ -795,7 +795,7 @@ async def backfill_embeddings(db: aiosqlite.Connection) -> int:
     if not settings.embedding_enabled:
         _backfill_state["running"] = False
         return 0
-    async with db.execute("SELECT id, title, content FROM posts") as cur:
+    async with db.execute("SELECT id, title, content, tags FROM posts") as cur:
         rows = await cur.fetchall()
     total = len(rows)
     _backfill_state.update(running=True, checked=0, total=total, started_at=utcnow_iso(), completed_at=None)
@@ -805,7 +805,8 @@ async def backfill_embeddings(db: aiosqlite.Connection) -> int:
         # sync_post_chunks never raises (see its docstring), but a SQL error
         # here must not abort the whole run either — one bad post is one bad post.
         try:
-            await vectors.sync_post_chunks(db, post_id=row["id"], title=row["title"], content=row["content"])
+            tags = [t for t in row["tags"].split(",") if t]
+            await vectors.sync_post_chunks(db, post_id=row["id"], title=row["title"], content=row["content"], tags=tags)
             await db.commit()
         except Exception:
             failed += 1
