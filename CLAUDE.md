@@ -162,7 +162,7 @@ Stored verbatim, resolved at display time. Code spans/blocks are skipped.
 | `OIDC_ALLOWED_SUBS` / `OIDC_ALLOWED_EMAILS` | "" | Allowlists; both empty = any PocketID user |
 | `MCP_OAUTH_ENABLED` | false | OAuth 2.1 AS+RS for `/mcp` (DCR + PKCE, brokered to PocketID) |
 | `MCP_REQUIRED_SCOPES` | relay | |
-| `MCP_ALLOWED_REDIRECT_HOSTS` | claude.ai,claude.com,chatgpt.com | DCR redirect-URI allowlist |
+| `MCP_ALLOWED_REDIRECT_HOSTS` | claude.ai,claude.com,chatgpt.com,*.mistral.ai | DCR redirect-URI allowlist. Entries are exact hosts or `*.`-prefixed subdomain suffixes (`config.mcp_redirect_hosts`/`mcp_redirect_host_wildcards`, matched dot-bounded in `provider._host_allowed` — never a bare substring, which would also accept `evilmistral.ai`); a wildcard entry excludes its own apex |
 
 ## Authentication
 

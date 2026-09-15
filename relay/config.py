@@ -104,8 +104,11 @@ class Settings(BaseSettings):
     # DCR redirect-URI host allowlist (comma-separated) for https redirects. Blocks
     # an attacker from registering a client that points an auth code at their own
     # https endpoint. Defaults to Claude's known connector callback hosts; empty =
-    # allow any https (opt-out). http redirects stay loopback-only regardless.
-    mcp_allowed_redirect_hosts: str = "claude.ai,claude.com,chatgpt.com"
+    # allow any https (opt-out). http redirects stay loopback-only regardless. An
+    # entry may be an exact host (`claude.ai`) or a `*.`-prefixed suffix
+    # (`*.mistral.ai`) matching that domain's subdomains only — not the bare apex,
+    # and never a naive substring (see `mcp_redirect_host_wildcards`).
+    mcp_allowed_redirect_hosts: str = "claude.ai,claude.com,chatgpt.com,*.mistral.ai"
     # Token lifetimes (seconds). Auth codes are single-use and short-lived;
     # access tokens rotate via long-lived refresh tokens.
     mcp_auth_code_ttl_seconds: int = 60
@@ -154,8 +157,32 @@ class Settings(BaseSettings):
 
     @property
     def mcp_redirect_hosts(self) -> set[str]:
-        """Allowlisted https redirect hosts for DCR (lowercased). Empty = any."""
-        return {h.strip().lower() for h in self.mcp_allowed_redirect_hosts.split(",") if h.strip()}
+        """Allowlisted https redirect hosts for DCR (lowercased), exact-match
+        entries only — `*.`-prefixed entries live in `mcp_redirect_host_wildcards`
+        instead. Both empty = any (opt-out)."""
+        return {
+            h.strip().lower()
+            for h in self.mcp_allowed_redirect_hosts.split(",")
+            if h.strip() and not h.strip().startswith("*.")
+        }
+
+    @property
+    def mcp_redirect_host_wildcards(self) -> set[str]:
+        """Base domains (lowercased, no leading `*.`) from `*.`-prefixed entries in
+        `MCP_ALLOWED_REDIRECT_HOSTS`. A base domain here matches only its
+        subdomains (`sub.mistral.ai`), not the bare apex (`mistral.ai` needs its
+        own separate exact entry) — mirrors how a wildcard TLS cert doesn't cover
+        its own apex either, and keeps the two cases from being silently conflated.
+        Matching is dot-boundary suffix matching (`provider._redirect_uri_allowed`),
+        never a bare `str.endswith` on the raw domain — that would also accept
+        `evilmistral.ai` for a `mistral.ai` entry (relay #313 Phase 2 checklist
+        already flagged this exact class of bug for the future fastmcp migration;
+        it applies here too)."""
+        return {
+            h.strip().lower().removeprefix("*.")
+            for h in self.mcp_allowed_redirect_hosts.split(",")
+            if h.strip().startswith("*.")
+        }
 
     @property
     def relay_dir(self) -> str:
