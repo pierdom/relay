@@ -61,6 +61,10 @@ CREATE TABLE IF NOT EXISTS tokens (
     revoked    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_tokens_client ON tokens (client_id);
+CREATE TABLE IF NOT EXISTS approved_clients (
+    client_id   TEXT PRIMARY KEY,
+    approved_at REAL NOT NULL
+);
 """
 
 
@@ -147,6 +151,20 @@ class OAuthStore:
         return row["info_json"] if row else None
 
     # --- pending authorizations (broker leg) ---------------------------------
+    @staticmethod
+    def _row_to_pending(row) -> PendingAuth:
+        return PendingAuth(
+            client_id=row["client_id"],
+            redirect_uri=row["redirect_uri"],
+            redirect_uri_explicit=bool(row["redirect_uri_explicit"]),
+            code_challenge=row["code_challenge"],
+            scopes=row["scopes"].split() if row["scopes"] else [],
+            resource=row["resource"],
+            client_state=row["client_state"],
+            up_verifier=row["up_verifier"],
+            up_nonce=row["up_nonce"],
+        )
+
     async def save_pending(self, txn_id: str, p: PendingAuth, ttl_seconds: int) -> None:
         async with self._connect() as db:
             await db.execute(
@@ -176,17 +194,43 @@ class OAuthStore:
             await db.commit()
         if row is None or not claimed or row["expires_at"] < time.time():
             return None
-        return PendingAuth(
-            client_id=row["client_id"],
-            redirect_uri=row["redirect_uri"],
-            redirect_uri_explicit=bool(row["redirect_uri_explicit"]),
-            code_challenge=row["code_challenge"],
-            scopes=row["scopes"].split() if row["scopes"] else [],
-            resource=row["resource"],
-            client_state=row["client_state"],
-            up_verifier=row["up_verifier"],
-            up_nonce=row["up_nonce"],
-        )
+        return self._row_to_pending(row)
+
+    async def get_pending(self, txn_id: str) -> PendingAuth | None:
+        """Read a pending authorization without consuming it.
+
+        The consent gate needs to inspect a pending auth twice without burning
+        it: once to render the prompt (``GET``), once more on approval to
+        build the PocketID redirect (``POST``) — only the eventual broker
+        callback (``pop_pending``) actually claims it, once PocketID has
+        authenticated the human.
+        """
+        async with self._connect() as db:
+            async with db.execute("SELECT * FROM pending_auth WHERE txn_id = ?", (txn_id,)) as cur:
+                row = await cur.fetchone()
+        if row is None or row["expires_at"] < time.time():
+            return None
+        return self._row_to_pending(row)
+
+    # --- per-client consent (relay #313 Stopgap) ------------------------------
+    async def is_client_approved(self, client_id: str) -> bool:
+        """Whether a human has ever explicitly approved this DCR client via the
+        consent gate. Persists across restarts — it's a one-time gate per
+        client, not a per-session flag."""
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT 1 FROM approved_clients WHERE client_id = ?", (client_id,)
+            ) as cur:
+                row = await cur.fetchone()
+        return row is not None
+
+    async def approve_client(self, client_id: str) -> None:
+        async with self._connect() as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO approved_clients (client_id, approved_at) VALUES (?, ?)",
+                (client_id, time.time()),
+            )
+            await db.commit()
 
     # --- auth codes ----------------------------------------------------------
     async def save_auth_code(self, code: str, c: StoredCode) -> None:

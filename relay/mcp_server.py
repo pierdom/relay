@@ -111,6 +111,17 @@ async def mcp_oauth_callback(request: Request) -> Response:
     return await handle_callback(request)
 
 
+@mcp.custom_route("/mcp/oauth/consent", methods=["GET", "POST"], include_in_schema=False)
+async def mcp_oauth_consent(request: Request) -> Response:
+    """Per-client consent gate for an unapproved DCR client (relay #313
+    Stopgap, unauthenticated by design — same standing as the callback above)."""
+    from .mcp_oauth.consent import handle_consent_get, handle_consent_post
+
+    if request.method == "POST":
+        return await handle_consent_post(request)
+    return await handle_consent_get(request)
+
+
 _db = database.connect
 
 
