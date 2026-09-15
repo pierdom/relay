@@ -144,6 +144,11 @@ async def test_register_and_get_client(provider):
         ("https://chatgpt.com/oauth/callback", True),  # allowlisted (default set)
         ("http://localhost:41000/cb", True),  # loopback http allowed (native apps)
         ("http://127.0.0.1:8080/cb", True),
+        ("https://sub.mistral.ai/cb", True),  # *.mistral.ai wildcard entry (default set)
+        ("https://a.b.mistral.ai/cb", True),  # multi-level subdomain still matches the suffix
+        ("https://mistral.ai/cb", False),  # *.mistral.ai does NOT cover the bare apex
+        ("https://evilmistral.ai/cb", False),  # dot-boundary: no leading '.' before the base -> rejected
+        ("https://mistral.ai.evil.example.com/cb", False),  # base as a prefix of an attacker host -> rejected
         ("https://www.perplexity.ai/rest/connections/oauth_callback", False),  # not in default -> opt-in
         ("https://evil.example.com/cb", False),  # non-allowlisted https -> rejected
         ("http://evil.example.com/cb", False),  # remote cleartext -> rejected
@@ -173,6 +178,29 @@ async def test_register_redirect_host_allowlist_opt_out(provider, monkeypatch):
     monkeypatch.setattr(settings, "mcp_allowed_redirect_hosts", "")
     await provider.register_client(_client(redirect="https://anything.example.com/cb"))
     assert await provider.get_client("c1") is not None
+
+
+def test_host_allowed_wildcard_matching_is_dot_bounded(monkeypatch):
+    # Direct unit test of the matcher, not just the end-to-end registration
+    # flow above — pins the exact bypass shape relay #313's Phase 2 checklist
+    # warned about for a naive substring/suffix implementation.
+    from relay.mcp_oauth.provider import _host_allowed
+
+    monkeypatch.setattr(settings, "mcp_allowed_redirect_hosts", "*.mistral.ai")
+    assert _host_allowed("sub.mistral.ai") is True
+    assert _host_allowed("a.b.mistral.ai") is True
+    assert _host_allowed("mistral.ai") is False  # wildcard-only entry excludes its own apex
+    assert _host_allowed("evilmistral.ai") is False  # no dot boundary -> must reject
+    assert _host_allowed("mistral.ai.evil.example.com") is False  # base as a prefix -> must reject
+
+    # A wildcard-only allowlist is still a real (non-opt-out) restriction.
+    assert _host_allowed("evil.example.com") is False
+
+    # Exact and wildcard entries combine.
+    monkeypatch.setattr(settings, "mcp_allowed_redirect_hosts", "claude.ai,*.mistral.ai")
+    assert _host_allowed("claude.ai") is True
+    assert _host_allowed("sub.mistral.ai") is True
+    assert _host_allowed("mistral.ai") is False
 
 
 @pytest.mark.asyncio

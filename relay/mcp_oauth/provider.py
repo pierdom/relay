@@ -47,6 +47,21 @@ def _consent_url(txn_id: str) -> str:
     return f"{settings.relay_base_url.rstrip('/')}/mcp/oauth/consent?txn_id={txn_id}"
 
 
+def _host_allowed(host: str) -> bool:
+    """Exact-host or `*.`-suffix match against ``MCP_ALLOWED_REDIRECT_HOSTS``.
+    A wildcard entry matches only its subdomains (``host.endswith("." + base)``),
+    never the bare apex itself (list it separately if needed) and never a bare
+    ``str.endswith(base)``, which would also accept ``evilmistral.ai`` for a
+    ``mistral.ai`` wildcard entry."""
+    exact = settings.mcp_redirect_hosts
+    wildcards = settings.mcp_redirect_host_wildcards
+    if not exact and not wildcards:
+        return True  # opt-out: allow any https host
+    if host in exact:
+        return True
+    return any(host.endswith(f".{base}") for base in wildcards)
+
+
 def _redirect_uri_allowed(uri: AnyUrl) -> bool:
     """DCR redirect-URI policy. http is loopback-only (native apps, RFC 8252).
     https is restricted to the ``MCP_ALLOWED_REDIRECT_HOSTS`` allowlist so an
@@ -56,8 +71,7 @@ def _redirect_uri_allowed(uri: AnyUrl) -> bool:
     if uri.scheme == "http" and host in _LOOPBACK_HOSTS:
         return True
     if uri.scheme == "https":
-        allowed = settings.mcp_redirect_hosts
-        return not allowed or host in allowed
+        return _host_allowed(host)
     return False
 
 
