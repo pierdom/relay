@@ -16,6 +16,21 @@ and gets the victim to open it is functionally unchanged from today, just
 with one extra click. ``__Host-`` / ``Secure`` / ``HttpOnly`` /
 ``SameSite=Lax`` per Obsidian Security's pitfall list (see relay post #313 §2).
 
+**Approving here does not itself grant approval.** The binding cookie only
+proves same-browser continuity between this ``GET`` and this ``POST`` — it
+proves nothing about *who* that browser belongs to. DCR registration and
+``/authorize`` are both unauthenticated by spec, so without this distinction
+an attacker could register their own client, click through this page against
+their own registration with zero relay credentials, and permanently mark
+that client pre-approved — reintroducing the exact zero-interaction bypass
+this module exists to close, just fronted by an extra click the attacker
+takes against themselves. Approve here only forwards to PocketID; the actual
+grant (``OAuthStore.approve_client``) happens in ``broker.handle_callback``,
+and only once PocketID has authenticated a real human and that human's
+``sub`` has cleared the allowlist. An attacker who self-approves this page
+still can't produce a valid, allowlisted PocketID login for someone else's
+identity, so their client never actually gets marked approved.
+
 **Honest limit, not papered over**: this raises the bar from *zero-interaction,
 zero-signal exploitation* to *requires an explicit, out-of-context approval
 click a reasonably attentive user could refuse* — it cannot prove *which*
@@ -189,9 +204,12 @@ async def handle_consent_post(request: Request) -> Response:
         url = construct_redirect_uri(pending.redirect_uri, error="access_denied", state=pending.client_state)
         return RedirectResponse(url, status_code=302)
 
-    # Approval persists (oauth.db, not memory) — this specific client skips the
-    # gate on every future authorize() call, exactly like PocketID's own
-    # skip-consent behaves for a client PocketID has already seen approved.
-    await store.approve_client(pending.client_id)
+    # Deliberately does NOT approve the client here. This endpoint has no way
+    # to know the browser clicking Approve belongs to the actual vault owner —
+    # it only proves "the browser that saw the GET is the one submitting this
+    # POST," which an attacker can satisfy against their own registration with
+    # zero relay credentials. Approval is earned in broker.handle_callback,
+    # only after PocketID has actually authenticated a human and that sub has
+    # cleared the allowlist — see that module for why.
     url = await pocketid.build_authorize_url(txn_id, pending.up_verifier, pending.up_nonce)
     return RedirectResponse(url, status_code=302)

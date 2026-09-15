@@ -5,8 +5,20 @@ Registered as an *unauthenticated* custom route on the MCP app
 terminates the upstream OIDC leg and resumes the pending MCP authorization.
 
 Flow: validate the PocketID id_token → enforce the **same** ``_authorized()`` sub
-allowlist as the web UI → mint a relay auth code bound to the original client
-request → 302 back to the client's ``redirect_uri`` with ``code`` + ``state``.
+allowlist as the web UI → **grant this pending flow's client the consent-gate
+approval** (relay #313 Stopgap; see ``consent.py``) → mint a relay auth code
+bound to the original client request → 302 back to the client's
+``redirect_uri`` with ``code`` + ``state``.
+
+Approval is granted here, not in ``consent.py``'s own ``POST`` handler,
+deliberately: this is the one point in the whole flow that has actually
+verified a real human authenticated as an allowlisted identity. Consent's own
+``POST`` only proves same-browser continuity with its ``GET`` — nowhere near
+enough to grant a *permanent* bypass, since DCR + ``/authorize`` are both
+unauthenticated and an attacker could satisfy that check against their own
+registration. Granting it here instead means an attacker's self-approval
+attempt dead-ends at PocketID's login screen, where they'd need real,
+allowlisted credentials they don't have.
 """
 from __future__ import annotations
 
@@ -62,6 +74,12 @@ async def handle_callback(request: Request) -> Response:
     if not sub or not _authorized(sub, email, email_verified):
         logger.warning("MCP OAuth: login denied for sub=%s email=%s (not in allowlist)", sub, email)
         return _redirect_error(pending.redirect_uri, pending.client_state, "access_denied")
+
+    # A real, allowlisted human has now authenticated through this client —
+    # the only point in the flow where that's actually true. Grant the
+    # consent-gate approval here (idempotent: a client that skipped the gate
+    # because it was already approved just gets its approved_at refreshed).
+    await get_store().approve_client(pending.client_id)
 
     relay_code = await get_provider().mint_authorization_code(pending, sub)
     url = construct_redirect_uri(pending.redirect_uri, code=relay_code, state=pending.client_state)

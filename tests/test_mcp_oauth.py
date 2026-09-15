@@ -542,7 +542,12 @@ async def test_consent_post_approve_with_mismatched_cookie_is_rejected(store, mo
 
 
 @pytest.mark.asyncio
-async def test_consent_post_approve_marks_client_approved_and_redirects_upstream(store, monkeypatch):
+async def test_consent_post_approve_forwards_upstream_without_granting_approval(store, monkeypatch):
+    # Consent's own POST must NOT itself grant approval (relay #313 audit
+    # finding): it only proves same-browser continuity with the GET, which an
+    # attacker can satisfy against their own DCR registration with zero relay
+    # credentials. Approval is earned later, in broker.handle_callback, only
+    # after a real PocketID login clears the allowlist.
     from relay.mcp_oauth import consent, pocketid
 
     monkeypatch.setattr(consent, "get_store", lambda: store)
@@ -561,10 +566,42 @@ async def test_consent_post_approve_marks_client_approved_and_redirects_upstream
     )
     assert resp.status_code == 302
     assert resp.headers["location"] == "https://id.example.com/authorize?state=txn-approve"
-    assert await store.is_client_approved("c1") is True
+    assert await store.is_client_approved("c1") is False
     # approval does not itself consume the pending auth — the broker callback
     # (after PocketID) still needs to pop it.
     assert await store.get_pending("txn-approve") is not None
+
+
+@pytest.mark.asyncio
+async def test_self_approval_attack_is_blocked(provider, store, monkeypatch):
+    """The confirmed relay #313 audit finding: an attacker who registers their
+    own client and clicks through their own consent page (no relay
+    credentials, no PocketID login) must NOT be able to grant that client
+    permanent approval. A subsequent authorize() call for the same client
+    must still be gated — an unrelated victim must still see the prompt."""
+    from relay.mcp_oauth import consent, pocketid
+
+    monkeypatch.setattr(consent, "get_store", lambda: store)
+
+    async def fake_build(txn_id, verifier, nonce):
+        return f"https://id.example.com/authorize?state={txn_id}"
+
+    monkeypatch.setattr(pocketid, "build_authorize_url", fake_build)
+
+    # "attacker" runs the entire consent gate against their own client, alone.
+    url = await provider.authorize(_client(), _params())
+    txn_id = url.rsplit("=", 1)[1]
+    cookie = f"{consent._cookie_name()}={consent._sign(txn_id)}"
+    approve_resp = await consent.handle_consent_post(
+        _consent_post_request({"txn_id": txn_id, "action": "approve"}, cookie=cookie)
+    )
+    assert approve_resp.status_code == 302  # forwarded to PocketID...
+    assert await store.is_client_approved("c1") is False  # ...but never approved
+
+    # a later authorize() for the same client (e.g. a link sent to a victim)
+    # is still gated to consent — the attacker's self-click bought them nothing.
+    url2 = await provider.authorize(_client(), _params())
+    assert "/mcp/oauth/consent?txn_id=" in url2
 
 
 @pytest.mark.asyncio
@@ -587,31 +624,75 @@ async def test_consent_post_deny_discards_pending_and_redirects_with_error(store
 
 @pytest.mark.asyncio
 async def test_full_stopgap_flow_unapproved_then_approved(provider, store, monkeypatch):
-    """End-to-end: an unapproved client is gated to consent; approving it lets
-    the *next* authorize() call for the same client skip straight to PocketID,
-    same as an already-PocketID-approved client behaves today."""
-    from relay.mcp_oauth import consent, pocketid
+    """End-to-end: an unapproved client is gated to consent; a human clicking
+    Approve and then *actually completing PocketID login as an allowlisted
+    user* is what lets the *next* authorize() call for the same client skip
+    straight to PocketID. Consent's Approve click alone is not enough —
+    matches broker.handle_callback granting approval, not consent.py."""
+    from relay.mcp_oauth import broker, consent, pocketid
 
     monkeypatch.setattr(consent, "get_store", lambda: store)
+    monkeypatch.setattr(broker, "get_store", lambda: store)
+    monkeypatch.setattr(broker, "get_provider", lambda: provider)
 
     async def fake_build(txn_id, verifier, nonce):
         return f"https://id.example.com/authorize?state={txn_id}"
 
     monkeypatch.setattr(pocketid, "build_authorize_url", fake_build)
 
+    async def fake_validate(code, verifier, nonce):
+        # provider.authorize() (unlike the _pending() fixture) generates a real
+        # PKCE verifier/nonce, so just accept whatever it produced.
+        return {"sub": "user-42", "email": "me@x.com", "email_verified": True}
+
+    monkeypatch.setattr(broker.pocketid, "exchange_and_validate", fake_validate)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-42")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
     # first authorize(): unapproved -> routed to the consent gate
     url = await provider.authorize(_client(), _params())
     assert "/mcp/oauth/consent?txn_id=" in url
     txn_id = url.rsplit("=", 1)[1]
 
-    # human approves in-browser
+    # human clicks Approve in-browser...
     cookie = f"{consent._cookie_name()}={consent._sign(txn_id)}"
     approve_resp = await consent.handle_consent_post(
         _consent_post_request({"txn_id": txn_id, "action": "approve"}, cookie=cookie)
     )
     assert approve_resp.status_code == 302
     assert approve_resp.headers["location"].startswith("https://id.example.com/authorize?state=")
+    assert await store.is_client_approved("c1") is False  # not yet — still needs real login
+
+    # ...and then actually completes PocketID login as an allowlisted user.
+    callback_resp = await broker.handle_callback(_request(f"state={txn_id}&code=upstream-code"))
+    assert callback_resp.status_code == 302
+    assert await store.is_client_approved("c1") is True  # now granted
 
     # second authorize() for the same client: now pre-approved, straight to PocketID
     url2 = await provider.authorize(_client(), _params())
     assert url2.startswith("https://id.example.com/authorize?state=")
+
+
+@pytest.mark.asyncio
+async def test_broker_callback_denied_login_does_not_grant_approval(provider, store, monkeypatch):
+    # An unauthorized sub reaching the callback (e.g. someone without a
+    # relay-allowlisted PocketID identity) must not grant approval either —
+    # only a successful, allowlisted login does.
+    from relay.mcp_oauth import broker
+
+    monkeypatch.setattr(broker, "get_store", lambda: store)
+    monkeypatch.setattr(broker, "get_provider", lambda: provider)
+
+    async def fake_validate(code, verifier, nonce):
+        return {"sub": "intruder", "email": "e@x.com", "email_verified": True}
+
+    monkeypatch.setattr(broker.pocketid, "exchange_and_validate", fake_validate)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-42")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    await store.save_pending("txn-denied", _pending(), ttl_seconds=600)
+    resp = await broker.handle_callback(_request("state=txn-denied&code=c"))
+
+    assert resp.status_code == 302
+    assert "error=access_denied" in resp.headers["location"]
+    assert await store.is_client_approved("c1") is False
