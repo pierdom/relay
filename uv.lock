@@ -1504,7 +1504,7 @@ wheels = [
 
 [[package]]
 name = "relay"
-version = "1.10.4"
+version = "1.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
