@@ -23,6 +23,7 @@ os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
 import pytest_asyncio
+from fastmcp.server.auth.redirect_validation import validate_redirect_uri
 from httpx import ASGITransport, AsyncClient
 from joserfc import jwt as _joserfc_jwt
 from joserfc.errors import InvalidClaimError
@@ -508,6 +509,36 @@ async def test_relay_oidc_proxy_denies_missing_id_token():
     with pytest.raises(TokenError) as exc_info:
         await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"access_token": "opaque"})
     assert exc_info.value.error == "invalid_grant"
+
+
+def test_mcp_allowed_client_redirect_uri_patterns_permits_loopback(monkeypatch):
+    """relay #313 Phase 4: caught while writing docs, not by a test — fastmcp's
+    `validate_redirect_uri` gives loopback URIs no automatic exemption once
+    `allowed_patterns` is a real list (confirmed by reading it), unlike the old
+    hand-rolled `mcp_oauth/provider.py` this phase deletes, which explicitly
+    allowed loopback http regardless of the https host allowlist. Uses fastmcp's
+    real matcher, not a re-implementation of it — this proves the patterns
+    actually work against the library that consumes them, not just that the
+    Python list looks right."""
+    monkeypatch.setattr(settings, "mcp_allowed_redirect_hosts", "claude.ai,*.mistral.ai")
+    patterns = settings.mcp_allowed_client_redirect_uri_patterns
+
+    assert validate_redirect_uri("http://localhost:41000/cb", patterns)
+    assert validate_redirect_uri("http://127.0.0.1:8080/cb", patterns)
+    assert validate_redirect_uri("https://claude.ai/cb", patterns)
+    assert validate_redirect_uri("https://sub.mistral.ai/cb", patterns)
+    assert not validate_redirect_uri("https://mistral.ai/cb", patterns)  # wildcard excludes its own apex
+    assert not validate_redirect_uri("https://evilmistral.ai/cb", patterns)  # dot-boundary
+    assert not validate_redirect_uri("https://evil.example.com/cb", patterns)
+    assert not validate_redirect_uri("http://evil.example.com/cb", patterns)  # remote cleartext
+
+
+def test_mcp_allowed_client_redirect_uri_patterns_none_when_hosts_empty(monkeypatch):
+    """Empty MCP_ALLOWED_REDIRECT_HOSTS must translate to fastmcp's `None`
+    (trust each DCR client's own declared URI), not `[]` (allow nothing) —
+    relay's own "empty = opt-out" default, preserved."""
+    monkeypatch.setattr(settings, "mcp_allowed_redirect_hosts", "")
+    assert settings.mcp_allowed_client_redirect_uri_patterns is None
 
 
 # ── K-5: attachment tools must catch InvalidFolder, like REST already does ──

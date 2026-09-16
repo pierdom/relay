@@ -200,12 +200,30 @@ class Settings(BaseSettings):
         with no explicit allowlist, fastmcp falls back to trusting each DCR
         client's self-declared, self-registered redirect URI, which is the same
         practical openness relay's own "empty" already meant.
+
+        Always includes `http://localhost:*`/`http://127.0.0.1:*` when returning
+        an explicit list — caught while writing Phase 4's docs, not by a test:
+        fastmcp's `validate_redirect_uri` gives loopback URIs **no automatic
+        exemption** once `allowed_patterns` is a real list (confirmed by reading
+        it) — unlike the old hand-rolled `provider.py`, which explicitly allowed
+        loopback http regardless of the https host allowlist (`_pending()`'s own
+        test cases: `http://localhost:41000/cb`, `http://127.0.0.1:8080/cb`).
+        Without these two entries, a native/local MCP client could no longer
+        register against a relay with the default (non-empty) redirect-host
+        allowlist — a real regression, not a hypothetical one. Same two patterns
+        as fastmcp's own `redirect_validation.DEFAULT_LOCALHOST_PATTERNS`,
+        hand-copied rather than imported so this settings module doesn't need to
+        know about fastmcp's types.
         """
         hosts = self.mcp_redirect_hosts
         wildcards = self.mcp_redirect_host_wildcards
         if not hosts and not wildcards:
             return None
-        return [f"https://{h}/*" for h in sorted(hosts)] + [f"https://*.{w}/*" for w in sorted(wildcards)]
+        return (
+            ["http://localhost:*", "http://127.0.0.1:*"]
+            + [f"https://{h}/*" for h in sorted(hosts)]
+            + [f"https://*.{w}/*" for w in sorted(wildcards)]
+        )
 
     @property
     def relay_dir(self) -> str:
