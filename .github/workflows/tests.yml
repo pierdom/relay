@@ -34,6 +34,20 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      # relay #313 Phase 5. `pip-audit` was already a dev dependency but had to be
+      # remembered by hand, so nothing ran it between audits — and the migration to
+      # fastmcp pulled in `diskcache`, which had a pickle-deserialization RCE
+      # (PYSEC-2026-2447) with no fixed release, holding OAuth tokens inside the
+      # vault. A human noticed; CI should have. This is the "plan for staying
+      # current" that phase called for, and it matters more than usual for an
+      # internet-exposed OAuth surface whose library has shipped two real CVEs in
+      # months. Advisories appear for reasons unrelated to our commits, so this is
+      # `continue-on-error`: a new advisory should show up as a loud annotation on
+      # the next push, not block an unrelated PR on someone else's disclosure.
+      - name: Audit dependencies
+        run: uv run pip-audit --progress-spinner off
+        continue-on-error: true
+
       # The browser smokes (tests/ui) drive the real UI in Chromium. Without this
       # they skip rather than fail, so a missing browser would silently lose
       # coverage of the least-tested file in the repo — install it explicitly.

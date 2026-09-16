@@ -167,4 +167,17 @@ In the client's connector dialog, fill only the **name** and **URL** (`<RELAY_BA
 
 > Tokens are opaque and hashed at rest, audience-bound to `/mcp`, and single-use on auth codes and refresh tokens (each rotation invalidates the one before it). Replaying an already-rotated refresh token is rejected, but — unlike an earlier version of this feature — doesn't also revoke any newer tokens issued from it; a stolen-and-raced refresh token isn't automatically contained beyond the rotation itself. A deliberate trade-off, not an oversight (relay #313).
 
+**Rate-limit the OAuth endpoints at your reverse proxy.** `/register` (Dynamic Client Registration) and `/authorize` are unauthenticated by OAuth spec — anyone on the internet can call them, and relay has no in-process limiter. Measured on the reference deployment: ~280 registrations/second accepted, ~5.6 KB stored per registration, and client registrations carry **no expiry**, so this is a disk-fill vector against the volume that also holds your notes and `history.git`. Nothing about this is new to the fastmcp migration (it is the long-standing S-12 finding), but it is worth closing before exposing relay publicly. In nginx/openresty:
+
+```nginx
+limit_req_zone $binary_remote_addr zone=relay_oauth:10m rate=10r/m;
+
+location ~ ^/(register|authorize)$ {
+    limit_req zone=relay_oauth burst=20 nodelay;
+    proxy_pass http://relay;
+}
+```
+
+A legitimate client registers approximately once, so a limit this tight is invisible in normal use while turning a hours-to-fill-the-disk attack into a years-long one. Put the limit at the proxy rather than in relay: the proxy is the only layer that sees the real client IP.
+
 **First connection from a new client shows a consent screen.** Before relay hands off to your IdP, it routes an unrecognized client through a consent page — naming the client (self-reported, not verified) and its redirect target, with Approve/Deny. This is expected, not an error: it's a deliberate check against a client silently riding an already-authenticated IdP session (relay #313). Approving forwards you on to your IdP's own login as normal. Unlike a typical "remember this app" prompt, there's no persistent approval to skip on your *next* connection either — every connection attempt shows this screen fresh, tied to that one attempt's own signed browser-binding cookie, not a per-client memory.
