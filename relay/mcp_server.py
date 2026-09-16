@@ -120,14 +120,33 @@ class _RelayOIDCProxy(OIDCProxy):
         if not id_token:
             raise TokenError("invalid_grant", "PocketID token response had no id_token")
 
-        jwks = await _load_pocketid_jwks()
-        decoded = joserfc_jwt.decode(id_token, jwks)
-        assert _oidc_metadata_cache is not None  # _load_pocketid_jwks always populates this first
-        registry = joserfc_jwt.JWTClaimsRegistry(
-            iss={"essential": True, "value": _oidc_metadata_cache["issuer"]},
-            aud={"essential": True, "value": settings.oidc_client_id},
-        )
-        registry.validate(decoded.claims)  # enforces exp/nbf/iat + iss/aud
+        # Everything from here to the allowlist check is converted into a clean
+        # OAuth error rather than allowed to escape (relay #313 Phase 5). It
+        # already failed *closed* — an escaping exception means no token — but it
+        # surfaced as a bare 500 from `/token`, an unauthenticated endpoint: a
+        # stale JWKS after an IdP key rotation, or PocketID being briefly
+        # unreachable, would turn every login attempt into an unhandled-exception
+        # log entry instead of a diagnosable `invalid_grant`. `TokenError` is
+        # re-raised untouched so the allowlist denial below keeps its own
+        # `unauthorized_client` code, and the unexpected case is logged with a
+        # traceback so converting it here doesn't cost us the diagnosis.
+        try:
+            jwks = await _load_pocketid_jwks()
+            decoded = joserfc_jwt.decode(id_token, jwks)
+            assert _oidc_metadata_cache is not None  # _load_pocketid_jwks populates this first
+            registry = joserfc_jwt.JWTClaimsRegistry(
+                iss={"essential": True, "value": _oidc_metadata_cache["issuer"]},
+                aud={"essential": True, "value": settings.oidc_client_id},
+            )
+            registry.validate(decoded.claims)  # enforces exp/nbf/iat + iss/aud
+        except TokenError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "MCP OAuth: could not verify the upstream id_token (JWKS unreachable, "
+                "signing key rotated since startup, or claims invalid)"
+            )
+            raise TokenError("invalid_grant", "Upstream id_token could not be verified") from None
 
         claims = decoded.claims
         sub = claims.get("sub") or ""

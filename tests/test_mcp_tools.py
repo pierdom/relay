@@ -27,7 +27,6 @@ import pytest_asyncio
 from fastmcp.server.auth.redirect_validation import validate_redirect_uri
 from httpx import ASGITransport, AsyncClient
 from joserfc import jwt as _joserfc_jwt
-from joserfc.errors import InvalidClaimError
 from joserfc.jwk import KeySet, RSAKey
 from mcp.server.auth.provider import TokenError
 
@@ -495,14 +494,21 @@ async def test_relay_oidc_proxy_allows_any_identity_when_no_allowlist_configured
 async def test_relay_oidc_proxy_denies_a_forged_audience(monkeypatch):
     """The id_token's signature is genuine (signed by the test key relay would
     fetch from PocketID's own JWKS), but its `aud` doesn't match this relay's
-    client_id — JWTClaimsRegistry must catch this, not just the signature check."""
+    client_id — JWTClaimsRegistry must catch this, not just the signature check.
+
+    Asserted as a `TokenError`, not joserfc's raw `InvalidClaimError`: Phase 5's
+    audit found that letting the verification failure escape turned `/token` —
+    an unauthenticated endpoint — into a bare 500. It always failed closed, but
+    a rotated IdP signing key would have produced unhandled exceptions instead
+    of a diagnosable `invalid_grant`."""
     id_token, keyset = _signed_id_token(sub="user-123", aud="a-different-relay")
     _prime_jwks_cache(monkeypatch, keyset)
     monkeypatch.setattr(settings, "oidc_allowed_subs", "")
     monkeypatch.setattr(settings, "oidc_allowed_emails", "")
 
-    with pytest.raises(InvalidClaimError):  # joserfc's own claims-validation error, not TokenError
+    with pytest.raises(TokenError) as exc_info:
         await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"id_token": id_token})
+    assert exc_info.value.error == "invalid_grant"
 
 
 @pytest.mark.asyncio
