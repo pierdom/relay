@@ -515,8 +515,8 @@ def test_mcp_allowed_client_redirect_uri_patterns_permits_loopback(monkeypatch):
     """relay #313 Phase 4: caught while writing docs, not by a test — fastmcp's
     `validate_redirect_uri` gives loopback URIs no automatic exemption once
     `allowed_patterns` is a real list (confirmed by reading it), unlike the old
-    hand-rolled `mcp_oauth/provider.py` this phase deletes, which explicitly
-    allowed loopback http regardless of the https host allowlist. Uses fastmcp's
+    hand-rolled `mcp_oauth/provider.py` (deleted in this same phase), which
+    explicitly allowed loopback http regardless of the https host allowlist. Uses fastmcp's
     real matcher, not a re-implementation of it — this proves the patterns
     actually work against the library that consumes them, not just that the
     Python list looks right."""
