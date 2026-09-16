@@ -17,12 +17,17 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 
 os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from joserfc import jwt as _joserfc_jwt
+from joserfc.errors import InvalidClaimError
+from joserfc.jwk import KeySet, RSAKey
+from mcp.server.auth.provider import TokenError
 
 from relay import database, embedding, history, mcp_server, vectors
 from relay.config import settings
@@ -409,6 +414,100 @@ async def test_mcp_rejects_oversized_request_bodies(client):
         headers={**HEADERS, "Accept": "application/json, text/event-stream"},
     )
     assert resp.status_code == 413
+
+
+# ── relay #313 Phase 2: _RelayOIDCProxy's sub/email allowlist enforcement ──
+#
+# _extract_upstream_claims doesn't touch `self`, so these call it directly on the
+# class rather than constructing a real _RelayOIDCProxy — that constructor makes a
+# live network call to OIDC discovery (see mcp_server._build_auth's docstring),
+# which has no place in a unit test. _oidc_jwks_cache/_oidc_metadata_cache are
+# pre-populated instead of going through _load_pocketid_jwks, so no network call
+# happens here either.
+
+_TEST_ISSUER = "https://id.example.com"
+_TEST_AUDIENCE = "relay-mcp-client"
+
+
+def _signed_id_token(**claim_overrides) -> tuple[str, KeySet]:
+    """A real, signed id_token plus the KeySet that verifies it — exercises
+    _RelayOIDCProxy's actual jwt.decode + JWTClaimsRegistry path, not a mock of it."""
+    key = RSAKey.generate_key(2048, parameters={"kid": "test-kid"}, private=True)
+    now = int(time.time())
+    claims = {
+        "iss": _TEST_ISSUER,
+        "aud": _TEST_AUDIENCE,
+        "sub": "user-123",
+        "email": "user@example.com",
+        "email_verified": True,
+        "iat": now,
+        "nbf": now - 5,
+        "exp": now + 600,
+        **claim_overrides,
+    }
+    token = _joserfc_jwt.encode({"alg": "RS256", "kid": "test-kid"}, claims, key)
+    return token, KeySet([key])
+
+
+def _prime_jwks_cache(monkeypatch, keyset: KeySet):
+    monkeypatch.setattr(mcp_server, "_oidc_metadata_cache", {"issuer": _TEST_ISSUER, "jwks_uri": "unused"})
+    monkeypatch.setattr(mcp_server, "_oidc_jwks_cache", keyset)
+    monkeypatch.setattr(settings, "oidc_client_id", _TEST_AUDIENCE)
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_allows_a_sub_on_the_allowlist(monkeypatch):
+    id_token, keyset = _signed_id_token(sub="user-123")
+    _prime_jwks_cache(monkeypatch, keyset)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    claims = await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"id_token": id_token})
+    assert claims == {"sub": "user-123", "email": "user@example.com"}
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_denies_a_sub_not_on_the_allowlist(monkeypatch):
+    id_token, keyset = _signed_id_token(sub="uninvited-user")
+    _prime_jwks_cache(monkeypatch, keyset)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    with pytest.raises(TokenError) as exc_info:
+        await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"id_token": id_token})
+    assert exc_info.value.error == "unauthorized_client"
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_allows_any_identity_when_no_allowlist_configured(monkeypatch):
+    id_token, keyset = _signed_id_token(sub="anyone-at-all")
+    _prime_jwks_cache(monkeypatch, keyset)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    claims = await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"id_token": id_token})
+    assert claims["sub"] == "anyone-at-all"
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_denies_a_forged_audience(monkeypatch):
+    """The id_token's signature is genuine (signed by the test key relay would
+    fetch from PocketID's own JWKS), but its `aud` doesn't match this relay's
+    client_id — JWTClaimsRegistry must catch this, not just the signature check."""
+    id_token, keyset = _signed_id_token(sub="user-123", aud="a-different-relay")
+    _prime_jwks_cache(monkeypatch, keyset)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    with pytest.raises(InvalidClaimError):  # joserfc's own claims-validation error, not TokenError
+        await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"id_token": id_token})
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_denies_missing_id_token():
+    with pytest.raises(TokenError) as exc_info:
+        await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"access_token": "opaque"})
+    assert exc_info.value.error == "invalid_grant"
 
 
 # ── K-5: attachment tools must catch InvalidFolder, like REST already does ──

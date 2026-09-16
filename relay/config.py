@@ -185,6 +185,29 @@ class Settings(BaseSettings):
         }
 
     @property
+    def mcp_allowed_client_redirect_uri_patterns(self) -> list[str] | None:
+        """`mcp_redirect_hosts`/`mcp_redirect_host_wildcards` translated into
+        fastmcp `OIDCProxy`'s `allowed_client_redirect_uris` URI-pattern shape
+        (relay #313 Phase 2). Only a format translation, not a re-implementation
+        of the matching itself: fastmcp's own wildcard host matching
+        (`fastmcp.server.auth.redirect_validation._match_host`) uses the identical
+        dot-boundary suffix semantics as this file's own docstrings describe —
+        confirmed by reading it, not assumed — so `*.mistral.ai` here is exactly
+        as safe as it always was.
+
+        `None` (both sets empty) is the right translation of relay's own "empty =
+        allow any https" default, not `[]` (which means "allow none" to fastmcp) —
+        with no explicit allowlist, fastmcp falls back to trusting each DCR
+        client's self-declared, self-registered redirect URI, which is the same
+        practical openness relay's own "empty" already meant.
+        """
+        hosts = self.mcp_redirect_hosts
+        wildcards = self.mcp_redirect_host_wildcards
+        if not hosts and not wildcards:
+            return None
+        return [f"https://{h}/*" for h in sorted(hosts)] + [f"https://*.{w}/*" for w in sorted(wildcards)]
+
+    @property
     def relay_dir(self) -> str:
         """Hidden control folder inside the vault (index DB + tag config)."""
         return str(Path(self.vault_path) / ".relay")

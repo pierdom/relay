@@ -10,10 +10,17 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 
+import httpx
 from fastmcp import FastMCP
-from fastmcp.server.auth.auth import AccessToken, TokenVerifier
+from fastmcp.server.auth.auth import AccessToken, AuthProvider, MultiAuth, TokenVerifier
+from fastmcp.server.auth.oidc_proxy import OIDCProxy
 from fastmcp.utilities.types import Image
+from joserfc import jwt as joserfc_jwt
+from joserfc.jwk import KeySet
+from key_value.aio.stores.disk import DiskStore
+from mcp.server.auth.provider import TokenError
 from mcp.types import Icon
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -23,6 +30,7 @@ from . import __version__, changes, database, lint, metrics, service, status, va
 from .auth import bearer_matches
 from .config import settings
 from .models import AttachmentCreate, ChangeEntry, ChangeListResponse, PostCreate, PostUpdate, TagConfigCreate
+from .routes.auth import _authorized
 
 
 def _first_error(exc: ValidationError) -> str:
@@ -43,34 +51,100 @@ INSTRUCTIONS = (
 )
 
 
-def _warn_if_oauth_expected() -> None:
-    """Phase 1 spike (relay #313): fastmcp's OAuth wiring (MultiAuth/OIDCProxy against
-    PocketID, replacing the old mcp SDK's AuthSettings/auth_server_provider) is Phase 2's
-    job, not this one — this branch only proves out the tool/resource/transport swap with
-    the static bearer key, which `_StaticBearerAuth` below wires unconditionally.
+_oidc_metadata_cache: dict | None = None
+_oidc_jwks_cache: KeySet | None = None
 
-    A previous version of this check *raised* here instead of warning — caught by
-    code review as disproportionate: raising at import time crashes relay's entire
-    process (REST, UI, SSE, everything) over a setting that only affects /mcp, and
-    the raise landed before `main.py` even constructs `FastAPI()`. A log line is
-    already "not silent" without that blast radius — mirrors the adjacent, unchanged
-    pattern in `main.py`'s own lifespan for the sibling misconfiguration case
-    (MCP_OAUTH_ENABLED set but OIDC not configured)."""
-    if settings.mcp_oauth_active:
-        logging.getLogger(__name__).warning(
-            "MCP_OAUTH_ENABLED is set, but this branch (relay #313 fastmcp migration, "
-            "Phase 1) hasn't ported OAuth yet — that lands in Phase 2. /mcp is running "
-            "static-bearer-only regardless of this setting."
+
+async def _load_pocketid_jwks() -> KeySet:
+    """Fetch and cache PocketID's OIDC discovery metadata + JWKS, for verifying
+    `OIDCProxy`'s upstream id_tokens in `_RelayOIDCProxy` below (relay #313 Phase 2).
+
+    A new, independent implementation rather than reusing `mcp_oauth/pocketid.py`'s
+    near-identical logic — that whole module is scheduled for deletion in Phase 4,
+    and importing from code about to be deleted would just create a dependency
+    Phase 4 then has to unwind. Same trust model/caching tradeoff as that module:
+    cached for the process lifetime, not refetched on a `kid` miss — PocketID
+    rotating its signing keys is rare enough that a relay restart to pick up new
+    keys is an acceptable cost on this single-user deployment, and not refetching
+    avoids letting an attacker force repeated JWKS fetches with bogus `kid`s.
+
+    A second, independent discovery+JWKS fetch from the one `OIDCProxy` itself
+    already makes at construction for its own token verifier — wasteful but
+    correctness-safe; reaching into `OIDCProxy`'s internal cache instead would be
+    relying on an unstable private API for a minor efficiency gain."""
+    global _oidc_metadata_cache, _oidc_jwks_cache
+    if _oidc_jwks_cache is None:
+        if _oidc_metadata_cache is None:
+            url = f"{settings.oidc_issuer.rstrip('/')}/.well-known/openid-configuration"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                _oidc_metadata_cache = resp.json()
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(_oidc_metadata_cache["jwks_uri"])
+            resp.raise_for_status()
+            _oidc_jwks_cache = KeySet.import_key_set(resp.json())
+    return _oidc_jwks_cache
+
+
+class _RelayOIDCProxy(OIDCProxy):
+    """Enforces relay's own `OIDC_ALLOWED_SUBS`/`OIDC_ALLOWED_EMAILS` allowlist on
+    top of `OIDCProxy` — not a stock feature (relay #313 Phase 2 plan flagged this
+    explicitly). `_extract_upstream_claims` is fastmcp's own documented override
+    point for inspecting the upstream token response; raising here aborts
+    `exchange_authorization_code`/`exchange_refresh_token` before any FastMCP
+    access token is issued (confirmed by reading both call sites: the raise lands
+    before `self.jwt_issuer.issue_access_token(...)` in each), so a real PocketID
+    login by a non-allowlisted human still can't obtain a working `/mcp`
+    credential. Runs on every refresh too, not just initial login — a stronger
+    guarantee than the current hand-rolled `mcp_oauth/broker.py`, which only
+    checks once at login and never revisits the allowlist on refresh.
+
+    Independently re-verifies the id_token's signature against PocketID's own
+    JWKS rather than trusting `idp_tokens`'s contents unverified — the same rigor
+    `mcp_oauth/pocketid.py` already applies today, reimplemented here rather than
+    imported from it since that whole module is deleted in Phase 4. Deliberately
+    does not check `nonce` (unlike `pocketid.py`'s hand-rolled upstream leg) —
+    `OIDCProxy` owns the upstream `/authorize` request end to end and doesn't
+    expose a way to thread a per-transaction nonce through to this hook;
+    `iss`/`aud`/`exp` are the essential claims for authenticity of a token
+    obtained via a fresh, PKCE-bound, server-to-server code exchange. Flagged
+    here for Phase 5 to scrutinize explicitly, not silently asserted as
+    equivalent."""
+
+    async def _extract_upstream_claims(self, idp_tokens: dict) -> dict | None:
+        id_token = idp_tokens.get("id_token")
+        if not id_token:
+            raise TokenError("invalid_grant", "PocketID token response had no id_token")
+
+        jwks = await _load_pocketid_jwks()
+        decoded = joserfc_jwt.decode(id_token, jwks)
+        assert _oidc_metadata_cache is not None  # _load_pocketid_jwks always populates this first
+        registry = joserfc_jwt.JWTClaimsRegistry(
+            iss={"essential": True, "value": _oidc_metadata_cache["issuer"]},
+            aud={"essential": True, "value": settings.oidc_client_id},
         )
+        registry.validate(decoded.claims)  # enforces exp/nbf/iat + iss/aud
+
+        claims = decoded.claims
+        sub = claims.get("sub") or ""
+        email = (claims.get("email") or "").lower()
+        email_verified = claims.get("email_verified") is True
+        if not sub or not _authorized(sub, email, email_verified):
+            logging.getLogger(__name__).warning(
+                "MCP OAuth: login denied for sub=%s email=%s (not in allowlist)", sub, email
+            )
+            raise TokenError("unauthorized_client", "This identity is not authorized for this relay")
+        return {"sub": sub, "email": email}
 
 
 class _StaticBearerAuth(TokenVerifier):
     """Static pre-shared bearer key, wired through fastmcp's own `auth=` slot rather
-    than a hand-rolled ASGI wrapper — this is the extension point Phase 2's
-    `MultiAuth([OIDCProxy(...), _StaticBearerAuth()])` composes with, so Phase 1 sets
-    up the plumbing Phase 2 actually needs instead of a parallel mechanism it would
-    have to reconcile or discard. Subclasses `TokenVerifier` specifically (not the
-    bare `AuthProvider` etf-scout-mcp's own reference `_StaticBearerAuth` uses) —
+    than a hand-rolled ASGI wrapper. With MCP OAuth active this is one of
+    `MultiAuth`'s `verifiers` (see `_build_auth` below) — a pure fallback with no
+    routes of its own, tried after `_RelayOIDCProxy`. Subclasses `TokenVerifier`
+    specifically (not the bare `AuthProvider` etf-scout-mcp's own reference
+    `_StaticBearerAuth` uses) —
     fastmcp's docstring for it is explicit that token verifiers "typically don't
     provide authentication routes by default", which is exactly the property this
     needs and is more precise than relying on an unstated default. Deliberately not
@@ -83,7 +157,14 @@ class _StaticBearerAuth(TokenVerifier):
 
     async def verify_token(self, token: str) -> AccessToken | None:
         if bearer_matches(token):
-            return AccessToken(token=token, client_id="relay", scopes=[])
+            # Caught live (relay #313 Phase 2): with MCP OAuth active, MultiAuth
+            # enforces `required_scopes` against every verifier's result, not just
+            # the OAuth server's — `scopes=[]` here made the static-bearer path
+            # 403 "insufficient_scope" on every single call, since it could never
+            # satisfy `settings.mcp_scopes`. The static key represents full,
+            # unscoped relay access (same as it always has); reporting relay's
+            # actual configured scopes is what lets it clear that check.
+            return AccessToken(token=token, client_id="relay", scopes=settings.mcp_scopes)
         return None
 
 
@@ -103,7 +184,55 @@ def _brand_icons() -> list[Icon]:
     ]
 
 
-_warn_if_oauth_expected()
+def _build_auth() -> AuthProvider:
+    """Static bearer only when MCP OAuth isn't configured (unchanged fallback);
+    `MultiAuth(server=_RelayOIDCProxy(...), verifiers=[_StaticBearerAuth()])` when
+    it is active (relay #313 Phase 2). `server` owns the OAuth routes/metadata and
+    is tried first for token verification; `verifiers` are pure fallbacks with no
+    routes of their own. Mirrors etf-scout-mcp's `_make_auth()` precedence (OIDC >
+    static bearer), composed rather than either/or since relay needs both at
+    once — Claude's remote connector uses OAuth, the stdio bridge and other
+    machine clients use the static key.
+
+    Constructing `_RelayOIDCProxy` makes a real (bounded, ~10s-timeout) network
+    call to PocketID's OIDC discovery endpoint — fastmcp's own documented
+    tradeoff so a slow/unreachable issuer can't hang startup indefinitely, but a
+    behavior change from the old `mcp_oauth/pocketid.py`, which fetched lazily on
+    first request rather than at startup. Worth Phase 5/6 attention, not silently
+    carried over.
+
+    `client_storage` is pinned under `<vault>/.relay/mcp_oauth/` rather than
+    fastmcp's own default (`~/.fastmcp/oauth-proxy/`, outside the vault volume
+    entirely) so OAuth client registrations and encrypted tokens ride the same
+    Docker volume and durability guarantee `oauth.db` has today — the Phase 2
+    checklist item this closes. `redirect_path` is pinned to the exact path
+    already registered on PocketID's own client config
+    (`<RELAY_BASE_URL>/mcp/oauth/callback`, documented in CLAUDE.md) — fastmcp's
+    own default (`/auth/callback`) would collide with relay's *existing* web-UI
+    OIDC callback route at that same path.
+
+    `resource_base_url` is deliberately the bare origin (`settings.relay_base_url`),
+    not `settings.mcp_resource_url` (`<base>/mcp`) — caught live: fastmcp's
+    `set_mcp_path("/mcp")` (called automatically from `http_app(path="/mcp")`'s own
+    wiring) *appends* the mount path to `resource_base_url` itself to derive the
+    real resource URL, so passing an already-`/mcp`-suffixed value produced
+    `.../mcp/mcp` in the served OAuth metadata and `WWW-Authenticate` header.
+    """
+    if not settings.mcp_oauth_active:
+        return _StaticBearerAuth()
+
+    oidc = _RelayOIDCProxy(
+        config_url=f"{settings.oidc_issuer.rstrip('/')}/.well-known/openid-configuration",
+        client_id=settings.oidc_client_id,
+        client_secret=settings.oidc_client_secret,
+        base_url=settings.relay_base_url,
+        redirect_path="/mcp/oauth/callback",
+        required_scopes=settings.mcp_scopes,
+        allowed_client_redirect_uris=settings.mcp_allowed_client_redirect_uri_patterns,
+        client_storage=DiskStore(directory=Path(settings.relay_dir) / "mcp_oauth"),
+    )
+    return MultiAuth(server=oidc, verifiers=[_StaticBearerAuth()])
+
 
 mcp = FastMCP(
     "relay",
@@ -115,13 +244,22 @@ mcp = FastMCP(
     instructions=INSTRUCTIONS,
     website_url=settings.relay_base_url.rstrip("/"),
     icons=_brand_icons(),
-    auth=_StaticBearerAuth(),
+    auth=_build_auth(),
 )
 
 
 @mcp.custom_route("/mcp/oauth/callback", methods=["GET"], include_in_schema=False)
 async def mcp_oauth_callback(request: Request) -> Response:
-    """Return leg of the upstream PocketID login (unauthenticated by design)."""
+    """Return leg of the upstream PocketID login (unauthenticated by design).
+
+    Dead code whenever MCP OAuth is active (relay #313 Phase 2, confirmed live):
+    `_build_auth()` configures `_RelayOIDCProxy` with `redirect_path="/mcp/oauth/callback"`
+    — the exact same path — and fastmcp registers its own handler at that path
+    ahead of this one, so this function is never actually reached; a real request
+    to this path returns fastmcp's own rich HTML error page, not this handler's
+    JSON. Left in place (not removed) because `mcp_oauth/broker.py` it delegates
+    to is still needed by the old, still-active-when-OAuth-is-off code paths this
+    branch hasn't touched yet — both are deleted together in Phase 4."""
     from .mcp_oauth.broker import handle_callback
 
     return await handle_callback(request)
@@ -130,7 +268,15 @@ async def mcp_oauth_callback(request: Request) -> Response:
 @mcp.custom_route("/mcp/oauth/consent", methods=["GET", "POST"], include_in_schema=False)
 async def mcp_oauth_consent(request: Request) -> Response:
     """Per-client consent gate for an unapproved DCR client (relay #313
-    Stopgap, unauthenticated by design — same standing as the callback above)."""
+    Stopgap, unauthenticated by design — same standing as the callback above).
+
+    Unlike the callback above, this path (`/mcp/oauth/consent`) doesn't collide
+    with fastmcp's own consent route (`/consent`, bare — see `authorize()` in
+    `oauth_proxy/proxy.py`), so this handler is still technically reachable when
+    OAuth is active. It's still functionally dead, though: nothing in the new
+    `_RelayOIDCProxy`-driven flow ever redirects here — `mcp_oauth/provider.py`'s
+    own `authorize()`, the only code that used to send clients here, is no longer
+    in the auth path at all now that `auth=_build_auth()` owns `/authorize`."""
     from .mcp_oauth.consent import handle_consent_get, handle_consent_post
 
     if request.method == "POST":
@@ -804,7 +950,7 @@ async def set_tag_config(
 # an unexposed fastmcp-internal default rather than a relay-configurable setting — worth
 # reconfirming across future fastmcp versions (Phase 5·E), not a Phase 1 gap.
 #
-# `auth=_StaticBearerAuth()` above (not a wrapper here) is what actually gates every
+# `auth=_build_auth()` above (not a wrapper here) is what actually gates every
 # request — fastmcp's own `http_app()` forwards `self.auth` into the app it builds and
 # wraps it in its own RequireAuthMiddleware, so there is nothing left for this module to
 # do beyond building the app and handing it to main.py to mount directly.
