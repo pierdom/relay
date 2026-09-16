@@ -8,16 +8,21 @@ transport can connect remotely with the relay's bearer key.
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import re
+from contextvars import ContextVar
 from pathlib import Path
 
 import httpx
 from fastmcp import FastMCP
 from fastmcp.server.auth.auth import AccessToken, AuthProvider, MultiAuth, TokenVerifier
+from fastmcp.server.auth.oauth_proxy.models import UpstreamTokenSet
 from fastmcp.server.auth.oidc_proxy import OIDCProxy
 from fastmcp.utilities.types import Image
 from joserfc import jwt as joserfc_jwt
+from joserfc.errors import ExpiredTokenError
 from joserfc.jwk import KeySet
 from key_value.aio.stores.filetree import (
     FileTreeStore,
@@ -25,7 +30,8 @@ from key_value.aio.stores.filetree import (
     FileTreeV1KeySanitizationStrategy,
 )
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-from mcp.server.auth.provider import TokenError
+from mcp.server.auth.provider import RefreshToken, TokenError
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from mcp.types import Icon
 from pydantic import ValidationError
 
@@ -90,6 +96,26 @@ async def _load_pocketid_jwks() -> KeySet:
     return _oidc_jwks_cache
 
 
+def _unverified_exp(token: str) -> float | None:
+    """Read a JWT's `exp` without verifying anything. Never a security decision —
+    see `_RelayOIDCProxy._get_verification_token`, its only caller, for why that
+    is safe there (the value can only schedule a refresh *earlier*)."""
+    try:
+        payload = token.split(".")[1]
+        decoded = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+        return float(json.loads(decoded)["exp"])
+    except Exception:
+        return None
+
+
+# Set only while `exchange_refresh_token` is on the stack, read by
+# `_extract_upstream_claims` to tell the two grant types apart — see
+# `_RelayOIDCProxy` for why that distinction is load-bearing. A ContextVar rather
+# than an attribute because one proxy instance serves every concurrent request:
+# an instance flag would leak one caller's grant type into another's validation.
+_refreshing_upstream: ContextVar[bool] = ContextVar("relay_mcp_refreshing_upstream", default=False)
+
+
 class _RelayOIDCProxy(OIDCProxy):
     """Enforces relay's own `OIDC_ALLOWED_SUBS`/`OIDC_ALLOWED_EMAILS` allowlist on
     top of `OIDCProxy` — not a stock feature (relay #313 Phase 2 plan flagged this
@@ -115,6 +141,65 @@ class _RelayOIDCProxy(OIDCProxy):
     here for Phase 5 to scrutinize explicitly, not silently asserted as
     equivalent."""
 
+    def _get_verification_token(self, upstream_token_set: UpstreamTokenSet) -> str | None:
+        """Align the upstream token set's expiry with the id_token's own `exp`.
+
+        `OAuthProxy.load_access_token` runs on *every* `/mcp` request and has two
+        separate notions of upstream expiry that `verify_id_token=True` pulls
+        apart:
+
+        * what it **validates** — `_get_verification_token`, which for us is the
+          **id_token**, rejected by the verifier once its own `exp` passes;
+        * when it decides to **refresh** — `upstream_token_set.expires_at`, which
+          comes from the token response's `expires_in`, i.e. the **access
+          token's** lifetime.
+
+        Nothing keeps those two in agreement. Whenever PocketID's id_token is
+        shorter-lived than its access token, every request in the gap between the
+        two fails validation while `needs_refresh` is still False, so no
+        transparent refresh is attempted and `/mcp` answers 401 with a perfectly
+        healthy session underneath. Reproduced end to end against a mock IdP
+        (3s id_token, 3600s access token): `/mcp` returned 200, then 401 six
+        seconds later, with an hour left on relay's own access token.
+
+        Clamping `expires_at` down to the id_token's `exp` makes the refresh
+        trigger track the token actually being validated, so the refresh fires
+        *before* validation can fail. Combined with the non-zero
+        `token_expiry_threshold_seconds` in `_build_auth`, the rotation happens
+        ahead of expiry rather than during an outage.
+
+        The `exp` is read **without signature verification**, deliberately. It is
+        not trusted for any authorization decision — the same id_token is fully
+        verified moments later by the token verifier, and again by
+        `_extract_upstream_claims` on the refresh. This value only ever moves the
+        refresh *earlier* (it is applied solely when it is lower than the
+        recorded expiry), so a forged or corrupt `exp` can at worst cause a
+        redundant refresh; it can never extend a session.
+        """
+        token = super()._get_verification_token(upstream_token_set)
+        if token is not None:
+            exp = _unverified_exp(token)
+            if exp is not None and exp < upstream_token_set.expires_at:
+                upstream_token_set.expires_at = exp
+        return token
+
+    async def exchange_refresh_token(
+        self,
+        client: OAuthClientInformationFull,
+        refresh_token: RefreshToken,
+        scopes: list[str],
+    ) -> OAuthToken:
+        """Mark the refresh grant so `_extract_upstream_claims` can relax `exp`.
+
+        Overridden purely to set the flag; the exchange itself is entirely
+        `OAuthProxy`'s. See `_extract_upstream_claims` for the reasoning.
+        """
+        marker = _refreshing_upstream.set(True)
+        try:
+            return await super().exchange_refresh_token(client, refresh_token, scopes)
+        finally:
+            _refreshing_upstream.reset(marker)
+
     async def _extract_upstream_claims(self, idp_tokens: dict) -> dict | None:
         id_token = idp_tokens.get("id_token")
         if not id_token:
@@ -134,11 +219,59 @@ class _RelayOIDCProxy(OIDCProxy):
             jwks = await _load_pocketid_jwks()
             decoded = joserfc_jwt.decode(id_token, jwks)
             assert _oidc_metadata_cache is not None  # _load_pocketid_jwks populates this first
-            registry = joserfc_jwt.JWTClaimsRegistry(
-                iss={"essential": True, "value": _oidc_metadata_cache["issuer"]},
-                aud={"essential": True, "value": settings.oidc_client_id},
-            )
-            registry.validate(decoded.claims)  # enforces exp/nbf/iat + iss/aud
+            # `exp` is marked essential deliberately. joserfc validates a claim
+            # only when it is *present*, so without this an id_token carrying no
+            # `exp` at all would satisfy the registry and be accepted forever.
+            claim_options = {
+                "iss": {"essential": True, "value": _oidc_metadata_cache["issuer"]},
+                "aud": {"essential": True, "value": settings.oidc_client_id},
+                "exp": {"essential": True},
+            }
+            try:
+                # enforces exp/nbf/iat + iss/aud
+                joserfc_jwt.JWTClaimsRegistry(**claim_options).validate(decoded.claims)
+            except ExpiredTokenError:
+                # On the *login* path an expired id_token is simply invalid.
+                if not _refreshing_upstream.get():
+                    raise
+                # On the *refresh* path it usually isn't the same token at all.
+                # OIDC Core §12.2 makes `id_token` OPTIONAL in a refresh response,
+                # and `OAuthProxy.exchange_refresh_token` merges that response over
+                # the stored login response rather than replacing it — so when the
+                # IdP omits one, what arrives here is the *original login*
+                # id_token, re-presented. It is genuinely old by design, and once
+                # past its (typically minutes-long) lifetime every refresh would
+                # fail `invalid_grant` forever: a connector that worked at login
+                # would break an hour later and need a fresh manual login, over and
+                # over. Reproduced end to end against a mock IdP before this fix.
+                #
+                # Relaxing `exp` *here specifically* costs nothing: on this path the
+                # id_token is not what authenticates the request — the caller already
+                # presented a valid FastMCP refresh token, and the upstream refresh
+                # that just succeeded is PocketID's own live attestation that the
+                # session is still good (a disabled or revoked user fails that
+                # exchange and never reaches this line). The id_token is read only to
+                # learn *whose* session it is, for the allowlist check below, and
+                # signature/`iss`/`aud`/`sub` — which is all that question depends on
+                # — stay fully verified. `exp` is dropped from both the options and
+                # the claims so "essential" doesn't then trip on its absence.
+                # Logged at WARNING, not DEBUG, because it is the one observable
+                # signal for an upstream that never reissues `id_token`. In that
+                # case this refresh succeeds and mints a working-looking relay
+                # token that every `/mcp` request then rejects with 401, because
+                # `load_access_token` re-verifies this same stale id_token per
+                # request and nothing can ever replace it. Without this line that
+                # presents as an unexplained 401 loop; with it, the cause is named.
+                logging.getLogger(__name__).warning(
+                    "MCP OAuth: the IdP did not reissue an id_token on the refresh grant, so the "
+                    "original login id_token is being re-presented and has expired. Identity is "
+                    "still verified (signature/iss/aud/sub), but /mcp requests will 401 until the "
+                    "next interactive login — see _get_verification_token in this module."
+                )
+                del claim_options["exp"]
+                joserfc_jwt.JWTClaimsRegistry(**claim_options).validate(
+                    {k: v for k, v in decoded.claims.items() if k != "exp"}
+                )
         except TokenError:
             raise
         except Exception:
@@ -220,12 +353,17 @@ def _oauth_client_storage() -> FernetEncryptionWrapper:
 
     **Encryption.** The proxy persists the *upstream* PocketID access and refresh
     tokens (it re-validates them on every request and refreshes them
-    transparently). Without the wrapper those sit in cleartext in the vault —
-    confirmed by reading a stored record during the audit — and the vault is a
-    Syncthing-synced tree that also gets backed up, so a live IdP refresh token
-    would be replicated to every synced device in the clear. The implementation
-    this migration replaced never had this exposure at all: it stored only
-    relay's *own* tokens, hashed, and never persisted an upstream token.
+    transparently). Without the wrapper those sit in cleartext on disk —
+    confirmed by reading a stored record during the audit. To be precise about
+    the blast radius, since an earlier draft of this comment overstated it:
+    `.relay/` is *excluded* from Syncthing (see `settings.history_dir`), so these
+    files do **not** replicate to every synced device. What remains is real
+    enough on its own — cleartext, long-lived IdP credentials sitting in the
+    same directory tree as the private notes, inside whatever backs that volume
+    up, readable by anything that can read a file in the vault. The
+    implementation this migration replaced never had this exposure at all: it
+    stored only relay's *own* tokens, hashed, and never persisted an upstream
+    token.
     Key derivation mirrors fastmcp's own (PBKDF2 over a high-entropy secret with
     a fixed salt), and `raise_on_decryption_error=False` matches its default
     too: rotating `OIDC_CLIENT_SECRET` then reads as a cache miss and clients
@@ -235,11 +373,11 @@ def _oauth_client_storage() -> FernetEncryptionWrapper:
     `pip-audit` flags as PYSEC-2026-2447 — it serializes with **pickle** through
     5.6.3, with no fixed release, so write access to that directory is arbitrary
     code execution in this process on the next read. For a directory inside a
-    synced, hand-edited vault that precondition is not far-fetched. Switching the
-    extra to `py-key-value-aio[filetree]` drops `diskcache` from the dependency
-    tree rather than merely not calling it. It also stops putting a SQLite
-    database inside the vault — the corruption footgun this repo already designed
-    `history.git` around — in favour of per-key JSON that syncs cleanly.
+    hand-edited vault that precondition is not far-fetched. Switching the extra
+    to `py-key-value-aio[filetree]` drops `diskcache` from the dependency tree
+    rather than merely not calling it. It also stops putting a SQLite database
+    inside the vault — the corruption footgun this repo already designed
+    `history.git` around — in favour of per-key JSON.
     """
     # Both sanitization strategies `os.pathconf()` the directory to size their
     # name/path limits, so it has to exist before they are constructed — the
@@ -336,6 +474,17 @@ def _build_auth() -> AuthProvider:
         # ways against a mock IdP: opaque *and* JWT upstream access tokens now
         # both authenticate end to end, so PocketID's token format stops mattering.
         verify_id_token=True,
+        # Rotate the upstream token *before* it expires rather than after. With
+        # the default 0, `load_access_token` only refreshes once the recorded
+        # expiry has already passed — so the request that discovers the expiry is
+        # the one that pays for it, and any request racing the rotation 401s.
+        # Since `_get_verification_token` above clamps that expiry to the
+        # id_token's own `exp`, this threshold is measured against the token
+        # actually being validated: at 120s, PocketID is asked for a fresh
+        # id_token two minutes before the current one stops verifying. Small
+        # enough to stay well inside any plausible IdP token lifetime, large
+        # enough to cover a slow upstream round trip.
+        token_expiry_threshold_seconds=120,
     )
     return MultiAuth(server=oidc, verifiers=[_StaticBearerAuth()])
 

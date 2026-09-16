@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from datetime import UTC, datetime
+from pathlib import Path
 
 import aiosqlite
 
@@ -10,6 +13,39 @@ from .config import settings
 from .models import ISO_Z_RE
 
 logger = logging.getLogger(__name__)
+
+
+def _sweep_expired_oauth_records() -> int:
+    """Unlink OAuth store entries whose own `expires_at` has already passed.
+
+    Operates on the files rather than through `AsyncKeyValue`, because that
+    protocol has no enumeration or cull operation — only get/put/delete by known
+    key, and the keys here are random ids nobody will ever present again. See the
+    call site in `cleanup_loop` for why this is safe and why it exists.
+
+    Deliberately conservative: an entry is removed only when it carries an
+    `expires_at` that is in the past. A malformed or unreadable file is left
+    alone rather than guessed at — this is an auth store, and reclaiming a few
+    stale bytes is never worth deleting something we failed to parse.
+    """
+    root = Path(settings.mcp_oauth_storage_dir)
+    if not root.is_dir():
+        return 0
+
+    now = datetime.now(UTC)
+    dropped = 0
+    for path in root.glob("*/*.json"):
+        try:
+            expires_at = json.loads(path.read_text()).get("expires_at")
+            if not expires_at:  # no TTL (DCR client registrations) — never swept
+                continue
+            if datetime.fromisoformat(expires_at) > now:
+                continue
+            path.unlink()
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        dropped += 1
+    return dropped
 
 
 async def _ids_where(db: aiosqlite.Connection, clause: str, params: list) -> set[int]:
@@ -149,9 +185,28 @@ async def cleanup_loop() -> None:
         except Exception as exc:
             logger.error("Upload-slot cleanup error: %s", exc)
 
-        # relay #313 Phase 4: OAuth store hygiene used to be piggybacked here
-        # (the old mcp_oauth/store.py SQLite oauth.db needed an explicit sweep of
-        # expired pending auths/codes/tokens). fastmcp's own client_storage
-        # (DiskStore, mcp_server._build_auth) is a diskcache-backed store that
-        # honors the `ttl=` passed to every `.put()` call internally — expired
-        # entries are dropped on read/access, no external sweep needed.
+        # Sweep expired OAuth records (relay #313). Phase 4 deleted this sweep on
+        # the reasoning that the new store "honors the ttl= passed to every .put()
+        # internally, no external sweep needed" — wrong, and caught by the Phase 5
+        # audit's independent pass. `FileTreeStore` says so itself: "No built-in
+        # cleanup of expired entries. Expired entries are only filtered out when
+        # read." Nothing ever reads an expired authorization code or transaction
+        # again — the key is a random id nobody will present twice — so the file
+        # stays on disk forever. `/authorize` and `/register` are unauthenticated
+        # by OAuth spec, which turns that into an unbounded write primitive against
+        # the volume holding the notes, the index and history.git.
+        #
+        # Deleting an already-expired entry is behaviourally a no-op: the store
+        # filters it out on read regardless, so this only reclaims bytes. That is
+        # what makes a filesystem-level sweep safe here despite touching an auth
+        # store. Records with no `expires_at` at all — DCR client registrations,
+        # which fastmcp deliberately stores without a TTL — are skipped by the same
+        # rule, so a live connector can never be swept out from under itself. Those
+        # remain unbounded; rate-limit /register at the proxy (docs/setup.md).
+        if settings.mcp_oauth_active:
+            try:
+                dropped = _sweep_expired_oauth_records()
+                if dropped:
+                    logger.info("Cleanup removed %d expired OAuth record(s)", dropped)
+            except Exception as exc:
+                logger.error("OAuth cleanup error: %s", exc)

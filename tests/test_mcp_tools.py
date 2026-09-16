@@ -15,6 +15,7 @@ feature was.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import time
@@ -621,3 +622,156 @@ async def test_oauth_client_storage_is_encrypted_at_rest(tmp_path, monkeypatch):
     assert on_disk, "expected the store to have written something"
     assert not any("super-secret-value" in blob for blob in on_disk), "secret readable on disk"
     assert any("__encrypted_data__" in blob for blob in on_disk)
+
+
+def test_expired_oauth_records_are_swept_but_client_registrations_are_not(tmp_path, monkeypatch):
+    """relay #313 Phase 5. `FileTreeStore` documents that it has "no built-in
+    cleanup of expired entries" — they are merely filtered out on read, and
+    nothing ever reads an expired authorization code again, so the file stays
+    forever. Since `/authorize` and `/register` are unauthenticated by OAuth
+    spec, that is an unbounded write primitive against the volume that also
+    holds the notes and history.git.
+
+    The sweep must reclaim expired entries and must *never* touch a DCR client
+    registration, which fastmcp deliberately stores with no TTL — deleting one
+    would break a working connector mid-session."""
+    from relay import cleanup
+
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path))
+    root = Path(settings.mcp_oauth_storage_dir)
+    (root / "S_mcp_authorization_codes-abc").mkdir(parents=True)
+    (root / "S_mcp_oauth_proxy_clients-def").mkdir(parents=True)
+
+    expired = root / "S_mcp_authorization_codes-abc" / "expired.json"
+    expired.write_text('{"created_at": "2020-01-01T00:00:00+00:00", '
+                       '"expires_at": "2020-01-01T00:10:00+00:00", "value": {}}')
+    live = root / "S_mcp_authorization_codes-abc" / "live.json"
+    live.write_text('{"created_at": "2020-01-01T00:00:00+00:00", '
+                    '"expires_at": "2099-01-01T00:00:00+00:00", "value": {}}')
+    client = root / "S_mcp_oauth_proxy_clients-def" / "client.json"
+    client.write_text('{"created_at": "2020-01-01T00:00:00+00:00", "value": {}, "version": 1}')
+    malformed = root / "S_mcp_authorization_codes-abc" / "malformed.json"
+    malformed.write_text("not json at all")
+
+    assert cleanup._sweep_expired_oauth_records() == 1
+
+    assert not expired.exists(), "expired entry should be reclaimed"
+    assert live.exists(), "unexpired entry must survive"
+    assert client.exists(), "a DCR client registration has no TTL and must never be swept"
+    assert malformed.exists(), "unparseable files are left alone, not guessed at"
+
+
+def _id_token(exp_offset: int, **overrides) -> str:
+    """Mint an id_token signed by a throwaway key, and point the module's cached
+    JWKS/metadata at it so `_extract_upstream_claims` verifies against it."""
+    key = RSAKey.generate_key(2048, parameters={"kid": "t"}, private=True)
+    claims = {
+        "iss": "https://idp.example", "aud": settings.oidc_client_id or "relay-client",
+        "sub": "allowed-user", "email": "owner@example.com", "email_verified": True,
+        "iat": int(time.time()) - 10, "exp": int(time.time()) + exp_offset,
+    }
+    claims.update(overrides)
+    for k in [k for k, v in claims.items() if v is None]:
+        del claims[k]
+    token = _joserfc_jwt.encode({"alg": "RS256", "kid": "t"}, claims, key)
+    return token, KeySet([key])
+
+
+@pytest.mark.parametrize(
+    "refreshing, exp_offset, expect_ok",
+    [
+        (False, 600, True),    # fresh login, valid token
+        (False, -60, False),   # fresh login, expired token — must still be rejected
+        (True, 600, True),     # refresh, valid token
+        (True, -60, True),     # refresh, expired token — the finding-3 relaxation
+    ],
+)
+def test_expired_upstream_id_token_is_tolerated_only_on_the_refresh_path(
+    monkeypatch, refreshing, exp_offset, expect_ok
+):
+    """relay #313 Phase 5, finding 3. OIDC Core §12.2 makes `id_token` OPTIONAL on
+    a refresh grant, and `OAuthProxy.exchange_refresh_token` *merges* the refresh
+    response over the stored login response — so an IdP that omits one leaves the
+    original login id_token to be re-validated, long past its own `exp`. That made
+    every refresh fail `invalid_grant` forever once the login token aged out
+    (reproduced end to end against a mock IdP: 401 after a 3s token expired).
+
+    The relaxation must be scoped to the refresh grant only: on the login path an
+    expired id_token is simply invalid, and this test pins both halves."""
+    token, keyset = _id_token(exp_offset)
+    monkeypatch.setattr(mcp_server, "_oidc_jwks_cache", keyset)
+    monkeypatch.setattr(mcp_server, "_oidc_metadata_cache", {"issuer": "https://idp.example"})
+    monkeypatch.setattr(settings, "oidc_client_id", settings.oidc_client_id or "relay-client")
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "allowed-user")
+
+    proxy = mcp_server._RelayOIDCProxy.__new__(mcp_server._RelayOIDCProxy)
+    marker = mcp_server._refreshing_upstream.set(refreshing)
+    try:
+        coro = proxy._extract_upstream_claims({"id_token": token})
+        if expect_ok:
+            assert asyncio.run(coro)["sub"] == "allowed-user"
+        else:
+            with pytest.raises(TokenError):
+                asyncio.run(coro)
+    finally:
+        mcp_server._refreshing_upstream.reset(marker)
+
+
+def test_an_id_token_with_no_exp_at_all_is_never_accepted(monkeypatch):
+    """relay #313 Phase 5, finding 3b. joserfc validates a claim only when it is
+    *present*, so without `exp={"essential": True}` an id_token carrying no `exp`
+    sails through the registry and stays valid forever. Pinned on the refresh path
+    specifically — that is where `exp` is otherwise relaxed, so it is the one place
+    a missing `exp` could be mistaken for a tolerated expired one."""
+    token, keyset = _id_token(600, exp=None)
+    monkeypatch.setattr(mcp_server, "_oidc_jwks_cache", keyset)
+    monkeypatch.setattr(mcp_server, "_oidc_metadata_cache", {"issuer": "https://idp.example"})
+    monkeypatch.setattr(settings, "oidc_client_id", settings.oidc_client_id or "relay-client")
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "allowed-user")
+
+    proxy = mcp_server._RelayOIDCProxy.__new__(mcp_server._RelayOIDCProxy)
+    for refreshing in (False, True):
+        marker = mcp_server._refreshing_upstream.set(refreshing)
+        try:
+            with pytest.raises(TokenError):
+                asyncio.run(proxy._extract_upstream_claims({"id_token": token}))
+        finally:
+            mcp_server._refreshing_upstream.reset(marker)
+
+
+def test_upstream_expiry_is_clamped_to_the_id_token_exp():
+    """relay #313 Phase 5. `load_access_token` validates the *id_token* but decides
+    whether to refresh from `expires_at`, which carries the *access token's*
+    lifetime. When PocketID's id_token is the shorter of the two, every request in
+    the gap fails validation while `needs_refresh` is still False — no refresh is
+    attempted and `/mcp` 401s on a healthy session. Reproduced live with a 3s
+    id_token against a 3600s access token: 200, then 401 six seconds later.
+
+    Clamping makes the refresh trigger track the token actually being validated.
+    It must only ever move expiry *earlier*."""
+    from fastmcp.server.auth.oauth_proxy.models import UpstreamTokenSet
+
+    def _token_set(tid, expires_at, id_token):
+        return UpstreamTokenSet(
+            upstream_token_id=tid, access_token="opaque-access", expires_at=expires_at,
+            refresh_token_expires_at=expires_at, token_type="Bearer", scope="openid",
+            client_id="relay-client", created_at=time.time(), refresh_token="r",
+            raw_token_data={"id_token": id_token},
+        )
+
+    token, _ = _id_token(60)
+    proxy = mcp_server._RelayOIDCProxy.__new__(mcp_server._RelayOIDCProxy)
+    proxy._verify_id_token = True
+
+    far = time.time() + 3600
+    tokens = _token_set("t1", far, token)
+    assert proxy._get_verification_token(tokens) == token
+    assert tokens.expires_at < far, "expiry must be pulled back to the id_token's exp"
+    assert abs(tokens.expires_at - (time.time() + 60)) < 5
+
+    # A *longer*-lived id_token must never extend the access token's expiry.
+    long_token, _ = _id_token(7200)
+    near = time.time() + 30
+    tokens2 = _token_set("t2", near, long_token)
+    proxy._get_verification_token(tokens2)
+    assert tokens2.expires_at == near, "clamp must only ever move expiry earlier"
