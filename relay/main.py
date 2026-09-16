@@ -21,7 +21,7 @@ from . import status as app_status
 from .cleanup import cleanup_loop
 from .config import settings
 from .database import connect, init_db
-from .mcp_server import mcp_asgi_app, mcp_http_app
+from .mcp_server import mcp_http_app
 from .routes.attachments import router as attachments_router
 from .routes.auth import router as auth_router
 from .routes.changes import router as changes_router
@@ -321,4 +321,4 @@ app.include_router(lint_router)
 # with the relay bearer key; shares relay.service with the REST routes. The
 # MCP route is at /mcp so the path matches exactly (no trailing-slash redirect);
 # mounted last so every declared route above takes priority over this catch-all.
-app.mount("/", mcp_asgi_app())
+app.mount("/", mcp_http_app)

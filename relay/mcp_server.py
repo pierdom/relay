@@ -8,14 +8,16 @@ transport can connect remotely with the relay's bearer key.
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from fastmcp import FastMCP
+from fastmcp.server.auth.auth import AccessToken, TokenVerifier
 from fastmcp.utilities.types import Image
 from mcp.types import Icon
 from pydantic import ValidationError
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 
 from . import __version__, changes, database, lint, metrics, service, status, vault
 from .auth import bearer_matches
@@ -41,20 +43,48 @@ INSTRUCTIONS = (
 )
 
 
-def _check_oauth_not_yet_supported() -> None:
+def _warn_if_oauth_expected() -> None:
     """Phase 1 spike (relay #313): fastmcp's OAuth wiring (MultiAuth/OIDCProxy against
     PocketID, replacing the old mcp SDK's AuthSettings/auth_server_provider) is Phase 2's
     job, not this one — this branch only proves out the tool/resource/transport swap with
-    the static bearer key. Failing loud here beats silently running with OAuth dark:
-    MCP_OAUTH_ENABLED=true would otherwise look "on" while /mcp quietly stayed
-    static-bearer-only, same class of silent-degradation bug this migration exists to
-    avoid elsewhere."""
+    the static bearer key, which `_StaticBearerAuth` below wires unconditionally.
+
+    A previous version of this check *raised* here instead of warning — caught by
+    code review as disproportionate: raising at import time crashes relay's entire
+    process (REST, UI, SSE, everything) over a setting that only affects /mcp, and
+    the raise landed before `main.py` even constructs `FastAPI()`. A log line is
+    already "not silent" without that blast radius — mirrors the adjacent, unchanged
+    pattern in `main.py`'s own lifespan for the sibling misconfiguration case
+    (MCP_OAUTH_ENABLED set but OIDC not configured)."""
     if settings.mcp_oauth_active:
-        raise RuntimeError(
+        logging.getLogger(__name__).warning(
             "MCP_OAUTH_ENABLED is set, but this branch (relay #313 fastmcp migration, "
-            "Phase 1) hasn't ported OAuth yet — that lands in Phase 2. Disable "
-            "MCP_OAUTH_ENABLED to run this branch."
+            "Phase 1) hasn't ported OAuth yet — that lands in Phase 2. /mcp is running "
+            "static-bearer-only regardless of this setting."
         )
+
+
+class _StaticBearerAuth(TokenVerifier):
+    """Static pre-shared bearer key, wired through fastmcp's own `auth=` slot rather
+    than a hand-rolled ASGI wrapper — this is the extension point Phase 2's
+    `MultiAuth([OIDCProxy(...), _StaticBearerAuth()])` composes with, so Phase 1 sets
+    up the plumbing Phase 2 actually needs instead of a parallel mechanism it would
+    have to reconcile or discard. Subclasses `TokenVerifier` specifically (not the
+    bare `AuthProvider` etf-scout-mcp's own reference `_StaticBearerAuth` uses) —
+    fastmcp's docstring for it is explicit that token verifiers "typically don't
+    provide authentication routes by default", which is exactly the property this
+    needs and is more precise than relying on an unstated default. Deliberately not
+    fastmcp's own `DebugTokenVerifier` (`fastmcp.server.auth.providers.debug`) — same
+    shape, but its name and docstring ("bypasses standard security checks... only use
+    in controlled environments") is the wrong signal to leave sitting in relay's
+    actual production auth path. Delegates comparison to `auth.bearer_matches` —
+    relay's own constant-time-safe compare (relay/auth.py: "the only place the key is
+    compared") — rather than a bare `==`."""
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if bearer_matches(token):
+            return AccessToken(token=token, client_id="relay", scopes=[])
+        return None
 
 
 def _brand_icons() -> list[Icon]:
@@ -73,7 +103,7 @@ def _brand_icons() -> list[Icon]:
     ]
 
 
-_check_oauth_not_yet_supported()
+_warn_if_oauth_expected()
 
 mcp = FastMCP(
     "relay",
@@ -85,6 +115,7 @@ mcp = FastMCP(
     instructions=INSTRUCTIONS,
     website_url=settings.relay_base_url.rstrip("/"),
     icons=_brand_icons(),
+    auth=_StaticBearerAuth(),
 )
 
 
@@ -750,25 +781,6 @@ async def set_tag_config(
     return result.model_dump()
 
 
-class BearerAuthASGI:
-    """Minimal ASGI wrapper that gates the MCP app behind the static bearer key."""
-
-    def __init__(self, app) -> None:
-        self.app = app
-
-    async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-        headers = dict(scope.get("headers") or [])
-        auth = headers.get(b"authorization", b"").decode("latin-1")
-        token = auth[7:] if auth.startswith("Bearer ") else ""
-        if not bearer_matches(token):
-            await JSONResponse({"detail": "Invalid API key"}, status_code=401)(scope, receive, send)
-            return
-        await self.app(scope, receive, send)
-
-
 # Built once at import time (relay #313 Phase 1 spike) rather than per-call: fastmcp's
 # http_app() constructs the Starlette app and its (not-yet-running) session manager
 # together, and main.py's own lifespan needs this *exact* instance's `.lifespan` context
@@ -791,19 +803,14 @@ class BearerAuthASGI:
 # max_request_body_size at the SDK's own DEFAULT_MAX_REQUEST_BODY_SIZE. So this is now
 # an unexposed fastmcp-internal default rather than a relay-configurable setting — worth
 # reconfirming across future fastmcp versions (Phase 5·E), not a Phase 1 gap.
+#
+# `auth=_StaticBearerAuth()` above (not a wrapper here) is what actually gates every
+# request — fastmcp's own `http_app()` forwards `self.auth` into the app it builds and
+# wraps it in its own RequireAuthMiddleware, so there is nothing left for this module to
+# do beyond building the app and handing it to main.py to mount directly.
 mcp_http_app = mcp.http_app(
     path="/mcp",
     transport="streamable-http",
     stateless_http=True,
     host_origin_protection=False,
 )
-
-
-def mcp_asgi_app():
-    """Return the Streamable HTTP MCP app to mount on FastAPI.
-
-    OAuth isn't wired up on this branch yet (Phase 2) — `_check_oauth_not_yet_supported()`
-    above already fails loud at import time if MCP_OAUTH_ENABLED is set, so by the time
-    this runs OAuth is guaranteed off and the static-bearer gate is always the right one.
-    """
-    return BearerAuthASGI(mcp_http_app)

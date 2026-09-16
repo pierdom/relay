@@ -387,6 +387,30 @@ async def test_initialize_announces_relays_own_version_and_branding():
     assert [i.mime_type for i in opts.icons] == ["image/svg+xml", "image/png"]
 
 
+@pytest.mark.asyncio
+async def test_mcp_rejects_oversized_request_bodies(client):
+    """relay #313 Phase 1: fastmcp's `http_app()` has no parameter to configure a
+    request-body-size cap, but still enforces one — it builds the old mcp SDK's
+    `TransportSecuritySettings` internally and only overrides the DNS-rebinding half
+    of it (see `mcp_server.py`'s comment above `mcp_http_app`). That's an unexposed
+    internal of a wrapped third-party library, not a documented relay setting, so pin
+    it here: a future fastmcp version silently dropping it should fail a test, not
+    surface as `add_attachment(data=…)` quietly accepting an unbounded body."""
+    oversized = "x" * (5 * 1024 * 1024)  # over the 4 MiB default
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "update_post", "arguments": {"id": 0, "content": oversized}},
+    }
+    resp = await client.post(
+        "/mcp",
+        json=payload,
+        headers={**HEADERS, "Accept": "application/json, text/event-stream"},
+    )
+    assert resp.status_code == 413
+
+
 # ── K-5: attachment tools must catch InvalidFolder, like REST already does ──
 
 
