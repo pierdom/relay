@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 
 import httpx
 from fastmcp import FastMCP
@@ -18,7 +19,12 @@ from fastmcp.server.auth.oidc_proxy import OIDCProxy
 from fastmcp.utilities.types import Image
 from joserfc import jwt as joserfc_jwt
 from joserfc.jwk import KeySet
-from key_value.aio.stores.disk import DiskStore
+from key_value.aio.stores.filetree import (
+    FileTreeStore,
+    FileTreeV1CollectionSanitizationStrategy,
+    FileTreeV1KeySanitizationStrategy,
+)
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from mcp.server.auth.provider import TokenError
 from mcp.types import Icon
 from pydantic import ValidationError
@@ -181,6 +187,64 @@ def _brand_icons() -> list[Icon]:
     ]
 
 
+def _oauth_client_storage() -> FernetEncryptionWrapper:
+    """Encrypted, JSON-file-backed storage for OAuth state, rooted in the vault.
+
+    Both halves of this were audit findings (relay #313 Phase 5), and both come
+    from the same root cause: **passing `client_storage` at all opts out of what
+    `OIDCProxy` does for you.** Left `None`, fastmcp builds a
+    `FernetEncryptionWrapper(FileTreeStore(...))` under `~/.fastmcp/`; Phase 2
+    passed a bare store to move it onto the vault volume, and silently dropped
+    the encryption with it. `proxy.py` still logs "Stored encrypted upstream
+    tokens" either way, which is how it stayed unnoticed. This function moves the
+    storage *and* keeps everything the default gave us.
+
+    **Encryption.** The proxy persists the *upstream* PocketID access and refresh
+    tokens (it re-validates them on every request and refreshes them
+    transparently). Without the wrapper those sit in cleartext in the vault —
+    confirmed by reading a stored record during the audit — and the vault is a
+    Syncthing-synced tree that also gets backed up, so a live IdP refresh token
+    would be replicated to every synced device in the clear. The implementation
+    this migration replaced never had this exposure at all: it stored only
+    relay's *own* tokens, hashed, and never persisted an upstream token.
+    Key derivation mirrors fastmcp's own (PBKDF2 over a high-entropy secret with
+    a fixed salt), and `raise_on_decryption_error=False` matches its default
+    too: rotating `OIDC_CLIENT_SECRET` then reads as a cache miss and clients
+    re-authenticate, instead of every request hard-failing on undecryptable state.
+
+    **FileTreeStore, not DiskStore.** `DiskStore` wraps `diskcache`, which
+    `pip-audit` flags as PYSEC-2026-2447 — it serializes with **pickle** through
+    5.6.3, with no fixed release, so write access to that directory is arbitrary
+    code execution in this process on the next read. For a directory inside a
+    synced, hand-edited vault that precondition is not far-fetched. Switching the
+    extra to `py-key-value-aio[filetree]` drops `diskcache` from the dependency
+    tree rather than merely not calling it. It also stops putting a SQLite
+    database inside the vault — the corruption footgun this repo already designed
+    `history.git` around — in favour of per-key JSON that syncs cleanly.
+    """
+    # Both sanitization strategies `os.pathconf()` the directory to size their
+    # name/path limits, so it has to exist before they are constructed — the
+    # store's own `auto_create` runs too late for that.
+    directory = Path(settings.mcp_oauth_storage_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    store = FileTreeStore(
+        data_directory=directory,
+        # Passed explicitly, exactly as fastmcp does for its own default store:
+        # these bound key/collection names to the filesystem's real limits. That
+        # matters more here than it looks, because a CIMD client_id is a *URL*
+        # and becomes a storage key — this is what keeps such a key from
+        # escaping the directory or blowing past NAME_MAX.
+        key_sanitization_strategy=FileTreeV1KeySanitizationStrategy(directory),
+        collection_sanitization_strategy=FileTreeV1CollectionSanitizationStrategy(directory),
+    )
+    return FernetEncryptionWrapper(
+        key_value=store,
+        source_material=settings.oidc_client_secret,
+        salt="relay-mcp-oauth-storage",
+        raise_on_decryption_error=False,
+    )
+
+
 def _build_auth() -> AuthProvider:
     """Static bearer only when MCP OAuth isn't configured (unchanged fallback);
     `MultiAuth(server=_RelayOIDCProxy(...), verifiers=[_StaticBearerAuth()])` when
@@ -226,7 +290,33 @@ def _build_auth() -> AuthProvider:
         redirect_path="/mcp/oauth/callback",
         required_scopes=settings.mcp_scopes,
         allowed_client_redirect_uris=settings.mcp_allowed_client_redirect_uri_patterns,
-        client_storage=DiskStore(directory=settings.mcp_oauth_storage_dir),
+        client_storage=_oauth_client_storage(),
+        # Load-bearing, and the single most important line in this call — without
+        # it, a *completed* OAuth login mints a token that 401s on every
+        # subsequent request (relay #313 Phase 5, caught by running the real flow;
+        # no amount of reading would have shown it).
+        #
+        # `load_access_token` implements a token *swap*: it verifies relay's own
+        # JWT, then re-validates the stored upstream token on every request via
+        # `OIDCProxy`'s `token_verifier`. Which upstream token that is, and what
+        # it's checked against, is decided at construction (`oidc_proxy.py`):
+        #     verifier_audience = client_id if verify_id_token else audience
+        #     verifier_scopes   = None      if verify_id_token else required_scopes
+        # Left False (the default), relay passes no `audience` — so the verifier
+        # audience is None — and hands it `required_scopes=["relay"]`, which means
+        # it demands PocketID's *own access token* be a JWT carrying a `relay`
+        # scope. `relay` is this server's MCP scope; PocketID has never heard of
+        # it and will never mint it, and PocketID's access token isn't an RP's to
+        # validate in the first place.
+        #
+        # True verifies the **id_token** instead: always a JWT, always verifiable
+        # against the IdP's JWKS, `aud` == our client_id per OIDC Core §2. fastmcp
+        # then restores relay's own `required_scopes` at the FastMCP-token level
+        # (see `OIDCProxy.__init__`), so `relay` is still enforced — on relay's
+        # token, which is the only place it was ever meaningful. Verified both
+        # ways against a mock IdP: opaque *and* JWT upstream access tokens now
+        # both authenticate end to end, so PocketID's token format stops mattering.
+        verify_id_token=True,
     )
     return MultiAuth(server=oidc, verifiers=[_StaticBearerAuth()])
 

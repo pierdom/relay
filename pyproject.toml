@@ -24,7 +24,7 @@ dependencies = [
     "httpcore>=1.0.9",
     "anyio>=4.13.0",
     "fastmcp>=4.0.4",
-    "py-key-value-aio[disk]>=0.4.5",
+    "py-key-value-aio[filetree,wrappers-encryption]>=0.4.5",
 ]
 
 [project.scripts]

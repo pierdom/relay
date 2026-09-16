@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import shutil
 import time
+from pathlib import Path
 
 os.environ.setdefault("API_KEY", "test-key")
 
@@ -555,3 +556,62 @@ async def test_list_attachments_reports_an_invalid_folder(client):
     out = await mcp_server.list_attachments(folder="..")
     assert "error" in out
     assert out["error"]
+
+
+# ── relay #313 Phase 5 audit: two config-level properties that fail silently ──
+
+
+def test_oidc_proxy_verifies_the_id_token_not_the_upstream_access_token(monkeypatch):
+    """The single most load-bearing kwarg in `_build_auth` (Phase 5 audit).
+
+    Left at its default (`verify_id_token=False`), `OIDCProxy` builds its token
+    verifier with `audience=None` and `required_scopes=["relay"]` and then
+    re-validates *PocketID's own access token* against that on every request —
+    demanding a `relay` scope no IdP will ever mint. The symptom is nasty
+    precisely because the OAuth dance still succeeds: login completes, a token
+    is issued, and then every single API call 401s. Caught by running the real
+    flow against a mock IdP, not by reading. Captures the kwargs instead of
+    constructing the proxy for real, since the real constructor performs OIDC
+    discovery over the network."""
+    captured = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_init(self, **kwargs):
+        # Capture and bail out before MultiAuth tries to compose a half-built
+        # proxy; the kwargs are the whole point of this test.
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(mcp_server._RelayOIDCProxy, "__init__", fake_init)
+    monkeypatch.setattr(type(settings), "mcp_oauth_active", property(lambda _: True))
+    monkeypatch.setattr(settings, "oidc_client_secret", "secret")
+
+    with pytest.raises(_Stop):
+        mcp_server._build_auth()
+    assert captured.get("verify_id_token") is True
+    # The other half of the same trap: relay's own scope floor must survive.
+    assert captured.get("required_scopes") == settings.mcp_scopes
+
+
+@pytest.mark.asyncio
+async def test_oauth_client_storage_is_encrypted_at_rest(tmp_path, monkeypatch):
+    """Passing `client_storage` at all opts out of the encryption `OIDCProxy`
+    applies to the store it would otherwise build itself — so the upstream
+    PocketID access/refresh tokens it persists landed in the vault in cleartext
+    (Phase 5 audit; the vault is Syncthing-synced). Also pins the backend away
+    from `DiskStore`/`diskcache`, whose pickle serialization is PYSEC-2026-2447
+    with no fixed release."""
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path))
+    monkeypatch.setattr(settings, "oidc_client_secret", "a-high-entropy-secret")
+
+    storage = mcp_server._oauth_client_storage()
+    await storage.put(collection="c", key="k", value={"refresh_token": "super-secret-value"})
+
+    assert await storage.get(collection="c", key="k") == {"refresh_token": "super-secret-value"}
+
+    on_disk = [p.read_text() for p in Path(settings.mcp_oauth_storage_dir).rglob("*.json")]
+    assert on_disk, "expected the store to have written something"
+    assert not any("super-secret-value" in blob for blob in on_disk), "secret readable on disk"
+    assert any("__encrypted_data__" in blob for blob in on_disk)
