@@ -149,15 +149,9 @@ async def cleanup_loop() -> None:
         except Exception as exc:
             logger.error("Upload-slot cleanup error: %s", exc)
 
-        # Piggyback OAuth store hygiene: drop expired pending auths, codes, and
-        # access tokens (refresh tokens live until their own expiry). Gate on
-        # mcp_oauth_active — the store only exists when OAuth actually ran.
-        if settings.mcp_oauth_active:
-            try:
-                from .mcp_oauth.store import get_store
-
-                removed = await get_store().cleanup_expired()
-                if removed:
-                    logger.info("Cleanup removed %d expired OAuth row(s)", removed)
-            except Exception as exc:
-                logger.error("OAuth cleanup error: %s", exc)
+        # relay #313 Phase 4: OAuth store hygiene used to be piggybacked here
+        # (the old mcp_oauth/store.py SQLite oauth.db needed an explicit sweep of
+        # expired pending auths/codes/tokens). fastmcp's own client_storage
+        # (DiskStore, mcp_server._build_auth) is a diskcache-backed store that
+        # honors the `ttl=` passed to every `.put()` call internally — expired
+        # entries are dropped on read/access, no external sweep needed.

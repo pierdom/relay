@@ -266,13 +266,16 @@ class Settings(BaseSettings):
         return str(Path(self.relay_dir) / "models")
 
     @property
-    def mcp_oauth_db_path(self) -> str:
-        """Persistent OAuth store (DCR clients, codes, tokens).
+    def mcp_oauth_storage_dir(self) -> str:
+        """Persistent OAuth store — DCR client registrations and encrypted upstream
+        tokens (relay #313 Phase 2/4: fastmcp's `DiskStore`/`diskcache`, replacing
+        the old hand-rolled `mcp_oauth/store.py`'s single-file SQLite `oauth.db`
+        with a directory of its own).
 
         Separate from the disposable ``index.db`` — the startup index rebuild must
         never touch it. Lives in ``.relay/`` so it rides the vault backup.
         """
-        return str(Path(self.relay_dir) / "oauth.db")
+        return str(Path(self.relay_dir) / "mcp_oauth")
 
     @property
     def mcp_resource_url(self) -> str:

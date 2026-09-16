@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 
 import httpx
 from fastmcp import FastMCP
@@ -23,8 +22,6 @@ from key_value.aio.stores.disk import DiskStore
 from mcp.server.auth.provider import TokenError
 from mcp.types import Icon
 from pydantic import ValidationError
-from starlette.requests import Request
-from starlette.responses import Response
 
 from . import __version__, changes, database, lint, metrics, service, status, vault
 from .auth import bearer_matches
@@ -229,7 +226,7 @@ def _build_auth() -> AuthProvider:
         redirect_path="/mcp/oauth/callback",
         required_scopes=settings.mcp_scopes,
         allowed_client_redirect_uris=settings.mcp_allowed_client_redirect_uri_patterns,
-        client_storage=DiskStore(directory=Path(settings.relay_dir) / "mcp_oauth"),
+        client_storage=DiskStore(directory=settings.mcp_oauth_storage_dir),
     )
     return MultiAuth(server=oidc, verifiers=[_StaticBearerAuth()])
 
@@ -246,42 +243,6 @@ mcp = FastMCP(
     icons=_brand_icons(),
     auth=_build_auth(),
 )
-
-
-@mcp.custom_route("/mcp/oauth/callback", methods=["GET"], include_in_schema=False)
-async def mcp_oauth_callback(request: Request) -> Response:
-    """Return leg of the upstream PocketID login (unauthenticated by design).
-
-    Dead code whenever MCP OAuth is active (relay #313 Phase 2, confirmed live):
-    `_build_auth()` configures `_RelayOIDCProxy` with `redirect_path="/mcp/oauth/callback"`
-    — the exact same path — and fastmcp registers its own handler at that path
-    ahead of this one, so this function is never actually reached; a real request
-    to this path returns fastmcp's own rich HTML error page, not this handler's
-    JSON. Left in place (not removed) because `mcp_oauth/broker.py` it delegates
-    to is still needed by the old, still-active-when-OAuth-is-off code paths this
-    branch hasn't touched yet — both are deleted together in Phase 4."""
-    from .mcp_oauth.broker import handle_callback
-
-    return await handle_callback(request)
-
-
-@mcp.custom_route("/mcp/oauth/consent", methods=["GET", "POST"], include_in_schema=False)
-async def mcp_oauth_consent(request: Request) -> Response:
-    """Per-client consent gate for an unapproved DCR client (relay #313
-    Stopgap, unauthenticated by design — same standing as the callback above).
-
-    Unlike the callback above, this path (`/mcp/oauth/consent`) doesn't collide
-    with fastmcp's own consent route (`/consent`, bare — see `authorize()` in
-    `oauth_proxy/proxy.py`), so this handler is still technically reachable when
-    OAuth is active. It's still functionally dead, though: nothing in the new
-    `_RelayOIDCProxy`-driven flow ever redirects here — `mcp_oauth/provider.py`'s
-    own `authorize()`, the only code that used to send clients here, is no longer
-    in the auth path at all now that `auth=_build_auth()` owns `/authorize`."""
-    from .mcp_oauth.consent import handle_consent_get, handle_consent_post
-
-    if request.method == "POST":
-        return await handle_consent_post(request)
-    return await handle_consent_get(request)
 
 
 _db = database.connect

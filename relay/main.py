@@ -84,13 +84,12 @@ async def lifespan(app: FastAPI):
     from . import ingest
 
     ingest.registry.reset()
-    # Persistent OAuth store (DCR clients + tokens) lives beside the index but is
-    # never rebuilt from files; create its schema once at startup when enabled.
-    if settings.mcp_oauth_active:
-        from .mcp_oauth.store import get_store
-
-        await get_store().init()
-    elif settings.mcp_oauth_enabled:
+    # relay #313 Phase 4: the persistent OAuth store used to need its schema
+    # created explicitly here (`mcp_oauth/store.py`'s SQLite `oauth.db`). fastmcp's
+    # own DiskStore (mcp_server._build_auth) creates its directory eagerly at
+    # `_RelayOIDCProxy` construction time — already done by the time this module
+    # imports `mcp_server` — so there is nothing left to initialize here.
+    if settings.mcp_oauth_enabled and not settings.oidc_enabled:
         # Flag set but the upstream OIDC client isn't configured, so OAuth can't
         # broker a login — fall back to static-bearer. Warn so it's not silent.
         logging.getLogger(__name__).warning(
