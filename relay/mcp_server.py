@@ -783,11 +783,14 @@ class BearerAuthASGI:
 # loopback bind — but False pins relay to the same explicit, audited behavior it has
 # always had rather than an implicit heuristic. Revisit in Phase 5.
 #
-# max_request_body_size isn't exposed here in fastmcp (unlike the old SDK's 4 MiB
-# default) — `add_attachment(data=…)` over /mcp has no separate transport-level cap
-# on this branch. ATTACHMENT_MAX_MB (25) is still enforced inside `service.ingest_attachment`
-# itself, so oversized base64 attachments are still rejected, just one layer later.
-# Worth a note in Phase 5's operational checklist, not a Phase 1 blocker.
+# The old SDK's 4 MiB max_request_body_size cap is still very much active — verified
+# live (a ~6 MB /mcp POST body 413s with "Request body too large"). fastmcp's http_app()
+# has no parameter to configure it, but internally still builds the old SDK's
+# TransportSecuritySettings when constructing the session manager and only overrides
+# enable_dns_rebinding_protection on it (see host_origin_protection above), leaving
+# max_request_body_size at the SDK's own DEFAULT_MAX_REQUEST_BODY_SIZE. So this is now
+# an unexposed fastmcp-internal default rather than a relay-configurable setting — worth
+# reconfirming across future fastmcp versions (Phase 5·E), not a Phase 1 gap.
 mcp_http_app = mcp.http_app(
     path="/mcp",
     transport="streamable-http",
