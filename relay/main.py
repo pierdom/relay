@@ -21,7 +21,7 @@ from . import status as app_status
 from .cleanup import cleanup_loop
 from .config import settings
 from .database import connect, init_db
-from .mcp_server import mcp, mcp_asgi_app
+from .mcp_server import mcp_asgi_app, mcp_http_app
 from .routes.attachments import router as attachments_router
 from .routes.auth import router as auth_router
 from .routes.changes import router as changes_router
@@ -120,8 +120,10 @@ async def lifespan(app: FastAPI):
     watcher.start(asyncio.get_running_loop())
     # The Streamable HTTP MCP app needs its session manager running for the
     # lifetime of the server; mounted sub-apps don't get their lifespan run
-    # automatically, so we drive it from here.
-    async with mcp.session_manager.run():
+    # automatically, so we drive it from here — this must be the exact same
+    # `mcp_http_app` instance mounted below, not a freshly built one (see its
+    # docstring in mcp_server.py).
+    async with mcp_http_app.lifespan(mcp_http_app):
         yield
     watcher.stop()
     task.cancel()

@@ -23,6 +23,7 @@ dependencies = [
     "httpx2>=2.12.0",
     "httpcore>=1.0.9",
     "anyio>=4.13.0",
+    "fastmcp>=4.0.4",
 ]
 
 [project.scripts]

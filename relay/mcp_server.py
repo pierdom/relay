@@ -10,13 +10,8 @@ from __future__ import annotations
 
 import re
 
-from mcp.server.auth.settings import (
-    AuthSettings,
-    ClientRegistrationOptions,
-    RevocationOptions,
-)
-from mcp.server.mcpserver import Image, MCPServer
-from mcp.server.transport_security import TransportSecuritySettings
+from fastmcp import FastMCP
+from fastmcp.utilities.types import Image
 from mcp.types import Icon
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -46,31 +41,20 @@ INSTRUCTIONS = (
 )
 
 
-def _auth_kwargs() -> dict:
-    """When MCP OAuth is enabled (and the upstream OIDC client is configured),
-    turn the MCP server into an OAuth 2.1 Authorization + Resource Server: the SDK
-    mounts /authorize /token /register /revoke + metadata and wraps /mcp in
-    RequireAuthMiddleware, using our provider (which also honors the static key).
-    Off => today's static-bearer BearerAuthASGI, unchanged."""
-    if not settings.mcp_oauth_active:
-        return {}
-    from .mcp_oauth.provider import get_provider
-
-    scopes = list(settings.mcp_scopes)
-    return {
-        "auth": AuthSettings(
-            issuer_url=settings.relay_base_url,
-            resource_server_url=settings.mcp_resource_url,
-            required_scopes=scopes,
-            client_registration_options=ClientRegistrationOptions(
-                enabled=True,
-                valid_scopes=scopes,
-                default_scopes=scopes,
-            ),
-            revocation_options=RevocationOptions(enabled=True),
-        ),
-        "auth_server_provider": get_provider(),
-    }
+def _check_oauth_not_yet_supported() -> None:
+    """Phase 1 spike (relay #313): fastmcp's OAuth wiring (MultiAuth/OIDCProxy against
+    PocketID, replacing the old mcp SDK's AuthSettings/auth_server_provider) is Phase 2's
+    job, not this one — this branch only proves out the tool/resource/transport swap with
+    the static bearer key. Failing loud here beats silently running with OAuth dark:
+    MCP_OAUTH_ENABLED=true would otherwise look "on" while /mcp quietly stayed
+    static-bearer-only, same class of silent-degradation bug this migration exists to
+    avoid elsewhere."""
+    if settings.mcp_oauth_active:
+        raise RuntimeError(
+            "MCP_OAUTH_ENABLED is set, but this branch (relay #313 fastmcp migration, "
+            "Phase 1) hasn't ported OAuth yet — that lands in Phase 2. Disable "
+            "MCP_OAUTH_ENABLED to run this branch."
+        )
 
 
 def _brand_icons() -> list[Icon]:
@@ -89,7 +73,9 @@ def _brand_icons() -> list[Icon]:
     ]
 
 
-mcp = MCPServer(
+_check_oauth_not_yet_supported()
+
+mcp = FastMCP(
     "relay",
     # serverInfo.version, which a client shows next to the server's name. Left
     # unset it is the empty string; under mcp 1.x it was the *SDK's* version
@@ -99,7 +85,6 @@ mcp = MCPServer(
     instructions=INSTRUCTIONS,
     website_url=settings.relay_base_url.rstrip("/"),
     icons=_brand_icons(),
-    **_auth_kwargs(),
 )
 
 
@@ -784,33 +769,38 @@ class BearerAuthASGI:
         await self.app(scope, receive, send)
 
 
+# Built once at import time (relay #313 Phase 1 spike) rather than per-call: fastmcp's
+# http_app() constructs the Starlette app and its (not-yet-running) session manager
+# together, and main.py's own lifespan needs this *exact* instance's `.lifespan` context
+# manager — mounted sub-apps don't get their lifespan run automatically, so relay drives
+# it from its own lifespan (see main.py). Building a second instance there would give
+# FastAPI a session manager different from the one actually mounted.
+#
+# host_origin_protection=False matches today's explicit disable of the old SDK's
+# DNS-rebinding protection: relay is mounted into FastAPI behind a public reverse proxy,
+# not run standalone, so a real Host header (e.g. relay.geon.im) must not be rejected.
+# fastmcp's own default ("auto") is smarter than the old SDK's — it only enforces on a
+# loopback bind — but False pins relay to the same explicit, audited behavior it has
+# always had rather than an implicit heuristic. Revisit in Phase 5.
+#
+# max_request_body_size isn't exposed here in fastmcp (unlike the old SDK's 4 MiB
+# default) — `add_attachment(data=…)` over /mcp has no separate transport-level cap
+# on this branch. ATTACHMENT_MAX_MB (25) is still enforced inside `service.ingest_attachment`
+# itself, so oversized base64 attachments are still rejected, just one layer later.
+# Worth a note in Phase 5's operational checklist, not a Phase 1 blocker.
+mcp_http_app = mcp.http_app(
+    path="/mcp",
+    transport="streamable-http",
+    stateless_http=True,
+    host_origin_protection=False,
+)
+
+
 def mcp_asgi_app():
     """Return the Streamable HTTP MCP app to mount on FastAPI.
 
-    With OAuth enabled the SDK already wraps /mcp in RequireAuthMiddleware (and our
-    verifier still accepts the static key), so we mount it bare. Otherwise we keep
-    the minimal static-bearer gate.
+    OAuth isn't wired up on this branch yet (Phase 2) — `_check_oauth_not_yet_supported()`
+    above already fails loud at import time if MCP_OAUTH_ENABLED is set, so by the time
+    this runs OAuth is guaranteed off and the static-bearer gate is always the right one.
     """
-    # mcp 2.x moved the transport options off the constructor onto this factory.
-    #
-    # We mount into FastAPI behind a public reverse proxy, not the SDK's own
-    # uvicorn. Its default host (127.0.0.1) otherwise auto-enables DNS-rebinding
-    # protection scoped to localhost, which 421s every real Host header (e.g.
-    # relay.geon.im) and 403s a browser Origin — so remote /mcp never worked over
-    # the network. DNS rebinding is a localhost-dev threat; our actual controls
-    # are bearer/OAuth auth + HTTPS + the proxy, so that check stays off.
-    #
-    # max_request_body_size is the SDK's own 4 MiB default, named here because it
-    # is now load-bearing: `add_attachment(data=…)` is reachable over /mcp and
-    # ATTACHMENT_MAX_MB is 25, so a large base64 attachment is rejected by the
-    # transport before relay sees it. That is the intended shape — the tool
-    # documents base64 as tiny-files-only and points at source_url/upload_id for
-    # anything real — but it is a cap chosen here, not an accident.
-    app = mcp.streamable_http_app(
-        stateless_http=True,
-        streamable_http_path="/mcp",
-        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
-    )
-    if settings.mcp_oauth_active:
-        return app
-    return BearerAuthASGI(app)
+    return BearerAuthASGI(mcp_http_app)

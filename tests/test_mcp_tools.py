@@ -378,7 +378,9 @@ async def test_initialize_announces_relays_own_version_and_branding():
     """
     from relay import __version__
 
-    opts = mcp_server.mcp._lowlevel_server.create_initialization_options()
+    # fastmcp (relay #313 migration) names this attribute `_mcp_server`, not the old
+    # mcp SDK's `_lowlevel_server` — same LowLevelServer type underneath.
+    opts = mcp_server.mcp._mcp_server.create_initialization_options()
     assert opts.server_name == "relay"
     assert opts.server_version == __version__
     assert opts.website_url == settings.relay_base_url.rstrip("/")
