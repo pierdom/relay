@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 from urllib.parse import urlsplit
 
 from fastapi import Cookie, HTTPException, Request, Security, status
@@ -8,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from .config import settings
+from .identity import Actor, actor_from_session, resolve_bearer
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -20,16 +20,17 @@ APIKEY_SUB = "apikey"
 
 
 def bearer_matches(token: str | None) -> bool:
-    """Constant-time comparison of a presented bearer against ``API_KEY``.
+    """Whether a presented bearer matches *any* configured key — the primary
+    ``API_KEY`` or a named ``RELAY_API_KEYS`` entry (relay #198, B-7).
 
-    The single place the key is compared. Compares UTF-8 bytes: ``compare_digest``
-    on ``str`` raises ``TypeError`` for non-ASCII input, which turned an
-    unauthenticated request carrying ``Bearer café`` into a 500 and a stack
-    trace in the log (once per copy of this check — there used to be five).
+    The single place a bearer is checked; delegates the actual (constant-time,
+    UTF-8-byte) comparison to ``identity.resolve_bearer`` so there is exactly
+    one comparison implementation — ``compare_digest`` on ``str`` raises
+    ``TypeError`` for non-ASCII input, which used to turn an unauthenticated
+    request carrying ``Bearer café`` into a 500 (once per copy of this check —
+    there used to be five).
     """
-    if not token:
-        return False
-    return hmac.compare_digest(token.encode("utf-8"), settings.api_key.encode("utf-8"))
+    return resolve_bearer(token) is not None
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -109,16 +110,28 @@ async def require_api_key(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
     relay_session: str | None = Cookie(default=None),
-) -> None:
-    if relay_session and verify_session(relay_session) is not None:
-        # The cookie is a browser credential, so a state-changing request must
-        # come from this site. SameSite=Strict already keeps the cookie off
-        # cross-site requests in current browsers; this is the second lock.
-        if request.method not in _SAFE_METHODS and is_cross_site(request):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-site request rejected")
-        return
-    if credentials and bearer_matches(credentials.credentials):
-        return
+) -> Actor:
+    """Authenticate the request and resolve *who* made it (relay #198, B-7).
+
+    Most routes use this as a bare ``dependencies=[Depends(require_api_key)]``
+    and never look at the return value — only the write routes that need
+    provenance (``routes.posts``/``attachments``/``tags``) capture it as
+    ``actor: Actor = Depends(require_api_key)``.
+    """
+    if relay_session:
+        payload = verify_session(relay_session)
+        if payload is not None:
+            # The cookie is a browser credential, so a state-changing request
+            # must come from this site. SameSite=Strict already keeps the
+            # cookie off cross-site requests in current browsers; this is the
+            # second lock.
+            if request.method not in _SAFE_METHODS and is_cross_site(request):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-site request rejected")
+            return actor_from_session(payload)
+    if credentials:
+        actor = resolve_bearer(credentials.credentials)
+        if actor is not None:
+            return actor
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid API key",

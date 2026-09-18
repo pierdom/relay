@@ -24,6 +24,11 @@ async def list_changes(
         "Omit for the most recent `limit`.",
     ),
     limit: int = Query(default=50, ge=1, le=200),
+    author: str | None = Query(
+        default=None,
+        description="Filter to one identity's writes (relay #198, B-7) — a named API key or "
+        "OIDC user's email/sub. Always null until at least one authenticated write has landed.",
+    ),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> ChangeListResponse:
     """Every post-affecting write, newest first — a flat feed of `history.git`
@@ -31,7 +36,7 @@ async def list_changes(
     delete/TTL expiry), so an agent can catch up on what moved since it last
     looked instead of re-reading the whole vault."""
     try:
-        rows = await changes_module.list_changes(db, since=since, limit=limit)
+        rows = await changes_module.list_changes(db, since=since, limit=limit, author=author)
     except changes_module.HistoryUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

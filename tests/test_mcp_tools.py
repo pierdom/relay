@@ -775,3 +775,42 @@ def test_upstream_expiry_is_clamped_to_the_id_token_exp():
     tokens2 = _token_set("t2", near, long_token)
     proxy._get_verification_token(tokens2)
     assert tokens2.expires_at == near, "clamp must only ever move expiry earlier"
+
+
+# ── per-agent identity: _current_actor (relay #198, B-7) ──────────────────────
+
+
+def _fake_access_token(*, subject=None, claims=None):
+    from fastmcp.server.auth.auth import AccessToken
+
+    return AccessToken(token="t", client_id="relay", scopes=[], subject=subject, claims=claims or {})
+
+
+def test_current_actor_prefers_email_claim_over_the_opaque_subject(monkeypatch):
+    """PocketID's id_token `sub` is an opaque IdP id — unreadable in a git
+    author line or an `?author=` filter — so a claims `email` (relay requests
+    the `email` OIDC scope) must win over `subject` when both are present,
+    the same priority `identity.actor_from_session` already gives the web
+    UI's OIDC session cookie."""
+    token = _fake_access_token(
+        subject="a1b2c3-opaque-sub", claims={"sub": "a1b2c3-opaque-sub", "email": "me@example.com"}
+    )
+    monkeypatch.setattr(mcp_server, "get_access_token", lambda: token)
+    actor = mcp_server._current_actor()
+    assert actor.name == "me@example.com"
+    assert actor.email == "me@example.com"
+
+
+def test_current_actor_falls_back_to_subject_without_an_email_claim(monkeypatch):
+    """The static-bearer path (`_StaticBearerAuth`) sets only `subject` — the
+    configured key's name — with no `claims` at all."""
+    token = _fake_access_token(subject="news-agent", claims={})
+    monkeypatch.setattr(mcp_server, "get_access_token", lambda: token)
+    actor = mcp_server._current_actor()
+    assert actor.name == "news-agent"
+    assert actor.email == "news-agent@relay.local"  # synthesized: no "@" in the name
+
+
+def test_current_actor_is_none_without_an_authenticated_caller(monkeypatch):
+    monkeypatch.setattr(mcp_server, "get_access_token", lambda: None)
+    assert mcp_server._current_actor() is None

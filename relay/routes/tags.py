@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from .. import service
 from ..auth import require_api_key
 from ..database import get_db
+from ..identity import Actor
 from ..models import TagConfigCreate, TagConfigResponse, TagListResponse, TagRename
 
 router = APIRouter(tags=["tags"])
@@ -23,15 +24,15 @@ async def list_tags(db: aiosqlite.Connection = Depends(get_db)) -> TagListRespon
 @router.patch(
     "/tags/{tag}",
     response_model=TagListResponse,
-    dependencies=[Depends(require_api_key)],
 )
 async def rename_tag(
     tag: str,
     body: TagRename,
     db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
 ) -> TagListResponse:
     try:
-        return await service.rename_tag(db, tag, body.new_name)
+        return await service.rename_tag(db, tag, body.new_name, actor=actor)
     except service.InvalidTag:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="tag must not be empty") from None
 

@@ -156,16 +156,19 @@ async def _reconcile_file_locked(db: aiosqlite.Connection, path: Path) -> None:
             id=pid, title=path.stem, content=body, tags=meta.get("tags") or [],
             source=meta.get("source"), created_at=meta.get("created_at") or vault.utcnow_iso(),
             updated_at=meta.get("updated_at"), expires_at=meta.get("expires_at"), old_path=path,
-            properties=meta.get("properties"),
+            properties=meta.get("properties"), updated_by=meta.get("updated_by"),
         )
     # An external editor rewrites the body but leaves the front-matter stamp
     # alone, so take the last-modified time from the file itself — otherwise
     # an Obsidian edit never moves the post in the default "updated" sort.
+    # `updated_by` (relay #198, B-7) round-trips from the file's own
+    # front-matter unchanged — files are canonical, and an external edit has
+    # no authenticated identity of its own to attribute to.
     await vault.index_upsert(
         db, id=pid, title=path.stem, path=path, content=body, tags=meta.get("tags") or [],
         source=meta.get("source"), created_at=meta.get("created_at") or vault.utcnow_iso(),
         updated_at=vault.effective_updated_at(path, meta), expires_at=meta.get("expires_at"),
-        properties=meta.get("properties"),
+        properties=meta.get("properties"), updated_by=meta.get("updated_by"),
     )
     await db.commit()
     post = await service.get_post(db, pid)
@@ -199,6 +202,7 @@ async def _reconcile_delete(db: aiosqlite.Connection, path: Path) -> None:
             source=row["source"], created_at=row["created_at"],
             updated_at=row["updated_at"], expires_at=None,
             properties=vault.decode_properties(row["properties"]),
+            updated_by=row["updated_by"],
         )
         return
     await db.execute("DELETE FROM posts WHERE id = ?", (row["id"],))

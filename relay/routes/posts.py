@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from .. import service
 from ..auth import require_api_key
 from ..database import get_db
+from ..identity import Actor
 from ..models import (
     BacklinksResponse,
     DeletedPostsResponse,
@@ -64,14 +65,14 @@ def _conflict(post_id: int, current: PostResponse | None) -> HTTPException:
     "",
     response_model=PostCreateResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_api_key)],
 )
 async def create_post(
     body: PostCreate,
     response: Response,
     db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
 ) -> PostCreateResponse:
-    post = await service.create_post(db, body)
+    post = await service.create_post(db, body, actor=actor)
     _set_etag(response, post)
     return post
 
@@ -110,6 +111,11 @@ async def list_posts(
             "'tag'/'folder'. 'semantic'/'hybrid' 503 if this relay hasn't got embeddings enabled."
         ),
     ),
+    author: str | None = Query(
+        default=None,
+        description="Filter to posts whose most recent write is attributed to this identity "
+        "(relay #198, B-7) — a named API key or an OIDC user's email/sub.",
+    ),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostListResponse | PostSummaryListResponse:
     try:
@@ -124,6 +130,7 @@ async def list_posts(
             sort=sort,
             order=order,
             mode=mode,
+            author=author,
         )
     except service.SemanticSearchUnavailable:
         raise HTTPException(
@@ -281,20 +288,20 @@ async def get_post_revision(
 @router.post(
     "/{post_id}/restore",
     response_model=PostResponse,
-    dependencies=[Depends(require_api_key)],
 )
 async def restore_post(
     post_id: int,
     body: PostRestore,
     response: Response,
     db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
 ) -> PostResponse:
     """Roll a post back to a revision from its history, recreating it if deleted.
 
     The restore is itself committed, so it can be undone the same way.
     """
     try:
-        post = await service.restore_post(db, post_id, body.sha)
+        post = await service.restore_post(db, post_id, body.sha, actor=actor)
         _set_etag(response, post)
         return post
     except service.HistoryUnavailable:
@@ -312,7 +319,6 @@ async def restore_post(
 @router.patch(
     "/{post_id}",
     response_model=PostResponse,
-    dependencies=[Depends(require_api_key)],
 )
 async def update_post(
     post_id: int,
@@ -320,10 +326,13 @@ async def update_post(
     response: Response,
     db: aiosqlite.Connection = Depends(get_db),
     if_match_header: str | None = Header(default=None, alias="If-Match"),
+    actor: Actor = Depends(require_api_key),
 ) -> PostResponse:
     if_match = _resolve_if_match(if_match_header, body.if_match)
     try:
-        post = await service.update_post(db, post_id, body.model_copy(update={"if_match": if_match}))
+        post = await service.update_post(
+            db, post_id, body.model_copy(update={"if_match": if_match}), actor=actor
+        )
         _set_etag(response, post)
         return post
     except service.PostNotFound:
@@ -336,7 +345,6 @@ async def update_post(
 @router.post(
     "/{post_id}/edit",
     response_model=PostResponse,
-    dependencies=[Depends(require_api_key)],
 )
 async def edit_post(
     post_id: int,
@@ -344,12 +352,15 @@ async def edit_post(
     response: Response,
     db: aiosqlite.Connection = Depends(get_db),
     if_match_header: str | None = Header(default=None, alias="If-Match"),
+    actor: Actor = Depends(require_api_key),
 ) -> PostResponse:
     """`str_replace`-style partial edit (relay #198, N-1): ``old_str`` must
     match exactly once in the post's current content."""
     if_match = _resolve_if_match(if_match_header, body.if_match)
     try:
-        post = await service.edit_post(db, post_id, body.old_str, body.new_str, if_match=if_match)
+        post = await service.edit_post(
+            db, post_id, body.old_str, body.new_str, if_match=if_match, actor=actor
+        )
         _set_etag(response, post)
         return post
     except service.PostNotFound:
@@ -377,7 +388,6 @@ async def edit_post(
 @router.post(
     "/{post_id}/append",
     response_model=PostResponse,
-    dependencies=[Depends(require_api_key)],
 )
 async def append_post(
     post_id: int,
@@ -385,12 +395,13 @@ async def append_post(
     response: Response,
     db: aiosqlite.Connection = Depends(get_db),
     if_match_header: str | None = Header(default=None, alias="If-Match"),
+    actor: Actor = Depends(require_api_key),
 ) -> PostResponse:
     """Append to a post's content (relay #198, N-1) instead of resending the
     whole body."""
     if_match = _resolve_if_match(if_match_header, body.if_match)
     try:
-        post = await service.append_post(db, post_id, body.content, if_match=if_match)
+        post = await service.append_post(db, post_id, body.content, if_match=if_match, actor=actor)
         _set_etag(response, post)
         return post
     except service.PostNotFound:
@@ -403,14 +414,14 @@ async def append_post(
 @router.delete(
     "/{post_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_api_key)],
 )
 async def delete_post(
     post_id: int,
     db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
 ) -> None:
     try:
-        await service.delete_post(db, post_id)
+        await service.delete_post(db, post_id, actor=actor)
     except service.ProtectedPost:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

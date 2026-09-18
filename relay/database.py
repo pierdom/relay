@@ -37,10 +37,12 @@ CREATE TABLE IF NOT EXISTS posts (
     created_at TEXT NOT NULL,
     updated_at TEXT,
     expires_at TEXT,
-    properties TEXT NOT NULL DEFAULT '{}'
+    properties TEXT NOT NULL DEFAULT '{}',
+    updated_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts (created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_tags ON posts (tags);
+CREATE INDEX IF NOT EXISTS idx_posts_updated_by ON posts (updated_by);
 CREATE TABLE IF NOT EXISTS tag_config (
     tag        TEXT PRIMARY KEY,
     ttl_hours  INTEGER NOT NULL DEFAULT 0,
@@ -134,6 +136,11 @@ async def init_db() -> None:
             await db.execute("ALTER TABLE posts ADD COLUMN properties TEXT NOT NULL DEFAULT '{}'")
         except aiosqlite.OperationalError:
             pass
+        # updated_by (relay #198, B-7), same upgrade-in-place pattern as properties above.
+        try:
+            await db.execute("ALTER TABLE posts ADD COLUMN updated_by TEXT")
+        except aiosqlite.OperationalError:
+            pass
         await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA busy_timeout=5000;")
         # Drop any FTS objects a prior run left so rebuild_index's DELETE/INSERT
@@ -156,14 +163,17 @@ def escape_like(value: str) -> str:
 
 
 def tag_folder_filters(
-    tag: str | None, folder: str | None, *, alias: str | None = "posts"
+    tag: str | None, folder: str | None, *, alias: str | None = "posts", author: str | None = None
 ) -> tuple[list[str], list[str]]:
-    """The ``tag``/``folder`` WHERE fragments every listing path shares.
+    """The ``tag``/``folder``/``author`` WHERE fragments every listing path shares.
 
     Tags are stored with sentinel commas (``,news,ai,``) and matched with
-    ``LIKE '%,tag,%'``; a folder is the first path segment, ``LIKE 'folder/%'``.
-    One helper so the unranked list, the keyword ranker, the KNN join and the
-    SSE replay agree on which posts are eligible — and all escape wildcards.
+    ``LIKE '%,tag,%'``; a folder is the first path segment, ``LIKE 'folder/%'``;
+    ``author`` (relay #198, B-7) is an exact match against ``updated_by`` — "who
+    currently owns this post's content," unlike ``changes.author``'s "everyone
+    who's ever touched it." One helper so the unranked list, the keyword ranker,
+    the KNN join and the SSE replay agree on which posts are eligible — and all
+    escape wildcards.
     """
     col = f"{alias}." if alias else ""
     conditions: list[str] = []
@@ -174,6 +184,9 @@ def tag_folder_filters(
     if folder:
         conditions.append(f"{col}path LIKE ? ESCAPE '\\'")
         params.append(f"{escape_like(folder)}/%")
+    if author:
+        conditions.append(f"{col}updated_by = ?")
+        params.append(author)
     return conditions, params
 
 

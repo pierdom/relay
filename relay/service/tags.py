@@ -7,6 +7,7 @@ from collections import Counter
 import aiosqlite
 
 from .. import changes, events, history, vault
+from ..identity import Actor
 from ..models import (
     FolderCount,
     FolderListResponse,
@@ -49,7 +50,9 @@ async def list_tags(db: aiosqlite.Connection) -> TagListResponse:
     return TagListResponse(tags=[TagCount(tag=t, count=c) for t, c in counter.most_common()])
 
 
-async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagListResponse:
+async def rename_tag(
+    db: aiosqlite.Connection, tag: str, new_name: str, *, actor: Actor | None = None
+) -> TagListResponse:
     old = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
     if not old or not new_name:
         raise InvalidTag
@@ -70,23 +73,31 @@ async def rename_tag(db: aiosqlite.Connection, tag: str, new_name: str) -> TagLi
                 if t not in renamed:
                     renamed.append(t)
             row_properties = vault.decode_properties(row["properties"])
+            # A tag rename is a taxonomy change, not a content write (relay
+            # #198, B-7) — `updated_by` carries over from the row unchanged
+            # rather than attributing to whoever triggered the rename.
             new_path = vault.write_file(
                 id=row["id"], title=row["title"], content=row["content"], tags=renamed,
                 source=row["source"], created_at=row["created_at"],
                 updated_at=row["updated_at"], expires_at=row["expires_at"],
                 old_path=vault.abspath(row["path"]), properties=row_properties,
+                updated_by=row["updated_by"],
             )
             await vault.index_upsert(
                 db, id=row["id"], title=new_path.stem, path=new_path, content=row["content"],
                 tags=renamed, source=row["source"], created_at=row["created_at"],
                 updated_at=row["updated_at"], expires_at=row["expires_at"], properties=row_properties,
+                updated_by=row["updated_by"],
             )
         await db.execute("UPDATE tag_config SET tag = ? WHERE tag = ?", (new_name, old))
         await vault.write_tag_config(db)
         await db.commit()
         # K-2: commit while still holding `write_lock` — see posts.create_post's
         # comment for why the two must never be split by a lock release.
-        await history.commit(f"tag rename: {old} -> {new_name} ({len(affected)} post(s))")
+        await history.commit(
+            f"tag rename: {old} -> {new_name} ({len(affected)} post(s))",
+            author=actor.git_author if actor else None,
+        )
     # Every retagged post gets an SSE `post` event (relay #198, N-4) — this
     # never happened before, live or on reconnect: a connected client's post
     # list silently went stale on a tag rename, and a reconnecting one had no

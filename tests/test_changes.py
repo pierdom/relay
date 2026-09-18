@@ -404,6 +404,37 @@ async def test_no_since_returns_most_recent_limit(client):
     assert items[0]["seq"] > items[1]["seq"]   # newest first
 
 
+# ── author (relay #198, B-7) ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_changes_record_the_real_actor_and_can_filter_by_it(monkeypatch):
+    """Unlike every other test in this file (whose `client` fixture overrides
+    auth to a bare `None`), this drives real bearer authentication end to end
+    so `changes.author` reflects an actual identity, not the always-null
+    default every other test here deliberately exercises."""
+    monkeypatch.setattr(settings, "history_enabled", True)
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    await database.init_db()
+    await history.init()
+    await _db_sync()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        await c.post(
+            "/posts", json={"title": "By The Agent", "content": "x", "tags": []},
+            headers={"Authorization": "Bearer sk-news"},
+        )
+        await c.post("/posts", json={"title": "By The Human", "content": "x", "tags": []}, headers=AUTH)
+
+        all_changes = (await c.get("/changes", headers=AUTH)).json()["items"]
+        by_title = {i["title"]: i["author"] for i in all_changes}
+        assert by_title["By The Agent"] == "news-agent"
+        assert by_title["By The Human"] == "apikey"
+
+        filtered = (await c.get("/changes", params={"author": "news-agent"}, headers=AUTH)).json()["items"]
+        assert [i["title"] for i in filtered] == ["By The Agent"]
+
+
 # ── K-4: list_changes must clamp `limit` like every sibling paginated call ───
 #
 # REST is protected by FastAPI's own `Query(ge=1, le=200)`, but `changes.py`
@@ -627,10 +658,10 @@ async def test_history_commit_always_runs_under_write_lock(client, monkeypatch):
     real_commit = history.commit
     seen_unlocked: list[str] = []
 
-    async def _checking_commit(message: str) -> bool:
+    async def _checking_commit(message: str, *, author: str | None = None) -> bool:
         if not vault.write_lock.locked():
             seen_unlocked.append(message)
-        return await real_commit(message)
+        return await real_commit(message, author=author)
 
     monkeypatch.setattr(history, "commit", _checking_commit)
 
@@ -698,10 +729,10 @@ async def test_concurrent_create_and_update_do_not_misattribute_commits(client, 
 
     real_commit = history.commit
 
-    async def _slow_commit(message: str) -> bool:
+    async def _slow_commit(message: str, *, author: str | None = None) -> bool:
         if "create" in message:
             await asyncio.sleep(0.05)
-        return await real_commit(message)
+        return await real_commit(message, author=author)
 
     monkeypatch.setattr(history, "commit", _slow_commit)
 

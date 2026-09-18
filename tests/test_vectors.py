@@ -758,9 +758,9 @@ async def test_ranked_pool_covers_offset_plus_limit(db, backend, monkeypatch):
     calls: list[int] = []
     real_semantic_search = vectors.semantic_search
 
-    async def spy(db_, query, *, limit=50, tag=None, folder=None):
+    async def spy(db_, query, *, limit=50, tag=None, folder=None, author=None):
         calls.append(limit)
-        return await real_semantic_search(db_, query, limit=limit, tag=tag, folder=folder)
+        return await real_semantic_search(db_, query, limit=limit, tag=tag, folder=folder, author=author)
 
     monkeypatch.setattr(vectors, "semantic_search", spy)
     await service.list_posts(db, search="anything", mode="semantic", limit=10, offset=60)
@@ -774,9 +774,9 @@ async def test_ranked_pool_size_is_capped(db, backend, monkeypatch):
     calls: list[int] = []
     real_semantic_search = vectors.semantic_search
 
-    async def spy(db_, query, *, limit=50, tag=None, folder=None):
+    async def spy(db_, query, *, limit=50, tag=None, folder=None, author=None):
         calls.append(limit)
-        return await real_semantic_search(db_, query, limit=limit, tag=tag, folder=folder)
+        return await real_semantic_search(db_, query, limit=limit, tag=tag, folder=folder, author=author)
 
     monkeypatch.setattr(vectors, "semantic_search", spy)
     await service.list_posts(db, search="anything", mode="semantic", limit=50, offset=10_000)

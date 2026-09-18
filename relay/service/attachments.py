@@ -10,6 +10,7 @@ import aiosqlite
 
 from .. import folders, history, ingest, vault
 from ..config import settings
+from ..identity import Actor
 from ..models import (
     AttachmentDeleteResponse,
     AttachmentInfo,
@@ -113,6 +114,7 @@ async def ingest_attachment(
     folder: str | None = None,
     tags: list[str] | None = None,
     embed: bool = True,
+    actor: Actor | None = None,
 ) -> AttachmentResponse:
     """Resolve any of the three byte transports (base64 / source_url / upload_id)
     then store via ``add_attachment``. The single entry point REST + MCP share."""
@@ -120,7 +122,7 @@ async def ingest_attachment(
         filename=filename, data=data, source_url=source_url, upload_id=upload_id
     )
     return await add_attachment(
-        db, filename=name, data=raw, post_id=post_id, folder=folder, tags=tags, embed=embed
+        db, filename=name, data=raw, post_id=post_id, folder=folder, tags=tags, embed=embed, actor=actor
     )
 
 
@@ -147,6 +149,7 @@ async def add_attachment(
     folder: str | None = None,
     tags: list[str] | None = None,
     embed: bool = True,
+    actor: Actor | None = None,
 ) -> AttachmentResponse:
     """Store an attachment in a folder's ``assets/`` dir and return its embed ref.
 
@@ -187,7 +190,7 @@ async def add_attachment(
         # post update. Committed while still holding `write_lock` (K-2) — see
         # posts.create_post's comment for why the two must never be split by a
         # lock release.
-        await history.commit(f"attachment add: {written.name}")
+        await history.commit(f"attachment add: {written.name}", author=actor.git_author if actor else None)
     ref = f"![[{written.name}]]"
 
     result_post_id = None
@@ -195,7 +198,7 @@ async def add_attachment(
         from .posts import update_post  # posts imports this module; keep the cycle out of import time
 
         new_content = row["content"].rstrip() + f"\n\n{ref}\n"
-        await update_post(db, row["id"], PostUpdate(content=new_content))
+        await update_post(db, row["id"], PostUpdate(content=new_content), actor=actor)
         result_post_id = row["id"]
 
     return AttachmentResponse(
@@ -222,7 +225,9 @@ async def list_attachments(
     return AttachmentListResponse(items=items)
 
 
-async def delete_attachment(db: aiosqlite.Connection, name: str) -> AttachmentDeleteResponse | None:
+async def delete_attachment(
+    db: aiosqlite.Connection, name: str, *, actor: Actor | None = None
+) -> AttachmentDeleteResponse | None:
     """Delete an attachment file. Returns the removed name plus any post ids that
     still embed/link it (now dangling), or ``None`` if it didn't resolve."""
     async with vault.write_lock:
@@ -235,5 +240,5 @@ async def delete_attachment(db: aiosqlite.Connection, name: str) -> AttachmentDe
         referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
         # K-2: commit while still holding `write_lock` — see posts.create_post's
         # comment for why the two must never be split by a lock release.
-        await history.commit(f"attachment delete: {removed.name}")
+        await history.commit(f"attachment delete: {removed.name}", author=actor.git_author if actor else None)
     return AttachmentDeleteResponse(filename=removed.name, referenced_by=sorted(referenced_by))

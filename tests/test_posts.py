@@ -15,7 +15,7 @@ from relay import database, service, vault
 from relay.auth import require_api_key
 from relay.config import settings
 from relay.main import app
-from relay.models import PostCreate
+from relay.models import PostCreate, PostUpdate
 
 AUTH = {"Authorization": "Bearer test-key"}
 
@@ -72,6 +72,47 @@ async def test_create_get_list_update_delete_roundtrip(client):
     assert r.status_code in (200, 204)
     r = await client.get(f"/posts/{pid}", headers=AUTH)
     assert r.status_code == 404
+
+
+# ── updated_by (relay #198, B-7) ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_updated_by_is_set_on_create_and_overwritten_on_update(vault_dir):
+    from relay.identity import Actor
+
+    db = await _db()
+    try:
+        agent = Actor(name="news-agent", email="news-agent@relay.local")
+        human = Actor(name="me@example.com", email="me@example.com")
+
+        created = await service.create_post(
+            db, PostCreate(title="Attributed", content="one", tags=[]), actor=agent
+        )
+        assert created.updated_by == "news-agent"
+        # The file itself carries it — a 7th reserved front-matter key, not
+        # just an index-only field.
+        row = await _fetch_row(db, created.id)
+        text = vault.abspath(row["path"]).read_text(encoding="utf-8")
+        assert "updated_by: news-agent" in text
+
+        updated = await service.update_post(
+            db, created.id, PostUpdate(content="two"), actor=human
+        )
+        assert updated.updated_by == "me@example.com"
+
+        # A caller that doesn't thread identity leaves attribution alone
+        # rather than clearing it — the safe default for call sites relay
+        # hasn't wired yet.
+        unattributed = await service.update_post(db, created.id, PostUpdate(content="three"))
+        assert unattributed.updated_by == "me@example.com"
+    finally:
+        await db.close()
+
+
+async def _fetch_row(db, post_id: int):
+    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
+        return await cur.fetchone()
 
 
 # ── task C: concurrent-create id race ────────────────────────────────────────

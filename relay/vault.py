@@ -220,6 +220,7 @@ def write_file(
     old_path: Path | None = None,
     move_to_folder: str | None = None,
     properties: dict | None = None,
+    updated_by: str | None = None,
 ) -> Path:
     """Write a post to disk; rename from ``old_path`` if the title changed.
 
@@ -248,6 +249,7 @@ def write_file(
         "created_at": created_at,
         "updated_at": updated_at,
         "expires_at": expires_at,
+        "updated_by": updated_by,
     }
     text = frontmatter.serialize(meta, content, properties)
     _atomic_write(new_path, text)
@@ -515,6 +517,7 @@ async def index_upsert(
     updated_at: str | None,
     expires_at: str | None,
     properties: dict | None = None,
+    updated_by: str | None = None,
     sync_embeddings: bool = True,
 ) -> None:
     """``sync_embeddings=False`` skips the (possibly slow, cache-missing)
@@ -524,15 +527,17 @@ async def index_upsert(
     skipped (see its docstring for why the split exists)."""
     await db.execute(
         """
-        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at, properties)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at,
+                            properties, updated_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, path=excluded.path, content=excluded.content,
             tags=excluded.tags, source=excluded.source, created_at=excluded.created_at,
-            updated_at=excluded.updated_at, expires_at=excluded.expires_at, properties=excluded.properties
+            updated_at=excluded.updated_at, expires_at=excluded.expires_at, properties=excluded.properties,
+            updated_by=excluded.updated_by
         """,
         (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
-         created_at, updated_at, expires_at, encode_properties(properties)),
+         created_at, updated_at, expires_at, encode_properties(properties), updated_by),
     )
     if sync_embeddings:
         await vectors.sync_post_chunks(db, post_id=id, title=title, content=content, tags=tags)
@@ -551,6 +556,7 @@ async def index_insert(
     updated_at: str | None,
     expires_at: str | None,
     properties: dict | None = None,
+    updated_by: str | None = None,
 ) -> None:
     """Plain INSERT for a brand-new post — **no** ``ON CONFLICT``.
 
@@ -561,11 +567,12 @@ async def index_insert(
     """
     await db.execute(
         """
-        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at, properties)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO posts (id, title, path, content, tags, source, created_at, updated_at, expires_at,
+                            properties, updated_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
-         created_at, updated_at, expires_at, encode_properties(properties)),
+         created_at, updated_at, expires_at, encode_properties(properties), updated_by),
     )
     await vectors.sync_post_chunks(db, post_id=id, title=title, content=content, tags=tags)
 
@@ -668,6 +675,7 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
             expires_at=meta.get("expires_at"),
             old_path=path,
             properties=meta.get("properties"),
+            updated_by=meta.get("updated_by"),
         )
         parsed.append((new_path, meta, body))
 
@@ -685,6 +693,7 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
             updated_at=effective_updated_at(path, meta),
             expires_at=meta.get("expires_at"),
             properties=meta.get("properties"),
+            updated_by=meta.get("updated_by"),
             # Embedding sync is deliberately skipped here — see index_upsert's
             # and backfill_embeddings's docstrings. This loop runs inline
             # during app startup and must stay fast; main.py's lifespan kicks

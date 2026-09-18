@@ -167,9 +167,15 @@ async def _ingest(db: aiosqlite.Connection, commits: list[history.CommitPaths]) 
                 at = normalize_expires_at(commit.when) or commit.when
             except ValueError:
                 at = commit.when   # malformed timestamp: keep it rather than drop the row
+            # "relay" is `CommitPaths`'s own default (relay #198, B-7) for a
+            # commit with no explicit `--author` — no specific actor made
+            # this write (TTL sweep, external-edit batch) — and maps to NULL
+            # here, not the literal string, matching `ChangeEntry.author`'s
+            # "always null until B-7" contract for those cases.
+            author = None if commit.author_name == "relay" else commit.author_name
             cur = await db.execute(
-                "INSERT INTO changes (post_id, title, tags, action, at, sha, author) VALUES (?, ?, ?, ?, ?, ?, NULL)",
-                (post_id, title, tags, action, at, commit.sha),
+                "INSERT INTO changes (post_id, title, tags, action, at, sha, author) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (post_id, title, tags, action, at, commit.sha, author),
             )
             assigned[post_id] = cur.lastrowid
     if assigned:
@@ -254,11 +260,13 @@ async def record_latest(db: aiosqlite.Connection, *, post_ids: tuple[int, ...] =
 
 
 async def list_changes(
-    db: aiosqlite.Connection, *, since: str | None = None, limit: int = 50
+    db: aiosqlite.Connection, *, since: str | None = None, limit: int = 50, author: str | None = None
 ) -> list[aiosqlite.Row]:
     """Changes newest-first, optionally starting after a `seq` (as a plain
     integer string) or an ISO-8601 `at` value. Neither given: the most
-    recent `limit`.
+    recent `limit`. `author` (relay #198, B-7) filters to one identity's
+    writes — everything they've touched, including a since-overwritten edit,
+    unlike `posts.updated_by`'s "who wrote the *current* state" filter.
 
     Raises `HistoryUnavailable` when history is off — the table is
     entirely derived from it, so it would otherwise just look permanently
@@ -275,6 +283,9 @@ async def list_changes(
         else:
             conditions.append("at > ?")
             params.append(since)
+    if author:
+        conditions.append("author = ?")
+        params.append(author)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     params.append(_clamp_limit(limit))
     async with db.execute(

@@ -151,13 +151,23 @@ def _init_sync() -> bool:
     return True
 
 
-def _commit_sync(message: str) -> bool:
-    """Stage the whole vault and commit. True if a commit was actually created."""
+def _commit_sync(message: str, author: str | None = None) -> bool:
+    """Stage the whole vault and commit. True if a commit was actually created.
+
+    ``author`` (``"Name <email>"``, relay #198, B-7) sets git's own
+    ``--author`` field — who the change is really from — while the committer
+    stays the pinned ``relay <relay@localhost>`` identity (``_IDENTITY``)
+    regardless: relay always did the actual commit, but a specific agent or
+    human may be who it's from. ``None`` (the TTL sweep, external-edit
+    batches — nothing a specific actor did) leaves both as ``relay``,
+    unchanged from before this feature.
+    """
     staged = _run("add", "-A")
     if staged.returncode:
         logger.warning("Vault history: staging failed — %s", staged.stderr.strip())
         return False
-    done = _run("commit", "-m", message)
+    args = ("commit", "-m", message) if author is None else ("commit", f"--author={author}", "-m", message)
+    done = _run(*args)
     if done.returncode == 0:
         return True
     # rc=1 with a clean tree is the normal "nothing changed" case, not an error:
@@ -187,8 +197,10 @@ async def init() -> None:
             logger.warning("Vault history unavailable: %s", exc)
 
 
-async def commit(message: str) -> bool:
+async def commit(message: str, *, author: str | None = None) -> bool:
     """Commit the vault's current state. Returns whether anything was recorded.
+
+    ``author`` (relay #198, B-7): see ``_commit_sync``'s docstring.
 
     Safe to call from any write path: it never raises and never blocks the event
     loop (git runs in a worker thread).
@@ -197,7 +209,7 @@ async def commit(message: str) -> bool:
         return False
     async with _lock:
         try:
-            return await asyncio.to_thread(_commit_sync, message)
+            return await asyncio.to_thread(_commit_sync, message, author)
         except (OSError, subprocess.SubprocessError) as exc:
             logger.warning("Vault history: commit skipped — %s", exc)
             return False
@@ -219,6 +231,12 @@ def reset_state_for_tests() -> None:
 # parser keys on control characters rather than a punctuation convention.
 _RS, _FS = "\x1e", "\x1f"
 _LOG_FORMAT = f"{_RS}%H{_FS}%aI{_FS}%s"
+# `_commits_sync` only, not the shared `_LOG_FORMAT` above: three other log
+# readers (`Revision`, `Deletion`, the pickaxe lookup) parse with `_parse_log`
+# and don't need author — only `changes.py`'s changelog does (relay #198,
+# B-7). `%an`/`%ae` are the git *author* (see `_commit_sync`'s `--author`),
+# not `%cn`/`%ce` (the pinned `relay` committer).
+_COMMITS_LOG_FORMAT = f"{_RS}%H{_FS}%aI{_FS}%an{_FS}%ae{_FS}%s"
 
 
 @dataclass(frozen=True)
@@ -430,6 +448,12 @@ class CommitPaths:
     when: str
     message: str
     changes: list[tuple[str, str]]   # (status, path)
+    # Git's real `--author` (relay #198, B-7) — "relay" (`_IDENTITY`'s pinned
+    # name) when the commit carried no explicit `--author`, i.e. no specific
+    # actor made this write (TTL sweep, external-edit batch). `changes._ingest`
+    # is what turns that "relay" sentinel into a `NULL` `changes.author`.
+    author_name: str = "relay"
+    author_email: str = "relay@localhost"
 
 
 def _parse_commits(out: str) -> list[CommitPaths]:
@@ -438,14 +462,15 @@ def _parse_commits(out: str) -> list[CommitPaths]:
     commit order, so callers should feed commits in that order."""
     out_rows: list[CommitPaths] = []
     sha = when = message = ""
+    author_name = author_email = ""
     changes: list[tuple[str, str]] = []
     for line in out.split("\n"):
         if line.startswith(_RS):
             if sha:
-                out_rows.append(CommitPaths(sha, when, message, changes))
+                out_rows.append(CommitPaths(sha, when, message, changes, author_name, author_email))
             parts = line[1:].split(_FS)
-            if len(parts) == 3:
-                sha, when, message = parts
+            if len(parts) == 5:
+                sha, when, author_name, author_email, message = parts
             changes = []
             continue
         row = line.strip()
@@ -458,7 +483,7 @@ def _parse_commits(out: str) -> list[CommitPaths]:
         if sha:
             changes.append((status, path))
     if sha:
-        out_rows.append(CommitPaths(sha, when, message, changes))
+        out_rows.append(CommitPaths(sha, when, message, changes, author_name, author_email))
     return out_rows
 
 
@@ -477,7 +502,7 @@ def _commits_sync(range_or_single: str) -> list[CommitPaths]:
     # `changes._ingest` for now rather than churning this again to save a
     # `.endswith` call per path.
     got = _run(
-        "log", "--reverse", "--no-renames", "--format=" + _LOG_FORMAT,
+        "log", "--reverse", "--no-renames", "--format=" + _COMMITS_LOG_FORMAT,
         "--name-status", range_or_single,
     )
     if got.returncode:

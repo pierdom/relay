@@ -8,6 +8,7 @@ from .. import ingest, service, vault
 from ..auth import require_api_key
 from ..config import settings
 from ..database import get_db
+from ..identity import Actor
 from ..models import (
     AttachmentCreate,
     AttachmentDeleteResponse,
@@ -43,11 +44,11 @@ async def list_attachments(
     "/attachments",
     response_model=AttachmentResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_api_key)],
 )
 async def create_attachment(
     body: AttachmentCreate,
     db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
 ) -> AttachmentResponse:
     """Store an attachment in a folder's ``assets/``; with ``post_id`` the
     ``![[file]]`` embed is appended to that post's body. The bytes come from
@@ -57,7 +58,7 @@ async def create_attachment(
         return await service.ingest_attachment(
             db, filename=body.filename, data=body.data, source_url=body.source_url,
             upload_id=body.upload_id, post_id=body.post_id, folder=body.folder,
-            tags=body.tags, embed=body.embed,
+            tags=body.tags, embed=body.embed, actor=actor,
         )
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data is not valid base64") from None
@@ -148,14 +149,14 @@ async def get_attachment(name: str) -> FileResponse:
 @router.delete(
     "/attachments/{name:path}",
     response_model=AttachmentDeleteResponse,
-    dependencies=[Depends(require_api_key)],
 )
 async def delete_attachment(
     name: str,
     db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
 ) -> AttachmentDeleteResponse:
     """Delete an attachment file; reports any posts that still reference it."""
-    result = await service.delete_attachment(db, name)
+    result = await service.delete_attachment(db, name, actor=actor)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     return result

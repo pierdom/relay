@@ -6,6 +6,7 @@ from pathlib import Path
 import aiosqlite
 
 from .. import changes, events, folders, frontmatter, history, vault
+from ..identity import Actor
 from ..models import (
     DeletedPost,
     DeletedPostsResponse,
@@ -145,7 +146,9 @@ async def get_post_revision(
     )
 
 
-async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> PostResponse:
+async def restore_post(
+    db: aiosqlite.Connection, post_id: int, sha: str, *, actor: Actor | None = None
+) -> PostResponse:
     """Roll a post back to an earlier revision, recreating it if it was deleted.
 
     A restore is an ordinary write, so it is committed like any other — a restore
@@ -168,7 +171,7 @@ async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> Post
             db,
             post_id,
             PostUpdate(title=title, content=body, tags=tags, source=source, expires_at=expires_at),
-            commit_message=label,
+            commit_message=label, actor=actor,
         )
 
     # Deleted: recreate the file and its index row, keeping the original id so
@@ -188,17 +191,18 @@ async def restore_post(db: aiosqlite.Connection, post_id: int, sha: str) -> Post
             id=post_id, title=title, content=body, tags=tags, source=source,
             created_at=created_at, updated_at=now, expires_at=expires_at,
             move_to_folder=folder, properties=properties,
+            updated_by=actor.name if actor else None,
         )
         await vault.index_insert(
             db, id=post_id, title=path.stem, path=path, content=body, tags=tags,
             source=source, created_at=created_at, updated_at=now, expires_at=expires_at,
-            properties=properties,
+            properties=properties, updated_by=actor.name if actor else None,
         )
         await db.commit()
         post = PostResponse.from_row(await _fetch(db, post_id))
         # K-2: commit while still holding `write_lock` — see posts.create_post's
         # comment for why the two must never be split by a lock release.
-        await history.commit(label)
+        await history.commit(label, author=actor.git_author if actor else None)
     seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
     await events.publish(post.model_dump(), seq=seq)
     return post

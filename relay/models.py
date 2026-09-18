@@ -18,10 +18,12 @@ def etag_for_row(row) -> str:
     as the watcher's debounced reconcile of a human's Obsidian edit) this
     token exists to catch. Includes ``properties`` so an external Obsidian
     edit to a Property (N-2) also invalidates a stale ``if_match``, not just
-    relay-initiated field changes."""
+    relay-initiated field changes. Includes ``updated_by`` (relay #198, B-7)
+    for the same reason — it changes exactly when a write's actor does."""
     parts = [
         row["title"], row["content"], row["tags"], row["source"] or "",
         row["updated_at"] or row["created_at"], row["expires_at"] or "", row["properties"] or "{}",
+        row["updated_by"] or "",
     ]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
 
@@ -117,6 +119,13 @@ class PostResponse(BaseModel):
         description="Non-relay front-matter keys (Obsidian Properties, custom fields) — read-only here; "
         "edit them in Obsidian or hand-edit the file",
     )
+    updated_by: str | None = Field(
+        default=None,
+        description="Identity that made the most recent write (relay #198, B-7) — a named API key or an "
+        "OIDC user's email/sub. Set on create too, unlike updated_at, so a never-edited post still "
+        "attributes to its creator. Null for a write history predates, or one made by an unauthenticated "
+        "path (the TTL sweep, an external Obsidian edit).",
+    )
     etag: str = Field(
         description="Opaque version token (relay #198, N-1) — pass back as if_match on a write to detect "
         "a concurrent change; changes whenever any mutable field of the post does"
@@ -134,6 +143,7 @@ class PostResponse(BaseModel):
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
             properties=_decode_properties(row["properties"]),
+            updated_by=row["updated_by"],
             etag=etag_for_row(row),
         )
 
@@ -242,6 +252,9 @@ class PostSummary(BaseModel):
         default_factory=dict,
         description="Non-relay front-matter keys (Obsidian Properties, custom fields) — read-only here",
     )
+    updated_by: str | None = Field(
+        default=None, description="See PostResponse.updated_by (relay #198, B-7)"
+    )
     etag: str = Field(description="Opaque version token (relay #198, N-1) — pass back as if_match on a write")
 
     @classmethod
@@ -257,6 +270,7 @@ class PostSummary(BaseModel):
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
             properties=_decode_properties(row["properties"]),
+            updated_by=row["updated_by"],
             etag=etag_for_row(row),
         )
 

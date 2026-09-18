@@ -327,3 +327,67 @@ async def test_wrong_api_key_is_401(tmp_path, monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/posts", headers={"Authorization": "Bearer wrong-key"})
     assert r.status_code == 401
+
+
+# ── per-agent identity (relay #198, B-7) ───────────────────────────────────────
+
+
+def test_named_api_keys_parses_valid_entries(monkeypatch):
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news,finance-agent:sk-finance")
+    assert settings.named_api_keys == {"news-agent": "sk-news", "finance-agent": "sk-finance"}
+    assert settings.all_api_keys == {
+        "apikey": "test-key", "news-agent": "sk-news", "finance-agent": "sk-finance",
+    }
+
+
+def test_named_api_keys_skips_malformed_and_reserved_and_duplicate_entries(monkeypatch):
+    monkeypatch.setattr(
+        settings, "api_keys",
+        "good:sk-good,no-colon,:blank-name,apikey:sk-shadow,good:sk-second-good,Bad Name:sk-x",
+    )
+    # only the one well-formed, non-reserved, non-duplicate entry survives
+    assert settings.named_api_keys == {"good": "sk-good"}
+
+
+def test_named_api_keys_empty_by_default():
+    assert settings.named_api_keys == {}
+    assert settings.all_api_keys == {"apikey": "test-key"}
+
+
+def test_resolve_bearer_matches_the_primary_and_named_keys(monkeypatch):
+    from relay.identity import Actor, resolve_bearer
+
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    assert resolve_bearer("test-key") == Actor(name="apikey", email="apikey@relay.local")
+    assert resolve_bearer("sk-news") == Actor(name="news-agent", email="news-agent@relay.local")
+    assert resolve_bearer("sk-nobody") is None
+    assert resolve_bearer(None) is None
+    assert resolve_bearer("") is None
+
+
+def test_actor_from_session_prefers_email_then_sub_then_apikey():
+    from relay.identity import actor_from_session
+
+    assert actor_from_session({"sub": "u1", "email": "me@example.com"}).name == "me@example.com"
+    assert actor_from_session({"sub": "u1", "email": ""}).name == "u1"
+    assert actor_from_session({"sub": "apikey", "email": ""}).name == "apikey"
+
+
+@pytest.mark.asyncio
+async def test_a_named_key_authenticates_and_is_attributed_by_name(tmp_path, monkeypatch):
+    """End to end: a request bearing a *named* key (not the primary API_KEY)
+    both authenticates and stamps its own identity into the write — the
+    scenario B-7 exists for (five schedulers, one relay, distinguishable)."""
+    from relay import database
+
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    await database.init_db()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/posts",
+            json={"title": "Filed By News Agent", "content": "x", "tags": []},
+            headers={"Authorization": "Bearer sk-news"},
+        )
+    assert r.status_code == 201, r.text
+    assert r.json()["updated_by"] == "news-agent"

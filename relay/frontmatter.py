@@ -1,8 +1,9 @@
 """YAML front-matter parsing/serialization and Obsidian-style filename rules.
 
 A post on disk is a Markdown file: a YAML front-matter block (``id``, ``tags``,
-``source``, ``created_at``, ``updated_at``, ``expires_at``) followed by the body.
-The post *title* is NOT stored here — it is the filename stem (Obsidian-native).
+``source``, ``created_at``, ``updated_at``, ``expires_at``, ``updated_by``)
+followed by the body. The post *title* is NOT stored here — it is the
+filename stem (Obsidian-native).
 """
 from __future__ import annotations
 
@@ -15,7 +16,9 @@ import yaml
 # Fields carried in front-matter. ``title`` is intentionally absent — it is the
 # filename. Order here is the order written to disk.
 _DATETIME_FIELDS = ("created_at", "updated_at", "expires_at")
-_FIELD_ORDER = ("id", "tags", "source", *_DATETIME_FIELDS)
+# ``updated_by`` (relay #198, B-7): the identity that made the most recent
+# write — a 7th relay-owned key, alongside the six CLAUDE.md documents.
+_FIELD_ORDER = ("id", "tags", "source", *_DATETIME_FIELDS, "updated_by")
 
 _FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 
@@ -76,6 +79,8 @@ def parse(text: str) -> tuple[dict, str]:
     meta["source"] = raw.get("source")
     for f in _DATETIME_FIELDS:
         meta[f] = _to_iso(raw.get(f))
+    updated_by = raw.get("updated_by")
+    meta["updated_by"] = str(updated_by) if updated_by is not None else None
     # Anything else in the front-matter (Obsidian Properties like `aliases`,
     # `cssclasses`, or a custom key) isn't a relay-owned field, but a human or
     # Obsidian put it there — round-tripped verbatim by `serialize` rather than

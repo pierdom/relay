@@ -20,6 +20,7 @@ from fastmcp import FastMCP
 from fastmcp.server.auth.auth import AccessToken, AuthProvider, MultiAuth, TokenVerifier
 from fastmcp.server.auth.oauth_proxy.models import UpstreamTokenSet
 from fastmcp.server.auth.oidc_proxy import OIDCProxy
+from fastmcp.server.dependencies import get_access_token
 from fastmcp.utilities.types import Image
 from joserfc import jwt as joserfc_jwt
 from joserfc.errors import ExpiredTokenError
@@ -36,8 +37,8 @@ from mcp.types import Icon
 from pydantic import ValidationError
 
 from . import __version__, changes, database, lint, metrics, service, status, vault
-from .auth import bearer_matches
 from .config import settings
+from .identity import Actor, resolve_bearer
 from .models import AttachmentCreate, ChangeEntry, ChangeListResponse, PostCreate, PostUpdate, TagConfigCreate
 from .routes.auth import _authorized
 
@@ -354,12 +355,14 @@ class _StaticBearerAuth(TokenVerifier):
     fastmcp's own `DebugTokenVerifier` (`fastmcp.server.auth.providers.debug`) — same
     shape, but its name and docstring ("bypasses standard security checks... only use
     in controlled environments") is the wrong signal to leave sitting in relay's
-    actual production auth path. Delegates comparison to `auth.bearer_matches` —
-    relay's own constant-time-safe compare (relay/auth.py: "the only place the key is
-    compared") — rather than a bare `==`."""
+    actual production auth path. Delegates comparison to `identity.resolve_bearer`
+    (relay #198, B-7) — the same constant-time, multi-key-aware resolver
+    `auth.require_api_key` uses — rather than a bare `==`, and its return
+    identifies *which* configured key matched, not just whether one did."""
 
     async def verify_token(self, token: str) -> AccessToken | None:
-        if bearer_matches(token):
+        actor = resolve_bearer(token)
+        if actor is not None:
             # Caught live (relay #313 Phase 2): with MCP OAuth active, MultiAuth
             # enforces `required_scopes` against every verifier's result, not just
             # the OAuth server's — `scopes=[]` here made the static-bearer path
@@ -367,7 +370,13 @@ class _StaticBearerAuth(TokenVerifier):
             # satisfy `settings.mcp_scopes`. The static key represents full,
             # unscoped relay access (same as it always has); reporting relay's
             # actual configured scopes is what lets it clear that check.
-            return AccessToken(token=token, client_id="relay", scopes=settings.mcp_scopes)
+            #
+            # `subject=actor.name` (relay #198, B-7): which configured key
+            # matched — "apikey" for the primary key, or a RELAY_API_KEYS
+            # name — read back by `_current_actor()` for git/changes/
+            # updated_by provenance. `client_id` stays the fixed "relay" in
+            # case anything else depends on its current constant value.
+            return AccessToken(token=token, client_id="relay", scopes=settings.mcp_scopes, subject=actor.name)
         return None
 
 
@@ -580,6 +589,43 @@ mcp = FastMCP(
 _db = database.connect
 
 
+def _current_actor() -> Actor | None:
+    """The identity behind the in-flight tool call (relay #198, B-7), or
+    ``None`` for a caller this server can't yet attribute (shouldn't happen —
+    every tool call is already authenticated by ``auth=_build_auth()`` — but
+    provenance is advisory enrichment, never a reason to fail a write).
+
+    Two paths, confirmed by reading fastmcp's ``AccessToken`` construction
+    directly (not assumed — same standard this file already holds every
+    other `OIDCProxy` subtlety to):
+
+    - **Static bearer**: ``subject`` is set by ``_StaticBearerAuth`` below to
+      the matched key's configured name (``apikey`` or a `RELAY_API_KEYS`
+      name) — used as-is.
+    - **MCP OAuth** (`verify_id_token=True`): the token verifier
+      (`fastmcp.server.auth.providers.jwt.JWTVerifier.load_access_token`)
+      sets ``subject = claims["sub"]`` from PocketID's **id_token** and
+      ``claims`` to that token's full decoded payload — so `email` (relay
+      requests the `email` OIDC scope) is already a top-level claim,
+      independently of `_RelayOIDCProxy._extract_upstream_claims`'s own copy
+      nested under `claims["upstream_claims"]` (a separate fastmcp
+      mechanism, `OAuthProxy.load_access_token`'s token-swap merge). `sub` is
+      an opaque, IdP-assigned identifier — unreadable in a git author line or
+      an `?author=` filter — so `email` is preferred here even though
+      `subject` is the more reliably-present field, mirroring
+      `identity.actor_from_session`'s own email-first priority for the web
+      UI's OIDC session cookie.
+    """
+    token = get_access_token()
+    if token is None:
+        return None
+    claims = token.claims or {}
+    name = claims.get("email") or token.subject or claims.get("sub")
+    if not name:
+        return None
+    return Actor(name=name, email=f"{name}@relay.local" if "@" not in name else name)
+
+
 @mcp.resource(
     "relay://master-document",
     name="Master Document",
@@ -621,7 +667,7 @@ async def publish_post(
         expires_at=expires_at,
     )
     async with _db() as db:
-        post = await service.create_post(db, body)
+        post = await service.create_post(db, body, actor=_current_actor())
     return post.model_dump()
 
 
@@ -639,7 +685,8 @@ async def publish_post(
         "enabled. A bare id or '#id' as search (e.g. '42' or '#42') is a lookup, not a ranked "
         "search: it answers with just that post as the response's 'pinned' field (items empty) "
         "and ignores mode/tag/folder entirely — a plain id lookup works the same whether or not "
-        "this relay has embeddings enabled."
+        "this relay has embeddings enabled. author (relay #198, B-7) filters to posts whose most "
+        "recent write is attributed to that identity (a named API key or an OIDC user's email/sub)."
     )
 )
 async def list_posts(
@@ -652,13 +699,14 @@ async def list_posts(
     sort: str = "updated",
     order: str = "desc",
     mode: str = "keyword",
+    author: str | None = None,
 ) -> dict:
     metrics.record_tool_call("list_posts")
     async with _db() as db:
         try:
             result = await service.list_posts(
                 db, tag=tag, folder=folder, search=search, limit=limit, offset=offset,
-                summary=summary, sort=sort, order=order, mode=mode,
+                summary=summary, sort=sort, order=order, mode=mode, author=author,
             )
         except service.SemanticSearchUnavailable:
             return {"error": "Semantic search is not enabled on this relay."}
@@ -710,7 +758,7 @@ async def update_post(
     body = PostUpdate(**{k: v for k, v in fields.items() if v is not None})
     async with _db() as db:
         try:
-            post = await service.update_post(db, id, body)
+            post = await service.update_post(db, id, body, actor=_current_actor())
         except service.PostNotFound:
             return {"error": f"Post #{id} not found."}
         except service.ConcurrentModification:
@@ -735,7 +783,7 @@ async def edit_post(id: int, old_str: str, new_str: str, if_match: str | None = 
     metrics.record_tool_call("edit_post")
     async with _db() as db:
         try:
-            post = await service.edit_post(db, id, old_str, new_str, if_match=if_match)
+            post = await service.edit_post(db, id, old_str, new_str, if_match=if_match, actor=_current_actor())
         except service.PostNotFound:
             return {"error": f"Post #{id} not found."}
         except service.EditNoChange:
@@ -765,7 +813,7 @@ async def append_post(id: int, content: str, if_match: str | None = None) -> dic
     metrics.record_tool_call("append_post")
     async with _db() as db:
         try:
-            post = await service.append_post(db, id, content, if_match=if_match)
+            post = await service.append_post(db, id, content, if_match=if_match, actor=_current_actor())
         except service.PostNotFound:
             return {"error": f"Post #{id} not found."}
         except service.ConcurrentModification:
@@ -821,19 +869,20 @@ async def list_deleted_posts(limit: int = 50, include_expiry: bool = False) -> d
     description=(
         "The vault changelog (relay #198, N-4): every post-affecting write, newest first — "
         "create, update, edit, append, delete, restore, tag rename, an external Obsidian "
-        "edit/delete, or a TTL expiry. Each item has seq, id, title, action, when, sha (and "
-        "author, always null until per-agent identity ships). Pass since as a seq from a "
-        "prior response to page forward, or an ISO 8601 timestamp to see what moved after a "
-        "given time — e.g. 'what did the schedulers publish overnight'. Omit since for the "
-        "most recent `limit`. This is a flat feed over git history, not a second store — "
-        "reading it costs nothing extra."
+        "edit/delete, or a TTL expiry. Each item has seq, id, title, action, when, sha and "
+        "author (relay #198, B-7: null for a write that predates it, or one with no "
+        "authenticated identity — the TTL sweep, an external edit). Pass since as a seq "
+        "from a prior response to page forward, or an ISO 8601 timestamp to see what moved "
+        "after a given time — e.g. 'what did the schedulers publish overnight'. Omit since "
+        "for the most recent `limit`. author filters to one identity's writes. This is a "
+        "flat feed over git history, not a second store — reading it costs nothing extra."
     )
 )
-async def list_changes(since: str | None = None, limit: int = 50) -> dict:
+async def list_changes(since: str | None = None, limit: int = 50, author: str | None = None) -> dict:
     metrics.record_tool_call("list_changes")
     async with _db() as db:
         try:
-            rows = await changes.list_changes(db, since=since, limit=limit)
+            rows = await changes.list_changes(db, since=since, limit=limit, author=author)
         except changes.HistoryUnavailable:
             return {"error": "Vault history is disabled or git is unavailable."}
     return ChangeListResponse(items=[ChangeEntry.from_row(r) for r in rows]).model_dump()
@@ -915,7 +964,7 @@ async def rename_tag(tag: str, new_name: str) -> dict:
         return {"error": "new_name must contain at least one letter, digit, hyphen or underscore."}
     async with _db() as db:
         try:
-            result = await service.rename_tag(db, tag, cleaned)
+            result = await service.rename_tag(db, tag, cleaned, actor=_current_actor())
         except service.InvalidTag:
             # `InvalidTag` carries no message (REST supplies its own static
             # detail too — see routes/tags.py) — `str(exc)` here would be "".
@@ -935,7 +984,7 @@ async def restore_post(id: int, sha: str) -> dict:
     metrics.record_tool_call("restore_post")
     async with _db() as db:
         try:
-            post = await service.restore_post(db, id, sha)
+            post = await service.restore_post(db, id, sha, actor=_current_actor())
         except service.HistoryUnavailable:
             return {"error": "Vault history is disabled or git is unavailable."}
         except service.RevisionNotFound:
@@ -1049,7 +1098,7 @@ async def delete_post(id: int) -> dict:
     metrics.record_tool_call("delete_post")
     async with _db() as db:
         try:
-            await service.delete_post(db, id)
+            await service.delete_post(db, id, actor=_current_actor())
         except service.ProtectedPost:
             return {"error": "Master document (id=0) cannot be deleted."}
         except service.PostNotFound:
@@ -1093,7 +1142,7 @@ async def add_attachment(
             result = await service.ingest_attachment(
                 db, filename=body.filename, data=body.data, source_url=body.source_url,
                 upload_id=body.upload_id, post_id=body.post_id, folder=body.folder,
-                tags=body.tags, embed=body.embed,
+                tags=body.tags, embed=body.embed, actor=_current_actor(),
             )
         except ValueError:
             return {"error": "data is not valid base64"}
@@ -1154,7 +1203,7 @@ async def get_attachment(name: str):
 async def delete_attachment(name: str) -> dict:
     metrics.record_tool_call("delete_attachment")
     async with _db() as db:
-        result = await service.delete_attachment(db, name)
+        result = await service.delete_attachment(db, name, actor=_current_actor())
     if result is None:
         return {"error": f"Attachment '{name}' not found."}
     return result.model_dump()

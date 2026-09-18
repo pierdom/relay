@@ -431,7 +431,13 @@ def _embed_query(query: str) -> list[float]:
 
 
 async def semantic_search(
-    db: aiosqlite.Connection, query: str, *, limit: int = 50, tag: str | None = None, folder: str | None = None
+    db: aiosqlite.Connection,
+    query: str,
+    *,
+    limit: int = 50,
+    tag: str | None = None,
+    folder: str | None = None,
+    author: str | None = None,
 ) -> list[tuple[int, float]]:
     """(post_id, best_distance) pairs, ascending distance (= descending
     similarity). Chunk→post aggregation uses **max similarity / min distance**,
@@ -468,12 +474,12 @@ async def semantic_search(
     joins = ""
     conditions = ["v.embedding MATCH ?", "k = ?"]
     params: list = [query_vec, chunk_k]
-    if tag or folder:
+    if tag or folder or author:
         async with db.execute("SELECT COUNT(*) FROM chunks") as cur:
             total_chunks = (await cur.fetchone())[0]
         params[1] = chunk_k = max(total_chunks, chunk_k)
         joins = "JOIN posts p ON p.id = c.post_id"
-        f_conds, f_params = database.tag_folder_filters(tag, folder, alias="p")
+        f_conds, f_params = database.tag_folder_filters(tag, folder, alias="p", author=author)
         conditions += f_conds
         params += f_params
 

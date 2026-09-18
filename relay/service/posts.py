@@ -9,6 +9,7 @@ import aiosqlite
 
 from .. import changes, database, embedding, events, folders, history, links, metrics, vault, vectors
 from ..config import settings
+from ..identity import Actor
 from ..models import (
     BacklinksResponse,
     LinkIndexResponse,
@@ -67,7 +68,15 @@ async def _similar_posts(
     ]
 
 
-async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostCreateResponse:
+async def create_post(
+    db: aiosqlite.Connection, body: PostCreate, *, actor: Actor | None = None
+) -> PostCreateResponse:
+    """``actor`` (relay #198, B-7) is the identity behind this write, if any —
+    who to attribute the commit's real git ``--author`` to and what to stamp
+    into the new post's ``updated_by``. ``None`` (a caller that doesn't thread
+    identity, e.g. tests exercising the service layer directly) behaves
+    exactly as before this feature: an unattributed commit, no ``updated_by``.
+    """
     now = vault.utcnow_iso()
     # Allocate the id and claim it in one atomic step. `allocate_id` is
     # `SELECT MAX(id)+1`, so two writers that read it before either inserts would
@@ -93,11 +102,13 @@ async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostCreateR
                     created_at=now,
                     updated_at=None,
                     expires_at=body.expires_at,
+                    updated_by=actor.name if actor else None,
                 )
                 await vault.index_insert(
                     db, id=post_id, title=path.stem, path=path, content=body.content,
                     tags=body.tags, source=body.source, created_at=now,
                     updated_at=None, expires_at=body.expires_at,
+                    updated_by=actor.name if actor else None,
                 )
                 await db.commit()
                 break
@@ -119,7 +130,7 @@ async def create_post(db: aiosqlite.Connection, body: PostCreate) -> PostCreateR
         # committed file could get swept into *this* commit — and then
         # `changes._ingest` attributes this commit's message/action to every
         # post it touched, including the other writer's.
-        await history.commit(f"post {post_id} create: {post.title}")
+        await history.commit(f"post {post_id} create: {post.title}", author=actor.git_author if actor else None)
     seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
     await events.publish(post.model_dump(), seq=seq)
     # Advisory duplicate-guard (relay #198, N-7): computed after the write and
@@ -186,17 +197,24 @@ def _fts_query(search: str) -> str | None:
 
 
 async def _keyword_ranked_ids(
-    db: aiosqlite.Connection, search: str, *, limit: int, tag: str | None = None, folder: str | None = None
+    db: aiosqlite.Connection,
+    search: str,
+    *,
+    limit: int,
+    tag: str | None = None,
+    folder: str | None = None,
+    author: str | None = None,
 ) -> list[int]:
     """Top-``limit`` post ids by keyword relevance — feeds the RRF input list
     for ``mode="hybrid"``. Empty if FTS5 is unavailable or the query has no
     searchable tokens (no LIKE fallback here; the semantic list still carries
     the search on its own in that case).
 
-    ``tag``/``folder`` (relay #253 usage report, Issue 4) use the exact same
-    condition shape as the unranked path below (``posts.tags LIKE
-    '%,tag,%'`` / ``posts.path LIKE 'folder/%'``) so a filtered hybrid query
-    fuses two lists that agree on which posts are even eligible."""
+    ``tag``/``folder`` (relay #253 usage report, Issue 4) / ``author`` (relay
+    #198, B-7) use the exact same condition shape as the unranked path below
+    (``posts.tags LIKE '%,tag,%'`` / ``posts.path LIKE 'folder/%'`` /
+    ``posts.updated_by = ?``) so a filtered hybrid query fuses two lists that
+    agree on which posts are even eligible."""
     if not database.FTS_ENABLED:
         return []
     match = _fts_query(search)
@@ -204,7 +222,7 @@ async def _keyword_ranked_ids(
         return []
     conditions = ["posts_fts MATCH ?"]
     params: list[str | int] = [match]
-    f_conds, f_params = database.tag_folder_filters(tag, folder)
+    f_conds, f_params = database.tag_folder_filters(tag, folder, author=author)
     conditions += f_conds
     params += f_params
     params.append(limit)
@@ -235,10 +253,12 @@ async def _list_posts_ranked(
     summary: bool,
     tag: str | None = None,
     folder: str | None = None,
+    author: str | None = None,
 ) -> PostListResponse | PostSummaryListResponse:
     """``mode="semantic"``/``"hybrid"`` path (relay #253 phases 2-5). Ranks by
     vector similarity, RRF-fused with keyword for hybrid. ``tag``/``folder``
-    (relay #253 usage report, Issue 4) are pushed into both rankers —
+    (relay #253 usage report, Issue 4) / ``author`` (relay #198, B-7) are
+    pushed into both rankers —
     ``vectors.semantic_search`` and ``_keyword_ranked_ids`` — rather than
     applied to the fused list afterward, so a filtered page doesn't need a
     wider pool to make up for candidates dropped post-fusion.
@@ -270,7 +290,9 @@ async def _list_posts_ranked(
     t0 = time.monotonic()
     degraded = False
     try:
-        semantic_results = await vectors.semantic_search(db, search, limit=pool_size, tag=tag, folder=folder)
+        semantic_results = await vectors.semantic_search(
+            db, search, limit=pool_size, tag=tag, folder=folder, author=author
+        )
     except Exception:
         # The feature is on but the backend failed *now* (model download blocked,
         # OOM, corrupt cache). Answer the query keyword-ranked and say so, rather
@@ -283,11 +305,11 @@ async def _list_posts_ranked(
 
     semantic_ranked = [pid for pid, _ in semantic_results]
     if degraded:
-        ordered_ids = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder)
+        ordered_ids = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder, author=author)
     elif mode == "semantic":
         ordered_ids = semantic_ranked
     else:
-        keyword_ranked = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder)
+        keyword_ranked = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder, author=author)
         # Per-query adaptive weight, not a fixed ratio — a fixed global ratio
         # measured zero-sum (relay #253 phase 4): it fixes queries where
         # semantic is strong and breaks queries where keyword is strong
@@ -361,13 +383,14 @@ async def list_posts(
     sort: str = "updated",
     order: str = "desc",
     mode: str = "keyword",
+    author: str | None = None,
 ) -> PostListResponse | PostSummaryListResponse:
     if mode not in ("keyword", "semantic", "hybrid"):
         raise InvalidSearchMode
     # ``?tag=`` / ``?search=`` (empty) mean "no filter", not "filter on nothing";
     # without this the empty string skipped the master-doc pin while filtering
     # on nothing (AUDIT.md B-14).
-    tag, folder, search = tag or None, folder or None, search or None
+    tag, folder, search, author = tag or None, folder or None, search or None, author or None
     limit = _clamp(limit, low=1, high=MAX_PAGE_LIMIT)
     offset = max(0, int(offset))
     id_query = _id_query(search) if search else None
@@ -375,7 +398,8 @@ async def list_posts(
         return await _id_lookup(db, id_query, limit=limit, offset=offset, summary=summary)
     if search and mode in ("semantic", "hybrid"):
         return await _list_posts_ranked(
-            db, search=search, mode=mode, limit=limit, offset=offset, summary=summary, tag=tag, folder=folder
+            db, search=search, mode=mode, limit=limit, offset=offset, summary=summary,
+            tag=tag, folder=folder, author=author,
         )
 
     conditions: list[str] = []
@@ -407,13 +431,13 @@ async def list_posts(
             )
             params.extend([q, q, q])
 
-    f_conds, f_params = database.tag_folder_filters(tag, folder)
+    f_conds, f_params = database.tag_folder_filters(tag, folder, author=author)
     conditions += f_conds
     params += f_params
 
     # On the unfiltered home feed, pin the master document (id=0) on top and keep
     # it out of the dated stream so pagination stays consistent across pages.
-    pin_master = tag is None and search is None and folder is None
+    pin_master = tag is None and search is None and folder is None and author is None
     if pin_master:
         conditions.append("posts.id != 0")
 
@@ -456,8 +480,15 @@ async def get_post(db: aiosqlite.Connection, post_id: int) -> PostResponse | Non
 
 
 async def update_post(
-    db: aiosqlite.Connection, post_id: int, body: PostUpdate, *, commit_message: str | None = None
+    db: aiosqlite.Connection,
+    post_id: int,
+    body: PostUpdate,
+    *,
+    commit_message: str | None = None,
+    actor: Actor | None = None,
 ) -> PostResponse:
+    """``actor``: see ``create_post``'s docstring — threaded here so
+    ``edit_post``/``append_post`` (which call this) get identical behavior."""
     # The fetch-and-derive-defaults step lives *inside* the lock (relay #198,
     # N-1): reading `row` before acquiring `vault.write_lock` leaves a gap in
     # which another writer (another caller, or the watcher reconciling an
@@ -492,15 +523,21 @@ async def update_post(
             if desired and desired != folders.INBOX:
                 move_to = desired
 
+        # A caller that doesn't thread identity (relay #198, B-7) leaves the
+        # post's existing attribution alone rather than clearing it — only a
+        # caller that *does* supply an actor overwrites `updated_by`.
+        updated_by = actor.name if actor is not None else row["updated_by"]
         new_path = vault.write_file(
             id=post_id, title=title, content=content, tags=tags or [], source=source,
             created_at=row["created_at"], updated_at=now, expires_at=expires_at,
             old_path=old_path, move_to_folder=move_to, properties=properties,
+            updated_by=updated_by,
         )
         await vault.index_upsert(
             db, id=post_id, title=new_path.stem, path=new_path, content=content,
             tags=tags or [], source=source, created_at=row["created_at"],
             updated_at=now, expires_at=expires_at, properties=properties,
+            updated_by=updated_by,
         )
         if new_path.stem != row["title"]:
             await _rewrite_inbound_wikilinks(db, old_title=row["title"], new_title=new_path.stem)
@@ -509,7 +546,10 @@ async def update_post(
         await db.commit()
         post = PostResponse.from_row(await _fetch(db, post_id))
         # K-2: commit while still holding `write_lock` — see create_post's comment.
-        await history.commit(commit_message or f"post {post_id} update: {post.title}")
+        await history.commit(
+            commit_message or f"post {post_id} update: {post.title}",
+            author=actor.git_author if actor else None,
+        )
     # Stream the edit so other live clients update in place. `seq` (relay
     # #198, N-4) is this write's changes-log row — every SSE frame carries
     # one now, monotonic by construction, so it can never rewind a
@@ -522,7 +562,13 @@ async def update_post(
 
 
 async def edit_post(
-    db: aiosqlite.Connection, post_id: int, old_str: str, new_str: str, *, if_match: str | None = None
+    db: aiosqlite.Connection,
+    post_id: int,
+    old_str: str,
+    new_str: str,
+    *,
+    if_match: str | None = None,
+    actor: Actor | None = None,
 ) -> PostResponse:
     """`str_replace`-style partial edit (relay #198, N-1): ``old_str`` must match
     exactly once in the post's current content, like a code-agent Edit tool —
@@ -559,12 +605,17 @@ async def edit_post(
     new_content = row["content"].replace(old_str, new_str, 1)
     return await update_post(
         db, post_id, PostUpdate(content=new_content, if_match=row_etag),
-        commit_message=f"post {post_id} edit: {row['title']}",
+        commit_message=f"post {post_id} edit: {row['title']}", actor=actor,
     )
 
 
 async def append_post(
-    db: aiosqlite.Connection, post_id: int, content: str, *, if_match: str | None = None
+    db: aiosqlite.Connection,
+    post_id: int,
+    content: str,
+    *,
+    if_match: str | None = None,
+    actor: Actor | None = None,
 ) -> PostResponse:
     """Append to a post's content (relay #198, N-1) instead of resending the
     whole body. See ``edit_post`` for why the read-time etag is always passed
@@ -579,7 +630,7 @@ async def append_post(
     new_content = row["content"].rstrip("\n") + sep + content
     return await update_post(
         db, post_id, PostUpdate(content=new_content, if_match=row_etag),
-        commit_message=f"post {post_id} append: {row['title']}",
+        commit_message=f"post {post_id} append: {row['title']}", actor=actor,
     )
 
 
@@ -618,16 +669,21 @@ async def _rewrite_inbound_wikilinks(
             continue
         row_tags = _tags_from_sentinel(row["tags"])
         row_properties = vault.decode_properties(row["properties"])
+        # Mechanical side-effect of someone else's rename, not this post's own
+        # write (relay #198, B-7) — carry `updated_by` over unchanged, same as
+        # tags.rename_tag's own bulk rewrite.
         new_path = vault.write_file(
             id=row["id"], title=row["title"], content=new_content, tags=row_tags,
             source=row["source"], created_at=row["created_at"],
             updated_at=row["updated_at"], expires_at=row["expires_at"],
             old_path=vault.abspath(row["path"]), properties=row_properties,
+            updated_by=row["updated_by"],
         )
         await vault.index_upsert(
             db, id=row["id"], title=new_path.stem, path=new_path, content=new_content,
             tags=row_tags, source=row["source"], created_at=row["created_at"],
             updated_at=row["updated_at"], expires_at=row["expires_at"], properties=row_properties,
+            updated_by=row["updated_by"],
         )
 
 
@@ -692,7 +748,7 @@ async def get_related(db: aiosqlite.Connection, post_id: int) -> RelatedPostsRes
 
 
 
-async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
+async def delete_post(db: aiosqlite.Connection, post_id: int, *, actor: Actor | None = None) -> None:
     if post_id == 0:
         raise ProtectedPost
     row = await _fetch(db, post_id)
@@ -721,6 +777,6 @@ async def delete_post(db: aiosqlite.Connection, post_id: int) -> None:
                     vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
         # After the orphan sweep, so the note and the assets it took with it are one
         # commit — restoring the post restores its images in the same revert.
-        await history.commit(f"post {post_id} delete: {row['title']}")
+        await history.commit(f"post {post_id} delete: {row['title']}", author=actor.git_author if actor else None)
     seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
     await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]), seq=seq)

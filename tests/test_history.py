@@ -227,3 +227,30 @@ async def test_bulk_external_change_is_one_commit(client):
     await watcher._reconcile(paths)
     assert len(log()) == before + 1
     assert log()[0] == "external change: 2 edited, 0 removed"
+
+
+# ── per-agent identity: git authorship (relay #198, B-7) ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_commit_author_defaults_to_the_pinned_relay_identity(client):
+    """No ``author`` given: the committer identity (``_IDENTITY``) is also the
+    author, unchanged from before this feature."""
+    await _create(client, "No Actor Post")
+    assert git("log", "-1", "--format=%an <%ae>") == "relay <relay@localhost>"
+
+
+@pytest.mark.asyncio
+async def test_commit_author_is_the_given_actor_not_the_committer(client):
+    """``--author`` sets who the change is *from*; the committer (``_IDENTITY``)
+    stays the pinned ``relay`` identity regardless — separating the two is the
+    whole point of using git's own author field."""
+    post = await _create(client, "Actor Post")
+    path = Path(settings.vault_path) / git("ls-files", "*Actor Post.md")
+    path.write_text(path.read_text(encoding="utf-8") + "\nmore\n", encoding="utf-8")
+    committed = await history.commit(
+        f"post {post['id']} update: Actor Post", author="news-agent <news-agent@relay.local>"
+    )
+    assert committed
+    assert git("log", "-1", "--format=%an <%ae>") == "news-agent <news-agent@relay.local>"
+    assert git("log", "-1", "--format=%cn <%ce>") == "relay <relay@localhost>"

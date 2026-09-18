@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 
 from pydantic import AliasChoices, Field
@@ -7,11 +9,29 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = Path(__file__).parent.parent / ".env"
 
+logger = logging.getLogger(__name__)
+
+# Mirrors models._clean_tag_list's shape (a key name ends up in git author
+# fields and `?author=` query strings) and identity.APIKEY_NAME, duplicated
+# rather than imported: relay.identity imports settings from this module, so
+# importing back would be a cycle.
+_KEY_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
+_RESERVED_KEY_NAME = "apikey"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=_ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
     api_key: str
+    # Named keys for per-agent identity/provenance (relay #198, B-7):
+    # "name:key,name:key,...". Each resolves to its own git commit author,
+    # `changes.author` and `updated_by` — see relay/identity.py. The plain
+    # `api_key` above always remains valid too, under the reserved identity
+    # `identity.APIKEY_NAME` ("apikey").
+    api_keys: str = Field(
+        default="",
+        validation_alias=AliasChoices("RELAY_API_KEYS", "API_KEYS"),
+    )
     relay_base_url: str = "http://localhost:8000"
     default_ttl_hours: int = 0  # 0 = never expire
     cleanup_interval_minutes: int = 60
@@ -145,6 +165,39 @@ class Settings(BaseSettings):
     @property
     def allowed_subs(self) -> set[str]:
         return {s.strip() for s in self.oidc_allowed_subs.split(",") if s.strip()}
+
+    @property
+    def named_api_keys(self) -> dict[str, str]:
+        """Parsed ``RELAY_API_KEYS`` ("name:key,name:key,..."). A malformed
+        entry, a name colliding with the reserved primary-key identity
+        (``apikey``), or a duplicate name is skipped with a warning rather
+        than failing startup — a typo'd extra key shouldn't take the relay
+        down, it just won't authenticate anything until fixed."""
+        keys: dict[str, str] = {}
+        for entry in self.api_keys.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            name, _, key = entry.partition(":")
+            name, key = name.strip().lower(), key.strip()
+            if not key or not _KEY_NAME_RE.match(name):
+                logger.warning("RELAY_API_KEYS: skipping malformed entry %r", entry)
+                continue
+            if name == _RESERVED_KEY_NAME:
+                logger.warning("RELAY_API_KEYS: %r is reserved for the primary API_KEY — skipping", name)
+                continue
+            if name in keys:
+                logger.warning("RELAY_API_KEYS: duplicate name %r — keeping the first", name)
+                continue
+            keys[name] = key
+        return keys
+
+    @property
+    def all_api_keys(self) -> dict[str, str]:
+        """Every valid bearer key, by identity name — the primary ``API_KEY``
+        (under the reserved name ``apikey``) plus every named key. Single
+        source ``identity.resolve_bearer``/``auth.bearer_matches`` both read."""
+        return {_RESERVED_KEY_NAME: self.api_key, **self.named_api_keys}
 
     @property
     def mcp_scopes(self) -> list[str]:
