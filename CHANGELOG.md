@@ -4,6 +4,27 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.13.0] — 2026-09-18
+
+Per-agent identity and provenance (relay #198, B-7): a shared vault written by multiple agents plus a human finally has an answer to "who changed this."
+
+### Added
+- `RELAY_API_KEYS` — named bearer keys (`name:key,...`) alongside the primary `API_KEY`, each resolving to its own identity for attribution. A malformed entry, one colliding with the reserved `apikey` name, or a duplicate is skipped with a warning, not a startup failure
+- Every authenticated write now threads that identity through: the git commit's real `--author` field (the committer stays the pinned `relay <relay@localhost>` identity), the `changes` table's `author` column (previously always `NULL`), and a new `updated_by` front-matter key on posts — relay's 7th reserved field, set on create and overwritten on update
+- `GET /changes` / `list_changes` and `GET /posts` / `list_posts` (REST + MCP, keyword/semantic/hybrid alike) gain an `?author=`/`author=` filter
+- MCP tool calls resolve identity via fastmcp's `get_access_token()` — the static-bearer path uses the matched key's name; MCP OAuth (PocketID) prefers the user's `email` claim over their opaque `sub` for readability
+- A mechanical side-effect write that isn't really "by" whoever triggered it (a tag rename's bulk rewrite, an inbound-wikilink retarget on someone else's post, a restore with no actor) carries `updated_by` over from the existing value rather than clobbering it to `None`
+
+Per-key scopes (write-only to certain tags, read-only keys) are explicitly deferred — this release is identity/provenance only, not authorization; see relay #198's own backlog for the scoping fast-follow.
+
+---
+
+## [1.12.0] — 2026-09-18
+
+`MCP_OAUTH_ENABLED` now runs on fastmcp's `OIDCProxy`/`MultiAuth` instead of ~820 lines of hand-rolled OAuth 2.1 AS logic (relay #313), passing a dedicated Phase 5 security audit before merge. Live-tested against bespin's real PocketID after deploying: two more bugs found and fixed that the mock-IdP audit couldn't have caught (a PocketID scope/resource mismatch on `/authorize`, and the upstream-echoed scope leaking into relay's own token claim), plus rate limiting on `/register`/`/authorize` closed at the reverse-proxy layer. Full history in relay #313; what fastmcp 4.x unlocks beyond OAuth itself (a Skills provider, scope-based auth middleware, a built-in rate limiter, CIMD) is summarized in relay #198.
+
+---
+
 ## [1.11.0] — 2026-09-15
 
 MCP OAuth gains a per-client consent gate closing a confused-deputy gap in the existing hand-rolled Authorization Server (relay #313) — designed, then caught self-approvable by its own pre-merge security audit, fixed, and verified against production by simulating the attack live before shipping. Also: digest/news posts stop dominating semantic search, a `related` MCP tool, and subdomain-wildcard support for the OAuth redirect-host allowlist.
