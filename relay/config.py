@@ -109,11 +109,6 @@ class Settings(BaseSettings):
     # (`*.mistral.ai`) matching that domain's subdomains only — not the bare apex,
     # and never a naive substring (see `mcp_redirect_host_wildcards`).
     mcp_allowed_redirect_hosts: str = "claude.ai,claude.com,chatgpt.com,*.mistral.ai"
-    # Token lifetimes (seconds). Auth codes are single-use and short-lived;
-    # access tokens rotate via long-lived refresh tokens.
-    mcp_auth_code_ttl_seconds: int = 60
-    mcp_access_token_ttl_seconds: int = 60 * 60  # 1h
-    mcp_refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30  # 30d, rotating
 
     @property
     def attachment_max_bytes(self) -> int:
