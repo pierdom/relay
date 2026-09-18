@@ -200,6 +200,30 @@ class _RelayOIDCProxy(OIDCProxy):
         finally:
             _refreshing_upstream.reset(marker)
 
+    def _prepare_scopes_for_token_exchange(self, scopes: list[str]) -> list[str]:
+        """Never forward the downstream `scope` to PocketID's own `/token`.
+
+        Found live, not read for (relay #313, first production connector test):
+        a real claude.ai connection requests `scope=relay` from `/authorize`
+        (relay's own MCP scope, since that's what `settings.mcp_scopes` reports
+        via `/.well-known/oauth-authorization-server`) — fine for the FastMCP
+        token this proxy issues *to* claude.ai, meaningless to PocketID, which
+        only ever advertised `openid profile email groups offline_access`
+        (confirmed against its live discovery document). The base
+        implementation echoes `transaction["scopes"]` straight through as the
+        exchange's own `scope` param; empty means "omit it", which is the
+        correct default per RFC 6749 §4.1.3 since the code already carries
+        whatever PocketID granted at `/authorize`.
+        """
+        return []
+
+    def _prepare_scopes_for_upstream_refresh(self, scopes: list[str]) -> list[str]:
+        """Same reasoning as `_prepare_scopes_for_token_exchange`, for the
+        refresh grant: the stored `RefreshToken.scopes` is relay's own
+        `["relay"]`, never PocketID's. Omitting `scope` on refresh is RFC 6749
+        §6-legal (treated as identical to the scope originally granted)."""
+        return []
+
     async def _extract_upstream_claims(self, idp_tokens: dict) -> dict | None:
         id_token = idp_tokens.get("id_token")
         if not id_token:
@@ -485,6 +509,32 @@ def _build_auth() -> AuthProvider:
         # enough to stay well inside any plausible IdP token lifetime, large
         # enough to cover a slow upstream round trip.
         token_expiry_threshold_seconds=120,
+        # Both found live against real PocketID, not the mock IdP Phase 5 used —
+        # the mock tolerated a scope/resource it had never heard of; PocketID
+        # rejects `/authorize` outright with `invalid_request` naming exactly
+        # these two params. `_prepare_scopes_for_token_exchange`/
+        # `_prepare_scopes_for_upstream_refresh` above cover the token-exchange
+        # and refresh legs; this pair covers the one upstream leg with no
+        # override hook at all — `_build_upstream_authorize_url` builds
+        # `scope` from `transaction["scopes"]` (relay's own `["relay"]`)
+        # unconditionally.
+        #
+        # `forward_resource=False`: PocketID's discovery document advertises no
+        # RFC 8707 support, and the default (`True`) forwards claude.ai's
+        # `resource=https://relay.herrdr.net/mcp` straight through.
+        #
+        # `extra_authorize_params={"scope": ...}`: applied last via a plain
+        # dict.update() over the already-built query params (confirmed by
+        # reading `_build_upstream_authorize_url`), so this is the one
+        # supported way to override — not add to — the `scope` PocketID
+        # actually receives. `offline_access` (in PocketID's advertised scope
+        # list, absent from the web-UI login's own `openid email profile` in
+        # `routes/auth.py`) is required here and not there: the web UI re-authenticates
+        # via its own session cookie, but this proxy must be able to silently
+        # refresh PocketID's token to keep an MCP session alive, which needs a
+        # PocketID refresh_token in the first place.
+        forward_resource=False,
+        extra_authorize_params={"scope": "openid profile email offline_access"},
     )
     return MultiAuth(server=oidc, verifiers=[_StaticBearerAuth()])
 
