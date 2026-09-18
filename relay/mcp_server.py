@@ -224,6 +224,30 @@ class _RelayOIDCProxy(OIDCProxy):
         §6-legal (treated as identical to the scope originally granted)."""
         return []
 
+    def _translate_scopes_from_idp(self, scopes: list[str]) -> list[str]:
+        """Substitute relay's own scope for whatever PocketID echoed back.
+
+        Found live, immediately after the scope/resource fix above: fixing the
+        *upstream* leg surfaced a second-order bug on the *downstream* one.
+        `OAuthProxy.exchange_authorization_code` (and the refresh path) reads
+        `idp_tokens["scope"]` — per RFC 6749 §5.1, the IdP MUST echo the scope
+        it actually granted — and, unless translated here, embeds *that
+        upstream string* as the FastMCP JWT's own scope claim. PocketID
+        dutifully echoes back `openid profile email offline_access` (the
+        vocabulary `extra_authorize_params` above asks it for); with no
+        translation that becomes the token `claude.ai` receives, which then
+        fails relay's own `required_scopes=["relay"]` check on every `/mcp`
+        call with `insufficient_scope` (confirmed live: `POST /token` 200,
+        immediately followed by `POST /mcp` 403). PocketID's scope vocabulary
+        and relay's MCP scope are disjoint by design — relay's `required_scopes`
+        is the only value that was ever meaningful here, matching what
+        `_get_verification_token`'s docstring already documents about
+        `verify_id_token=True` decoupling upstream identity from relay's own
+        authorization.
+        """
+        _ = scopes
+        return list(settings.mcp_scopes)
+
     async def _extract_upstream_claims(self, idp_tokens: dict) -> dict | None:
         id_token = idp_tokens.get("id_token")
         if not id_token:
