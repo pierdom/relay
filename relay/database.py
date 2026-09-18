@@ -42,7 +42,6 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts (created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_tags ON posts (tags);
-CREATE INDEX IF NOT EXISTS idx_posts_updated_by ON posts (updated_by);
 CREATE TABLE IF NOT EXISTS tag_config (
     tag        TEXT PRIMARY KEY,
     ttl_hours  INTEGER NOT NULL DEFAULT 0,
@@ -141,6 +140,13 @@ async def init_db() -> None:
             await db.execute("ALTER TABLE posts ADD COLUMN updated_by TEXT")
         except aiosqlite.OperationalError:
             pass
+        # Deliberately *not* in `_SCHEMA` above: that executescript runs before
+        # this ALTER on an existing (pre-B-7) database, where the column
+        # doesn't exist yet — `CREATE INDEX ... (updated_by)` in the same
+        # script as the CREATE TABLE would 500 on startup for every install
+        # upgrading in place (caught live deploying to bespin: the column
+        # only exists by this point, after the ALTER above has run).
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_posts_updated_by ON posts (updated_by)")
         await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA busy_timeout=5000;")
         # Drop any FTS objects a prior run left so rebuild_index's DELETE/INSERT

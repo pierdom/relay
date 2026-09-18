@@ -4,6 +4,15 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.13.1] — 2026-09-18
+
+Found deploying 1.13.0 to bespin, within minutes: relay crash-looped on startup with `sqlite3.OperationalError: no such column: updated_by`.
+
+### Fixed
+- `CREATE INDEX idx_posts_updated_by` lived in the same `executescript` as `CREATE TABLE IF NOT EXISTS posts`, which is a no-op against an *existing* table — so on an in-place upgrade the index statement ran before the `ALTER TABLE posts ADD COLUMN updated_by` migration below it had added the column. Never caught locally: every test starts from an empty `index.db`, where the fresh `CREATE TABLE` already includes the column, so no test ever exercised the upgrade-an-existing-database path. Moved the index creation to after the `ALTER TABLE`, and added `tests/test_database.py` (seeds the pre-migration schema by hand, upgrades it in place) so this class of bug — a new column's index outrunning its own migration — can't reach production silently again
+
+---
+
 ## [1.13.0] — 2026-09-18
 
 Per-agent identity and provenance (relay #198, B-7): a shared vault written by multiple agents plus a human finally has an answer to "who changed this."
