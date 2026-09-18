@@ -27,7 +27,7 @@ def test_vault_and_every_derived_path_are_isolated(tmp_path):
         ("database_path", settings.database_path),
         ("tags_config_path", settings.tags_config_path),
         ("uploads_dir", settings.uploads_dir),
-        ("mcp_oauth_db_path", settings.mcp_oauth_db_path),
+        ("mcp_oauth_storage_dir", settings.mcp_oauth_storage_dir),
     ):
         assert value.startswith(root), f"{name} escaped tmp_path: {value!r}"
 

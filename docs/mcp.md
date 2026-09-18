@@ -223,6 +223,6 @@ Run `git pull` and restart the client to pick up updates.
 
 ## OAuth login (optional)
 
-With `MCP_OAUTH_ENABLED=true`, relay acts as its own OAuth 2.1 Authorization Server. Remote clients authenticate via OAuth + Dynamic Client Registration instead of a pasted bearer key: in the connector dialog, fill only the **name** and **URL** and leave the OAuth fields blank. The static `API_KEY` keeps working alongside OAuth. A client relay hasn't seen before is routed through relay's own consent page first — see [docs/setup.md](setup.md#oauth-21-for-remote-mcp-clients) for what to expect.
+With `MCP_OAUTH_ENABLED=true`, relay acts as its own OAuth 2.1 Authorization Server (fastmcp's `OIDCProxy`, relay #313, brokering to your OIDC provider). Remote clients authenticate via OAuth + Dynamic Client Registration instead of a pasted bearer key: in the connector dialog, fill only the **name** and **URL** and leave the OAuth fields blank. The static `API_KEY` keeps working alongside OAuth. A client relay hasn't seen before is routed through a consent page first — see [docs/setup.md](setup.md#oauth-21-for-remote-mcp-clients) for what to expect.
 
-Setup: [docs/setup.md: OAuth 2.1 for remote MCP clients](setup.md#optional-oauth-21-for-remote-mcp-clients).
+Setup: [docs/setup.md: OAuth 2.1 for remote MCP clients](setup.md#oauth-21-for-remote-mcp-clients).

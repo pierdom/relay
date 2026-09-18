@@ -15,14 +15,21 @@ feature was.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
+import time
+from pathlib import Path
 
 os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
 import pytest_asyncio
+from fastmcp.server.auth.redirect_validation import validate_redirect_uri
 from httpx import ASGITransport, AsyncClient
+from joserfc import jwt as _joserfc_jwt
+from joserfc.jwk import KeySet, RSAKey
+from mcp.server.auth.provider import TokenError
 
 from relay import database, embedding, history, mcp_server, vectors
 from relay.config import settings
@@ -378,11 +385,168 @@ async def test_initialize_announces_relays_own_version_and_branding():
     """
     from relay import __version__
 
-    opts = mcp_server.mcp._lowlevel_server.create_initialization_options()
+    # fastmcp (relay #313 migration) names this attribute `_mcp_server`, not the old
+    # mcp SDK's `_lowlevel_server` — same LowLevelServer type underneath.
+    opts = mcp_server.mcp._mcp_server.create_initialization_options()
     assert opts.server_name == "relay"
     assert opts.server_version == __version__
     assert opts.website_url == settings.relay_base_url.rstrip("/")
     assert [i.mime_type for i in opts.icons] == ["image/svg+xml", "image/png"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_rejects_oversized_request_bodies(client):
+    """relay #313 Phase 1: fastmcp's `http_app()` has no parameter to configure a
+    request-body-size cap, but still enforces one — it builds the old mcp SDK's
+    `TransportSecuritySettings` internally and only overrides the DNS-rebinding half
+    of it (see `mcp_server.py`'s comment above `mcp_http_app`). That's an unexposed
+    internal of a wrapped third-party library, not a documented relay setting, so pin
+    it here: a future fastmcp version silently dropping it should fail a test, not
+    surface as `add_attachment(data=…)` quietly accepting an unbounded body."""
+    oversized = "x" * (5 * 1024 * 1024)  # over the 4 MiB default
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "update_post", "arguments": {"id": 0, "content": oversized}},
+    }
+    resp = await client.post(
+        "/mcp",
+        json=payload,
+        headers={**HEADERS, "Accept": "application/json, text/event-stream"},
+    )
+    assert resp.status_code == 413
+
+
+# ── relay #313 Phase 2: _RelayOIDCProxy's sub/email allowlist enforcement ──
+#
+# _extract_upstream_claims doesn't touch `self`, so these call it directly on the
+# class rather than constructing a real _RelayOIDCProxy — that constructor makes a
+# live network call to OIDC discovery (see mcp_server._build_auth's docstring),
+# which has no place in a unit test. _oidc_jwks_cache/_oidc_metadata_cache are
+# pre-populated instead of going through _load_pocketid_jwks, so no network call
+# happens here either.
+
+_TEST_ISSUER = "https://id.example.com"
+_TEST_AUDIENCE = "relay-mcp-client"
+
+
+def _signed_id_token(**claim_overrides) -> tuple[str, KeySet]:
+    """A real, signed id_token plus the KeySet that verifies it — exercises
+    _RelayOIDCProxy's actual jwt.decode + JWTClaimsRegistry path, not a mock of it."""
+    key = RSAKey.generate_key(2048, parameters={"kid": "test-kid"}, private=True)
+    now = int(time.time())
+    claims = {
+        "iss": _TEST_ISSUER,
+        "aud": _TEST_AUDIENCE,
+        "sub": "user-123",
+        "email": "user@example.com",
+        "email_verified": True,
+        "iat": now,
+        "nbf": now - 5,
+        "exp": now + 600,
+        **claim_overrides,
+    }
+    token = _joserfc_jwt.encode({"alg": "RS256", "kid": "test-kid"}, claims, key)
+    return token, KeySet([key])
+
+
+def _prime_jwks_cache(monkeypatch, keyset: KeySet):
+    monkeypatch.setattr(mcp_server, "_oidc_metadata_cache", {"issuer": _TEST_ISSUER, "jwks_uri": "unused"})
+    monkeypatch.setattr(mcp_server, "_oidc_jwks_cache", keyset)
+    monkeypatch.setattr(settings, "oidc_client_id", _TEST_AUDIENCE)
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_allows_a_sub_on_the_allowlist(monkeypatch):
+    id_token, keyset = _signed_id_token(sub="user-123")
+    _prime_jwks_cache(monkeypatch, keyset)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    claims = await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"id_token": id_token})
+    assert claims == {"sub": "user-123", "email": "user@example.com"}
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_denies_a_sub_not_on_the_allowlist(monkeypatch):
+    id_token, keyset = _signed_id_token(sub="uninvited-user")
+    _prime_jwks_cache(monkeypatch, keyset)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    with pytest.raises(TokenError) as exc_info:
+        await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"id_token": id_token})
+    assert exc_info.value.error == "unauthorized_client"
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_allows_any_identity_when_no_allowlist_configured(monkeypatch):
+    id_token, keyset = _signed_id_token(sub="anyone-at-all")
+    _prime_jwks_cache(monkeypatch, keyset)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    claims = await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"id_token": id_token})
+    assert claims["sub"] == "anyone-at-all"
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_denies_a_forged_audience(monkeypatch):
+    """The id_token's signature is genuine (signed by the test key relay would
+    fetch from PocketID's own JWKS), but its `aud` doesn't match this relay's
+    client_id — JWTClaimsRegistry must catch this, not just the signature check.
+
+    Asserted as a `TokenError`, not joserfc's raw `InvalidClaimError`: Phase 5's
+    audit found that letting the verification failure escape turned `/token` —
+    an unauthenticated endpoint — into a bare 500. It always failed closed, but
+    a rotated IdP signing key would have produced unhandled exceptions instead
+    of a diagnosable `invalid_grant`."""
+    id_token, keyset = _signed_id_token(sub="user-123", aud="a-different-relay")
+    _prime_jwks_cache(monkeypatch, keyset)
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "")
+    monkeypatch.setattr(settings, "oidc_allowed_emails", "")
+
+    with pytest.raises(TokenError) as exc_info:
+        await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"id_token": id_token})
+    assert exc_info.value.error == "invalid_grant"
+
+
+@pytest.mark.asyncio
+async def test_relay_oidc_proxy_denies_missing_id_token():
+    with pytest.raises(TokenError) as exc_info:
+        await mcp_server._RelayOIDCProxy._extract_upstream_claims(object(), {"access_token": "opaque"})
+    assert exc_info.value.error == "invalid_grant"
+
+
+def test_mcp_allowed_client_redirect_uri_patterns_permits_loopback(monkeypatch):
+    """relay #313 Phase 4: caught while writing docs, not by a test — fastmcp's
+    `validate_redirect_uri` gives loopback URIs no automatic exemption once
+    `allowed_patterns` is a real list (confirmed by reading it), unlike the old
+    hand-rolled `mcp_oauth/provider.py` (deleted in this same phase), which
+    explicitly allowed loopback http regardless of the https host allowlist. Uses fastmcp's
+    real matcher, not a re-implementation of it — this proves the patterns
+    actually work against the library that consumes them, not just that the
+    Python list looks right."""
+    monkeypatch.setattr(settings, "mcp_allowed_redirect_hosts", "claude.ai,*.mistral.ai")
+    patterns = settings.mcp_allowed_client_redirect_uri_patterns
+
+    assert validate_redirect_uri("http://localhost:41000/cb", patterns)
+    assert validate_redirect_uri("http://127.0.0.1:8080/cb", patterns)
+    assert validate_redirect_uri("https://claude.ai/cb", patterns)
+    assert validate_redirect_uri("https://sub.mistral.ai/cb", patterns)
+    assert not validate_redirect_uri("https://mistral.ai/cb", patterns)  # wildcard excludes its own apex
+    assert not validate_redirect_uri("https://evilmistral.ai/cb", patterns)  # dot-boundary
+    assert not validate_redirect_uri("https://evil.example.com/cb", patterns)
+    assert not validate_redirect_uri("http://evil.example.com/cb", patterns)  # remote cleartext
+
+
+def test_mcp_allowed_client_redirect_uri_patterns_none_when_hosts_empty(monkeypatch):
+    """Empty MCP_ALLOWED_REDIRECT_HOSTS must translate to fastmcp's `None`
+    (trust each DCR client's own declared URI), not `[]` (allow nothing) —
+    relay's own "empty = opt-out" default, preserved."""
+    monkeypatch.setattr(settings, "mcp_allowed_redirect_hosts", "")
+    assert settings.mcp_allowed_client_redirect_uri_patterns is None
 
 
 # ── K-5: attachment tools must catch InvalidFolder, like REST already does ──
@@ -399,3 +563,215 @@ async def test_list_attachments_reports_an_invalid_folder(client):
     out = await mcp_server.list_attachments(folder="..")
     assert "error" in out
     assert out["error"]
+
+
+# ── relay #313 Phase 5 audit: two config-level properties that fail silently ──
+
+
+def test_oidc_proxy_verifies_the_id_token_not_the_upstream_access_token(monkeypatch):
+    """The single most load-bearing kwarg in `_build_auth` (Phase 5 audit).
+
+    Left at its default (`verify_id_token=False`), `OIDCProxy` builds its token
+    verifier with `audience=None` and `required_scopes=["relay"]` and then
+    re-validates *PocketID's own access token* against that on every request —
+    demanding a `relay` scope no IdP will ever mint. The symptom is nasty
+    precisely because the OAuth dance still succeeds: login completes, a token
+    is issued, and then every single API call 401s. Caught by running the real
+    flow against a mock IdP, not by reading. Captures the kwargs instead of
+    constructing the proxy for real, since the real constructor performs OIDC
+    discovery over the network."""
+    captured = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_init(self, **kwargs):
+        # Capture and bail out before MultiAuth tries to compose a half-built
+        # proxy; the kwargs are the whole point of this test.
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(mcp_server._RelayOIDCProxy, "__init__", fake_init)
+    monkeypatch.setattr(type(settings), "mcp_oauth_active", property(lambda _: True))
+    monkeypatch.setattr(settings, "oidc_client_secret", "secret")
+
+    with pytest.raises(_Stop):
+        mcp_server._build_auth()
+    assert captured.get("verify_id_token") is True
+    # The other half of the same trap: relay's own scope floor must survive.
+    assert captured.get("required_scopes") == settings.mcp_scopes
+
+
+@pytest.mark.asyncio
+async def test_oauth_client_storage_is_encrypted_at_rest(tmp_path, monkeypatch):
+    """Passing `client_storage` at all opts out of the encryption `OIDCProxy`
+    applies to the store it would otherwise build itself — so the upstream
+    PocketID access/refresh tokens it persists landed in the vault in cleartext
+    (Phase 5 audit; the vault is Syncthing-synced). Also pins the backend away
+    from `DiskStore`/`diskcache`, whose pickle serialization is PYSEC-2026-2447
+    with no fixed release."""
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path))
+    monkeypatch.setattr(settings, "oidc_client_secret", "a-high-entropy-secret")
+
+    storage = mcp_server._oauth_client_storage()
+    await storage.put(collection="c", key="k", value={"refresh_token": "super-secret-value"})
+
+    assert await storage.get(collection="c", key="k") == {"refresh_token": "super-secret-value"}
+
+    on_disk = [p.read_text() for p in Path(settings.mcp_oauth_storage_dir).rglob("*.json")]
+    assert on_disk, "expected the store to have written something"
+    assert not any("super-secret-value" in blob for blob in on_disk), "secret readable on disk"
+    assert any("__encrypted_data__" in blob for blob in on_disk)
+
+
+def test_expired_oauth_records_are_swept_but_client_registrations_are_not(tmp_path, monkeypatch):
+    """relay #313 Phase 5. `FileTreeStore` documents that it has "no built-in
+    cleanup of expired entries" — they are merely filtered out on read, and
+    nothing ever reads an expired authorization code again, so the file stays
+    forever. Since `/authorize` and `/register` are unauthenticated by OAuth
+    spec, that is an unbounded write primitive against the volume that also
+    holds the notes and history.git.
+
+    The sweep must reclaim expired entries and must *never* touch a DCR client
+    registration, which fastmcp deliberately stores with no TTL — deleting one
+    would break a working connector mid-session."""
+    from relay import cleanup
+
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path))
+    root = Path(settings.mcp_oauth_storage_dir)
+    (root / "S_mcp_authorization_codes-abc").mkdir(parents=True)
+    (root / "S_mcp_oauth_proxy_clients-def").mkdir(parents=True)
+
+    expired = root / "S_mcp_authorization_codes-abc" / "expired.json"
+    expired.write_text('{"created_at": "2020-01-01T00:00:00+00:00", '
+                       '"expires_at": "2020-01-01T00:10:00+00:00", "value": {}}')
+    live = root / "S_mcp_authorization_codes-abc" / "live.json"
+    live.write_text('{"created_at": "2020-01-01T00:00:00+00:00", '
+                    '"expires_at": "2099-01-01T00:00:00+00:00", "value": {}}')
+    client = root / "S_mcp_oauth_proxy_clients-def" / "client.json"
+    client.write_text('{"created_at": "2020-01-01T00:00:00+00:00", "value": {}, "version": 1}')
+    malformed = root / "S_mcp_authorization_codes-abc" / "malformed.json"
+    malformed.write_text("not json at all")
+
+    assert cleanup._sweep_expired_oauth_records() == 1
+
+    assert not expired.exists(), "expired entry should be reclaimed"
+    assert live.exists(), "unexpired entry must survive"
+    assert client.exists(), "a DCR client registration has no TTL and must never be swept"
+    assert malformed.exists(), "unparseable files are left alone, not guessed at"
+
+
+def _id_token(exp_offset: int, **overrides) -> str:
+    """Mint an id_token signed by a throwaway key, and point the module's cached
+    JWKS/metadata at it so `_extract_upstream_claims` verifies against it."""
+    key = RSAKey.generate_key(2048, parameters={"kid": "t"}, private=True)
+    claims = {
+        "iss": "https://idp.example", "aud": settings.oidc_client_id or "relay-client",
+        "sub": "allowed-user", "email": "owner@example.com", "email_verified": True,
+        "iat": int(time.time()) - 10, "exp": int(time.time()) + exp_offset,
+    }
+    claims.update(overrides)
+    for k in [k for k, v in claims.items() if v is None]:
+        del claims[k]
+    token = _joserfc_jwt.encode({"alg": "RS256", "kid": "t"}, claims, key)
+    return token, KeySet([key])
+
+
+@pytest.mark.parametrize(
+    "refreshing, exp_offset, expect_ok",
+    [
+        (False, 600, True),    # fresh login, valid token
+        (False, -60, False),   # fresh login, expired token — must still be rejected
+        (True, 600, True),     # refresh, valid token
+        (True, -60, True),     # refresh, expired token — the finding-3 relaxation
+    ],
+)
+def test_expired_upstream_id_token_is_tolerated_only_on_the_refresh_path(
+    monkeypatch, refreshing, exp_offset, expect_ok
+):
+    """relay #313 Phase 5, finding 3. OIDC Core §12.2 makes `id_token` OPTIONAL on
+    a refresh grant, and `OAuthProxy.exchange_refresh_token` *merges* the refresh
+    response over the stored login response — so an IdP that omits one leaves the
+    original login id_token to be re-validated, long past its own `exp`. That made
+    every refresh fail `invalid_grant` forever once the login token aged out
+    (reproduced end to end against a mock IdP: 401 after a 3s token expired).
+
+    The relaxation must be scoped to the refresh grant only: on the login path an
+    expired id_token is simply invalid, and this test pins both halves."""
+    token, keyset = _id_token(exp_offset)
+    monkeypatch.setattr(mcp_server, "_oidc_jwks_cache", keyset)
+    monkeypatch.setattr(mcp_server, "_oidc_metadata_cache", {"issuer": "https://idp.example"})
+    monkeypatch.setattr(settings, "oidc_client_id", settings.oidc_client_id or "relay-client")
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "allowed-user")
+
+    proxy = mcp_server._RelayOIDCProxy.__new__(mcp_server._RelayOIDCProxy)
+    marker = mcp_server._refreshing_upstream.set(refreshing)
+    try:
+        coro = proxy._extract_upstream_claims({"id_token": token})
+        if expect_ok:
+            assert asyncio.run(coro)["sub"] == "allowed-user"
+        else:
+            with pytest.raises(TokenError):
+                asyncio.run(coro)
+    finally:
+        mcp_server._refreshing_upstream.reset(marker)
+
+
+def test_an_id_token_with_no_exp_at_all_is_never_accepted(monkeypatch):
+    """relay #313 Phase 5, finding 3b. joserfc validates a claim only when it is
+    *present*, so without `exp={"essential": True}` an id_token carrying no `exp`
+    sails through the registry and stays valid forever. Pinned on the refresh path
+    specifically — that is where `exp` is otherwise relaxed, so it is the one place
+    a missing `exp` could be mistaken for a tolerated expired one."""
+    token, keyset = _id_token(600, exp=None)
+    monkeypatch.setattr(mcp_server, "_oidc_jwks_cache", keyset)
+    monkeypatch.setattr(mcp_server, "_oidc_metadata_cache", {"issuer": "https://idp.example"})
+    monkeypatch.setattr(settings, "oidc_client_id", settings.oidc_client_id or "relay-client")
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "allowed-user")
+
+    proxy = mcp_server._RelayOIDCProxy.__new__(mcp_server._RelayOIDCProxy)
+    for refreshing in (False, True):
+        marker = mcp_server._refreshing_upstream.set(refreshing)
+        try:
+            with pytest.raises(TokenError):
+                asyncio.run(proxy._extract_upstream_claims({"id_token": token}))
+        finally:
+            mcp_server._refreshing_upstream.reset(marker)
+
+
+def test_upstream_expiry_is_clamped_to_the_id_token_exp():
+    """relay #313 Phase 5. `load_access_token` validates the *id_token* but decides
+    whether to refresh from `expires_at`, which carries the *access token's*
+    lifetime. When PocketID's id_token is the shorter of the two, every request in
+    the gap fails validation while `needs_refresh` is still False — no refresh is
+    attempted and `/mcp` 401s on a healthy session. Reproduced live with a 3s
+    id_token against a 3600s access token: 200, then 401 six seconds later.
+
+    Clamping makes the refresh trigger track the token actually being validated.
+    It must only ever move expiry *earlier*."""
+    from fastmcp.server.auth.oauth_proxy.models import UpstreamTokenSet
+
+    def _token_set(tid, expires_at, id_token):
+        return UpstreamTokenSet(
+            upstream_token_id=tid, access_token="opaque-access", expires_at=expires_at,
+            refresh_token_expires_at=expires_at, token_type="Bearer", scope="openid",
+            client_id="relay-client", created_at=time.time(), refresh_token="r",
+            raw_token_data={"id_token": id_token},
+        )
+
+    token, _ = _id_token(60)
+    proxy = mcp_server._RelayOIDCProxy.__new__(mcp_server._RelayOIDCProxy)
+    proxy._verify_id_token = True
+
+    far = time.time() + 3600
+    tokens = _token_set("t1", far, token)
+    assert proxy._get_verification_token(tokens) == token
+    assert tokens.expires_at < far, "expiry must be pulled back to the id_token's exp"
+    assert abs(tokens.expires_at - (time.time() + 60)) < 5
+
+    # A *longer*-lived id_token must never extend the access token's expiry.
+    long_token, _ = _id_token(7200)
+    near = time.time() + 30
+    tokens2 = _token_set("t2", near, long_token)
+    proxy._get_verification_token(tokens2)
+    assert tokens2.expires_at == near, "clamp must only ever move expiry earlier"

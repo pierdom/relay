@@ -74,9 +74,9 @@ The following change freely within any release:
 |------|-----|
 | **Browser UI** — DOM structure, CSS class names, JS module APIs, theme token names | Client-side; no external API contract |
 | **SQLite index schema** — table and column layout of `index.db` | The index is disposable; rebuilt from vault files at startup. Never query it directly |
-| **`.relay/` internal layout** — `history.git` format, `last_id`, `oauth.db` schema, `tags.yml` format, `uploads/` staging | Implementation details of history, auth, and cleanup subsystems |
+| **`.relay/` internal layout** — `history.git` format, `last_id`, `mcp_oauth/` (fastmcp `DiskStore` directory, relay #313) contents, `tags.yml` format, `uploads/` staging | Implementation details of history, auth, and cleanup subsystems |
 | **`/links` endpoint** — wikilink resolution index | Internal to the browser UI; not intended for external callers |
-| **`/mcp/oauth/**` paths** — the OAuth 2.1 AS endpoints | The OAuth protocol itself is stable; these paths are relay-internal plumbing |
+| **The OAuth 2.1 AS endpoints** — `/register`, `/authorize`, `/token`, `/consent`, `/.well-known/oauth-*`, `/mcp/oauth/callback` | The OAuth protocol itself is stable; these paths are fastmcp-internal plumbing, not a relay-designed surface |
 | **MCP tool descriptions** — the human-readable strings passed to AI clients | Improved for clarity without a version bump |
 
 ---

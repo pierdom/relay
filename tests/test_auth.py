@@ -200,16 +200,20 @@ async def test_oidc_login_ignores_a_malformed_post_param(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mcp_metadata_absent_when_oauth_disabled():
-    # With OAuth off (the default this app was imported under), the SDK mounts no
-    # auth metadata and there is no hand-rolled route — the path 404s. The
-    # enabled-mode metadata is emitted by the SDK when MCPServer is constructed with
-    # auth (import-time), covered in test_mcp_oauth via a fresh app build.
+    # With OAuth off (the default this app was imported under), fastmcp's `auth=` is a
+    # plain TokenVerifier (relay #313 Phase 1's `_StaticBearerAuth` — fastmcp's own
+    # docstring: token verifiers "typically don't provide authentication routes by
+    # default"), not a full OAuthProvider/RemoteAuthProvider — only those mount the
+    # OAuth discovery routes, so this path is never mounted at all: an ordinary 404
+    # from Starlette's own routing, not an auth decision. The enabled-mode metadata
+    # (this path serving real content once a real OAuthProvider is built, Phase 2)
+    # was verified live against a mock OIDC server, not by an automated test here —
+    # a real gap, not a documented-elsewhere one; worth a dedicated test later.
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/.well-known/oauth-protected-resource/mcp")
-    # No metadata document is served; the static-bearer gate answers 401 (never a
-    # 200 discovery doc that would invite a client into an OAuth flow relay isn't
-    # running).
-    assert r.status_code == 401
+    # No metadata document is served — never a 200 discovery doc that would invite a
+    # client into an OAuth flow relay isn't running.
+    assert r.status_code == 404
 
 
 @pytest.mark.asyncio

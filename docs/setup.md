@@ -87,9 +87,6 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `MCP_OAUTH_ENABLED` | `false` | Turn `/mcp` into an OAuth 2.1 AS+RS for remote clients via Dynamic Client Registration; the static `API_KEY` still works |
 | `MCP_REQUIRED_SCOPES` | `relay` | Scope required on `/mcp` |
 | `MCP_ALLOWED_REDIRECT_HOSTS` | `claude.ai,claude.com,chatgpt.com,*.mistral.ai` | DCR redirect-URI host allowlist, https only; blank = any https. Each entry is an exact host or a `*.`-prefixed suffix matching that domain's subdomains only — not its own bare apex, so list both (`mistral.ai,*.mistral.ai`) if you need the apex too. Add other clients as needed |
-| `MCP_AUTH_CODE_TTL_SECONDS` | `60` | OAuth authorization-code lifetime |
-| `MCP_ACCESS_TOKEN_TTL_SECONDS` | `3600` | OAuth access-token lifetime |
-| `MCP_REFRESH_TOKEN_TTL_SECONDS` | `2592000` | OAuth refresh-token lifetime (30 days) |
 | `RELAY_PALETTE` | `default` | TUI colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `solarized-light`, `molokai`, `candy`, `earthy`, `pastel`, `tango`, `tokyo-night`, `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`) |
 | `RELAY_TRANSPARENT` | `0` | TUI: let the terminal background show through the canvas |
 
@@ -165,6 +162,26 @@ Lets remote MCP clients (Claude.ai, ChatGPT, etc.) authenticate via OAuth + Dyna
 
 In the client's connector dialog, fill only the **name** and **URL** (`<RELAY_BASE_URL>/mcp`). Dynamic Client Registration self-registers the client. The static `API_KEY` keeps working alongside OAuth.
 
-> Tokens are opaque and hashed at rest, audience-bound to `/mcp`, single-use on auth codes and refresh tokens, and revoking one cascades to the whole client+user token family.
+> Tokens are opaque and hashed at rest, audience-bound to `/mcp`, and single-use on auth codes and refresh tokens (each rotation invalidates the one before it). Replaying an already-rotated refresh token is rejected, but — unlike an earlier version of this feature — doesn't also revoke any newer tokens issued from it; a stolen-and-raced refresh token isn't automatically contained beyond the rotation itself. A deliberate trade-off, not an oversight (relay #313).
+>
+> Token lifetimes are no longer relay's own knob (the old `MCP_AUTH_CODE_TTL_SECONDS`/`MCP_ACCESS_TOKEN_TTL_SECONDS`/`MCP_REFRESH_TOKEN_TTL_SECONDS` settings were removed as dead code post-migration — relay #313 cleanup, 2026-09-18): fastmcp's `OIDCProxy` owns them now, mirroring whatever PocketID itself issues (`fastmcp_access_token_expiry_seconds`/`fallback_*_expiry_seconds` exist as constructor overrides in `mcp_server.py` if a deployment ever needs to decouple from the upstream's lifetimes, but relay doesn't set them today).
 
-**First connection from a new client shows a consent screen.** Before relay hands off to your IdP, it routes an unrecognized client through its own `/mcp/oauth/consent` page — naming the client (self-reported, not verified) and its redirect target, with Approve/Deny. This is expected, not an error: it's a deliberate check against a client silently riding an already-authenticated IdP session (relay #313). Approving forwards you on to your IdP's own login as normal; the client only becomes permanently trusted once you've actually completed that login. A client you've connected before skips straight to the IdP, same as today.
+**Rate-limit the OAuth endpoints at your reverse proxy.** `/register` (Dynamic Client Registration) and `/authorize` are unauthenticated by OAuth spec — anyone on the internet can call them, and relay has no in-process limiter. Measured on the reference deployment: ~280 registrations/second accepted, ~5.6 KB stored per registration, and client registrations carry **no expiry**, so this is a disk-fill vector against the volume that also holds your notes and `history.git`. Nothing about this is new to the fastmcp migration (it is the long-standing S-12 finding), but it is worth closing before exposing relay publicly. In nginx/openresty:
+
+```nginx
+limit_req_zone $binary_remote_addr zone=relay_oauth:10m rate=10r/m;
+
+location ~ ^/(register|authorize)$ {
+    limit_req zone=relay_oauth burst=20 nodelay;
+    proxy_pass http://relay;
+}
+```
+
+A legitimate client registers approximately once, so a limit this tight is invisible in normal use while turning a hours-to-fill-the-disk attack into a years-long one. Put the limit at the proxy rather than in relay: the proxy is the only layer that sees the real client IP.
+
+> **Running nginx-proxy-manager (NPM)?** The snippet above is a single self-contained nginx config file — it doesn't work pasted as one block into NPM's per-host **Advanced → Custom Nginx Configuration** field. `limit_req_zone` is only valid in nginx's `http {}` context; NPM's Advanced field injects into that host's `server {}` block. Pasting the whole snippet there caused NPM to silently drop the entire custom block from the generated config with no visible error — and left the *running* nginx not serving that host at all (confirmed live: relay #313, 2026-09-18 — public TLS handshakes failed with `SSL alert 112 unrecognized name` until the bad block was removed via NPM's UI). Split it across NPM's two injection points instead:
+>
+> - `limit_req_zone $binary_remote_addr zone=relay_oauth:10m rate=10r/m;` alone in a file at `/data/nginx/custom/http_top.conf` (NPM includes this inside `http {}` globally, once, for every host — create the file, no UI action needed, then `docker exec <npm-container> nginx -s reload` or restart the container to pick it up).
+> - Just the `location ~ ^/(register|authorize)$ { ... }` block (referencing the zone by name, no `limit_req_zone` line) in the per-host Advanced field — that part *is* valid at `server {}` scope on its own.
+
+**First connection from a new client shows a consent screen.** Before relay hands off to your IdP, it routes an unrecognized client through a consent page — naming the client (self-reported, not verified) and its redirect target, with Approve/Deny. This is expected, not an error: it's a deliberate check against a client silently riding an already-authenticated IdP session (relay #313). Approving forwards you on to your IdP's own login as normal. Unlike a typical "remember this app" prompt, there's no persistent approval to skip on your *next* connection either — every connection attempt shows this screen fresh, tied to that one attempt's own signed browser-binding cookie, not a per-client memory.

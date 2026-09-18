@@ -53,7 +53,8 @@ def still_authorized(payload: dict) -> bool:
     re-check, dropping a sub from ``OIDC_ALLOWED_SUBS`` wouldn't revoke a session
     already in the wild: the documented access-control knob would silently not be
     one. Mirrors the same re-check the MCP OAuth refresh grant does
-    (``mcp_oauth/provider.py``) so deauthorization behaves alike on both surfaces.
+    (``mcp_server._RelayOIDCProxy._extract_upstream_claims``, relay #313) so
+    deauthorization behaves alike on both surfaces.
 
     Sub-allowlist only, exactly like the refresh grant: the session carries
     ``email`` but not ``email_verified``, so an email allowlist can't be

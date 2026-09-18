@@ -109,11 +109,6 @@ class Settings(BaseSettings):
     # (`*.mistral.ai`) matching that domain's subdomains only — not the bare apex,
     # and never a naive substring (see `mcp_redirect_host_wildcards`).
     mcp_allowed_redirect_hosts: str = "claude.ai,claude.com,chatgpt.com,*.mistral.ai"
-    # Token lifetimes (seconds). Auth codes are single-use and short-lived;
-    # access tokens rotate via long-lived refresh tokens.
-    mcp_auth_code_ttl_seconds: int = 60
-    mcp_access_token_ttl_seconds: int = 60 * 60  # 1h
-    mcp_refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30  # 30d, rotating
 
     @property
     def attachment_max_bytes(self) -> int:
@@ -185,6 +180,47 @@ class Settings(BaseSettings):
         }
 
     @property
+    def mcp_allowed_client_redirect_uri_patterns(self) -> list[str] | None:
+        """`mcp_redirect_hosts`/`mcp_redirect_host_wildcards` translated into
+        fastmcp `OIDCProxy`'s `allowed_client_redirect_uris` URI-pattern shape
+        (relay #313 Phase 2). Only a format translation, not a re-implementation
+        of the matching itself: fastmcp's own wildcard host matching
+        (`fastmcp.server.auth.redirect_validation._match_host`) uses the identical
+        dot-boundary suffix semantics as this file's own docstrings describe —
+        confirmed by reading it, not assumed — so `*.mistral.ai` here is exactly
+        as safe as it always was.
+
+        `None` (both sets empty) is the right translation of relay's own "empty =
+        allow any https" default, not `[]` (which means "allow none" to fastmcp) —
+        with no explicit allowlist, fastmcp falls back to trusting each DCR
+        client's self-declared, self-registered redirect URI, which is the same
+        practical openness relay's own "empty" already meant.
+
+        Always includes `http://localhost:*`/`http://127.0.0.1:*` when returning
+        an explicit list — caught while writing Phase 4's docs, not by a test:
+        fastmcp's `validate_redirect_uri` gives loopback URIs **no automatic
+        exemption** once `allowed_patterns` is a real list (confirmed by reading
+        it) — unlike the old hand-rolled `provider.py`, which explicitly allowed
+        loopback http regardless of the https host allowlist (`_pending()`'s own
+        test cases: `http://localhost:41000/cb`, `http://127.0.0.1:8080/cb`).
+        Without these two entries, a native/local MCP client could no longer
+        register against a relay with the default (non-empty) redirect-host
+        allowlist — a real regression, not a hypothetical one. Same two patterns
+        as fastmcp's own `redirect_validation.DEFAULT_LOCALHOST_PATTERNS`,
+        hand-copied rather than imported so this settings module doesn't need to
+        know about fastmcp's types.
+        """
+        hosts = self.mcp_redirect_hosts
+        wildcards = self.mcp_redirect_host_wildcards
+        if not hosts and not wildcards:
+            return None
+        return (
+            ["http://localhost:*", "http://127.0.0.1:*"]
+            + [f"https://{h}/*" for h in sorted(hosts)]
+            + [f"https://*.{w}/*" for w in sorted(wildcards)]
+        )
+
+    @property
     def relay_dir(self) -> str:
         """Hidden control folder inside the vault (index DB + tag config)."""
         return str(Path(self.vault_path) / ".relay")
@@ -225,13 +261,16 @@ class Settings(BaseSettings):
         return str(Path(self.relay_dir) / "models")
 
     @property
-    def mcp_oauth_db_path(self) -> str:
-        """Persistent OAuth store (DCR clients, codes, tokens).
+    def mcp_oauth_storage_dir(self) -> str:
+        """Persistent OAuth store — DCR client registrations and encrypted upstream
+        tokens (relay #313 Phase 2/4: fastmcp's `DiskStore`/`diskcache`, replacing
+        the old hand-rolled `mcp_oauth/store.py`'s single-file SQLite `oauth.db`
+        with a directory of its own).
 
         Separate from the disposable ``index.db`` — the startup index rebuild must
         never touch it. Lives in ``.relay/`` so it rides the vault backup.
         """
-        return str(Path(self.relay_dir) / "oauth.db")
+        return str(Path(self.relay_dir) / "mcp_oauth")
 
     @property
     def mcp_resource_url(self) -> str:
