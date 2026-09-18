@@ -186,17 +186,23 @@ async def restore_post(
     now = vault.utcnow_iso()
     created_at = meta.get("created_at") or now
     properties = meta.get("properties")
+    # Whoever restores it becomes the new attribution when known; otherwise
+    # (relay #198, B-7) fall back to the historical revision's own
+    # `updated_by` rather than clobbering it to None — the same
+    # preserve-don't-clobber rule `update_post`/`rename_tag`/inbound-wikilink
+    # rewrite already apply when no actor is threaded through.
+    updated_by = actor.name if actor else meta.get("updated_by")
     async with vault.write_lock:
         path = vault.write_file(
             id=post_id, title=title, content=body, tags=tags, source=source,
             created_at=created_at, updated_at=now, expires_at=expires_at,
             move_to_folder=folder, properties=properties,
-            updated_by=actor.name if actor else None,
+            updated_by=updated_by,
         )
         await vault.index_insert(
             db, id=post_id, title=path.stem, path=path, content=body, tags=tags,
             source=source, created_at=created_at, updated_at=now, expires_at=expires_at,
-            properties=properties, updated_by=actor.name if actor else None,
+            properties=properties, updated_by=updated_by,
         )
         await db.commit()
         post = PostResponse.from_row(await _fetch(db, post_id))

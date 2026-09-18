@@ -110,6 +110,38 @@ async def test_updated_by_is_set_on_create_and_overwritten_on_update(vault_dir):
         await db.close()
 
 
+@pytest.mark.asyncio
+async def test_restore_without_an_actor_preserves_the_historical_updated_by(vault_dir, monkeypatch):
+    """Restoring a deleted post attributes to whoever performed the restore
+    when known — but a caller that doesn't thread identity (relay #198, B-7)
+    must fall back to the revision's own `updated_by`, not clobber it to
+    None, the same preserve-don't-clobber rule every other bulk/mechanical
+    write in this file already follows."""
+    from relay.identity import Actor
+
+    monkeypatch.setattr(settings, "history_enabled", True)
+    from relay import history
+
+    history.reset_state_for_tests()
+    await history.init()
+    db = await _db()
+    try:
+        agent = Actor(name="news-agent", email="news-agent@relay.local")
+        created = await service.create_post(
+            db, PostCreate(title="Restorable", content="one", tags=[]), actor=agent
+        )
+        await service.delete_post(db, created.id)
+
+        hist = await service.get_post_history(db, created.id)
+        sha = hist.items[-1].sha  # the creation revision
+
+        restored = await service.restore_post(db, created.id, sha)  # no actor
+        assert restored.updated_by == "news-agent"
+    finally:
+        history.reset_state_for_tests()
+        await db.close()
+
+
 async def _fetch_row(db, post_id: int):
     async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
         return await cur.fetchone()
