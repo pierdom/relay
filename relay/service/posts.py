@@ -38,6 +38,7 @@ from ._common import (
     SemanticSearchUnavailable,
     _clamp,
     _fetch,
+    _require_write_scope,
     _tags_from_sentinel,
     logger,
 )
@@ -77,6 +78,7 @@ async def create_post(
     identity, e.g. tests exercising the service layer directly) behaves
     exactly as before this feature: an unattributed commit, no ``updated_by``.
     """
+    _require_write_scope(actor, body.tags)
     now = vault.utcnow_iso()
     # Allocate the id and claim it in one atomic step. `allocate_id` is
     # `SELECT MAX(id)+1`, so two writers that read it before either inserts would
@@ -500,6 +502,16 @@ async def update_post(
         row = await _fetch(db, post_id)
         if row is None:
             raise PostNotFound
+        # Scope check before ConcurrentModification (relay #198, B-8): a
+        # scope-denied caller shouldn't learn the post's current etag as a
+        # side effect of being told "conflict" instead of "not allowed".
+        # Both the post's existing tags and (if this update touches tags at
+        # all) its proposed new tags must pass — ALL-of, closing off both
+        # "touch a post outside scope" and "retag an owned post to
+        # something outside scope".
+        _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
+        if "tags" in body.model_fields_set:
+            _require_write_scope(actor, body.tags or [])
         if body.if_match is not None and body.if_match != etag_for_row(row):
             raise ConcurrentModification
 
@@ -594,6 +606,13 @@ async def edit_post(
     row = await _fetch(db, post_id)
     if row is None:
         raise PostNotFound
+    # Before any content-matching logic (relay #198, B-8): a scope-denied
+    # caller must never learn whether old_str exists in the post's content
+    # via EditTextNotFound/EditTextNotUnique before being told they're
+    # denied — that would be a content oracle. update_post re-checks this
+    # same scope below too; harmless, not a second independently-maintained
+    # rule since it's the same data/helper.
+    _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
     row_etag = etag_for_row(row)
     if if_match is not None and if_match != row_etag:
         raise ConcurrentModification
@@ -623,6 +642,9 @@ async def append_post(
     row = await _fetch(db, post_id)
     if row is None:
         raise PostNotFound
+    # Same reasoning/ordering as edit_post (relay #198, B-8) — check before
+    # any of this function's own content-derived work.
+    _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
     row_etag = etag_for_row(row)
     if if_match is not None and if_match != row_etag:
         raise ConcurrentModification
@@ -754,6 +776,7 @@ async def delete_post(db: aiosqlite.Connection, post_id: int, *, actor: Actor | 
     row = await _fetch(db, post_id)
     if row is None:
         raise PostNotFound
+    _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
     folder = folders.folder_of(row["path"], default=folders.INBOX)
     async with vault.write_lock:
         vault.delete_file(vault.abspath(row["path"]))

@@ -56,8 +56,9 @@ async def client(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_tool_is_advertised_to_clients():
-    names = {t.name for t in await mcp_server.mcp.list_tools()}
+async def test_the_tool_is_advertised_to_clients(mcp_auth_context):
+    with mcp_auth_context():
+        names = {t.name for t in await mcp_server.mcp.list_tools()}
     assert "list_deleted_posts" in names, f"not in the manifest: {sorted(names)}"
 
 
@@ -79,8 +80,10 @@ def _stem(word: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_every_tools_description_mentions_its_own_distinctive_name_words():
-    for tool in await mcp_server.mcp.list_tools():
+async def test_every_tools_description_mentions_its_own_distinctive_name_words(mcp_auth_context):
+    with mcp_auth_context():
+        tools = await mcp_server.mcp.list_tools()
+    for tool in tools:
         description = (tool.description or "").lower()
         for word in tool.name.split("_"):
             if len(word) <= 2 or word in _GENERIC_NAME_WORDS:
@@ -279,8 +282,9 @@ async def test_list_posts_can_browse_by_folder_and_reverse_the_sort(client):
 
 
 @pytest.mark.asyncio
-async def test_the_new_n1_tools_are_advertised_to_clients():
-    names = {t.name for t in await mcp_server.mcp.list_tools()}
+async def test_the_new_n1_tools_are_advertised_to_clients(mcp_auth_context):
+    with mcp_auth_context():
+        names = {t.name for t in await mcp_server.mcp.list_tools()}
     assert {"edit_post", "append_post"} <= names, f"not in the manifest: {sorted(names)}"
 
 

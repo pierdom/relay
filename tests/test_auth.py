@@ -391,3 +391,325 @@ async def test_a_named_key_authenticates_and_is_attributed_by_name(tmp_path, mon
         )
     assert r.status_code == 201, r.text
     assert r.json()["updated_by"] == "news-agent"
+
+
+# ── per-key scopes (relay #198, B-8) ────────────────────────────────────────
+
+
+def test_key_scopes_parses_read_and_write_and_full_entries(monkeypatch):
+    monkeypatch.setattr(
+        settings, "api_key_scopes",
+        "ro-agent:read,news-agent:write:news+briefing,admin-agent:full",
+    )
+    from relay.config import ApiKeyScope
+
+    assert settings.key_scopes == {
+        "ro-agent": ApiKeyScope(mode="read"),
+        "news-agent": ApiKeyScope(mode="write", tags=frozenset({"news", "briefing"})),
+        "admin-agent": ApiKeyScope(mode="full"),
+    }
+
+
+def test_key_scopes_skips_malformed_and_duplicate_entries(monkeypatch):
+    monkeypatch.setattr(
+        settings, "api_key_scopes",
+        "good:read,Bad Name:read,no-mode,unknown:bogus,empty-tags:write,"
+        "bad-tag:write:Not_Valid!,good:write:other,",
+    )
+    # only the one well-formed, non-duplicate entry survives
+    assert set(settings.key_scopes) == {"good"}
+    from relay.config import ApiKeyScope
+
+    assert settings.key_scopes["good"] == ApiKeyScope(mode="read")
+
+
+def test_key_scopes_empty_by_default():
+    assert settings.key_scopes == {}
+
+
+def test_key_scopes_lowercases_tags_like_every_other_vault_tag(monkeypatch):
+    """A mixed-case tag must not be silently dropped (and the key silently
+    left at FULL_SCOPE) just because vault tags are conventionally lowercase
+    but this config value wasn't normalised to match (found in review)."""
+    monkeypatch.setattr(settings, "api_key_scopes", "news-agent:write:News+Briefing")
+    from relay.config import ApiKeyScope
+
+    assert settings.key_scopes == {
+        "news-agent": ApiKeyScope(mode="write", tags=frozenset({"news", "briefing"})),
+    }
+
+
+def test_key_scopes_excludes_the_reserved_apikey_name(monkeypatch):
+    """The break-glass primary key must not be scopable via this variable,
+    mirroring `named_api_keys`'s own reserved-name guard (found in review)."""
+    monkeypatch.setattr(settings, "api_key_scopes", "apikey:read")
+    assert settings.key_scopes == {}
+
+
+def test_resolve_bearer_attaches_scope_to_actor(monkeypatch):
+    from relay.config import FULL_SCOPE, ApiKeyScope
+    from relay.identity import resolve_bearer
+
+    monkeypatch.setattr(settings, "api_keys", "ro-agent:sk-ro,news-agent:sk-news,plain-agent:sk-plain")
+    monkeypatch.setattr(settings, "api_key_scopes", "ro-agent:read,news-agent:write:news")
+    assert resolve_bearer("sk-ro").scope == ApiKeyScope(mode="read")
+    assert resolve_bearer("sk-news").scope == ApiKeyScope(mode="write", tags=frozenset({"news"}))
+    # No scope entry at all -> full access, same as before this feature existed.
+    assert resolve_bearer("sk-plain").scope == FULL_SCOPE
+    assert resolve_bearer("test-key").scope == FULL_SCOPE
+
+
+async def _init(tmp_path, monkeypatch):
+    from relay import database
+
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    await database.init_db()
+
+
+@pytest.mark.asyncio
+async def test_read_only_key_rejected_on_write_route_but_not_read_routes(tmp_path, monkeypatch):
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "ro-agent:sk-ro")
+    monkeypatch.setattr(settings, "api_key_scopes", "ro-agent:read")
+    headers = {"Authorization": "Bearer sk-ro"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/posts", json={"title": "Nope", "content": "x", "tags": []}, headers=headers)
+        assert r.status_code == 403
+        r = await c.get("/posts", headers=headers)
+        assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_tag_scoped_key_can_write_only_within_its_allowed_tags(tmp_path, monkeypatch):
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    monkeypatch.setattr(settings, "api_key_scopes", "news-agent:write:news")
+    headers = {"Authorization": "Bearer sk-news"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/posts", json={"title": "In Scope", "content": "x", "tags": ["news"]}, headers=headers)
+        assert r.status_code == 201, r.text
+
+        r = await c.post(
+            "/posts", json={"title": "Out Of Scope", "content": "x", "tags": ["finance"]}, headers=headers
+        )
+        assert r.status_code == 403
+
+        # ALL-of semantics: a second tag outside the allowed set still denies,
+        # even alongside an in-scope one.
+        r = await c.post(
+            "/posts", json={"title": "Mixed", "content": "x", "tags": ["news", "finance"]}, headers=headers
+        )
+        assert r.status_code == 403
+
+        # Empty tags never satisfy a tag-restricted key (the "subset of
+        # anything" loophole is closed deliberately).
+        r = await c.post("/posts", json={"title": "Untagged", "content": "x", "tags": []}, headers=headers)
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_tag_scoped_key_cannot_touch_an_existing_out_of_scope_post(tmp_path, monkeypatch):
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    monkeypatch.setattr(settings, "api_key_scopes", "news-agent:write:news")
+    admin_headers = {"Authorization": "Bearer test-key"}
+    scoped_headers = {"Authorization": "Bearer sk-news"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/posts", json={"title": "Finance Post", "content": "x", "tags": ["finance"]}, headers=admin_headers
+        )
+        post_id = r.json()["id"]
+
+        r = await c.patch(f"/posts/{post_id}", json={"content": "hijacked"}, headers=scoped_headers)
+        assert r.status_code == 403
+        r = await c.delete(f"/posts/{post_id}", headers=scoped_headers)
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_tag_scoped_key_cannot_retag_its_own_post_outside_scope(tmp_path, monkeypatch):
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    monkeypatch.setattr(settings, "api_key_scopes", "news-agent:write:news")
+    headers = {"Authorization": "Bearer sk-news"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/posts", json={"title": "Mine", "content": "x", "tags": ["news"]}, headers=headers)
+        post_id = r.json()["id"]
+        r = await c.patch(f"/posts/{post_id}", json={"tags": ["other"]}, headers=headers)
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_tag_scoped_key_cannot_rename_tag_or_set_tag_config(tmp_path, monkeypatch):
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    monkeypatch.setattr(settings, "api_key_scopes", "news-agent:write:news")
+    headers = {"Authorization": "Bearer sk-news"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        await c.post("/posts", json={"title": "Seed", "content": "x", "tags": ["news"]}, headers={
+            "Authorization": "Bearer test-key",
+        })
+        r = await c.patch("/tags/news", json={"new_name": "newsy"}, headers=headers)
+        assert r.status_code == 403
+        r = await c.post("/tags/news/config", json={"ttl_hours": 24}, headers=headers)
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_full_access_keys_are_unaffected_by_scope_gates(tmp_path, monkeypatch):
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "admin-agent:sk-admin")
+    # explicit "full" entry, and the primary API_KEY with no entry at all
+    monkeypatch.setattr(settings, "api_key_scopes", "admin-agent:full")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        for headers in ({"Authorization": "Bearer sk-admin"}, {"Authorization": "Bearer test-key"}):
+            r = await c.post(
+                "/posts", json={"title": f"Free {headers['Authorization']}", "content": "x", "tags": ["anything"]},
+                headers=headers,
+            )
+            assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_malformed_scope_config_does_not_break_the_app_the_key_stays_full_access(tmp_path, monkeypatch):
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "some-agent:sk-some")
+    monkeypatch.setattr(settings, "api_key_scopes", "some-agent:not-a-real-mode")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/posts", json={"title": "Still Works", "content": "x", "tags": []},
+            headers={"Authorization": "Bearer sk-some"},
+        )
+    assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_web_ui_paste_login_carries_the_pasted_keys_scope(tmp_path, monkeypatch):
+    """A read-only or tag-scoped key pasted into the browser must not become a
+    full-access session — otherwise the web UI is a bypass of every other
+    scope gate (relay #198, B-8)."""
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "ro-agent:sk-ro")
+    monkeypatch.setattr(settings, "api_key_scopes", "ro-agent:read")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/session", json={"key": "sk-ro"})
+        assert r.status_code == 200
+        cookie = r.cookies.get(auth.SESSION_COOKIE)
+        assert cookie is not None
+        c.cookies.set(auth.SESSION_COOKIE, cookie)
+        r = await c.post("/posts", json={"title": "Via Session", "content": "x", "tags": []})
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_tag_scoped_key_cannot_smuggle_an_attachment_into_an_arbitrary_folder(tmp_path, monkeypatch):
+    """`folder` picks the actual write target; `tags` (if also passed) says
+    nothing about it. Pairing an in-scope `tags` value with an unrelated
+    `folder` must still be denied (found in review) — otherwise the folder
+    branch's scope check was checking the wrong thing entirely."""
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    monkeypatch.setattr(settings, "api_key_scopes", "news-agent:write:news")
+    headers = {"Authorization": "Bearer sk-news"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/attachments",
+            json={"filename": "x.png", "data": "aGk=", "folder": "Finance", "tags": ["news"]},
+            headers=headers,
+        )
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_apikey_scope_entry_is_ignored_primary_key_stays_full_access(tmp_path, monkeypatch):
+    """An admin accidentally (or deliberately) writing an `apikey:...` entry
+    must not restrict the break-glass primary key (found in review)."""
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_key_scopes", "apikey:read")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/posts", json={"title": "Still Full Access", "content": "x", "tags": []},
+            headers={"Authorization": "Bearer test-key"},
+        )
+        assert r.status_code == 201, r.text
+
+
+# ── per-key scopes on the MCP surface (relay #198, B-8) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mcp_read_only_key_is_denied_the_write_tool_and_it_vanishes_from_the_manifest(
+    tmp_path, monkeypatch
+):
+    from relay import mcp_server
+    from relay.mcp_server import mcp
+
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "ro-agent:sk-ro")
+    monkeypatch.setattr(settings, "api_key_scopes", "ro-agent:read")
+
+    token = await mcp_server._StaticBearerAuth().verify_token("sk-ro")
+    assert token is not None
+    from mcp.server.auth.middleware.auth_context import auth_context_var
+    from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        names = {t.name for t in await mcp.list_tools()}
+        assert "publish_post" not in names
+        assert "list_posts" in names  # read tools are unaffected
+
+        with pytest.raises(Exception, match="insufficient scope"):
+            await mcp.call_tool("publish_post", {"title": "x", "content": "y"})
+    finally:
+        auth_context_var.reset(reset)
+
+
+@pytest.mark.asyncio
+async def test_mcp_tag_scoped_key_succeeds_in_scope_and_fails_out_of_scope(tmp_path, monkeypatch):
+    from relay import mcp_server
+    from relay.mcp_server import mcp
+
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    monkeypatch.setattr(settings, "api_key_scopes", "news-agent:write:news")
+
+    token = await mcp_server._StaticBearerAuth().verify_token("sk-news")
+    assert token is not None
+    from mcp.server.auth.middleware.auth_context import auth_context_var
+    from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        ok = await mcp.call_tool("publish_post", {"title": "In Scope", "content": "x", "tags": ["news"]})
+        assert "error" not in ok.structured_content
+
+        denied = await mcp.call_tool(
+            "publish_post", {"title": "Out Of Scope", "content": "x", "tags": ["finance"]}
+        )
+        assert denied.structured_content.get("error") == "This API key's scope does not permit this write."
+    finally:
+        auth_context_var.reset(reset)
+
+
+def test_current_actor_logs_loudly_when_a_real_token_has_no_derivable_identity(caplog):
+    """Since B-8, `_current_actor()` returning None also skips every scope
+    check for the call (actor=None is the same signal used for an internal
+    caller that bypasses auth entirely) — not reachable via any auth path
+    today, but if it ever is, it must fail loudly rather than silently
+    granting an authenticated-but-unattributable write (found in review)."""
+    from mcp.server.auth.middleware.auth_context import auth_context_var
+    from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+    from mcp.server.auth.provider import AccessToken
+
+    from relay import mcp_server
+
+    # A token that passed authentication but carries no usable identity claim.
+    token = AccessToken(token="t", client_id="relay", scopes=["relay", "write"], subject=None, claims={})
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        with caplog.at_level("ERROR"):
+            assert mcp_server._current_actor() is None
+        assert any("no derivable identity" in r.message for r in caplog.records)
+    finally:
+        auth_context_var.reset(reset)

@@ -17,10 +17,12 @@ from pathlib import Path
 
 import httpx
 from fastmcp import FastMCP
+from fastmcp.server.auth import restrict_tag
 from fastmcp.server.auth.auth import AccessToken, AuthProvider, MultiAuth, TokenVerifier
 from fastmcp.server.auth.oauth_proxy.models import UpstreamTokenSet
 from fastmcp.server.auth.oidc_proxy import OIDCProxy
 from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.middleware import AuthMiddleware
 from fastmcp.utilities.types import Image
 from joserfc import jwt as joserfc_jwt
 from joserfc.errors import ExpiredTokenError
@@ -37,7 +39,7 @@ from mcp.types import Icon
 from pydantic import ValidationError
 
 from . import __version__, changes, database, lint, metrics, service, status, vault
-from .config import settings
+from .config import FULL_SCOPE, settings
 from .identity import Actor, resolve_bearer
 from .models import AttachmentCreate, ChangeEntry, ChangeListResponse, PostCreate, PostUpdate, TagConfigCreate
 from .routes.auth import _authorized
@@ -245,9 +247,13 @@ class _RelayOIDCProxy(OIDCProxy):
         `_get_verification_token`'s docstring already documents about
         `verify_id_token=True` decoupling upstream identity from relay's own
         authorization.
-        """
+
+        Always grants ``"write"`` too (relay #198, B-8): an OIDC login is a
+        human web-UI-equivalent identity via ``identity.actor_from_session``,
+        which is full-access by contract — only bearer keys (``_StaticBearerAuth``)
+        get a per-key restricted scope set."""
         _ = scopes
-        return list(settings.mcp_scopes)
+        return [*settings.mcp_scopes, "write"]
 
     async def _extract_upstream_claims(self, idp_tokens: dict) -> dict | None:
         id_token = idp_tokens.get("id_token")
@@ -367,16 +373,21 @@ class _StaticBearerAuth(TokenVerifier):
             # enforces `required_scopes` against every verifier's result, not just
             # the OAuth server's — `scopes=[]` here made the static-bearer path
             # 403 "insufficient_scope" on every single call, since it could never
-            # satisfy `settings.mcp_scopes`. The static key represents full,
-            # unscoped relay access (same as it always has); reporting relay's
-            # actual configured scopes is what lets it clear that check.
+            # satisfy `settings.mcp_scopes`. `settings.mcp_scopes` (the base
+            # "relay" scope) is always reported so every key can clear that
+            # check; `"write"` (relay #198, B-8) is added only for a key whose
+            # scope isn't read-only — `AuthMiddleware`'s `restrict_tag("write",
+            # scopes=["write"])` (see `_build_auth`) then filters/denies the
+            # 13 write-tagged tools per key, instead of every key reporting the
+            # same uniform scope set as before this feature.
             #
             # `subject=actor.name` (relay #198, B-7): which configured key
             # matched — "apikey" for the primary key, or a RELAY_API_KEYS
             # name — read back by `_current_actor()` for git/changes/
             # updated_by provenance. `client_id` stays the fixed "relay" in
             # case anything else depends on its current constant value.
-            return AccessToken(token=token, client_id="relay", scopes=settings.mcp_scopes, subject=actor.name)
+            scopes = [*settings.mcp_scopes, "write"] if actor.can_write else list(settings.mcp_scopes)
+            return AccessToken(token=token, client_id="relay", scopes=scopes, subject=actor.name)
         return None
 
 
@@ -583,6 +594,20 @@ mcp = FastMCP(
     website_url=settings.relay_base_url.rstrip("/"),
     icons=_brand_icons(),
     auth=_build_auth(),
+    # Coarse read/write gate (relay #198, B-8): every tool below tagged
+    # `tags={"write"}` requires a `write` scope on the caller's token —
+    # `_StaticBearerAuth.verify_token`/`_RelayOIDCProxy._translate_scopes_from_idp`
+    # grant that scope to every key/login except a read-only bearer key. Denied
+    # components are silently omitted from `tools/list` too (fastmcp's own
+    # `AuthMiddleware.on_list_tools` filters, not just enforces), so a read-only
+    # key's manifest never advertises a tool it can't call. `restrict_tag` only
+    # sees this fastmcp-level component tag, never a vault post's own tags — the
+    # finer write-restricted-to-vault-tag check happens inside each write tool's
+    # body instead, via the same `service.ScopeDenied`-raising helper the REST
+    # routes use (`service._common._require_write_scope`/`_require_full_access`).
+    # A no-op for STDIO transport (fastmcp's own documented behavior) and for
+    # any full-access key/login, which always carries `write`.
+    middleware=[AuthMiddleware(auth=restrict_tag("write", scopes=["write"]))],
 )
 
 
@@ -592,8 +617,22 @@ _db = database.connect
 def _current_actor() -> Actor | None:
     """The identity behind the in-flight tool call (relay #198, B-7), or
     ``None`` for a caller this server can't yet attribute (shouldn't happen —
-    every tool call is already authenticated by ``auth=_build_auth()`` — but
-    provenance is advisory enrichment, never a reason to fail a write).
+    every tool call is already authenticated by ``auth=_build_auth()``).
+
+    Before B-8 this ``None`` was harmless: provenance is advisory enrichment,
+    never a reason to fail a write. **Since B-8, it is no longer harmless** —
+    every ``service.ScopeDenied`` check is a no-op for ``actor=None`` (by
+    design, for internal/test callers that bypass auth entirely), so a
+    write-tagged tool whose ``_current_actor()`` unexpectedly returns
+    ``None`` would skip its own tag-restriction check too, not just its
+    provenance. Every currently reachable path already rules this out before
+    a write tool's body ever runs: ``AuthMiddleware``'s coarse ``write``-scope
+    check (see the ``mcp = FastMCP(...)`` comment above) requires
+    ``get_access_token()`` to return a real token with a real ``subject``
+    just to reach this function at all, and both auth paths below always
+    populate ``subject``. The error log below exists so a future auth path
+    that somehow violates that invariant fails loudly instead of silently
+    granting an authenticated-but-unattributable write.
 
     Two paths, confirmed by reading fastmcp's ``AccessToken`` construction
     directly (not assumed — same standard this file already holds every
@@ -622,8 +661,23 @@ def _current_actor() -> Actor | None:
     claims = token.claims or {}
     name = claims.get("email") or token.subject or claims.get("sub")
     if not name:
+        logging.getLogger(__name__).error(
+            "MCP tool call has an access token but no derivable identity (no email/subject/sub claim) — "
+            "proceeding unattributed, and any scope restriction (relay #198, B-8) is skipped for this call"
+        )
         return None
-    return Actor(name=name, email=f"{name}@relay.local" if "@" not in name else name)
+    # scope (relay #198, B-8): looked up by `token.subject`, same key
+    # `settings.key_scopes` is keyed by. For a static-bearer call that's the
+    # matched key's own name (`_StaticBearerAuth.verify_token`'s
+    # `subject=actor.name`) — the exact lookup `identity.resolve_bearer`
+    # already does, kept in sync here rather than re-resolving the token.
+    # For an OIDC call it's PocketID's opaque `sub`, which won't collide
+    # with an admin-configured key-scope name unless the admin deliberately
+    # makes it collide (within their own control) — so this naturally comes
+    # back FULL_SCOPE for every human login, matching
+    # `_translate_scopes_from_idp`'s "OIDC is always full access" contract.
+    scope = settings.key_scopes.get(token.subject, FULL_SCOPE) if token.subject else FULL_SCOPE
+    return Actor(name=name, email=f"{name}@relay.local" if "@" not in name else name, scope=scope)
 
 
 @mcp.resource(
@@ -648,7 +702,8 @@ async def master_document() -> str:
         "the vault whose embedding is close enough to be worth a glance before you duplicate work "
         "— always empty if this relay hasn't got embeddings enabled, and never blocks or slows down "
         "the publish itself."
-    )
+    ),
+    tags={"write"},
 )
 async def publish_post(
     title: str,
@@ -667,7 +722,10 @@ async def publish_post(
         expires_at=expires_at,
     )
     async with _db() as db:
-        post = await service.create_post(db, body, actor=_current_actor())
+        try:
+            post = await service.create_post(db, body, actor=_current_actor())
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return post.model_dump()
 
 
@@ -732,7 +790,8 @@ async def get_post(id: int) -> dict:
         "Pass an empty string for expires_at (or source) to clear it. Pass if_match (a "
         "post's etag from a prior response) to reject the write with a conflict if the "
         "post has changed since — otherwise this silently overwrites like today."
-    )
+    ),
+    tags={"write"},
 )
 async def update_post(
     id: int,
@@ -767,6 +826,8 @@ async def update_post(
                 "error": f"post #{id} has changed since if_match was captured",
                 "current": current.model_dump() if current is not None else None,
             }
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return post.model_dump()
 
 
@@ -777,7 +838,8 @@ async def update_post(
         "line or paragraph without resending the whole body. Add more surrounding "
         "context to old_str if it isn't unique. Pass if_match (a post's etag from a "
         "prior response) to also reject the edit if the post changed since you read it."
-    )
+    ),
+    tags={"write"},
 )
 async def edit_post(id: int, old_str: str, new_str: str, if_match: str | None = None) -> dict:
     metrics.record_tool_call("edit_post")
@@ -798,6 +860,8 @@ async def edit_post(id: int, old_str: str, new_str: str, if_match: str | None = 
                 "error": f"post #{id} has changed since if_match was captured",
                 "current": current.model_dump() if current is not None else None,
             }
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return post.model_dump()
 
 
@@ -807,7 +871,8 @@ async def edit_post(id: int, old_str: str, new_str: str, if_match: str | None = 
         "blank line is inserted before it unless the post is currently empty. Pass "
         "if_match (a post's etag from a prior response) to reject the append if the "
         "post changed since you read it."
-    )
+    ),
+    tags={"write"},
 )
 async def append_post(id: int, content: str, if_match: str | None = None) -> dict:
     metrics.record_tool_call("append_post")
@@ -822,6 +887,8 @@ async def append_post(id: int, content: str, if_match: str | None = None) -> dic
                 "error": f"post #{id} has changed since if_match was captured",
                 "current": current.model_dump() if current is not None else None,
             }
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return post.model_dump()
 
 
@@ -955,7 +1022,8 @@ async def get_related(id: int) -> dict:
         "vault half-migrated if it stops partway. The new name is normalised the same way "
         "tags always are (lowercased; only letters, digits, hyphen and underscore survive). "
         "Renaming to a tag that already exists merges the two. Returns the full tag list."
-    )
+    ),
+    tags={"write"},
 )
 async def rename_tag(tag: str, new_name: str) -> dict:
     metrics.record_tool_call("rename_tag")
@@ -969,6 +1037,8 @@ async def rename_tag(tag: str, new_name: str) -> dict:
             # `InvalidTag` carries no message (REST supplies its own static
             # detail too — see routes/tags.py) — `str(exc)` here would be "".
             return {"error": "tag must contain at least one letter, digit, hyphen or underscore."}
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return result.model_dump()
 
 
@@ -978,7 +1048,8 @@ async def rename_tag(tag: str, new_name: str) -> dict:
         "sha from get_post_history. The restore is itself recorded in history, so it can "
         "be undone the same way. Use this to undo a bad overwrite rather than "
         "reconstructing the body by hand."
-    )
+    ),
+    tags={"write"},
 )
 async def restore_post(id: int, sha: str) -> dict:
     metrics.record_tool_call("restore_post")
@@ -989,6 +1060,8 @@ async def restore_post(id: int, sha: str) -> dict:
             return {"error": "Vault history is disabled or git is unavailable."}
         except service.RevisionNotFound:
             return {"error": f"No revision '{sha}' in the history of post #{id}."}
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return post.model_dump()
 
 
@@ -1051,17 +1124,20 @@ async def lint_vault() -> dict:
         "cache by default, or pass force=true to wipe every embedded chunk/vector/cache row first and "
         "re-embed the whole vault from scratch. Returns the same object as get_status's 'embeddings' "
         "field. Errors if embeddings aren't enabled on this relay, or if a backfill is already running."
-    )
+    ),
+    tags={"write"},
 )
 async def trigger_embedding_backfill(force: bool = False) -> dict:
     metrics.record_tool_call("trigger_embedding_backfill")
     async with _db() as db:
         try:
-            result = await status.trigger_backfill(db, force=force)
+            result = await status.trigger_backfill(db, force=force, actor=_current_actor())
         except status.EmbeddingsUnavailable:
             return {"error": "Semantic search is not enabled on this relay."}
         except status.BackfillAlreadyRunning:
             return {"error": "A backfill is already running."}
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return result.model_dump()
 
 
@@ -1073,13 +1149,14 @@ async def trigger_embedding_backfill(force: bool = False) -> dict:
         "needs a restart. Disabling frees the embedding model's memory immediately rather than waiting "
         "for the idle timeout. In-memory only — a restart reverts to whatever .env says. Returns the "
         "same object as get_status's 'embeddings' field."
-    )
+    ),
+    tags={"write"},
 )
 async def set_embeddings_enabled(enabled: bool) -> dict:
     metrics.record_tool_call("set_embeddings_enabled")
     async with _db() as db:
         try:
-            result = await status.set_embeddings_enabled(db, enabled)
+            result = await status.set_embeddings_enabled(db, enabled, actor=_current_actor())
         except status.EmbeddingsUnavailable:
             return {
                 "error": "sqlite-vec is not available on this relay, or EMBEDDING_MODEL is not a known "
@@ -1090,10 +1167,15 @@ async def set_embeddings_enabled(enabled: bool) -> dict:
                 "error": "EMBEDDING_MODEL's dimension doesn't match the vector schema already on disk. "
                 "Restart relay to rebuild it before enabling."
             }
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return result.model_dump()
 
 
-@mcp.tool(description="Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.")
+@mcp.tool(
+    description="Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.",
+    tags={"write"},
+)
 async def delete_post(id: int) -> dict:
     metrics.record_tool_call("delete_post")
     async with _db() as db:
@@ -1103,6 +1185,8 @@ async def delete_post(id: int) -> dict:
             return {"error": "Master document (id=0) cannot be deleted."}
         except service.PostNotFound:
             return {"error": f"Post #{id} not found."}
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return {"ok": True, "deleted": id}
 
 
@@ -1116,7 +1200,8 @@ async def delete_post(id: int) -> dict:
         "otherwise it goes to `folder`, or to the folder `tags` would file a post under, or Inbox — and you place "
         "the returned `ref` yourself. Pass embed=false to file a post's attachment without touching its body. "
         "`filename` is required with `data`; with `source_url`/`upload_id` it's derived when omitted."
-    )
+    ),
+    tags={"write"},
 )
 async def add_attachment(
     filename: str | None = None,
@@ -1152,6 +1237,8 @@ async def add_attachment(
             return {"error": f"Post #{post_id} not found."}
         except service.AttachmentError as exc:
             return {"error": str(exc)}
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return result.model_dump()
 
 
@@ -1161,7 +1248,8 @@ async def add_attachment(
         "{upload_id, upload_url, method, max_bytes, expires_at}: PUT the raw bytes to "
         "`upload_url` (out-of-band — not through this tool call), then call add_attachment "
         "with the `upload_id` to file it. Use when you can reach the relay host to PUT."
-    )
+    ),
+    tags={"write"},
 )
 async def create_upload() -> dict:
     metrics.record_tool_call("create_upload")
@@ -1198,12 +1286,16 @@ async def get_attachment(name: str):
     description=(
         "Delete an attachment from the vault by its filename. Returns the removed name and "
         "any post ids that still embed/link it (now dangling) so you can fix them."
-    )
+    ),
+    tags={"write"},
 )
 async def delete_attachment(name: str) -> dict:
     metrics.record_tool_call("delete_attachment")
     async with _db() as db:
-        result = await service.delete_attachment(db, name, actor=_current_actor())
+        try:
+            result = await service.delete_attachment(db, name, actor=_current_actor())
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     if result is None:
         return {"error": f"Attachment '{name}' not found."}
     return result.model_dump()
@@ -1255,7 +1347,8 @@ async def list_tags() -> dict:
         "Set expiry configuration for a tag. Provide ttl_hours (relative to each post's "
         "creation), expires_at (absolute cutoff), or both. Only affects posts without their "
         "own expires_at. Provide neither to remove the tag's expiry configuration."
-    )
+    ),
+    tags={"write"},
 )
 async def set_tag_config(
     tag: str,
@@ -1265,7 +1358,10 @@ async def set_tag_config(
     metrics.record_tool_call("set_tag_config")
     body = TagConfigCreate(ttl_hours=ttl_hours, expires_at=expires_at)
     async with _db() as db:
-        result = await service.set_tag_config(db, tag, body)
+        try:
+            result = await service.set_tag_config(db, tag, body, actor=_current_actor())
+        except service.ScopeDenied:
+            return {"error": "This API key's scope does not permit this write."}
     return result.model_dump()
 
 

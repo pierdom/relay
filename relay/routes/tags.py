@@ -35,20 +35,28 @@ async def rename_tag(
         return await service.rename_tag(db, tag, body.new_name, actor=actor)
     except service.InvalidTag:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="tag must not be empty") from None
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None
 
 
 @router.post(
     "/tags/{tag}/config",
     response_model=TagConfigResponse,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(require_api_key)],
 )
 async def set_tag_config(
     tag: str,
     body: TagConfigCreate,
     db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
 ) -> TagConfigResponse:
     try:
-        return await service.set_tag_config(db, tag, body)
+        return await service.set_tag_config(db, tag, body, actor=actor)
     except service.InvalidTag:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="tag must not be empty") from None
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None

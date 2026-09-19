@@ -26,6 +26,7 @@ import aiosqlite
 
 from . import __version__, database, embedding, events, folders, history, vault, vectors, watcher
 from .config import settings
+from .identity import Actor
 from .models import (
     AuthStatus,
     EmbeddingBackfillStatus,
@@ -37,6 +38,7 @@ from .models import (
     VaultStatus,
     WatcherStatus,
 )
+from .service._common import _require_full_access
 
 # Wall-clock and monotonic start, set once from the app lifespan. Monotonic for
 # the duration (immune to clock changes), wall-clock for the timestamp.
@@ -156,11 +158,18 @@ class EmbeddingDimensionMismatch(Exception):
     instead of attempting it."""
 
 
-async def trigger_backfill(db: aiosqlite.Connection, *, force: bool = False) -> EmbeddingStatus:
+async def trigger_backfill(
+    db: aiosqlite.Connection, *, force: bool = False, actor: Actor | None = None
+) -> EmbeddingStatus:
     """``POST /embeddings/backfill``. Re-runs the same catch-up that runs
     once at startup, without a restart — resuming from the content-addressed
     cache by default, or wiping it first with ``force=True`` when the cache
-    itself (not just its completeness) is in question."""
+    itself (not just its completeness) is in question.
+
+    ``actor`` (relay #198, B-8) gates this to full-access keys only — a
+    vault-wide operation with no per-post tag to check a restricted key
+    against, same reasoning as ``service.tags.rename_tag``."""
+    _require_full_access(actor)
     if not (database.VEC_ENABLED and settings.embedding_enabled):
         raise EmbeddingsUnavailable
     if vault.backfill_status()["running"]:
@@ -171,7 +180,9 @@ async def trigger_backfill(db: aiosqlite.Connection, *, force: bool = False) -> 
     return await embedding_status(db, await post_count(db))
 
 
-async def set_embeddings_enabled(db: aiosqlite.Connection, enabled: bool) -> EmbeddingStatus:
+async def set_embeddings_enabled(
+    db: aiosqlite.Connection, enabled: bool, *, actor: Actor | None = None
+) -> EmbeddingStatus:
     """``PATCH /embeddings``. Pause or resume semantic/hybrid search without
     a restart — mutates ``settings.embedding_enabled`` directly, which every
     embedding call site already re-checks per call rather than caching, so
@@ -182,7 +193,11 @@ async def set_embeddings_enabled(db: aiosqlite.Connection, enabled: bool) -> Emb
     disk (see ``EmbeddingDimensionMismatch``) and kicks off a backfill so
     newly-covered posts don't wait for the next restart. Disabling force-
     unloads the backend immediately rather than waiting for the idle timer —
-    an explicit "off" means the memory is wanted back now, not eventually."""
+    an explicit "off" means the memory is wanted back now, not eventually.
+
+    ``actor`` (relay #198, B-8) gates this to full-access keys only, same
+    reasoning as ``trigger_backfill`` above."""
+    _require_full_access(actor)
     if enabled:
         if not database.VEC_ENABLED:
             raise EmbeddingsUnavailable

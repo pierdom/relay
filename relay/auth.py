@@ -117,7 +117,17 @@ async def require_api_key(
     and never look at the return value — only the write routes that need
     provenance (``routes.posts``/``attachments``/``tags``) capture it as
     ``actor: Actor = Depends(require_api_key)``.
+
+    Also the single REST enforcement point for the coarse read/write scope
+    gate (relay #198, B-8): a read-only key 403s here, before reaching any
+    route body — including routes that don't capture ``actor`` for
+    provenance at all (``set_tag_config``, the presigned-upload routes), so
+    every write route is covered with zero per-route wiring. The finer
+    write-restricted-to-tags check can't happen here (it needs the specific
+    post/attachment's tags, which only the route/service layer knows) — see
+    ``service._common._require_write_scope``.
     """
+    actor: Actor | None = None
     if relay_session:
         payload = verify_session(relay_session)
         if payload is not None:
@@ -127,12 +137,14 @@ async def require_api_key(
             # second lock.
             if request.method not in _SAFE_METHODS and is_cross_site(request):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-site request rejected")
-            return actor_from_session(payload)
-    if credentials:
+            actor = actor_from_session(payload)
+    if actor is None and credentials:
         actor = resolve_bearer(credentials.credentials)
-        if actor is not None:
-            return actor
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid API key",
-    )
+    if actor is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key",
+        )
+    if request.method not in _SAFE_METHODS and not actor.can_write:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This API key is read-only")
+    return actor

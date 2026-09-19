@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import AliasChoices, Field
@@ -19,6 +20,28 @@ _KEY_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
 _RESERVED_KEY_NAME = "apikey"
 
 
+@dataclass(frozen=True)
+class ApiKeyScope:
+    """What a bearer key may do (relay #198, B-8) — parsed from
+    ``RELAY_API_KEY_SCOPES``, orthogonal to ``RELAY_API_KEYS`` (which key
+    material resolves to which identity). ``mode`` is ``"full"``, ``"read"``
+    or ``"write"``; ``tags`` is only meaningful for ``"write"`` — the set of
+    vault tags a write may touch, checked ALL-of (every tag on the post, not
+    just one) by ``identity.Actor.can_write_tags``.
+
+    A name absent from ``Settings.key_scopes`` means ``FULL_SCOPE`` wherever
+    that's looked up — this type only ever represents a *restriction*, so a
+    missing entry can never grant more than a key already had, which is what
+    keeps this additive to every already-deployed ``RELAY_API_KEYS`` key.
+    """
+
+    mode: str
+    tags: frozenset[str] = field(default_factory=frozenset)
+
+
+FULL_SCOPE = ApiKeyScope(mode="full")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=_ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
@@ -31,6 +54,15 @@ class Settings(BaseSettings):
     api_keys: str = Field(
         default="",
         validation_alias=AliasChoices("RELAY_API_KEYS", "API_KEYS"),
+    )
+    # Per-key read/write-to-tags restrictions (relay #198, B-8): "name:mode[:tags]",
+    # comma-separated, keyed by the same names as `api_keys` but parsed independently
+    # (see `key_scopes`'s own docstring for why this isn't a third field on api_keys).
+    # A name absent here is full access — every key deployed before this feature keeps
+    # behaving exactly as it does today.
+    api_key_scopes: str = Field(
+        default="",
+        validation_alias=AliasChoices("RELAY_API_KEY_SCOPES", "API_KEY_SCOPES"),
     )
     relay_base_url: str = "http://localhost:8000"
     default_ttl_hours: int = 0  # 0 = never expire
@@ -198,6 +230,66 @@ class Settings(BaseSettings):
         (under the reserved name ``apikey``) plus every named key. Single
         source ``identity.resolve_bearer``/``auth.bearer_matches`` both read."""
         return {_RESERVED_KEY_NAME: self.api_key, **self.named_api_keys}
+
+    @property
+    def key_scopes(self) -> dict[str, ApiKeyScope]:
+        """Parsed ``RELAY_API_KEY_SCOPES`` ("name:mode[:tags]", comma-separated;
+        relay #198, B-8). A separate variable from ``RELAY_API_KEYS`` rather than
+        a third ``:``-delimited field on it: ``named_api_keys`` already partitions
+        each entry on its *first* colon only, so key material may itself legally
+        contain colons — appending a scope suffix to that same grammar would be
+        genuinely ambiguous to parse and risks corrupting already-deployed key
+        secrets. Keeping the two independent also means scopes can be layered
+        onto an existing key by name, with no redeploy of the key itself.
+
+        Same skip-with-warning philosophy as ``named_api_keys``: a malformed
+        entry, an unknown mode, a ``write`` entry with no (or an invalid) tag,
+        a duplicate name, or the reserved ``apikey`` name is skipped with a
+        warning, never a startup failure. The reserved-name exclusion mirrors
+        ``named_api_keys``'s own guard — the break-glass primary key is not
+        scopable, consistent with its exemption from the OIDC allowlist
+        (``auth.still_authorized``'s ``sub == APIKEY_SUB`` carve-out). Does
+        not otherwise cross-validate against ``all_api_keys`` — an entry for
+        a name that isn't (or isn't yet) a configured key is simply inert,
+        not an error, so scope config can be prepared ahead of the key it
+        will apply to.
+
+        ``tags`` are lowercased before validation, same as the ``name``
+        itself and as every vault tag already is (``tags.py``'s own
+        cleaning) — a `write:News` entry means the same thing as
+        `write:news`, rather than silently failing to parse (and falling
+        back to :data:`FULL_SCOPE`, the opposite of what a typo like that
+        should do) just because vault tags are conventionally lowercase but
+        this config value wasn't normalised to match.
+        """
+        scopes: dict[str, ApiKeyScope] = {}
+        for entry in self.api_key_scopes.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            parts = entry.split(":")
+            name = parts[0].strip().lower()
+            if not _KEY_NAME_RE.match(name):
+                logger.warning("RELAY_API_KEY_SCOPES: skipping malformed entry %r", entry)
+                continue
+            if name == _RESERVED_KEY_NAME:
+                logger.warning("RELAY_API_KEY_SCOPES: %r is reserved for the primary API_KEY — skipping", name)
+                continue
+            if name in scopes:
+                logger.warning("RELAY_API_KEY_SCOPES: duplicate name %r — keeping the first", name)
+                continue
+            mode = parts[1].strip().lower() if len(parts) > 1 else ""
+            if mode in ("full", "read") and len(parts) == 2:
+                scopes[name] = ApiKeyScope(mode=mode)
+            elif mode == "write" and len(parts) == 3:
+                tags = frozenset(t.strip().lower() for t in parts[2].split("+") if t.strip())
+                if tags and all(_KEY_NAME_RE.match(t) for t in tags):
+                    scopes[name] = ApiKeyScope(mode="write", tags=tags)
+                else:
+                    logger.warning("RELAY_API_KEY_SCOPES: skipping malformed entry %r", entry)
+            else:
+                logger.warning("RELAY_API_KEY_SCOPES: skipping malformed entry %r", entry)
+        return scopes
 
     @property
     def mcp_scopes(self) -> list[str]:

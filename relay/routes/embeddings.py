@@ -10,7 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from .. import status as status_module
 from ..auth import require_api_key
 from ..database import get_db
+from ..identity import Actor
 from ..models import EmbeddingStatus, EmbeddingToggle
+from ..service import ScopeDenied
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
@@ -19,7 +21,6 @@ router = APIRouter(prefix="/embeddings", tags=["embeddings"])
     "/backfill",
     response_model=EmbeddingStatus,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_api_key)],
 )
 async def trigger_backfill(
     force: bool = Query(
@@ -30,9 +31,10 @@ async def trigger_backfill(
         ),
     ),
     db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
 ) -> EmbeddingStatus:
     try:
-        return await status_module.trigger_backfill(db, force=force)
+        return await status_module.trigger_backfill(db, force=force, actor=actor)
     except status_module.EmbeddingsUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -43,15 +45,21 @@ async def trigger_backfill(
             status_code=status.HTTP_409_CONFLICT,
             detail="A backfill is already running",
         ) from None
+    except ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This API key's scope does not permit this write",
+        ) from None
 
 
-@router.patch("", response_model=EmbeddingStatus, dependencies=[Depends(require_api_key)])
+@router.patch("", response_model=EmbeddingStatus)
 async def set_enabled(
     body: EmbeddingToggle,
     db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
 ) -> EmbeddingStatus:
     try:
-        return await status_module.set_embeddings_enabled(db, body.enabled)
+        return await status_module.set_embeddings_enabled(db, body.enabled, actor=actor)
     except status_module.EmbeddingsUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -64,4 +72,9 @@ async def set_enabled(
                 "EMBEDDING_MODEL's dimension doesn't match the vector schema already on disk. "
                 "Restart relay to rebuild it before enabling."
             ),
+        ) from None
+    except ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This API key's scope does not permit this write",
         ) from None

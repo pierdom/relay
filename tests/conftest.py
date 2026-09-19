@@ -7,15 +7,49 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import contextmanager
 
 # Must precede the `relay.config` import below: Settings requires API_KEY, and CI
 # has no .env to supply it.
 os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
+from mcp.server.auth.middleware.auth_context import auth_context_var
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+from mcp.server.auth.provider import AccessToken
 
 from relay import changes, history, vault
 from relay.config import settings
+
+
+@contextmanager
+def _fake_mcp_auth(*, scopes: list[str] = ("relay", "write"), subject: str = "apikey"):
+    """Fake an authenticated MCP request context (relay #198, B-8) for a test
+    that calls ``mcp_server.mcp.list_tools()``/other fastmcp server-level APIs
+    directly, bypassing the real Streamable HTTP transport that would
+    otherwise have set this via ``AuthContextMiddleware``. Without it,
+    ``get_access_token()`` (which ``AuthMiddleware`` reads to decide what a
+    caller may see) finds no token at all and fail-closed denies every
+    ``tags={"write"}`` tool — correct behavior for a genuinely unauthenticated
+    request, but not what a test asserting "this tool is in the manifest"
+    means to exercise. Real MCP calls always carry a token by the time a
+    handler runs; this only fills the gap that exists when bypassing the
+    transport in-process."""
+    token = AccessToken(token="test", client_id="relay", scopes=list(scopes), subject=subject)
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        yield
+    finally:
+        auth_context_var.reset(reset)
+
+
+@pytest.fixture
+def mcp_auth_context():
+    """Fixture form of ``_fake_mcp_auth`` — injected by name (no import needed,
+    ``tests/`` has no ``__init__.py`` so it isn't an importable package) as
+    ``with mcp_auth_context(): ...`` in a test that needs a full-access MCP
+    caller context."""
+    return _fake_mcp_auth
 
 
 @pytest.fixture(autouse=True)

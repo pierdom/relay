@@ -4,6 +4,22 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.14.0] — 2026-09-19
+
+Per-key scopes (relay #198, B-8): the authorization half of B-7's identity work — read-only and write-restricted-to-tags API keys, on both REST and MCP. A pre-release audit of the diff found and fixed four real gaps before this ever shipped, listed under Fixed below.
+
+### Added
+- `RELAY_API_KEY_SCOPES` (`name:mode[:tags]`, comma-separated) — `read` (read-only), `write:tag1+tag2` (write-restricted to those vault tags, checked ALL-of: every tag on a post/attachment, not just one), or `full` (explicit full access, same as omitting the entry). A name absent from this variable is full access, so every key deployed before this release keeps behaving exactly as it did
+- REST: a coarse read/write gate in `auth.require_api_key` covers every write route with no per-route wiring; a shared service-layer check (`service.ScopeDenied`, `_require_write_scope`/`_require_full_access`) enforces the tag restriction on `create_post`, `update_post`/`edit_post`/`append_post`/`delete_post`, `restore_post`, and `add_attachment`/`delete_attachment` (an attachment inherits its owning post's tags)
+- MCP: fastmcp's `AuthMiddleware`/`restrict_tag` gates the 13 write tools by a `write` scope, granted per-key instead of the previous uniform scope — a read-only key's `tools/list` now silently omits every write tool instead of erroring on a call. The same service-layer tag check backs the fine-grained restriction, so REST and MCP share one enforcement point, not two
+- `rename_tag`, `set_tag_config`, and the embeddings toggle/backfill require full access outright — none of them has a single owning tag a restricted key could be checked against
+
+### Fixed
+- The web UI's paste-login (`POST /session`) used to mint a full-access session cookie regardless of which key was pasted — a read-only or tag-scoped key holder could get full access through the browser. Now resolves the pasted key's actual identity and scope into the session
+- Found in a pre-release audit, before any of these were live: (1) `add_attachment`'s `folder`-only branch was scope-checking the caller-supplied `tags` value instead of the actual target folder, letting a tag-restricted key write into any folder by pairing an in-scope `tags` value with an unrelated `folder`; (2) a mixed-case tag in `RELAY_API_KEY_SCOPES` (e.g. `write:News`) failed the lowercase-only validation and was silently dropped — leaving the key at full access instead of the intended restriction, since a config parse failure and "no entry" look identical; (3) `RELAY_API_KEY_SCOPES` had no guard against scoping the reserved `apikey` name, unlike `RELAY_API_KEYS`, so an `apikey:read` entry would silently restrict the break-glass primary key; (4) `mcp_server._current_actor()` returning `None` (a "shouldn't happen" case, documented as such) now also skips scope enforcement, not just provenance — confirmed unreachable via any current auth path, hardened with a loud error log rather than left silent
+
+---
+
 ## [1.13.1] — 2026-09-18
 
 Found deploying 1.13.0 to bespin, within minutes: relay crash-looped on startup with `sqlite3.OperationalError: no such column: updated_by`.

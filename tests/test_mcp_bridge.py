@@ -87,12 +87,13 @@ def bridged(relay_server, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_bridge_exposes_the_servers_tools_plus_path_on_add_attachment(bridged):
+async def test_bridge_exposes_the_servers_tools_plus_path_on_add_attachment(bridged, mcp_auth_context):
     # fastmcp's list_tools() returns its own Tool/FunctionTool objects (relay #313
     # migration) — `.parameters`, not the wire-protocol mcp.types.Tool's `.input_schema`
     # that `local` (parsed off the real bridge response) has. to_mcp_tool() converts to
     # that same wire shape so both sides compare like for like.
-    remote = {t.name: t.to_mcp_tool() for t in await mcp.list_tools()}
+    with mcp_auth_context():
+        remote = {t.name: t.to_mcp_tool() for t in await mcp.list_tools()}
     local = await _tools()
     assert set(local) == set(remote)
     for name, tool in local.items():
