@@ -64,6 +64,8 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | **required** | Bearer token for all endpoints |
+| `RELAY_API_KEYS` | `""` | Named bearer keys (`name:key,name:key,...`) alongside `API_KEY`, each attributed separately — git commit author, `changes.author`, a post's `updated_by`. See [docs/auth.md](auth.md) |
+| `RELAY_API_KEY_SCOPES` | `""` | Restrict a `RELAY_API_KEYS` entry to read-only or to specific vault tags (`name:read` / `name:write:tag1+tag2` / `name:full`). A name with no entry is full access — see [docs/auth.md](auth.md) |
 | `RELAY_VAULT_PATH` | `/data/vault` | Markdown vault directory; SQLite index lives in `<vault>/.relay/` |
 | `RELAY_BASE_URL` | `http://localhost:8000` | Public URL of this relay instance (used by the stdio proxy and OAuth redirects) |
 | `DEFAULT_TTL_HOURS` | `0` | Global post expiry window; `0` disables expiry (per-tag TTLs still apply) |
