@@ -520,6 +520,19 @@ class AuthStatus(BaseModel):
     mcp_oauth: bool = Field(description="True only when the flag *and* an OIDC client are set")
 
 
+class CallerStatus(BaseModel):
+    """What the authenticated caller's own key may do (relay #198, B-8) — the
+    client-facing mirror of identity.ApiKeyScope, so a UI/TUI/agent can learn
+    its own restrictions up front instead of discovering them one 403 at a
+    time. `tags` is only populated when `mode == "write"` — a tag list means
+    nothing for "full"/"read"."""
+
+    mode: str = Field(description='"full", "read", or "write"')
+    tags: list[str] | None = Field(
+        default=None, description="Allowed vault tags (ALL-of semantics) — set only when mode='write'"
+    )
+
+
 class FeatureStatus(BaseModel):
     history: HistoryStatus
     search: SearchStatus
@@ -588,6 +601,11 @@ class StatusResponse(BaseModel):
     vault: VaultStatus
     features: FeatureStatus
     embeddings: EmbeddingStatus
+    caller: CallerStatus | None = Field(
+        default=None,
+        description="The authenticated caller's own effective scope (relay #198, B-8). Null only "
+        "for an internal caller with no resolved identity — every REST/MCP request has one.",
+    )
 
 
 class PostRevision(BaseModel):

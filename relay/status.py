@@ -29,6 +29,7 @@ from .config import settings
 from .identity import Actor
 from .models import (
     AuthStatus,
+    CallerStatus,
     EmbeddingBackfillStatus,
     EmbeddingStatus,
     FeatureStatus,
@@ -215,7 +216,17 @@ async def set_embeddings_enabled(
     return await embedding_status(db, await post_count(db))
 
 
-async def build(db: aiosqlite.Connection) -> StatusResponse:
+def _caller_status(actor: Actor | None) -> CallerStatus | None:
+    """Reduce an Actor's scope to the client-facing CallerStatus shape (relay
+    #198, B-8) — None only when there's no actor to report on at all (an
+    internal caller bypassing auth; every real REST/MCP request has one)."""
+    if actor is None:
+        return None
+    scope = actor.scope
+    return CallerStatus(mode=scope.mode, tags=sorted(scope.tags) if scope.mode == "write" else None)
+
+
+async def build(db: aiosqlite.Connection, *, actor: Actor | None = None) -> StatusResponse:
     """Assemble the full status. Reports what is *working*, not what is configured."""
     attachments = vault.list_attachments()
     git = await history.git_version()
@@ -249,4 +260,5 @@ async def build(db: aiosqlite.Connection) -> StatusResponse:
             auth=AuthStatus(oidc=settings.oidc_enabled, mcp_oauth=settings.mcp_oauth_active),
         ),
         embeddings=await embedding_status(db, posts),
+        caller=_caller_status(actor),
     )

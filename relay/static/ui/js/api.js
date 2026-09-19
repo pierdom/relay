@@ -14,6 +14,30 @@ let apiKey = '';
 export function setApiKey(key) { apiKey = key || ''; }
 export function clearApiKey() { apiKey = ''; }
 
+// Caller scope (relay #198, B-8) — the client-side mirror of GET /status's
+// `caller` field. Session-scoped state, same pattern as apiKey above: set
+// once by main.js's init() from its one /status fetch, read by main.js
+// (New Post / compose gating) and edit-form.js (Save gating), cleared on
+// disconnect so a stale scope never survives a switch to a different key.
+let callerScope = null;
+
+export function setCallerScope(scope) { callerScope = scope || null; }
+export function clearCallerScope() { callerScope = null; }
+export function getCallerScope() { return callerScope; }
+
+// Whether `tags` is entirely within a write-restricted key's allowed set —
+// the exact ALL-of, non-empty-required semantics of identity.Actor.can_write_tags,
+// mirrored deliberately so this can never be more permissive than the
+// server, only equally or more conservative. `scope` null or "full" always
+// passes; "read" never does (defense in depth — callers should already be
+// gating on mode === 'read' well before reaching this).
+export function tagsAllowedByScope(tags, scope) {
+  if (!scope || scope.mode === 'full') return true;
+  if (scope.mode === 'read') return false;
+  const allowed = new Set(scope.tags || []);
+  return tags.length > 0 && tags.every(t => allowed.has(t));
+}
+
 export async function apiFetch(path, opts = {}) {
   // Cookie carries the session by default; only add the bearer header on the
   // API-key break-glass path.

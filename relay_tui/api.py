@@ -82,6 +82,15 @@ class DeletedPost:
     path: str
 
 
+@dataclass
+class CallerScope:
+    """What the local key can do (relay #198, B-8) — the TUI's own mirror of
+    GET /status's `caller` field."""
+
+    mode: str  # "full" | "read" | "write"
+    tags: list[str] | None = None
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -207,6 +216,17 @@ def delete_post(post_id: int) -> None:
         timeout=10,
     )
     resp.raise_for_status()
+
+
+def get_caller_scope() -> CallerScope:
+    """GET /status, reduced to the caller's own effective scope (relay #198,
+    B-8) — everything else /status reports has no TUI consumer yet."""
+    resp = requests.get(f"{_base()}/status", headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    caller = resp.json().get("caller")
+    if caller is None:
+        return CallerScope(mode="full")
+    return CallerScope(mode=caller["mode"], tags=caller.get("tags"))
 
 
 def list_tags() -> list[Tag]:
