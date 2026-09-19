@@ -102,7 +102,11 @@ def _login_as(scoped_relay_server, browser, key: str, **context_args):
 def test_read_only_key_hides_new_post(scoped_relay_server, browser):
     context, page = _login_as(scoped_relay_server, browser, RO_KEY)
     try:
-        assert page.locator("#newPostBtn").is_hidden()
+        # Login only guarantees the synchronous part of init() has run;
+        # scope resolves asynchronously via fetchInitStatus(). Wait on the
+        # actual value this test reads (the button's own hidden state), not
+        # a proxy for it like "some time has passed since login".
+        page.locator("#newPostBtn").wait_for(state="hidden", timeout=10_000)
     finally:
         context.close()
 
@@ -111,8 +115,10 @@ def test_read_only_key_status_panel_shows_read_only(scoped_relay_server, browser
     context, page = _login_as(scoped_relay_server, browser, RO_KEY)
     try:
         page.locator("#statusBtn").click()
-        page.locator("#smBody").wait_for(state="visible", timeout=10_000)
-        assert "Read-only" in page.locator("#smBody").inner_text()
+        # Wait on the text this test actually asserts, not a "panel opened"
+        # proxy — the /status fetch inside openStatusModal() is itself async,
+        # so #smBody briefly shows "loading…" after the modal is visible.
+        page.get_by_text("Read-only").wait_for(timeout=10_000)
     finally:
         context.close()
 

@@ -247,6 +247,7 @@ async function init() {
 
     setCallerScope(caller);
     applyNewPostVisibility();
+    applyComposeScopeGate();   // no-op if compose isn't open; corrects it if it already is
   });
   // openPostFromUrl has no dependency on tags/posts, so it runs concurrently
   // with those — but it does depend on loadLinkIndex: the modal renders the
@@ -414,10 +415,30 @@ cpPublish.insertAdjacentElement('beforebegin', cpGateMsg);
 // only 'full' (always allowed) and 'write' (validated below) show up here.
 // Live as the user edits Tags, and re-run whenever the panel opens since
 // closeCompose() resets the field to empty (which a write-restricted key
-// never satisfies — see tagsAllowedByScope's non-empty rule).
+// never satisfies — see tagsAllowedByScope's non-empty rule). Also re-run
+// once fetchInitStatus() actually resolves (see init()) — scope is unknown
+// for a brief window right after login, and treating "unknown" the same as
+// "full access" would let Publish sit enabled during that window instead of
+// correctly disabled-until-proven-otherwise.
 function applyComposeScopeGate() {
   const scope = getCallerScope();
-  if (!scope || scope.mode !== 'write') { cpGateMsg.textContent = ''; cpPublish.disabled = false; return; }
+  if (!scope) {
+    cpGateMsg.textContent = 'Checking access…';
+    cpPublish.disabled = true;
+    return;
+  }
+  if (scope.mode === 'full') { cpGateMsg.textContent = ''; cpPublish.disabled = false; return; }
+  if (scope.mode === 'read') {
+    // Belt-and-suspenders: applyNewPostVisibility() already hides New Post
+    // outright for a read-only key, so this branch should be unreachable in
+    // practice — but scope resolves asynchronously (fetchInitStatus, after
+    // init()'s synchronous first paint), so there's a real window right
+    // after login where the button is still visible. Gate Publish here too
+    // rather than relying solely on the button being hidden in time.
+    cpGateMsg.textContent = 'This key is read-only — publishing is disabled.';
+    cpPublish.disabled = true;
+    return;
+  }
   const tags = parseTagsField(cpTags.value);
   if (tagsAllowedByScope(tags, scope)) {
     cpGateMsg.textContent = '';
