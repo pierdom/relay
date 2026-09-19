@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 import aiosqlite
+
+from ..identity import Actor
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +90,42 @@ class AttachmentSourceError(Exception):
     """Raised when the attachment's byte source fails to resolve — a source_url
     fetch error or a presigned upload slot that's unknown/expired/unfilled. Maps
     to a 400 (loud, actionable), distinct from the 413 size cap."""
+
+
+class ScopeDenied(Exception):
+    """Raised when an actor's key scope forbids a write (relay #198, B-8) —
+    either a write-restricted key touching a post/attachment outside its
+    allowed tags, or any non-full-access key calling a vault-wide operation
+    (rename_tag, set_tag_config, the embeddings toggle/backfill) that has no
+    per-post tag to check against. The single enforcement point both REST
+    routes and MCP tool functions catch for this finer-grained case — the
+    coarse read-only gate is already handled by ``auth.require_api_key``
+    (REST) and ``mcp_server``'s ``AuthMiddleware`` wiring (MCP) before a
+    write path is ever reached, so this only fires for a key that *can*
+    write in general but not *this*."""
+
+
+def _require_write_scope(actor: Actor | None, tags: Iterable[str]) -> None:
+    """Enforce a write-restricted-to-tags key's scope against the tags of
+    the post/attachment being written (relay #198, B-8; ALL-of semantics —
+    see ``Actor.can_write_tags``). ``actor=None`` means an internal/test
+    caller that bypasses auth entirely — never itself a reason to deny,
+    mirroring ``actor``'s existing provenance-only contract elsewhere in
+    this module (both REST's ``require_api_key`` and MCP's
+    ``_current_actor()`` always hand back a real ``Actor`` on an
+    authenticated call)."""
+    if actor is not None and not actor.can_write_tags(tags):
+        raise ScopeDenied
+
+
+def _require_full_access(actor: Actor | None) -> None:
+    """Vault-wide operations (rename_tag, set_tag_config, the embeddings
+    toggle/backfill) have no single owning tag to check — only a full-access
+    key (or an untracked internal caller, ``actor=None``) may call them; a
+    merely-``write`` tag-restricted key is denied outright, same as
+    ``read``."""
+    if actor is not None and actor.scope.mode != "full":
+        raise ScopeDenied
 
 
 async def _fetch(db: aiosqlite.Connection, post_id: int) -> aiosqlite.Row | None:

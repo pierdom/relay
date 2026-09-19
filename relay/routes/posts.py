@@ -72,7 +72,12 @@ async def create_post(
     db: aiosqlite.Connection = Depends(get_db),
     actor: Actor = Depends(require_api_key),
 ) -> PostCreateResponse:
-    post = await service.create_post(db, body, actor=actor)
+    try:
+        post = await service.create_post(db, body, actor=actor)
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None
     _set_etag(response, post)
     return post
 
@@ -314,6 +319,10 @@ async def restore_post(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No revision '{body.sha}' in the history of post #{post_id}",
         ) from None
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None
 
 
 @router.patch(
@@ -340,6 +349,10 @@ async def update_post(
     except service.ConcurrentModification:
         current = await service.get_post(db, post_id)
         raise _conflict(post_id, current) from None
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None
 
 
 @router.post(
@@ -383,6 +396,10 @@ async def edit_post(
     except service.ConcurrentModification:
         current = await service.get_post(db, post_id)
         raise _conflict(post_id, current) from None
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None
 
 
 @router.post(
@@ -409,6 +426,10 @@ async def append_post(
     except service.ConcurrentModification:
         current = await service.get_post(db, post_id)
         raise _conflict(post_id, current) from None
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None
 
 
 @router.delete(
@@ -429,3 +450,7 @@ async def delete_post(
         ) from None
     except service.PostNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None

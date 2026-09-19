@@ -19,7 +19,15 @@ from ..models import (
     PostUpdate,
     UploadSlotResponse,
 )
-from ._common import AttachmentError, AttachmentSourceError, InvalidFolder, PostNotFound, _fetch
+from ._common import (
+    AttachmentError,
+    AttachmentSourceError,
+    InvalidFolder,
+    PostNotFound,
+    _fetch,
+    _require_write_scope,
+    _tags_from_sentinel,
+)
 
 _EMBED_OR_LINK_RE = re.compile(r"!?\[\[([^\]|#]+?)(?:\|[^\]]*)?\]\]")
 
@@ -166,19 +174,33 @@ async def add_attachment(
     if len(data) > settings.attachment_max_bytes:
         raise AttachmentError(f"attachment exceeds the {settings.attachment_max_mb} MB limit")
 
+    # An attachment inherits its owning post's tags for scope purposes (relay
+    # #198, B-8) — there's no tag concept of its own. `folder`/neither give
+    # no derivable tag: folders are a many-to-one projection of tags
+    # (`folders.FALLBACK`), so reversing `folder` back to a tag set would be
+    # ambiguous; a tag-restricted key is denied outright in both cases
+    # rather than guessing.
     row = None
     if post_id is not None:
         row = await _fetch(db, post_id)
         if row is None:
             raise PostNotFound
+        _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
         target_folder = folders.folder_of(row["path"], default=folders.INBOX)
     elif folder:
         if not folders.is_valid_name(folder):
             raise InvalidFolder(f"invalid folder name: {folder!r}")
+        # `tags` (if also passed) says nothing about `folder` — a caller could
+        # supply an in-scope `tags` value alongside an unrelated `folder` and
+        # bypass the restriction entirely, so this branch never checks `tags`
+        # for the scope decision, unlike the `elif tags:` branch below.
+        _require_write_scope(actor, [])
         target_folder = folder
     elif tags:
+        _require_write_scope(actor, tags)
         target_folder = folders.folder_for(1, tags) or folders.INBOX
     else:
+        _require_write_scope(actor, [])
         target_folder = folders.INBOX
 
     # Serialize name-allocation + write against other writers so two concurrent
@@ -231,13 +253,28 @@ async def delete_attachment(
     """Delete an attachment file. Returns the removed name plus any post ids that
     still embed/link it (now dangling), or ``None`` if it didn't resolve."""
     async with vault.write_lock:
+        resolved = vault.resolve_attachment(name)
+        if resolved is None:
+            return None
+        fname = resolved.name.lower()
+        # Resolved and scanned *before* deleting (relay #198, B-8) so the same
+        # scan serves both the scope check (an attachment inherits its
+        # owning posts' tags — see add_attachment) and the existing
+        # `referenced_by` response field, rather than scanning twice. An
+        # orphan (zero referencing posts) has no tag to prove ownership
+        # against, so a tag-restricted key is denied outright, same as
+        # `folder`-only in add_attachment.
+        async with db.execute("SELECT id, tags, content FROM posts") as cur:
+            rows = await cur.fetchall()
+        referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
+        owning_tags: set[str] = set()
+        for r in rows:
+            if r["id"] in referenced_by:
+                owning_tags |= set(_tags_from_sentinel(r["tags"]))
+        _require_write_scope(actor, owning_tags)
         removed = vault.delete_attachment(name)
         if removed is None:
             return None
-        fname = removed.name.lower()
-        async with db.execute("SELECT id, content FROM posts") as cur:
-            rows = await cur.fetchall()
-        referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
         # K-2: commit while still holding `write_lock` — see posts.create_post's
         # comment for why the two must never be split by a lock release.
         await history.commit(f"attachment delete: {removed.name}", author=actor.git_author if actor else None)

@@ -17,7 +17,7 @@ from ..models import (
     TagCount,
     TagListResponse,
 )
-from ._common import InvalidTag, _fetch, _tags_from_sentinel
+from ._common import InvalidTag, _fetch, _require_full_access, _tags_from_sentinel
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
 
@@ -53,6 +53,10 @@ async def list_tags(db: aiosqlite.Connection) -> TagListResponse:
 async def rename_tag(
     db: aiosqlite.Connection, tag: str, new_name: str, *, actor: Actor | None = None
 ) -> TagListResponse:
+    # Vault-wide (relay #198, B-8): touches every post carrying `old` across
+    # the whole vault, with no single owning tag a scoped key could be
+    # checked against — full access only, same as set_tag_config below.
+    _require_full_access(actor)
     old = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
     if not old or not new_name:
         raise InvalidTag
@@ -110,11 +114,18 @@ async def rename_tag(
     return await list_tags(db)
 
 
-async def set_tag_config(db: aiosqlite.Connection, tag: str, body: TagConfigCreate) -> TagConfigResponse:
+async def set_tag_config(
+    db: aiosqlite.Connection, tag: str, body: TagConfigCreate, *, actor: Actor | None = None
+) -> TagConfigResponse:
     """Set a tag's expiry — or, with neither ``ttl_hours`` nor ``expires_at``,
     **remove** it. A config could be created but never deleted: clearing both
     fields left a ``ttl_hours=0`` row that kept the tag in ``list_tags`` at
-    count 0 forever (AUDIT.md G-03)."""
+    count 0 forever (AUDIT.md G-03).
+
+    ``actor`` (relay #198, B-8) is used purely for the full-access scope
+    check below — this function has no commit/git-author concept of its own
+    (it never touched provenance before this feature and still doesn't)."""
+    _require_full_access(actor)
     clean_tag = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
     if not clean_tag:
         raise InvalidTag

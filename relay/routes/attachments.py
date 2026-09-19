@@ -68,6 +68,10 @@ async def create_attachment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{body.post_id} not found") from None
     except service.AttachmentError as exc:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None
 
 
 @router.post(
@@ -156,7 +160,12 @@ async def delete_attachment(
     actor: Actor = Depends(require_api_key),
 ) -> AttachmentDeleteResponse:
     """Delete an attachment file; reports any posts that still reference it."""
-    result = await service.delete_attachment(db, name, actor=actor)
+    try:
+        result = await service.delete_attachment(db, name, actor=actor)
+    except service.ScopeDenied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
+        ) from None
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     return result

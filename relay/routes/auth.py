@@ -7,8 +7,9 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 
-from ..auth import SESSION_COOKIE, bearer_matches, create_session, revoke_session, verify_session
+from ..auth import SESSION_COOKIE, create_session, revoke_session, verify_session
 from ..config import settings
+from ..identity import resolve_bearer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["auth"])
@@ -177,9 +178,19 @@ async def session_create(request: Request, response: Response) -> dict:
     auth = request.headers.get("authorization", "")
     if not key and auth.startswith("Bearer "):
         key = auth[7:]
-    if not bearer_matches(key):
+    actor = resolve_bearer(key)
+    if actor is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-    token = create_session()
+    # sub=actor.name (not "apikey" unconditionally, relay #198 B-8): the
+    # session's scope lookup (identity.actor_from_session) is keyed by sub,
+    # same as a bearer's is keyed by name — a read-only/tag-scoped named key
+    # pasted here must carry that scope into the cookie too, or the web UI
+    # would be a full-access bypass of every other key restriction. email is
+    # deliberately left blank, not actor's own synthetic one: it keeps
+    # actor_from_session's `name = email or sub` regenerating the identical
+    # name/synthetic-email pair resolve_bearer already produced for this same
+    # key, rather than a session-only variant of it.
+    token = create_session(sub=actor.name, email="")
     response.set_cookie(
         key="relay_session",
         value=token,

@@ -16,7 +16,7 @@ from ..models import (
     PostRevisionContent,
     PostUpdate,
 )
-from ._common import MAX_HISTORY_LIMIT, HistoryUnavailable, RevisionNotFound, _clamp, _fetch
+from ._common import MAX_HISTORY_LIMIT, HistoryUnavailable, RevisionNotFound, _clamp, _fetch, _require_write_scope
 from .posts import update_post
 
 # ── History / restore ─────────────────────────────────────────────────────────
@@ -175,8 +175,13 @@ async def restore_post(
         )
 
     # Deleted: recreate the file and its index row, keeping the original id so
-    # inbound [[links]] and #id references resolve again.
-    #
+    # inbound [[links]] and #id references resolve again. The `row is not
+    # None` branch above already got its scope check for free from
+    # update_post (which checks both existing- and new-tag sets); this
+    # branch bypasses update_post entirely, so it needs its own explicit
+    # check against the tags the post is about to be recreated with (relay
+    # #198, B-8).
+    _require_write_scope(actor, tags)
     # Placement goes through move_to_folder rather than old_path. write_file's
     # `exclude=old_path` treats that path as free even when a file sits there, so
     # passing the deleted post's old path would overwrite whatever now owns that
