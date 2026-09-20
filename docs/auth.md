@@ -155,6 +155,29 @@ cookie for that key's own identity and scope — a read-only or tag-restricted
 key can't get full access just by going through the browser instead of
 sending a bearer header.
 
+### How this shows up in the UI and TUI
+
+`GET /status`'s `caller` field (`{mode, tags}`) is how a client learns its
+own scope, and both first-party clients use it so a restricted key finds out
+up front instead of from a rejected write:
+
+- **Browser UI** — the status panel's "Access" section always shows it
+  (`Full access` / `Read-only` / `Write — restricted to tags` with the
+  allowed list). `+ New Post` is hidden outright for a read-only key. For a
+  write-restricted key, the compose Publish button and the Edit
+  modal/vault-lint pane's Save button validate the Tags field live — the
+  exact same ALL-of/non-empty rule the server enforces — and disable with an
+  explanation when the current tags aren't fully in scope. This is UX
+  polish only: the server remains the real enforcement point, and every
+  existing error path still fires as a fallback if a client-side check ever
+  disagrees with it (e.g. scope changed server-side mid-session).
+- **TUI** — the header sub-title shows the scope next to the live/offline
+  dot (`read-only`, or `write:tag1,tag2`; nothing at all for full access).
+  A read-only key blocks `n`/`e`/`d` locally with a toast instead of
+  attempting a write the server would reject anyway. A tag-restricted key
+  is **not** validated client-side in the TUI — an out-of-scope write still
+  reaches the server and surfaces via the existing error toast.
+
 ---
 
 *Why a separate variable from `RELAY_API_KEYS` instead of a third field on
