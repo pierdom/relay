@@ -1,15 +1,19 @@
 # REST API
 
+## Authentication
+
 All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may authenticate with the `relay_session` cookie instead of the bearer token; both are checked by the same dependency (cookie-authenticated writes additionally reject cross-site requests). Interactive docs (Swagger UI) at `/docs`.
 
 **Public, no auth:** `/health` (container healthcheck), the UI shell and its static files (`/`, `/ui`, `/id/{id}`, `/static/*`, `/assets/*`, `/favicon.ico`), the API schema (`/docs`, `/redoc`, `/openapi.json` — it carries no secrets and this repository is public), the login bootstrap (`/auth/*`, `POST /session` which itself takes the key) and, when MCP OAuth is enabled, fastmcp's own OAuth AS surface (relay #313): the metadata endpoints, `/register`, `/authorize`, `/token`, `/consent`, and `/mcp/oauth/callback` (the upstream PocketID return leg — deliberately unauthenticated since it stands *before* login, not after; a binding cookie ties the browser that viewed the consent prompt to the one that completes the IdP login). Every other path — including any unmatched one — answers 401. `/id/{id}` is a redirect only (`/?post={id}`), not a lookup — it never touches the vault, so it needs no auth of its own; the UI fetches the post itself, authenticated, once it lands on `/`.
+
+**Named keys and per-key scopes** — giving different agents their own identity, and restricting what each one may write — are covered in [docs/auth.md](auth.md), not repeated here.
 
 ## Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/posts` | Publish a post |
-| GET | `/posts` | List posts (`tag`, `folder`, `search`, `summary`, `limit`, `offset`, `sort`, `order`, `mode`; master doc pinned on home feed). `mode` = `keyword` (default) / `semantic` / `hybrid` ranks a `search` and combines with `tag`/`folder`; 503 if embeddings are off. `sort` = `updated` (default, last-modified) or `created`; `order` = `desc` (default) or `asc`. A `search` ranks by relevance first and uses `sort`/`order` only as a tiebreak. A bare id or `#id` as `search` (e.g. `42`, `#42`) — the same `#NNN` convention `/posts/{id}/backlinks` resolves — is a lookup, not a ranked search: answers with just that post as `pinned` (`items` empty), ignoring `mode`/`tag`/`folder`, whether or not embeddings are enabled |
+| GET | `/posts` | List posts (`tag`, `folder`, `search`, `summary`, `limit`, `offset`, `sort`, `order`, `mode`, `author`; master doc pinned on home feed). `mode` = `keyword` (default) / `semantic` / `hybrid` ranks a `search` and combines with `tag`/`folder`; 503 if embeddings are off. `sort` = `updated` (default, last-modified) or `created`; `order` = `desc` (default) or `asc`. `author` filters to posts whose most recent write is attributed to that identity — see [docs/auth.md](auth.md). A `search` ranks by relevance first and uses `sort`/`order` only as a tiebreak. A bare id or `#id` as `search` (e.g. `42`, `#42`) — the same `#NNN` convention `/posts/{id}/backlinks` resolves — is a lookup, not a ranked search: answers with just that post as `pinned` (`items` empty), ignoring `mode`/`tag`/`folder`/`author`, whether or not embeddings are enabled |
 | GET | `/id/{id}` | Redirects to `/?post={id}` — the UI opens that post on load. A convenience for pasting a post id somewhere and landing directly on it, not an API endpoint (no auth, no body, `422` on a non-numeric or negative id) |
 | GET | `/posts/{id}` | Get a single post |
 | PATCH | `/posts/{id}` | Partial update — omitted fields unchanged; `null` or `""` clears `expires_at`/`source`. Optional `if_match` (body field or `If-Match` header) rejects the write with `409` if the post changed since |
@@ -26,7 +30,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may
 | GET | `/posts/{id}/history` | Revisions of a post from vault history, newest first; answers for a **deleted** post too (`exists:false`) |
 | GET | `/posts/{id}/history/{sha}` | The post as it was at that revision (preview before restoring) |
 | POST | `/posts/{id}/restore` | Roll a post back to a revision (`{"sha": …}`), recreating it if deleted |
-| GET | `/changes` | The vault changelog, newest first: every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, as `{seq, id, title, action, when, sha, author}`. `since` pages forward from a `seq` or filters by ISO timestamp; `author` is always `null` until per-agent identity ships. 503 if vault history is disabled |
+| GET | `/changes` | The vault changelog, newest first: every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, as `{seq, id, title, action, when, sha, author}`. `since` pages forward from a `seq` or filters by ISO timestamp; `author` is the identity (a named key or OIDC user) that made the write — `null` for one that predates named keys or has no authenticated identity (the TTL sweep, an external edit). `?author=` filters to one identity's writes — see [docs/auth.md](auth.md). 503 if vault history is disabled |
 | GET | `/links` | `(id, title)` index for resolving `[[Title]]` wikilinks |
 | GET | `/lint` | Check the vault against the rules in #0: missing/zero tags, stale Inbox placement, broken links/attachment embeds, missing/drifted H1, stale hub/plan, zero backlinks, unused tag config, zero embedding chunks, #0's stated post count. Link/heading scanning ignores code spans/fences. `#0` is exempt from everything except the link checks |
 | GET | `/folders` | First-level vault folders with post counts |
