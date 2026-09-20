@@ -1072,12 +1072,16 @@ async def restore_post(id: int, sha: str) -> dict:
         "features are actually working. Use it to confirm you are talking to the vault you think you are, "
         "and to check features that degrade silently — vault history is off when git is missing (writes "
         "would be unrecoverable), search falls back to substring matching without FTS5, and external "
-        "edits are not picked up when the watcher is off."   )
+        "edits are not picked up when the watcher is off. The 'caller' field (relay #198, B-8) reports "
+        "your own key's effective scope — 'full', 'read' (no writes at all), or 'write' with an allowed "
+        "tag list — so you can tell up front what you're allowed to do instead of finding out from a "
+        "rejected write."
+    )
 )
 async def get_status() -> dict:
     metrics.record_tool_call("get_status")
     async with _db() as db:
-        result = await status.build(db)
+        result = await status.build(db, actor=_current_actor())
     return result.model_dump()
 
 

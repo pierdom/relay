@@ -21,7 +21,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may
 | POST | `/posts/{id}/append` | Append `{"content": …}` to the post instead of resending the whole body; a blank line separates it from existing content |
 | DELETE | `/posts/{id}` | Delete a post |
 | GET | `/posts/{id}/backlinks` | Posts linking here via `[[title]]` or `#id` |
-| GET | `/status` | Runtime diagnostics: version, uptime, vault path + counts, effective feature state, embedding model/coverage/backfill diagnostics |
+| GET | `/status` | Runtime diagnostics: version, uptime, vault path + counts, effective feature state, embedding model/coverage/backfill diagnostics, and (relay #198, B-8) `caller` — the authenticated key's own effective scope, `{mode, tags}`. The browser UI and TUI use this to adapt: see [docs/auth.md](auth.md#how-this-shows-up-in-the-ui-and-tui) |
 | PATCH | `/embeddings` | Turn semantic/hybrid search on or off at runtime, without a restart (`{"enabled": bool}`). In-memory only. 503 if sqlite-vec/model unavailable, 409 on a dimension mismatch against the schema already on disk |
 | POST | `/embeddings/backfill` | Re-run the embedding backfill without a restart (`force=true` wipes the cache first). 503 if embeddings aren't enabled, 409 if a backfill is already running |
 | GET | `/metrics` | Prometheus/OpenMetrics text exposition (bearer-gated — relay sits behind a public proxy, and an open `/metrics` would leak vault size and activity) |

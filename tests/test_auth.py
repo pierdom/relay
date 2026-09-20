@@ -713,3 +713,27 @@ def test_current_actor_logs_loudly_when_a_real_token_has_no_derivable_identity(c
         assert any("no derivable identity" in r.message for r in caplog.records)
     finally:
         auth_context_var.reset(reset)
+
+
+@pytest.mark.asyncio
+async def test_mcp_get_status_reports_caller_scope(tmp_path, monkeypatch):
+    """get_status's new `caller` field (relay #198, B-8 follow-up) lets an
+    agent learn its own restrictions up front instead of one 403 at a time."""
+    from relay import mcp_server
+    from relay.mcp_server import mcp
+
+    await _init(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    monkeypatch.setattr(settings, "api_key_scopes", "news-agent:write:news")
+
+    token = await mcp_server._StaticBearerAuth().verify_token("sk-news")
+    assert token is not None
+    from mcp.server.auth.middleware.auth_context import auth_context_var
+    from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        result = await mcp.call_tool("get_status", {})
+        assert result.structured_content["caller"] == {"mode": "write", "tags": ["news"]}
+    finally:
+        auth_context_var.reset(reset)

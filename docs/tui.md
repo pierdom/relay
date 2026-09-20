@@ -24,6 +24,12 @@ Requires a running relay instance. Set `RELAY_BASE_URL` and `API_KEY` (or put th
 
 SSE runs in a background thread (`● live` / `○ offline`). On reconnect the client replays missed posts via `Last-Event-ID`.
 
+## Per-key scopes
+
+If the key in `API_KEY`/`.env` is scoped (`RELAY_API_KEY_SCOPES` on the server — see [docs/auth.md](auth.md)), the header sub-title shows it next to the live/offline dot: `read-only` for a read-only key, `write:tag1,tag2` for a key restricted to those vault tags. No badge at all means full access — the common case isn't called out every session.
+
+A read-only key blocks `n`/`e`/`d` locally with a toast (`This key is read-only`) instead of sending a request the server would reject anyway. A tag-restricted key is **not** checked client-side — a write outside its allowed tags still reaches the server and comes back as a toast with the server's own error (`This API key's scope does not permit this write`).
+
 ## Palettes
 
 Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`relay`) matches the browser UI's Relay Dark theme.

@@ -15,17 +15,19 @@ import { attachSheetDismiss } from './sheet.js';
 import { fetchDeleted, recoverableCount, renderDeleted } from './deleted.js';
 import { fetchLint, issueCount, openLintModal } from './lint.js';
 
-/** Whether mode='semantic'/'hybrid' is actually usable on this relay — main.js
- * calls this once at startup to decide whether the search bar's mode select is
- * worth showing at all (relay #253, proof of concept, off by default
- * everywhere). False on any fetch failure: a control for a search mode that
- * might not work is worse than not offering it. */
-export async function fetchEmbeddingsEnabled() {
+/** The two pieces of /status main.js's init() gates UI on, fetched together so
+ * startup makes one request instead of two: whether mode='semantic'/'hybrid'
+ * is actually usable (relay #253, proof of concept, off by default
+ * everywhere — a control for a search mode that might not work is worse than
+ * not offering it), and the caller's own effective scope (relay #198, B-8),
+ * which main.js uses to gate Compose/Save. Both fall back to their safest
+ * default (no ranked-search control, no assumed scope) on any fetch failure. */
+export async function fetchInitStatus() {
   try {
     const d = await apiFetch('/status');
-    return !!d.features?.search?.embeddings;
+    return { embeddingsEnabled: !!d.features?.search?.embeddings, caller: d.caller || null };
   } catch {
-    return false;
+    return { embeddingsEnabled: false, caller: null };
   }
 }
 
@@ -263,6 +265,25 @@ function showDeleted() {
   renderDeleted(smBody, { onBack: openStatusModal });
 }
 
+/* Always shown, even for full access — the panel should never have a
+ * conspicuous gap where "what can I do here" belongs. Placed right after
+ * Health: it answers the same kind of question (what's true about this
+ * session right now), ahead of the feature-level diagnostics below it. */
+function renderAccess(caller) {
+  if (!caller) return null;
+  if (caller.mode === 'full') {
+    return smSection('Access', smRows([['Access', 'Full access']]));
+  }
+  if (caller.mode === 'read') {
+    return smSection('Access', smRows([['Access', 'Read-only']]));
+  }
+  const tags = caller.tags && caller.tags.length ? caller.tags.join(', ') : '(none — every write will be denied)';
+  return smSection('Access', smRows([
+    ['Access', 'Write — restricted to tags'],
+    ['Allowed tags', tags],
+  ]));
+}
+
 function renderStatus(d) {
   smVersion.textContent = d.version;
   smBody.innerHTML = '';
@@ -291,6 +312,8 @@ function renderStatus(d) {
     d.features.watcher.running ? 'watching' : (d.features.watcher.enabled ? 'not running' : 'disabled'),
   ));
   smBody.appendChild(smSection('Health', health));
+  const access = renderAccess(d.caller);
+  if (access) smBody.appendChild(access);
   smBody.appendChild(renderEmbeddings(d.embeddings));
 
   const v = d.vault;

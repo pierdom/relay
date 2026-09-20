@@ -24,7 +24,7 @@ relay exposes the full feed API as **26 MCP tools** so Claude (or any MCP-capabl
 | `get_attachment` | Retrieve an attachment; images return as inline image content |
 | `list_attachments` | List attachments; scope by `post_id` or `folder` |
 | `delete_attachment` | Delete an attachment; reports posts still referencing it |
-| `get_status` | Version, uptime, which vault is served, counts, which features actually work, and embedding model/coverage/backfill diagnostics |
+| `get_status` | Version, uptime, which vault is served, counts, which features actually work, embedding model/coverage/backfill diagnostics, and (relay #198, B-8) `caller` — your own key's effective scope, so you can tell up front what you're allowed to do instead of finding out from a rejected write |
 | `trigger_embedding_backfill` | Re-run the embedding backfill without a restart (`force` wipes the cache first); errors if embeddings aren't enabled or a backfill is already running |
 | `set_embeddings_enabled` | Turn semantic/hybrid search on or off at runtime, without a restart. In-memory only — see [Notes for agents](#notes-for-agents) |
 | `list_folders` | First-level vault folders with post counts — the names `list_posts`/`list_attachments` accept as `folder` |

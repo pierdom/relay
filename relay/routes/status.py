@@ -14,12 +14,17 @@ from fastapi import APIRouter, Depends
 from .. import status as status_module
 from ..auth import require_api_key
 from ..database import get_db
+from ..identity import Actor
 from ..models import StatusResponse
 
 router = APIRouter(tags=["status"])
 
 
-@router.get("/status", response_model=StatusResponse, dependencies=[Depends(require_api_key)])
-async def get_status(db: aiosqlite.Connection = Depends(get_db)) -> StatusResponse:
-    """Version, uptime, vault counts, and which features are *actually* working."""
-    return await status_module.build(db)
+@router.get("/status", response_model=StatusResponse)
+async def get_status(
+    db: aiosqlite.Connection = Depends(get_db),
+    actor: Actor = Depends(require_api_key),
+) -> StatusResponse:
+    """Version, uptime, vault counts, which features are *actually* working,
+    and the caller's own effective scope (relay #198, B-8)."""
+    return await status_module.build(db, actor=actor)

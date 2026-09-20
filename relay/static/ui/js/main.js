@@ -12,8 +12,8 @@
  * deferred module.
  */
 
-import { apiFetch, apiSendChecked, clearApiKey, setApiKey } from './api.js';
-import { closeStatusModal, fetchEmbeddingsEnabled, isStatusOpen } from './status.js';   // also self-wires its own controls
+import { apiFetch, apiSendChecked, clearApiKey, clearCallerScope, getCallerScope, setApiKey, setCallerScope, tagsAllowedByScope } from './api.js';
+import { closeStatusModal, fetchInitStatus, isStatusOpen } from './status.js';   // also self-wires its own controls
 import { query, resetPaging } from './feed-query.js';
 import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
 import { attachSheetDismiss } from './sheet.js';
@@ -148,6 +148,17 @@ useKeyBtn.addEventListener('click', () => {
   apiKeyInput.focus();
 });
 
+// Single source of truth for New Post's visibility (relay #198, B-8) — it's
+// set from two independent places (init() and setSidebarMode()'s Files-tab
+// swap), and both need to agree on read-only gating or the button would
+// reappear for a read-only key the moment they switch to Files and back.
+function applyNewPostVisibility() {
+  const scope = getCallerScope();
+  const hiddenByTab = sidebarMode === 'files';
+  const hiddenByScope = !!scope && scope.mode === 'read';
+  newPostBtn.style.display = (hiddenByTab || hiddenByScope) ? 'none' : '';
+}
+
 // On load, ask the server whether a session cookie is already live (OIDC or a
 // prior key-paste). If so, boot straight into the app cookie-only — no re-paste.
 // Otherwise show the right login control based on whether OIDC is configured.
@@ -169,6 +180,7 @@ async function bootstrap() {
 
 disconnectBtn.addEventListener('click', async () => {
   clearApiKey();
+  clearCallerScope();
   authed = false;
   // Await so the cookie is cleared before bootstrap() re-checks /auth/me below.
   await fetch('/session', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
@@ -210,7 +222,7 @@ async function init() {
   oidcLogin.style.display = 'none';
   connectedBar.style.display = '';
   collapseBtn.style.display = '';
-  newPostBtn.style.display = '';
+  applyNewPostVisibility();   // scope isn't known yet here — re-run below once fetchInitStatus resolves
   newTagBtn.style.display = '';
   statusBtn.style.display = '';
   searchBar.style.display = '';
@@ -221,7 +233,7 @@ async function init() {
   query.mode = 'keyword';
   modeSelect.value = 'keyword';
   modeSelect.style.display = 'none';
-  fetchEmbeddingsEnabled().then(on => {
+  fetchInitStatus().then(({ embeddingsEnabled: on, caller }) => {
     modeSelect.style.display = on ? '' : 'none';
     // Hybrid, not keyword, is the mode worth defaulting to once it's actually
     // usable — it's the one that beats keyword-alone on this relay's own eval
@@ -232,6 +244,10 @@ async function init() {
     // accepted the combination since v1.5.0, so there's no reason left to
     // withhold the better default just because a filter is set.
     if (on) { query.mode = defaultMode; modeSelect.value = defaultMode; }
+
+    setCallerScope(caller);
+    applyNewPostVisibility();
+    applyComposeScopeGate();   // no-op if compose isn't open; corrects it if it already is
   });
   // openPostFromUrl has no dependency on tags/posts, so it runs concurrently
   // with those — but it does depend on loadLinkIndex: the modal renders the
@@ -388,19 +404,66 @@ async function renderBacklinks(id) {
 }
 
 /* ── Compose ──────────────────────────────────────────────── */
+const cpTags = document.getElementById('cpTags');
+const cpPublish = document.getElementById('cpPublish');
+const cpGateMsg = document.createElement('div');
+cpGateMsg.className = 'ef-gate-msg';
+cpPublish.insertAdjacentElement('beforebegin', cpGateMsg);
+
+// Write-restricted-to-tags gating (relay #198, B-8) — a read-only key never
+// reaches this: applyNewPostVisibility() hides New Post entirely for it, so
+// only 'full' (always allowed) and 'write' (validated below) show up here.
+// Live as the user edits Tags, and re-run whenever the panel opens since
+// closeCompose() resets the field to empty (which a write-restricted key
+// never satisfies — see tagsAllowedByScope's non-empty rule). Also re-run
+// once fetchInitStatus() actually resolves (see init()) — scope is unknown
+// for a brief window right after login, and treating "unknown" the same as
+// "full access" would let Publish sit enabled during that window instead of
+// correctly disabled-until-proven-otherwise.
+function applyComposeScopeGate() {
+  const scope = getCallerScope();
+  if (!scope) {
+    cpGateMsg.textContent = 'Checking access…';
+    cpPublish.disabled = true;
+    return;
+  }
+  if (scope.mode === 'full') { cpGateMsg.textContent = ''; cpPublish.disabled = false; return; }
+  if (scope.mode === 'read') {
+    // Belt-and-suspenders: applyNewPostVisibility() already hides New Post
+    // outright for a read-only key, so this branch should be unreachable in
+    // practice — but scope resolves asynchronously (fetchInitStatus, after
+    // init()'s synchronous first paint), so there's a real window right
+    // after login where the button is still visible. Gate Publish here too
+    // rather than relying solely on the button being hidden in time.
+    cpGateMsg.textContent = 'This key is read-only — publishing is disabled.';
+    cpPublish.disabled = true;
+    return;
+  }
+  const tags = parseTagsField(cpTags.value);
+  if (tagsAllowedByScope(tags, scope)) {
+    cpGateMsg.textContent = '';
+    cpPublish.disabled = false;
+  } else {
+    cpGateMsg.textContent = `This key can only write tags: ${(scope.tags || []).join(', ') || '(none)'}.`;
+    cpPublish.disabled = true;
+  }
+}
+cpTags.addEventListener('input', applyComposeScopeGate);
+
 newPostBtn.addEventListener('click', () => {
   if (composePanel.classList.contains('open')) {
     closeCompose();
   } else {
     composePanel.classList.add('open');
-    if (query.tag) document.getElementById('cpTags').value = query.tag;
+    if (query.tag) cpTags.value = query.tag;
+    applyComposeScopeGate();
     document.getElementById('cpContent').focus();
   }
 });
 
 document.getElementById('cpCancel').addEventListener('click', closeCompose);
 
-document.getElementById('cpPublish').addEventListener('click', async () => {
+cpPublish.addEventListener('click', async () => {
   const content = document.getElementById('cpContent').value.trim();
   if (!content) return;
   const title = document.getElementById('cpTitle').value.trim();
@@ -408,11 +471,11 @@ document.getElementById('cpPublish').addEventListener('click', async () => {
   const body = {
     title,
     content,
-    tags:   document.getElementById('cpTags').value.split(',').map(s => s.trim()).filter(Boolean),
+    tags:   parseTagsField(cpTags.value),
     source: document.getElementById('cpSource').value.trim() || null,
     expires_at: toUtcIso(document.getElementById('cpExpires').value) || null,
   };
-  const btn = document.getElementById('cpPublish');
+  const btn = cpPublish;
   btn.disabled = true; btn.textContent = 'Publishing…';
   try {
     await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
@@ -429,6 +492,7 @@ function closeCompose() {
   document.getElementById('cpExpires').value = '';
   const st = document.getElementById('cpAttachStatus');
   if (st) { st.textContent = ''; st.classList.remove('error'); }
+  cpGateMsg.textContent = '';
 }
 
 /* ── Attachment upload ─────────────────────────────────────── */
@@ -609,7 +673,7 @@ function setSidebarMode(mode) {
   for (const [name, id] of Object.entries(FEED_REPLACING)) {
     document.getElementById(id).style.display = mode === name ? '' : 'none';
   }
-  newPostBtn.style.display = replacing ? 'none' : '';
+  applyNewPostVisibility();
   if (replacing) loadMoreWrap.style.display = 'none';
   else if (query.offset < query.total) loadMoreWrap.style.display = 'block';
 

@@ -204,7 +204,11 @@ class RelayTuiApp(App):
         theme = build_textual_theme()
         self.register_theme(theme)
         self.theme = theme.name
-        self.sub_title = palette_name()
+
+        self._connected = False
+        self._scope_mode: str | None = None
+        self._scope_tags: list[str] = []
+        self._render_subtitle()
 
         self._transparent = False
         from relay.config import settings
@@ -231,6 +235,7 @@ class RelayTuiApp(App):
         )
         self._sse.start()
         self._reload()
+        self._load_caller_scope()
 
     def on_unmount(self) -> None:
         self._sse.stop()
@@ -242,9 +247,58 @@ class RelayTuiApp(App):
         self.call_from_thread(self._set_live_status, False)
 
     def _set_live_status(self, connected: bool) -> None:
-        dot = f"[{ACCENT}]●[/]" if connected else "[dim]○[/]"
-        status = "live" if connected else "offline"
-        self.sub_title = f"{dot} {status}  [{palette_name()}]"
+        self._connected = connected
+        self._render_subtitle()
+
+    @work(thread=True)
+    def _load_caller_scope(self) -> None:
+        """Fetch this key's own effective scope (relay #198, B-8) once at
+        startup, so a read-only/tag-restricted key shows up in the header
+        instead of only being discovered from a rejected write."""
+        try:
+            scope = api.get_caller_scope()
+            self.call_from_thread(self._set_caller_scope, scope.mode, scope.tags or [])
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Could not check key scope: {e}", severity="warning")
+
+    def _set_caller_scope(self, mode: str, tags: list[str]) -> None:
+        self._scope_mode = mode
+        self._scope_tags = tags
+        self._render_subtitle()
+
+    def _scope_badge(self) -> str:
+        """No badge for full access — the header has less room than the
+        status panel's own "Access: Full access" row, and unrestricted is
+        the common case, not something worth calling out every session."""
+        if self._scope_mode is None or self._scope_mode == "full":
+            return ""
+        if self._scope_mode == "read":
+            return "[dim]read-only[/]"
+        tags = ",".join(sorted(self._scope_tags)) or "(none)"
+        return f"[dim]write:{tags}[/]"
+
+    def _render_subtitle(self) -> None:
+        dot = f"[{ACCENT}]●[/]" if self._connected else "[dim]○[/]"
+        status = "live" if self._connected else "offline"
+        parts = [f"{dot} {status}"]
+        badge = self._scope_badge()
+        if badge:
+            parts.append(badge)
+        parts.append(f"[{palette_name()}]")
+        self.sub_title = "  ".join(parts)
+
+    def _reject_if_read_only(self) -> bool:
+        """True (and toasts) when the local key is read-only (relay #198,
+        B-8) — short-circuits n/e/d before a write the server would just
+        403 anyway. A tag-restricted ("write" + tags) key is deliberately
+        NOT intercepted here — only the coarse read/write gate is checked
+        client-side in the TUI; a write outside its allowed tags still
+        reaches the server and fails there, surfaced by the existing
+        `except Exception` toast each action's own worker already has."""
+        if self._scope_mode == "read":
+            self.notify("This key is read-only", severity="warning")
+            return True
+        return False
 
     def _on_sse_post(self, post_data: dict) -> None:
         try:
@@ -480,6 +534,8 @@ class RelayTuiApp(App):
             pass
 
     def action_compose_post(self) -> None:
+        if self._reject_if_read_only():
+            return
         def _on_result(result: dict | None) -> None:
             if result:
                 self._do_create_post(result)
@@ -510,6 +566,8 @@ class RelayTuiApp(App):
         self._refresh_tags()
 
     def action_edit_post(self) -> None:
+        if self._reject_if_read_only():
+            return
         post = self.query_one(PostPanel).selected_post
         if post is None:
             self.notify("No post selected", severity="warning")
@@ -539,6 +597,8 @@ class RelayTuiApp(App):
         self.notify("Updated", severity="information", timeout=3)
 
     def action_delete_post(self) -> None:
+        if self._reject_if_read_only():
+            return
         post = self.query_one(PostPanel).selected_post
         if post is None:
             self.notify("No post selected", severity="warning")

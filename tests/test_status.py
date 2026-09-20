@@ -244,3 +244,42 @@ async def test_status_requires_auth():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         assert (await c.get("/status")).status_code == 401
         assert (await c.get("/health")).status_code == 200  # unchanged, still public
+
+
+# ── caller scope (relay #198, B-8) ──────────────────────────────────────────
+# These bypass the `client` fixture's `require_api_key` override (which always
+# returns None, unconditionally) since they need real scoped keys resolved.
+
+
+@pytest.mark.asyncio
+async def test_status_reports_full_access_caller(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    await database.init_db()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/status", headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["caller"] == {"mode": "full", "tags": None}
+
+
+@pytest.mark.asyncio
+async def test_status_reports_read_only_caller(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    monkeypatch.setattr(settings, "api_keys", "ro-agent:sk-ro")
+    monkeypatch.setattr(settings, "api_key_scopes", "ro-agent:read")
+    await database.init_db()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/status", headers={"Authorization": "Bearer sk-ro"})
+    assert r.status_code == 200, r.text
+    assert r.json()["caller"] == {"mode": "read", "tags": None}
+
+
+@pytest.mark.asyncio
+async def test_status_reports_tag_scoped_caller(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "vault_path", str(tmp_path / "vault"))
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    monkeypatch.setattr(settings, "api_key_scopes", "news-agent:write:news+briefing")
+    await database.init_db()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/status", headers={"Authorization": "Bearer sk-news"})
+    assert r.status_code == 200, r.text
+    assert r.json()["caller"] == {"mode": "write", "tags": ["briefing", "news"]}

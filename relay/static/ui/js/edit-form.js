@@ -11,7 +11,7 @@
  * main.js beyond apiFetch/apiSend.
  */
 
-import { apiFetch, apiSend } from './api.js';
+import { apiFetch, apiSend, getCallerScope, tagsAllowedByScope } from './api.js';
 import { CODE_SPAN_RE, escHtml, fmtBytes, toDatetimeLocal, toUtcIso } from './util.js';
 
 // ── Attachment upload (drag/drop, paste, file picker) ──────────────────────
@@ -307,6 +307,7 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
       <div><label>Tags<input class="ef-tags" type="text" value="${escHtml(post.tags.join(', '))}"></label></div>
       <div><label>Source<input class="ef-source" type="text" value="${escHtml(post.source || '')}"></label></div>
       <div><label>Expires<input class="ef-expires" type="datetime-local" value="${toDatetimeLocal(post.expires_at || '')}"></label></div>
+      <div class="ef-gate-msg"></div>
       <div class="edit-actions">
         <button type="button" class="btn-cancel">Cancel</button>
         <button type="button" class="btn-save">Save</button>
@@ -318,6 +319,8 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
   const tagsField = container.querySelector('.ef-tags');
   const sourceField = container.querySelector('.ef-source');
   const expiresField = container.querySelector('.ef-expires');
+  const gateMsg = container.querySelector('.ef-gate-msg');
+  const saveBtn = container.querySelector('.btn-save');
   // Every field the form can actually change, not just content — the lint
   // pane's whole reason to exist is fixing a missing/zero-tags finding by
   // editing *only* Tags, and a content-only check would treat that as
@@ -346,11 +349,39 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
   renderEditAttachments(container, post.id);
   if (focus) titleField.focus();
 
+  // Scope gating (relay #198, B-8) — shared by the standalone Edit modal and
+  // the lint pane's inline editor, since both call buildEditForm. `read`
+  // disables Save outright with a visible reason; `write`+tags validates the
+  // Tags field live, same ALL-of semantics the server enforces
+  // (tagsAllowedByScope mirrors identity.Actor.can_write_tags exactly, so
+  // this can only be equally or more conservative, never more permissive).
+  // The existing alert() 403 fallback below stays as defense-in-depth for
+  // whatever this doesn't catch (e.g. scope changed server-side mid-session).
+  function applyScopeGate() {
+    const scope = getCallerScope();
+    if (!scope || scope.mode === 'full') { gateMsg.textContent = ''; saveBtn.disabled = false; return; }
+    if (scope.mode === 'read') {
+      gateMsg.textContent = 'This key is read-only — saving is disabled.';
+      saveBtn.disabled = true;
+      return;
+    }
+    const tags = tagsField.value.split(',').map(s => s.trim()).filter(Boolean);
+    if (tagsAllowedByScope(tags, scope)) {
+      gateMsg.textContent = '';
+      saveBtn.disabled = false;
+    } else {
+      gateMsg.textContent = `This key can only write tags: ${(scope.tags || []).join(', ') || '(none)'}.`;
+      saveBtn.disabled = true;
+    }
+  }
+  applyScopeGate();
+  tagsField.addEventListener('input', applyScopeGate);
+
   container.querySelector('.btn-cancel').addEventListener('click', () => {
     if (isDirty() && !confirm('Discard your changes to this post?')) return;
     onCancel?.();
   });
-  container.querySelector('.btn-save').addEventListener('click', async () => {
+  saveBtn.addEventListener('click', async () => {
     const newTitle = titleField.value.trim();
     if (!newTitle) { alert('Title is required'); return; }
     const body = {
@@ -360,15 +391,14 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
       source:     sourceField.value.trim() || null,
       expires_at: toUtcIso(expiresField.value) || null,
     };
-    const btn = container.querySelector('.btn-save');
-    btn.disabled = true; btn.textContent = 'Saving…';
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
       const updated = await apiFetch(`/posts/${post.id}`, { method: 'PATCH', body: JSON.stringify(body) });
       linkIndexCache = null;   // a title change can change what other posts' [[wikilinks]] resolve to
       onSave?.(updated);
     } catch (e) {
       alert(`Save failed: ${e.message}`);
-      btn.disabled = false; btn.textContent = 'Save';
+      saveBtn.disabled = false; saveBtn.textContent = 'Save';
     }
   });
 
