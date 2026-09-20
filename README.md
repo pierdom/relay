@@ -125,6 +125,7 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 | | |
 |---|---|
 | Installation, configuration, OIDC, MCP OAuth | [docs/setup.md](docs/setup.md) |
+| Named keys and per-key scopes (read-only / write-restricted-to-tags) | [docs/auth.md](docs/auth.md) |
 | REST API reference | [docs/api.md](docs/api.md) |
 | MCP tools and connection | [docs/mcp.md](docs/mcp.md) |
 | Terminal UI: keybindings, palettes, transparency | [docs/tui.md](docs/tui.md) |

@@ -11,14 +11,14 @@ relay exposes the full feed API as **26 MCP tools** so Claude (or any MCP-capabl
 | `edit_post` | `str_replace`-style partial edit: `old_str` must match exactly once in the post's current content and differ from `new_str`, like a code-agent Edit tool — errors (naming the match count) if it's missing or ambiguous |
 | `append_post` | Append content to a post instead of resending the whole body; a blank line separates it from existing content unless the post is currently empty |
 | `get_post` | Get a post by ID (`id=0` for the master document). Any other front-matter key found in the file (Obsidian Properties, a hand-added custom field) is returned read-only as `properties` — no write API for it |
-| `list_posts` | List posts with tag/folder/search/limit/offset/sort/order filters; returns metadata + excerpt by default. `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) and combines with tag/folder — errors if embeddings aren't enabled. A bare id or `#id` as `search` (e.g. `42`) is a lookup, not a ranked search: answers with just that post as `pinned`, ignoring `mode`/`tag`/`folder`, whether or not embeddings are enabled |
+| `list_posts` | List posts with tag/folder/search/author/limit/offset/sort/order filters; returns metadata + excerpt by default. `author` filters to posts whose most recent write is attributed to that identity — see [docs/auth.md](auth.md). `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) and combines with tag/folder — errors if embeddings aren't enabled. A bare id or `#id` as `search` (e.g. `42`) is a lookup, not a ranked search: answers with just that post as `pinned`, ignoring `mode`/`tag`/`folder`/`author`, whether or not embeddings are enabled |
 | `delete_post` | Delete a post by ID |
 | `get_post_history` | List a post's revisions from vault history; works for a deleted post (`exists:false`) |
 | `get_post_revision` | Read a post exactly as it was at one revision — preview before restoring |
 | `restore_post` | Restore a post to a revision sha, recreating it if deleted; the restore is itself recorded |
 | `get_backlinks` | A post's backlinks — posts that link here via `[[Title]]` or `#id` |
 | `list_deleted_posts` | Posts that are gone but restorable — id, title, restorable sha, and why they went |
-| `list_changes` | The vault changelog, newest first — every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, with `seq`/`id`/`title`/`action`/`when`/`sha`. `since` pages forward from a `seq` or filters by ISO timestamp — see [The vault changelog](#the-vault-changelog). Errors if vault history is disabled |
+| `list_changes` | The vault changelog, newest first — every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, with `seq`/`id`/`title`/`action`/`when`/`sha`/`author`. `since` pages forward from a `seq` or filters by ISO timestamp; `author` filters to one identity's writes — see [The vault changelog](#the-vault-changelog) and [docs/auth.md](auth.md). Errors if vault history is disabled |
 | `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio bridge also accepts `path` (a local file it uploads for you) |
 | `create_upload` | Mint a presigned upload slot (`upload_id` + `upload_url`); PUT the raw bytes there, then finalize with `add_attachment(upload_id=…)` |
 | `get_attachment` | Retrieve an attachment; images return as inline image content |
@@ -80,8 +80,11 @@ list_changes(limit=20)
 
 `action` is one of `create`, `update`, `edit`, `append`, `delete`, `restore`,
 `tag_rename`, `external_edit` (an Obsidian edit picked up by the watcher),
-`external_delete`, or `expiry` (a TTL sweep). `author` is always `null` today
-— it's reserved for relay #198's N-3 (per-agent identity), not yet shipped.
+`external_delete`, or `expiry` (a TTL sweep). `author` is the identity (a
+named key or OIDC user, see [docs/auth.md](auth.md)) that made the write —
+`null` for one that predates named keys or has no authenticated identity (the
+TTL sweep, an external edit). Pass `author=` to filter to one identity's
+writes.
 
 Page forward with `since` set to the largest `seq` you've already seen, or
 answer "what happened since yesterday" with an ISO 8601 timestamp:
@@ -170,6 +173,13 @@ restore_post(id=54, sha="a8dcc37")
   flight** — including the one `set_embeddings_enabled(true)` just kicked off.
   Check `get_status`'s `embeddings.backfill.running` before retrying rather than
   polling blind.
+- **A key's scope (see [docs/auth.md](auth.md)) can make a normally-available
+  tool fail.** A read-only key never sees a write tool in its own `tools/list`
+  at all; a tag-restricted key sees every tool but gets back
+  `{"error": "This API key's scope does not permit this write."}` from one
+  touching a post/attachment outside its allowed tags. Neither is a bug to
+  retry around — it means this key genuinely isn't allowed to make this
+  particular write.
 
 ---
 
