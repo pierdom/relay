@@ -4,6 +4,21 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.15.0] — 2026-09-20
+
+Per-key scope, surfaced (relay #198, B-8 follow-up): `GET /status` gains a `caller` field, and the browser UI and TUI both use it so a restricted key finds out up front instead of from a rejected write.
+
+### Added
+- `GET /status` and the MCP `get_status` tool gain `caller: {mode, tags}` — the authenticated key's own effective scope, threaded through from the already-resolved `Actor` at the auth boundary. REST and MCP share one `status.build(db, actor=...)` implementation
+- Browser UI: the status panel's new "Access" section always shows the caller's scope. `+ New Post` hides outright for a read-only key. The compose Publish button and the shared `buildEditForm` Save button (standalone Edit modal + vault-lint pane) validate the Tags field live against a write-restricted key's allowed set — the exact ALL-of/non-empty rule the server enforces, mirrored client-side. The server remains the only real enforcement point; every existing error path stays in place as a fallback
+- TUI: fetches scope on startup and shows it in the header next to the live/offline dot (`read-only`, or `write:tag1,tag2`; nothing for full access). A read-only key blocks `n`/`e`/`d` locally with a toast instead of attempting a write the server would reject. A tag-restricted key is deliberately not validated client-side in the TUI — an out-of-scope write still reaches the server and surfaces via the existing error toast
+- `docs/auth.md` (new page, alongside this release): documents `RELAY_API_KEYS`/`RELAY_API_KEY_SCOPES` and how both clients surface scope — closes a real gap where neither had any operator-facing docs before this, only CLAUDE.md's internals writeup. Also fixes two stale "not yet shipped" references to per-agent identity in `docs/api.md`/`docs/mcp.md` that predated B-7 by two releases
+
+### Fixed
+- Two races only a real browser could catch, found by CI's actual Chromium run (not reproducible in a sandbox missing system libraries): scope resolves asynchronously after login, and the compose Publish gate treated "not yet resolved" the same as "full access" — briefly leaving it enabled during that window, and never handling read mode at all. Now defaults to disabled-until-known and is re-evaluated once the fetch actually resolves
+
+---
+
 ## [1.14.0] — 2026-09-19
 
 Per-key scopes (relay #198, B-8): the authorization half of B-7's identity work — read-only and write-restricted-to-tags API keys, on both REST and MCP. A pre-release audit of the diff found and fixed four real gaps before this ever shipped, listed under Fixed below.
