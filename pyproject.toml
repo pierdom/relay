@@ -23,7 +23,7 @@ dependencies = [
     "httpx2>=2.13.0",
     "httpcore>=1.0.9",
     "anyio>=4.15.1",
-    "fastmcp>=4.0.4",
+    "fastmcp>=4.0.5",
     "py-key-value-aio[filetree,wrappers-encryption]>=0.4.5",
 ]
 
