@@ -135,3 +135,14 @@ async def test_publish_delete_reaches_tag_filtered_subscriber():
     assert other.empty()
     events.unsubscribe(q, "news")
     events.unsubscribe(other, "homelab")
+
+
+@pytest.mark.asyncio
+async def test_tag_subscription_is_case_insensitive_and_released():
+    q = events.subscribe("News")
+    try:
+        await events.publish({"id": 7, "tags": ["news"]})
+        assert q.get_nowait()["id"] == 7
+    finally:
+        events.unsubscribe(q, "News")
+    assert "news" not in events._subscribers

@@ -5,14 +5,13 @@ existing read-only diagnostics (``status.embedding_status``).
 from __future__ import annotations
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from .. import status as status_module
 from ..auth import require_api_key
 from ..database import get_db
 from ..identity import Actor
 from ..models import EmbeddingStatus, EmbeddingToggle
-from ..service import ScopeDenied
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
@@ -33,23 +32,7 @@ async def trigger_backfill(
     db: aiosqlite.Connection = Depends(get_db),
     actor: Actor = Depends(require_api_key),
 ) -> EmbeddingStatus:
-    try:
-        return await status_module.trigger_backfill(db, force=force, actor=actor)
-    except status_module.EmbeddingsUnavailable:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Semantic search is not enabled on this relay",
-        ) from None
-    except status_module.BackfillAlreadyRunning:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A backfill is already running",
-        ) from None
-    except ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This API key's scope does not permit this write",
-        ) from None
+    return await status_module.trigger_backfill(db, force=force, actor=actor)
 
 
 @router.patch("", response_model=EmbeddingStatus)
@@ -58,23 +41,4 @@ async def set_enabled(
     db: aiosqlite.Connection = Depends(get_db),
     actor: Actor = Depends(require_api_key),
 ) -> EmbeddingStatus:
-    try:
-        return await status_module.set_embeddings_enabled(db, body.enabled, actor=actor)
-    except status_module.EmbeddingsUnavailable:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="sqlite-vec is not available on this relay, or EMBEDDING_MODEL is not a known fastembed model",
-        ) from None
-    except status_module.EmbeddingDimensionMismatch:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "EMBEDDING_MODEL's dimension doesn't match the vector schema already on disk. "
-                "Restart relay to rebuild it before enabling."
-            ),
-        ) from None
-    except ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This API key's scope does not permit this write",
-        ) from None
+    return await status_module.set_embeddings_enabled(db, body.enabled, actor=actor)

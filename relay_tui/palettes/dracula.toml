@@ -9,8 +9,5 @@ bg      = "#282a36"   # background   — screen, header, footer background
 
 # ── Semantic colours ───────────────────────────────────────────────────────────
 perf_great    = "#50fa7b"  # green   — success / far-future expiry
-perf_good     = "#50fa7b"
-perf_flat     = "#bd93f9"  # purple
 perf_bad      = "#f1fa8c"  # yellow  — warning / expiry within 3 days
-perf_poor     = "#ff5555"  # red
 perf_terrible = "#ff5555"  # red     — error / expired / expiry within 24h

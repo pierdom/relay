@@ -10,9 +10,9 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi import Path as ApiPath
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -21,6 +21,7 @@ from . import status as app_status
 from .cleanup import cleanup_loop
 from .config import settings
 from .database import connect, init_db
+from .errors import ServiceError
 from .mcp_server import mcp_http_app
 from .routes.attachments import router as attachments_router
 from .routes.auth import router as auth_router
@@ -136,6 +137,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="relay", version=__version__, lifespan=lifespan)
+
+
+@app.exception_handler(ServiceError)
+async def _service_error(_request: Request, exc: ServiceError) -> JSONResponse:
+    """Every route's service-layer error, mapped once (see ``relay.errors``)."""
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status)
+
 
 app.add_middleware(metrics.MetricsMiddleware)
 

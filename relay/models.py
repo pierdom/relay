@@ -8,6 +8,7 @@ import re
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from . import folders
+from .markdown_scan import FENCE_RE
 
 
 def etag_for_row(row) -> str:
@@ -28,9 +29,18 @@ def etag_for_row(row) -> str:
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
-def _decode_properties(value: str | None) -> dict:
-    """Read-only view of a post's non-relay front-matter keys (Obsidian
-    Properties, custom fields) — see ``frontmatter.parse``/``relay.vault``.
+def tags_to_sentinel(tags: list[str]) -> str:
+    """Index form of a tag list, ``,news,ai,`` — matched with ``LIKE '%,tag,%'``."""
+    return "," + ",".join(tags) + "," if tags else ""
+
+
+def tags_from_sentinel(value: str) -> list[str]:
+    return [t for t in value.split(",") if t]
+
+
+def decode_properties(value: str | None) -> dict:
+    """A post's non-relay front-matter keys (Obsidian Properties, custom
+    fields) from the index's JSON column — see ``frontmatter.parse``.
     Tolerant of missing/invalid JSON (e.g. a pre-upgrade index row)."""
     if not value:
         return {}
@@ -73,13 +83,13 @@ def _clean_title(v: str) -> str:
     return v
 
 
+def clean_tag(tag: str) -> str:
+    """The one tag normal form: lowercase, only letters, digits, ``_`` and ``-``."""
+    return re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
+
+
 def _clean_tag_list(v: list[str]) -> list[str]:
-    cleaned = []
-    for t in v:
-        t = re.sub(r"[^a-z0-9_-]", "", t.strip().lower())
-        if t:
-            cleaned.append(t)
-    return cleaned
+    return [t for t in map(clean_tag, v) if t]
 
 
 class PostCreate(BaseModel):
@@ -137,12 +147,12 @@ class PostResponse(BaseModel):
             id=row["id"],
             title=row["title"],
             content=row["content"],
-            tags=[t for t in row["tags"].split(",") if t],
+            tags=tags_from_sentinel(row["tags"]),
             source=row["source"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
-            properties=_decode_properties(row["properties"]),
+            properties=decode_properties(row["properties"]),
             updated_by=row["updated_by"],
             etag=etag_for_row(row),
         )
@@ -201,7 +211,6 @@ class PostListResponse(BaseModel):
 
 
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
-_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 _IMAGE_EMBED_RE = re.compile(r"!\[\[[^\]]*\]\]")
 _IMAGE_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK_MD_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
@@ -221,7 +230,7 @@ def make_excerpt(content: str, limit: int = 240) -> str:
     characters on a word boundary. Never returns markdown syntax to render.
     """
     text = _FRONTMATTER_RE.sub("", content or "")
-    text = _FENCED_CODE_RE.sub(" ", text)
+    text = FENCE_RE.sub(" ", text)
     text = _IMAGE_EMBED_RE.sub(" ", text)
     text = _IMAGE_MD_RE.sub(" ", text)
     text = _LINK_MD_RE.sub(r"\1", text)
@@ -262,14 +271,14 @@ class PostSummary(BaseModel):
         return cls(
             id=row["id"],
             title=row["title"],
-            tags=[t for t in row["tags"].split(",") if t],
+            tags=tags_from_sentinel(row["tags"]),
             source=row["source"],
             folder=folders.folder_of(row["path"]),
             excerpt=make_excerpt(row["content"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
-            properties=_decode_properties(row["properties"]),
+            properties=decode_properties(row["properties"]),
             updated_by=row["updated_by"],
             etag=etag_for_row(row),
         )
@@ -470,7 +479,7 @@ class TagRename(BaseModel):
     @field_validator("new_name")
     @classmethod
     def clean(cls, v: str) -> str:
-        v = re.sub(r"[^a-z0-9_-]", "", v.strip().lower())
+        v = clean_tag(v)
         if not v:
             raise ValueError("new_name must not be empty")
         return v

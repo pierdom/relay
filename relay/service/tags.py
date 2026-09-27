@@ -1,12 +1,12 @@
 """Tags and folders: counts, per-tag TTL config, rename across the vault."""
 from __future__ import annotations
 
-import re
 from collections import Counter
 
 import aiosqlite
 
-from .. import changes, events, history, vault
+from .. import changes, database, events, history, vault
+from ..errors import InvalidTag
 from ..identity import Actor
 from ..models import (
     FolderCount,
@@ -16,8 +16,11 @@ from ..models import (
     TagConfigResponse,
     TagCount,
     TagListResponse,
+    clean_tag,
+    decode_properties,
+    tags_from_sentinel,
 )
-from ._common import InvalidTag, _fetch, _require_full_access, _tags_from_sentinel
+from ._common import _fetch, _require_full_access
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
 
@@ -41,7 +44,7 @@ async def list_tags(db: aiosqlite.Connection) -> TagListResponse:
         rows = await cur.fetchall()
     counter: Counter[str] = Counter()
     for row in rows:
-        for t in _tags_from_sentinel(row["tags"]):
+        for t in tags_from_sentinel(row["tags"]):
             counter[t] += 1
     async with db.execute("SELECT tag FROM tag_config") as cur:
         for row in await cur.fetchall():
@@ -57,26 +60,24 @@ async def rename_tag(
     # the whole vault, with no single owning tag a scoped key could be
     # checked against — full access only, same as set_tag_config below.
     _require_full_access(actor)
-    old = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
+    old, new_name = clean_tag(tag), clean_tag(new_name)
     if not old or not new_name:
         raise InvalidTag
     if old == new_name:
         return await list_tags(db)
 
-    async with db.execute(
-        "SELECT * FROM posts WHERE tags LIKE ?", (f"%,{old},%",)
-    ) as cur:
-        affected = await cur.fetchall()
-
     async with vault.write_lock:
+        conditions, params = database.tag_folder_filters(old, None, alias=None)
+        async with db.execute(f"SELECT * FROM posts WHERE {conditions[0]}", params) as cur:
+            affected = await cur.fetchall()
         for row in affected:
-            tags = _tags_from_sentinel(row["tags"])
+            tags = tags_from_sentinel(row["tags"])
             renamed: list[str] = []
             for t in tags:
                 t = new_name if t == old else t
                 if t not in renamed:
                     renamed.append(t)
-            row_properties = vault.decode_properties(row["properties"])
+            row_properties = decode_properties(row["properties"])
             # A tag rename is a taxonomy change, not a content write (relay
             # #198, B-7) — `updated_by` carries over from the row unchanged
             # rather than attributing to whoever triggered the rename.
@@ -126,18 +127,18 @@ async def set_tag_config(
     check below — this function has no commit/git-author concept of its own
     (it never touched provenance before this feature and still doesn't)."""
     _require_full_access(actor)
-    clean_tag = re.sub(r"[^a-z0-9_-]", "", tag.strip().lower())
-    if not clean_tag:
+    tag = clean_tag(tag)
+    if not tag:
         raise InvalidTag
     if body.ttl_hours is None and body.expires_at is None:
-        await db.execute("DELETE FROM tag_config WHERE tag = ?", (clean_tag,))
+        await db.execute("DELETE FROM tag_config WHERE tag = ?", (tag,))
     else:
         await db.execute(
             "INSERT INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)"
             " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours, expires_at = excluded.expires_at",
-            (clean_tag, body.ttl_hours or 0, body.expires_at),
+            (tag, body.ttl_hours or 0, body.expires_at),
         )
     await vault.write_tag_config(db)
     await db.commit()
-    return TagConfigResponse(tag=clean_tag, ttl_hours=body.ttl_hours, expires_at=body.expires_at)
+    return TagConfigResponse(tag=tag, ttl_hours=body.ttl_hours, expires_at=body.expires_at)
 

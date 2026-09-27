@@ -17,6 +17,7 @@ relay exposes the full feed API as **26 MCP tools** so Claude (or any MCP-capabl
 | `get_post_revision` | Read a post exactly as it was at one revision — preview before restoring |
 | `restore_post` | Restore a post to a revision sha, recreating it if deleted; the restore is itself recorded |
 | `get_backlinks` | A post's backlinks — posts that link here via `[[Title]]` or `#id` |
+| `get_related` | Posts similar by embedding that this post doesn't already cross-link in either direction — a to-do list of missing `[[wikilinks]]`, not "more like this". Errors if embeddings aren't enabled |
 | `list_deleted_posts` | Posts that are gone but restorable — id, title, restorable sha, and why they went |
 | `list_changes` | The vault changelog, newest first — every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, with `seq`/`id`/`title`/`action`/`when`/`sha`/`author`. `since` pages forward from a `seq` or filters by ISO timestamp; `author` filters to one identity's writes — see [The vault changelog](#the-vault-changelog) and [docs/auth.md](auth.md). Errors if vault history is disabled |
 | `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio bridge also accepts `path` (a local file it uploads for you) |
@@ -176,7 +177,7 @@ restore_post(id=54, sha="a8dcc37")
 - **A key's scope (see [docs/auth.md](auth.md)) can make a normally-available
   tool fail.** A read-only key never sees a write tool in its own `tools/list`
   at all; a tag-restricted key sees every tool but gets back
-  `{"error": "This API key's scope does not permit this write."}` from one
+  `{"error": "This API key's scope does not permit this write"}` from one
   touching a post/attachment outside its allowed tags. Neither is a bug to
   retry around — it means this key genuinely isn't allowed to make this
   particular write.

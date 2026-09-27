@@ -6,6 +6,7 @@ from pathlib import Path
 import aiosqlite
 
 from .. import changes, events, folders, frontmatter, history, vault
+from ..errors import HistoryUnavailable, RevisionNotFound
 from ..identity import Actor
 from ..models import (
     DeletedPost,
@@ -16,7 +17,7 @@ from ..models import (
     PostRevisionContent,
     PostUpdate,
 )
-from ._common import MAX_HISTORY_LIMIT, HistoryUnavailable, RevisionNotFound, _clamp, _fetch, _require_write_scope
+from ._common import MAX_HISTORY_LIMIT, _clamp, _fetch, _require_write_scope
 from .posts import update_post
 
 # ── History / restore ─────────────────────────────────────────────────────────
@@ -68,21 +69,18 @@ async def _resolve_revision(db: aiosqlite.Connection, post_id: int, sha: str):
         current_path=row["path"] if row is not None else None,
         limit=_RESTORE_SCAN_LIMIT,
     )
+    not_found = RevisionNotFound(f"No revision '{sha}' in the history of post #{post_id}")
     # REST enforces min_length=4 on the sha; MCP callers reach here unvalidated,
     # and ``"".startswith("")`` would silently pick the newest revision (B-15).
-    if len(sha) < 4:
-        raise RevisionNotFound
-    match = next((r for r in revs if r.sha == sha or r.sha.startswith(sha)), None)
-    if match is None:
-        raise RevisionNotFound
-    text = await history.blob(match.sha, match.path)
-    if text is None:
-        raise RevisionNotFound
+    match = next((r for r in revs if r.sha.startswith(sha)), None) if len(sha) >= 4 else None
+    text = await history.blob(match.sha, match.path) if match is not None else None
+    if match is None or text is None:
+        raise not_found
     meta, body = frontmatter.parse(text)
     # Titles are filenames, so a path can be reused by a different post; the id in
     # the file is the only thing that actually proves ownership.
     if meta.get("id") != post_id:
-        raise RevisionNotFound
+        raise not_found
     return match, meta, body, row
 
 
@@ -104,7 +102,7 @@ async def list_deleted_posts(
     exists for.
     """
     if not history.enabled():
-        raise HistoryUnavailable()
+        raise HistoryUnavailable
     limit = _clamp(limit, low=1, high=MAX_HISTORY_LIMIT)
     found = await history.deletions(limit=limit if include_expiry else limit * 3)
     if not include_expiry:

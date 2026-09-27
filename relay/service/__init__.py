@@ -11,7 +11,7 @@ the public names re-exported here so callers keep writing ``service.create_post`
 """
 from __future__ import annotations
 
-from ._common import (
+from ..errors import (
     AttachmentError,
     AttachmentSourceError,
     ConcurrentModification,
@@ -29,7 +29,6 @@ from ._common import (
     SemanticSearchUnavailable,
 )
 from .attachments import (
-    add_attachment,
     create_upload_slot,
     decode_attachment_b64,
     delete_attachment,
@@ -57,7 +56,7 @@ __all__ = [
     "AttachmentError", "AttachmentSourceError", "ConcurrentModification", "EditNoChange", "EditTextNotFound",
     "EditTextNotUnique", "HistoryUnavailable", "InvalidFolder", "InvalidSearchMode",
     "InvalidTag", "PostNotFound", "ProtectedPost", "RevisionNotFound", "ScopeDenied", "SemanticSearchUnavailable",
-    "add_attachment", "create_upload_slot", "decode_attachment_b64", "delete_attachment", "ingest_attachment",
+    "create_upload_slot", "decode_attachment_b64", "delete_attachment", "ingest_attachment",
     "list_attachments", "referenced_attachment_names",
     "_RANKED_POOL_CAP", "append_post", "create_post", "delete_post", "edit_post", "get_backlinks", "get_post",
     "get_related", "link_index", "list_posts", "update_post",

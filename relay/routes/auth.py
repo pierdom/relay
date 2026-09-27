@@ -7,7 +7,7 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 
-from ..auth import SESSION_COOKIE, create_session, revoke_session, verify_session
+from ..auth import SESSION_COOKIE, create_session, verify_session
 from ..config import settings
 from ..identity import resolve_bearer
 
@@ -154,9 +154,8 @@ async def auth_me(relay_session: str | None = Cookie(default=None)) -> dict:
 
 
 @router.get("/auth/logout", include_in_schema=False)
-async def auth_logout(relay_session: str | None = Cookie(default=None)):
-    if relay_session:
-        revoke_session(relay_session)
+async def auth_logout():
+    # The session is a stateless signed cookie: clearing it is the logout.
     resp = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     resp.delete_cookie(SESSION_COOKIE)
     return resp
@@ -190,9 +189,9 @@ async def session_create(request: Request, response: Response) -> dict:
     # actor_from_session's `name = email or sub` regenerating the identical
     # name/synthetic-email pair resolve_bearer already produced for this same
     # key, rather than a session-only variant of it.
-    token = create_session(sub=actor.name, email="")
+    token = create_session(sub=actor.name, email="", key=True)
     response.set_cookie(
-        key="relay_session",
+        key=SESSION_COOKIE,
         value=token,
         httponly=True,
         samesite="strict",
@@ -203,11 +202,6 @@ async def session_create(request: Request, response: Response) -> dict:
 
 
 @router.delete("/session", include_in_schema=False)
-async def session_delete(
-    response: Response,
-    relay_session: str | None = Cookie(default=None),
-) -> dict:
-    if relay_session:
-        revoke_session(relay_session)
-    response.delete_cookie("relay_session")
+async def session_delete(response: Response) -> dict:
+    response.delete_cookie(SESSION_COOKIE)
     return {"ok": True}

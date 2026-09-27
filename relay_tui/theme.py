@@ -46,16 +46,8 @@ ACCENT    = _c("primary", "#f59e0b")
 BORDER    = _c("border",  "#92400e")
 HEADER_BG = _c("bg",      "#1c1007")
 
-BAR_LOW  = _c("bar_low",  "bright_green")
-BAR_MID  = _c("bar_mid",  "yellow")
-BAR_HIGH = _c("bar_high", "bright_red")
-BAR_BG   = _c("bar_bg",   "#444444")
-
 PERF_GREAT    = _c("perf_great",    "bright_green")
-PERF_GOOD     = _c("perf_good",     "green")
-PERF_FLAT     = _c("perf_flat",     "cyan")
 PERF_BAD      = _c("perf_bad",      "yellow")
-PERF_POOR     = _c("perf_poor",     "red")
 PERF_TERRIBLE = _c("perf_terrible", "bright_red")
 
 

@@ -3,11 +3,8 @@
 Two scanners need this: ``links.extract_links`` (wikilink/id-ref resolution,
 relay #198 N-5 follow-up) and ``lint.py``'s H1 locator. ``main.js``'s
 ``extractMedia`` needed the equivalent fix but is JS, so it mirrors the idea
-rather than importing this module. ``chunking.py`` has its own, separate,
-fence-only stripper (``_strip_code_fences``) predating this one — left
-alone; embedding-relevance and link-scanning have different enough needs
-(chunking never had a false-positive problem to begin with) that merging
-them isn't worth the churn this fix didn't ask for.
+rather than importing this module. ``FENCE_RE`` is also the fence pattern
+``chunking`` and ``models.make_excerpt`` remove outright.
 
 Both functions return a string the *same length* as the input, with
 newlines untouched — a multiline ``^...$`` regex sees the same line
@@ -17,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 # A fenced block or a single-line inline code span — the same two forms
 # main.js's own ``preprocessLinks`` already excludes from link rendering.
 # Combining both in one pattern is safe under DOTALL: the inline alternative's
@@ -42,7 +39,7 @@ def strip_fences(content: str) -> str:
     title for exactly this reason before this function existed (relay #198
     N-5 follow-up).
     """
-    return _FENCE_RE.sub(_blank, content)
+    return FENCE_RE.sub(_blank, content)
 
 
 def strip_code(content: str) -> str:

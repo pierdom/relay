@@ -22,8 +22,9 @@ _FIELD_ORDER = ("id", "tags", "source", *_DATETIME_FIELDS, "updated_by")
 
 _FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 
-# Chars Obsidian forbids in note names (filesystem-illegal + wikilink-breaking).
-_ILLEGAL = re.compile(r'[/\\:*?"<>|\[\]#^]')
+# Chars Obsidian forbids in note names (filesystem-illegal + wikilink-breaking),
+# plus control characters — a NUL made every file operation raise.
+_ILLEGAL = re.compile(r'[/\\:*?"<>|\[\]#^\x00-\x1f\x7f]')
 _MAX_STEM = 180  # leave headroom under the 255-byte filesystem limit
 
 

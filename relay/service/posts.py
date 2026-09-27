@@ -9,6 +9,16 @@ import aiosqlite
 
 from .. import changes, database, embedding, events, folders, history, links, metrics, vault, vectors
 from ..config import settings
+from ..errors import (
+    ConcurrentModification,
+    EditNoChange,
+    EditTextNotFound,
+    EditTextNotUnique,
+    InvalidSearchMode,
+    PostNotFound,
+    ProtectedPost,
+    SemanticSearchUnavailable,
+)
 from ..identity import Actor
 from ..models import (
     BacklinksResponse,
@@ -24,22 +34,15 @@ from ..models import (
     RelatedPostsResponse,
     SearchTiming,
     SimilarPost,
+    decode_properties,
     etag_for_row,
+    tags_from_sentinel,
 )
 from ._common import (
     MAX_PAGE_LIMIT,
-    ConcurrentModification,
-    EditNoChange,
-    EditTextNotFound,
-    EditTextNotUnique,
-    InvalidSearchMode,
-    PostNotFound,
-    ProtectedPost,
-    SemanticSearchUnavailable,
     _clamp,
     _fetch,
     _require_write_scope,
-    _tags_from_sentinel,
     logger,
 )
 from .attachments import _all_referenced_attachments, referenced_attachment_names
@@ -501,7 +504,7 @@ async def update_post(
     async with vault.write_lock:
         row = await _fetch(db, post_id)
         if row is None:
-            raise PostNotFound
+            raise PostNotFound(f"Post #{post_id} not found")
         # Scope check before ConcurrentModification (relay #198, B-8): a
         # scope-denied caller shouldn't learn the post's current etag as a
         # side effect of being told "conflict" instead of "not allowed".
@@ -509,19 +512,19 @@ async def update_post(
         # all) its proposed new tags must pass — ALL-of, closing off both
         # "touch a post outside scope" and "retag an owned post to
         # something outside scope".
-        _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
+        _require_write_scope(actor, tags_from_sentinel(row["tags"]))
         if "tags" in body.model_fields_set:
             _require_write_scope(actor, body.tags or [])
         if body.if_match is not None and body.if_match != etag_for_row(row):
-            raise ConcurrentModification
+            raise ConcurrentModification(post_id, PostResponse.from_row(row).model_dump())
 
         fields = body.model_fields_set
         title: str = body.title if "title" in fields and body.title is not None else row["title"]
         content: str = body.content if "content" in fields and body.content is not None else row["content"]
-        tags = body.tags if "tags" in fields else _tags_from_sentinel(row["tags"])
+        tags = body.tags if "tags" in fields else tags_from_sentinel(row["tags"])
         source = body.source if "source" in fields else row["source"]
         expires_at = body.expires_at if "expires_at" in fields else row["expires_at"]
-        properties = vault.decode_properties(row["properties"])
+        properties = decode_properties(row["properties"])
         now = vault.utcnow_iso()
         old_path = vault.abspath(row["path"])
 
@@ -551,8 +554,9 @@ async def update_post(
             updated_at=now, expires_at=expires_at, properties=properties,
             updated_by=updated_by,
         )
+        relinked: list[int] = []
         if new_path.stem != row["title"]:
-            await _rewrite_inbound_wikilinks(db, old_title=row["title"], new_title=new_path.stem)
+            relinked = await _rewrite_inbound_wikilinks(db, old_title=row["title"], new_title=new_path.stem)
         if move_to:
             await _relocate_note_attachments(db, content, old_folder, move_to, post_id)
         await db.commit()
@@ -568,8 +572,13 @@ async def update_post(
     # reconnecting client's cursor the way a re-sent post id could. Self-write
     # suppression already covers the vault write, so this is the only path
     # that propagates API/MCP edits (incl. Inbox→domain moves).
-    seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
-    await events.publish(post.model_dump(), seq=seq)
+    seqs = await changes.record_latest(db, post_ids=(post_id, *relinked))
+    await events.publish(post.model_dump(), seq=seqs.get(post_id))
+    # Posts whose [[links]] the rename rewrote changed too — live clients need them.
+    for other_id in relinked:
+        other = await get_post(db, other_id)
+        if other is not None:
+            await events.publish(other.model_dump(), seq=seqs.get(other_id))
     return post
 
 
@@ -605,17 +614,17 @@ async def edit_post(
         raise EditNoChange
     row = await _fetch(db, post_id)
     if row is None:
-        raise PostNotFound
+        raise PostNotFound(f"Post #{post_id} not found")
     # Before any content-matching logic (relay #198, B-8): a scope-denied
     # caller must never learn whether old_str exists in the post's content
     # via EditTextNotFound/EditTextNotUnique before being told they're
     # denied — that would be a content oracle. update_post re-checks this
     # same scope below too; harmless, not a second independently-maintained
     # rule since it's the same data/helper.
-    _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
+    _require_write_scope(actor, tags_from_sentinel(row["tags"]))
     row_etag = etag_for_row(row)
     if if_match is not None and if_match != row_etag:
-        raise ConcurrentModification
+        raise ConcurrentModification(post_id, PostResponse.from_row(row).model_dump())
     occurrences = row["content"].count(old_str)
     if occurrences == 0:
         raise EditTextNotFound
@@ -641,13 +650,13 @@ async def append_post(
     through to ``update_post`` as ``if_match``."""
     row = await _fetch(db, post_id)
     if row is None:
-        raise PostNotFound
+        raise PostNotFound(f"Post #{post_id} not found")
     # Same reasoning/ordering as edit_post (relay #198, B-8) — check before
     # any of this function's own content-derived work.
-    _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
+    _require_write_scope(actor, tags_from_sentinel(row["tags"]))
     row_etag = etag_for_row(row)
     if if_match is not None and if_match != row_etag:
-        raise ConcurrentModification
+        raise ConcurrentModification(post_id, PostResponse.from_row(row).model_dump())
     sep = "\n\n" if row["content"].strip() else ""
     new_content = row["content"].rstrip("\n") + sep + content
     return await update_post(
@@ -677,20 +686,22 @@ async def _relocate_note_attachments(
 
 async def _rewrite_inbound_wikilinks(
     db: aiosqlite.Connection, *, old_title: str, new_title: str
-) -> None:
+) -> list[int]:
     """Point every ``[[old_title]]`` across the vault at ``new_title`` (rename).
 
     Mirrors Obsidian's rename behaviour. ``#NNN`` id-refs need no rewrite — the id
     is stable. Runs inside the caller's ``write_lock``; commit is the caller's.
+    Returns the ids of the posts it rewrote.
     """
+    rewritten: list[int] = []
     async with db.execute("SELECT * FROM posts WHERE content LIKE '%[[%'") as cur:
         rows = await cur.fetchall()
     for row in rows:
         new_content, changed = links.rewrite_wikilink_targets(row["content"], old_title, new_title)
         if not changed:
             continue
-        row_tags = _tags_from_sentinel(row["tags"])
-        row_properties = vault.decode_properties(row["properties"])
+        row_tags = tags_from_sentinel(row["tags"])
+        row_properties = decode_properties(row["properties"])
         # Mechanical side-effect of someone else's rename, not this post's own
         # write (relay #198, B-7) — carry `updated_by` over unchanged, same as
         # tags.rename_tag's own bulk rewrite.
@@ -707,6 +718,8 @@ async def _rewrite_inbound_wikilinks(
             updated_at=row["updated_at"], expires_at=row["expires_at"], properties=row_properties,
             updated_by=row["updated_by"],
         )
+        rewritten.append(row["id"])
+    return rewritten
 
 
 async def link_index(db: aiosqlite.Connection) -> LinkIndexResponse:
@@ -716,21 +729,25 @@ async def link_index(db: aiosqlite.Connection) -> LinkIndexResponse:
     return LinkIndexResponse(items=[LinkTarget(id=r["id"], title=r["title"]) for r in rows])
 
 
+async def _link_graph(db: aiosqlite.Connection) -> tuple[list[aiosqlite.Row], dict[str, int], set[int]]:
+    """Every post plus the title→id and id sets ``links.target_ids`` resolves against."""
+    async with db.execute("SELECT id, title, content FROM posts ORDER BY id") as cur:
+        rows = list(await cur.fetchall())
+    return rows, {links.norm_title(r["title"]): r["id"] for r in rows}, {r["id"] for r in rows}
+
+
+def _linking_to(post_id: int, rows, title_to_id: dict[str, int], ids: set[int]) -> list[aiosqlite.Row]:
+    return [r for r in rows if r["id"] != post_id and post_id in links.target_ids(r["content"], title_to_id, ids)]
+
+
 async def get_backlinks(db: aiosqlite.Connection, post_id: int) -> BacklinksResponse:
     """Posts that link to ``post_id`` via ``[[title]]`` or ``#id`` (linked mentions)."""
     if await _fetch(db, post_id) is None:
-        raise PostNotFound
-    async with db.execute("SELECT id, title, content FROM posts") as cur:
-        rows = await cur.fetchall()
-    title_to_id = {links.norm_title(r["title"]): r["id"] for r in rows}
-    ids = {r["id"] for r in rows}
-    items = [
-        LinkTarget(id=r["id"], title=r["title"])
-        for r in rows
-        if r["id"] != post_id and post_id in links.target_ids(r["content"], title_to_id, ids)
-    ]
-    items.sort(key=lambda t: t.id)
-    return BacklinksResponse(items=items)
+        raise PostNotFound(f"Post #{post_id} not found")
+    rows, title_to_id, ids = await _link_graph(db)
+    return BacklinksResponse(
+        items=[LinkTarget(id=r["id"], title=r["title"]) for r in _linking_to(post_id, rows, title_to_id, ids)]
+    )
 
 
 async def get_related(db: aiosqlite.Connection, post_id: int) -> RelatedPostsResponse:
@@ -746,7 +763,7 @@ async def get_related(db: aiosqlite.Connection, post_id: int) -> RelatedPostsRes
     available", not an indistinguishable "nothing similar"."""
     row = await _fetch(db, post_id)
     if row is None:
-        raise PostNotFound
+        raise PostNotFound(f"Post #{post_id} not found")
     if not (database.VEC_ENABLED and settings.embedding_enabled):
         raise SemanticSearchUnavailable
 
@@ -754,19 +771,11 @@ async def get_related(db: aiosqlite.Connection, post_id: int) -> RelatedPostsRes
     if not candidates:
         return RelatedPostsResponse(items=[])
 
-    async with db.execute("SELECT id, title, content FROM posts") as cur:
-        rows = await cur.fetchall()
-    title_to_id = {links.norm_title(r["title"]): r["id"] for r in rows}
-    ids = {r["id"] for r in rows}
-    outbound = links.target_ids(row["content"], title_to_id, ids)
-    inbound = {
-        r["id"] for r in rows
-        if r["id"] != post_id and post_id in links.target_ids(r["content"], title_to_id, ids)
+    rows, title_to_id, ids = await _link_graph(db)
+    already_linked = links.target_ids(row["content"], title_to_id, ids) | {
+        r["id"] for r in _linking_to(post_id, rows, title_to_id, ids)
     }
-    already_linked = outbound | inbound
-
-    items = [c for c in candidates if c.id not in already_linked]
-    return RelatedPostsResponse(items=items)
+    return RelatedPostsResponse(items=[c for c in candidates if c.id not in already_linked])
 
 
 
@@ -775,8 +784,8 @@ async def delete_post(db: aiosqlite.Connection, post_id: int, *, actor: Actor | 
         raise ProtectedPost
     row = await _fetch(db, post_id)
     if row is None:
-        raise PostNotFound
-    _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
+        raise PostNotFound(f"Post #{post_id} not found")
+    _require_write_scope(actor, tags_from_sentinel(row["tags"]))
     folder = folders.folder_of(row["path"], default=folders.INBOX)
     async with vault.write_lock:
         vault.delete_file(vault.abspath(row["path"]))
@@ -802,4 +811,4 @@ async def delete_post(db: aiosqlite.Connection, post_id: int, *, actor: Actor | 
         # commit — restoring the post restores its images in the same revert.
         await history.commit(f"post {post_id} delete: {row['title']}", author=actor.git_author if actor else None)
     seq = (await changes.record_latest(db, post_ids=(post_id,))).get(post_id)
-    await events.publish_delete(post_id, _tags_from_sentinel(row["tags"]), seq=seq)
+    await events.publish_delete(post_id, tags_from_sentinel(row["tags"]), seq=seq)

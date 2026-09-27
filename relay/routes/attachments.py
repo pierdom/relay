@@ -32,12 +32,7 @@ async def list_attachments(
     db: aiosqlite.Connection = Depends(get_db),
 ) -> AttachmentListResponse:
     """List attachments under ``assets/`` dirs (optionally scoped to a folder or post)."""
-    try:
-        return await service.list_attachments(db, post_id=post_id, folder=folder)
-    except service.InvalidFolder as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{post_id} not found") from None
+    return await service.list_attachments(db, post_id=post_id, folder=folder)
 
 
 @router.post(
@@ -54,24 +49,11 @@ async def create_attachment(
     ``![[file]]`` embed is appended to that post's body. The bytes come from
     exactly one of ``data`` (inline base64), ``source_url`` (server fetches), or
     ``upload_id`` (a filled presigned slot — see ``POST /attachments/uploads``)."""
-    try:
-        return await service.ingest_attachment(
-            db, filename=body.filename, data=body.data, source_url=body.source_url,
-            upload_id=body.upload_id, post_id=body.post_id, folder=body.folder,
-            tags=body.tags, embed=body.embed, actor=actor,
-        )
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data is not valid base64") from None
-    except (service.AttachmentSourceError, service.InvalidFolder) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Post #{body.post_id} not found") from None
-    except service.AttachmentError as exc:
-        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
-    except service.ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
-        ) from None
+    return await service.ingest_attachment(
+        db, filename=body.filename, data=body.data, source_url=body.source_url,
+        upload_id=body.upload_id, post_id=body.post_id, folder=body.folder,
+        tags=body.tags, embed=body.embed, actor=actor,
+    )
 
 
 @router.post(
@@ -160,12 +142,7 @@ async def delete_attachment(
     actor: Actor = Depends(require_api_key),
 ) -> AttachmentDeleteResponse:
     """Delete an attachment file; reports any posts that still reference it."""
-    try:
-        result = await service.delete_attachment(db, name, actor=actor)
-    except service.ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
-        ) from None
+    result = await service.delete_attachment(db, name, actor=actor)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     return result

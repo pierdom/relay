@@ -864,3 +864,18 @@ def test_rrf_weighting_can_flip_which_list_dominates():
     list_a, list_b = [8], [9, 8]
     assert vectors.reciprocal_rank_fusion(list_a, list_b, k=1)[0] == 8
     assert vectors.reciprocal_rank_fusion(list_a, list_b, k=1, weight_b=4.0)[0] == 9
+
+
+@pytest.mark.asyncio
+async def test_external_delete_drops_the_posts_chunks(db):
+    """A note deleted in Obsidian must not leave chunks behind to skew ranked
+    results and coverage until the next restart."""
+    from relay import vault
+
+    post = await service.create_post(db, PostCreate(title="Gone Soon", content=LONG_SECTION, tags=["homelab"]))
+    assert await _chunk_rows(db, post.id)
+    async with db.execute("SELECT path FROM posts WHERE id = ?", (post.id,)) as cur:
+        path = vault.abspath((await cur.fetchone())["path"])
+    path.unlink()  # not via relay, so no self-delete suppression
+    await watcher._reconcile_delete(db, path)
+    assert await _chunk_rows(db, post.id) == []

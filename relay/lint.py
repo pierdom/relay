@@ -42,8 +42,7 @@ import aiosqlite
 
 from . import database, folders, frontmatter, history, links, markdown_scan, vault, vectors
 from .config import settings
-from .models import LintFinding, LintReport
-from .service._common import _tags_from_sentinel
+from .models import LintFinding, LintReport, tags_from_sentinel
 
 # Type axis (relay #0's tag table, second column). Kept in sync by hand, same
 # footing as folders.DOMAINS for the domain axis — #0 is the source of truth.
@@ -175,7 +174,7 @@ async def run(db: aiosqlite.Connection) -> LintReport:
             row["id"], row["title"], row["path"], row["content"], row["tags"],
             row["updated_at"], row["created_at"],
         )
-        tags = _tags_from_sentinel(tags_raw)
+        tags = tags_from_sentinel(tags_raw)
         # Gates every convention rule below, but not the link checks further
         # down (those run unconditionally) — see the module docstring for why.
         lint_this_post = pid != 0
@@ -337,7 +336,7 @@ async def run(db: aiosqlite.Connection) -> LintReport:
             ))
 
     for row in rows:
-        pid, title, tags = row["id"], row["title"], _tags_from_sentinel(row["tags"])
+        pid, title, tags = row["id"], row["title"], tags_from_sentinel(row["tags"])
         if pid == 0 or any(t in _BACKLINK_EXEMPT_TAGS for t in tags):
             continue
         if inbound_counts.get(pid, 0) == 0:
@@ -350,7 +349,7 @@ async def run(db: aiosqlite.Connection) -> LintReport:
         configured_tags = [r["tag"] for r in await cur.fetchall()]
     live_tags: set[str] = set()
     for row in rows:
-        live_tags.update(_tags_from_sentinel(row["tags"]))
+        live_tags.update(tags_from_sentinel(row["tags"]))
     for tag in configured_tags:
         if tag not in live_tags:
             findings.append(_finding(

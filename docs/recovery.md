@@ -90,7 +90,7 @@ Commit messages tell you which path made the change:
 
 | Message | Came from |
 |---|---|
-| `post <id> create\|update\|delete: <title>` | the REST API or an MCP tool |
+| `post <id> create\|update\|edit\|append\|delete\|restore: <title>` | the REST API or an MCP tool (an attachment embedded into a post is an `append`) |
 | `external edit: <file>` / `external change: N edited, M removed` | Obsidian, nvim, anything editing files directly |
 | `attachment add\|delete: <name>` | an upload or an attachment delete |
 | `tag rename: a -> b (N post(s))` | a tag rename |

@@ -113,3 +113,23 @@ async def test_rename_rewrites_inbound_wikilinks(client):
     assert "[[New Name|alias]]" in updated["content"]
     assert "[[Old Name" not in updated["content"]
     assert f"#{a['id']}" in updated["content"]  # id-ref untouched (stable)
+
+
+@pytest.mark.asyncio
+async def test_rename_streams_the_posts_it_relinked(client):
+    """A live client must see B's rewritten link, not just A's new title."""
+    from relay import events
+
+    a = await _create(client, "Before")
+    b = await _create(client, "Linker", content="see [[Before]]")
+    q = events.subscribe(None)
+    try:
+        r = await client.patch(f"/posts/{a['id']}", json={"title": "After"}, headers=AUTH)
+        assert r.status_code == 200
+        streamed = {}
+        while not q.empty():
+            env = q.get_nowait()
+            streamed[env["id"]] = env["data"]
+    finally:
+        events.unsubscribe(q, None)
+    assert "[[After]]" in streamed[b["id"]]["content"]

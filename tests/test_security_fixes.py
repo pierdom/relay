@@ -203,3 +203,30 @@ async def test_like_wildcards_in_tag_and_folder_filters_are_literal(client):
     assert r.json()["total"] == 0
     r = await client.get("/posts", params={"folder": "Homelab"}, headers=AUTH)
     assert r.json()["total"] == 1
+
+
+# ── Attachments never resolve to posts or dot-directories ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_attachment_delete_cannot_unlink_a_post_or_the_master_document(client, vault_dir):
+    r = await client.post("/posts", json={"title": "Keep me", "content": "body", "tags": ["homelab"]}, headers=AUTH)
+    assert r.status_code == 201
+    for path in ("Homelab/Keep me.md", "Master Document.md"):
+        r = await client.delete(f"/attachments/{path}", headers=AUTH)
+        assert r.status_code == 404, path
+        assert (vault_dir / path).exists()
+    assert (await client.get("/attachments/Homelab/Keep me.md", headers=AUTH)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_attachments_never_serve_dot_directories_or_dotfiles(client, vault_dir):
+    secret = vault_dir / ".obsidian" / "plugins" / "sync" / "data.json"
+    secret.parent.mkdir(parents=True)
+    secret.write_text('{"token": "hunter2"}')
+    (vault_dir / "Inbox").mkdir(exist_ok=True)
+    (vault_dir / "Inbox" / ".env").write_text("SECRET=1")
+    for path in (".obsidian/plugins/sync/data.json", "Inbox/.env"):
+        assert (await client.get(f"/attachments/{path}", headers=AUTH)).status_code == 404, path
+        assert (await client.delete(f"/attachments/{path}", headers=AUTH)).status_code == 404, path
+    assert secret.exists()

@@ -280,6 +280,21 @@ def test_no_allowlist_leaves_sessions_untouched(monkeypatch):
     assert auth.verify_session(auth.create_session(sub="anyone")) is not None
 
 
+
+@pytest.mark.asyncio
+async def test_pasted_named_key_session_dies_with_its_key(monkeypatch):
+    """Removing a named key from RELAY_API_KEYS must revoke the browser session
+    minted by pasting it — and the OIDC allowlist must not lock that session out."""
+    monkeypatch.setattr(settings, "api_keys", "newsbot:sk-news")
+    monkeypatch.setattr(settings, "oidc_allowed_subs", "user-123")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/session", json={"key": "sk-news"})
+        assert r.status_code == 200
+        c.cookies.set(auth.SESSION_COOKIE, r.cookies.get(auth.SESSION_COOKIE))
+        assert (await c.get("/auth/me")).json()["authenticated"] is True
+        monkeypatch.setattr(settings, "api_keys", "")
+        assert (await c.get("/auth/me")).json()["authenticated"] is False
+
 @pytest.mark.asyncio
 async def test_deauthorized_session_is_401_on_a_protected_route(monkeypatch, tmp_path):
     from relay import database
@@ -687,17 +702,15 @@ async def test_mcp_tag_scoped_key_succeeds_in_scope_and_fails_out_of_scope(tmp_p
         denied = await mcp.call_tool(
             "publish_post", {"title": "Out Of Scope", "content": "x", "tags": ["finance"]}
         )
-        assert denied.structured_content.get("error") == "This API key's scope does not permit this write."
+        assert denied.structured_content.get("error") == "This API key's scope does not permit this write"
     finally:
         auth_context_var.reset(reset)
 
 
-def test_current_actor_logs_loudly_when_a_real_token_has_no_derivable_identity(caplog):
-    """Since B-8, `_current_actor()` returning None also skips every scope
-    check for the call (actor=None is the same signal used for an internal
-    caller that bypasses auth entirely) — not reachable via any auth path
-    today, but if it ever is, it must fail loudly rather than silently
-    granting an authenticated-but-unattributable write (found in review)."""
+def test_current_actor_fails_closed_when_a_real_token_has_no_derivable_identity(caplog):
+    """`actor=None` exempts a call from every scope check (it means an internal
+    caller), so an authenticated token with no identity must be denied, not
+    mapped to None — not reachable via any auth path today."""
     from mcp.server.auth.middleware.auth_context import auth_context_var
     from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
     from mcp.server.auth.provider import AccessToken
@@ -708,8 +721,8 @@ def test_current_actor_logs_loudly_when_a_real_token_has_no_derivable_identity(c
     token = AccessToken(token="t", client_id="relay", scopes=["relay", "write"], subject=None, claims={})
     reset = auth_context_var.set(AuthenticatedUser(token))
     try:
-        with caplog.at_level("ERROR"):
-            assert mcp_server._current_actor() is None
+        with caplog.at_level("ERROR"), pytest.raises(mcp_server.ScopeDenied):
+            mcp_server._current_actor()
         assert any("no derivable identity" in r.message for r in caplog.records)
     finally:
         auth_context_var.reset(reset)

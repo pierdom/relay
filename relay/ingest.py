@@ -41,7 +41,18 @@ class FetchError(Exception):
 # ── source_url fetch ──────────────────────────────────────────────────────────
 
 
+# "This network": Linux routes 0.x.x.x to the local host.
+_THIS_NETWORK = ipaddress.ip_network("0.0.0.0/8")
+
+
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(ip, ipaddress.IPv6Address):
+        # An IPv4 address tunnelled inside IPv6 (mapped, 6to4, Teredo) is judged as itself.
+        embedded = ip.ipv4_mapped or ip.sixtofour or (ip.teredo[1] if ip.teredo else None)
+        if embedded is not None and _is_blocked_ip(embedded):
+            return True
+    elif ip in _THIS_NETWORK:
+        return True
     return ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
 
 
@@ -196,7 +207,6 @@ class UploadSlot:
     id: str
     path: Path
     expires_at: float
-    received_bytes: int = 0
     ready: bool = False
 
 
@@ -265,10 +275,9 @@ class UploadRegistry:
         """The live slot for a PUT, or ``None`` if unknown/expired."""
         return self._live_slot(upload_id)
 
-    def mark_received(self, upload_id: str, size: int) -> None:
+    def mark_received(self, upload_id: str) -> None:
         slot = self._slots.get(upload_id)
         if slot is not None:
-            slot.received_bytes = size
             slot.ready = True
 
     def claim_slot(self, upload_id: str) -> bytes | None:
@@ -322,5 +331,5 @@ async def stage_upload(upload_id: str, stream, *, max_bytes: int) -> int:
         except OSError:
             pass
         raise
-    registry.mark_received(upload_id, total)
+    registry.mark_received(upload_id)
     return total

@@ -38,8 +38,8 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may
 | POST | `/attachments/uploads` | Mint a presigned upload slot (`upload_id` + `upload_url`) |
 | PUT | `/attachments/uploads/{upload_id}` | Stream raw bytes into a slot (single, capped body) |
 | GET | `/attachments` | List attachments (`folder`/`post_id` scope) |
-| GET | `/attachments/{path}` | Serve a vault attachment |
-| DELETE | `/attachments/{path}` | Delete an attachment; reports posts still referencing it |
+| GET | `/attachments/{path}` | Serve a vault attachment (a bare name or a vault-relative path — never a `.md` post, a dotfile, or anything under a dot-directory) |
+| DELETE | `/attachments/{path}` | Delete an attachment (same resolution rule); reports posts still referencing it |
 | GET | `/tags` | List tags with post counts |
 | POST | `/tags/{tag}/config` | Set per-tag TTL (`ttl_hours` and/or `expires_at`); an empty body `{}` removes the tag's config |
 | PATCH | `/tags/{tag}` | Rename a tag across all posts |
@@ -166,4 +166,4 @@ Upload via `POST /attachments`, providing the bytes exactly one of three ways:
 - **`source_url`** — an `http(s)` URL the **server** fetches (streamed, size-capped, SSRF-guarded; filename derived from the response when omitted). No bytes in the request.
 - **`upload_id`** — for large files, mint a slot with `POST /attachments/uploads`, `PUT` the raw bytes to the returned `upload_url` (out-of-band, not base64), then finalize with `POST /attachments` carrying the `upload_id`. Slots are single-use and short-lived (`ATTACHMENT_UPLOAD_TTL_SECONDS`).
 
-With `post_id`, the `![[file]]` embed is automatically appended to that post. Filenames are vault-globally unique, so `![[name]]` always resolves to exactly one file. Deleting a post removes orphaned attachments; shared assets are kept. A failed `source_url`/unknown `upload_id` → `400`; over the size cap → `413`.
+With `post_id`, the `![[file]]` embed is automatically appended to that post. Filenames are vault-globally unique, so `![[name]]` always resolves to exactly one file. Deleting a post removes orphaned attachments; shared assets are kept. A failed `source_url`/unknown `upload_id`/invalid base64 → `400`; over the size cap → `413`; a key whose scope doesn't cover the target → `403`, checked before any `source_url` is fetched.

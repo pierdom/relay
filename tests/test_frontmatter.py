@@ -290,3 +290,10 @@ def test_unique_path_exclude_treats_path_as_free(tmp_path):
     existing.touch()
     result = unique_path(tmp_path, "My Note", exclude=existing)
     assert result == existing  # renaming onto itself is a no-op
+
+
+def test_sanitizers_drop_control_characters():
+    from relay import frontmatter
+
+    assert frontmatter.sanitize_title("a\x00b\nc") == "a b c"
+    assert "\x00" not in frontmatter.sanitize_attachment_name("x\x00y.png")
