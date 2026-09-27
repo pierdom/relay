@@ -10,23 +10,19 @@ import aiosqlite
 
 from .. import folders, history, ingest, vault
 from ..config import settings
+from ..errors import AttachmentError, AttachmentSourceError, InvalidFolder, PostNotFound
 from ..identity import Actor
 from ..models import (
     AttachmentDeleteResponse,
     AttachmentInfo,
     AttachmentListResponse,
     AttachmentResponse,
-    PostUpdate,
     UploadSlotResponse,
+    tags_from_sentinel,
 )
 from ._common import (
-    AttachmentError,
-    AttachmentSourceError,
-    InvalidFolder,
-    PostNotFound,
     _fetch,
     _require_write_scope,
-    _tags_from_sentinel,
 )
 
 _EMBED_OR_LINK_RE = re.compile(r"!?\[\[([^\]|#]+?)(?:\|[^\]]*)?\]\]")
@@ -61,13 +57,13 @@ _DATA_URI_RE = re.compile(r"^data:[^;,]*;base64,", re.IGNORECASE)
 
 def decode_attachment_b64(data: str) -> bytes:
     """Decode a client-supplied base64 string, tolerating a ``data:...;base64,``
-    prefix and internal whitespace/newlines. Raises ``ValueError`` on bad input."""
+    prefix and internal whitespace/newlines."""
     s = _DATA_URI_RE.sub("", (data or "").strip())
     s = re.sub(r"\s+", "", s)
     try:
         return base64.b64decode(s, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise ValueError("data is not valid base64") from exc
+    except (binascii.Error, ValueError):
+        raise AttachmentSourceError("data is not valid base64") from None
 
 
 async def _resolve_attachment_bytes(
@@ -79,13 +75,13 @@ async def _resolve_attachment_bytes(
 ) -> tuple[bytes, str]:
     """Turn whichever transport the caller used into ``(raw_bytes, filename)``.
 
-    - ``data``: inline base64 (``ValueError`` on garbage → 400).
+    - ``data``: inline base64.
     - ``source_url``: the server fetches it (SSRF-guarded, capped); the name falls
       back to the response's Content-Disposition / URL basename.
     - ``upload_id``: claim a filled presigned slot (single-use).
     """
     if data is not None:
-        raw = decode_attachment_b64(data)  # ValueError → 400
+        raw = decode_attachment_b64(data)
         name = filename
     elif source_url is not None:
         try:
@@ -124,14 +120,84 @@ async def ingest_attachment(
     embed: bool = True,
     actor: Actor | None = None,
 ) -> AttachmentResponse:
-    """Resolve any of the three byte transports (base64 / source_url / upload_id)
-    then store via ``add_attachment``. The single entry point REST + MCP share."""
+    """Store an attachment in a folder's ``assets/`` dir and return its embed ref —
+    the single entry point REST + MCP share.
+
+    Folder precedence: ``post_id`` (the post's own folder) → explicit ``folder`` →
+    ``tags`` (same placement policy as a post via ``folders.folder_for``, so a
+    compose-time upload lands beside where the note will file) → ``Inbox``.
+
+    With ``post_id`` and ``embed`` true, the ``![[file]]`` embed is also appended to
+    the post's body (streamed via SSE). With ``embed`` false (e.g. the UI, which
+    inserts the ref itself) the post is left untouched.
+
+    Placement and scope are settled *before* any bytes are fetched, so a
+    scope-denied caller can't make the server fetch a URL or consume a slot.
+    """
+    row, target_folder = await _attachment_target(db, post_id=post_id, folder=folder, tags=tags, actor=actor)
     raw, name = await _resolve_attachment_bytes(
         filename=filename, data=data, source_url=source_url, upload_id=upload_id
     )
-    return await add_attachment(
-        db, filename=name, data=raw, post_id=post_id, folder=folder, tags=tags, embed=embed, actor=actor
-    )
+    if len(raw) > settings.attachment_max_bytes:
+        raise AttachmentError(f"attachment exceeds the {settings.attachment_max_mb} MB limit")
+    if not raw:
+        raise AttachmentError("attachment is empty")
+
+    # Serialize name-allocation + write against other writers so two concurrent
+    # uploads of the same filename can't resolve to the same path and clobber.
+    async with vault.write_lock:
+        written = vault.write_attachment(target_folder, name, raw)
+        # Before the embed below: the upload and the post edit that references it
+        # read as two steps in the log instead of the file appearing inside a
+        # post update. Committed while still holding `write_lock` (K-2) — see
+        # posts.create_post's comment for why the two must never be split by a
+        # lock release.
+        await history.commit(f"attachment add: {written.name}", author=actor.git_author if actor else None)
+    ref = f"![[{written.name}]]"
+
+    result_post_id = None
+    if row is not None and embed:  # outside the lock — append_post takes it itself
+        from .posts import append_post  # posts imports this module; keep the cycle out of import time
+
+        # append_post re-reads the post: `row` predates the (possibly slow) byte
+        # fetch, so rewriting from it would clobber an edit made meanwhile.
+        await append_post(db, row["id"], f"{ref}\n", actor=actor)
+        result_post_id = row["id"]
+
+    return AttachmentResponse(filename=written.name, ref=ref, folder=target_folder, post_id=result_post_id)
+
+
+async def _attachment_target(
+    db: aiosqlite.Connection,
+    *,
+    post_id: int | None,
+    folder: str | None,
+    tags: list[str] | None,
+    actor: Actor | None,
+) -> tuple[aiosqlite.Row | None, str]:
+    """The owning post (if any) and target folder, after the scope check.
+
+    An attachment inherits its owning post's tags for scope purposes (relay
+    #198, B-8) — it has no tags of its own. ``folder``/neither give no
+    derivable tag (folders are a many-to-one projection of tags), so a
+    tag-restricted key is denied outright there rather than guessing. The
+    ``folder`` branch ignores ``tags`` on purpose: they say nothing about the
+    folder, and checking them let a scoped key pair an in-scope tag with an
+    arbitrary folder.
+    """
+    if post_id is not None:
+        row = await _fetch(db, post_id)
+        if row is None:
+            raise PostNotFound(f"Post #{post_id} not found")
+        _require_write_scope(actor, tags_from_sentinel(row["tags"]))
+        return row, folders.folder_of(row["path"], default=folders.INBOX)
+    if folder:
+        if not folders.is_valid_name(folder):
+            raise InvalidFolder(f"invalid folder name: {folder!r}")
+        _require_write_scope(actor, [])
+        return None, folder
+    _require_write_scope(actor, tags or [])
+    return None, folders.folder_for(1, tags) if tags else folders.INBOX
 
 
 def create_upload_slot() -> UploadSlotResponse:
@@ -148,86 +214,6 @@ def create_upload_slot() -> UploadSlotResponse:
     )
 
 
-async def add_attachment(
-    db: aiosqlite.Connection,
-    *,
-    filename: str,
-    data: bytes,
-    post_id: int | None = None,
-    folder: str | None = None,
-    tags: list[str] | None = None,
-    embed: bool = True,
-    actor: Actor | None = None,
-) -> AttachmentResponse:
-    """Store an attachment in a folder's ``assets/`` dir and return its embed ref.
-
-    Folder precedence: ``post_id`` (the post's own folder) → explicit ``folder`` →
-    ``tags`` (same placement policy as a post via ``folders.folder_for``, so a
-    compose-time upload lands beside where the note will file) → ``Inbox``.
-
-    With ``post_id`` and ``embed`` true, the ``![[file]]`` embed is also appended to
-    the post's body (streamed via SSE). With ``embed`` false (e.g. the UI, which
-    inserts the ref itself) the post is left untouched.
-    """
-    if not data:
-        raise AttachmentError("attachment is empty")
-    if len(data) > settings.attachment_max_bytes:
-        raise AttachmentError(f"attachment exceeds the {settings.attachment_max_mb} MB limit")
-
-    # An attachment inherits its owning post's tags for scope purposes (relay
-    # #198, B-8) — there's no tag concept of its own. `folder`/neither give
-    # no derivable tag: folders are a many-to-one projection of tags
-    # (`folders.FALLBACK`), so reversing `folder` back to a tag set would be
-    # ambiguous; a tag-restricted key is denied outright in both cases
-    # rather than guessing.
-    row = None
-    if post_id is not None:
-        row = await _fetch(db, post_id)
-        if row is None:
-            raise PostNotFound
-        _require_write_scope(actor, _tags_from_sentinel(row["tags"]))
-        target_folder = folders.folder_of(row["path"], default=folders.INBOX)
-    elif folder:
-        if not folders.is_valid_name(folder):
-            raise InvalidFolder(f"invalid folder name: {folder!r}")
-        # `tags` (if also passed) says nothing about `folder` — a caller could
-        # supply an in-scope `tags` value alongside an unrelated `folder` and
-        # bypass the restriction entirely, so this branch never checks `tags`
-        # for the scope decision, unlike the `elif tags:` branch below.
-        _require_write_scope(actor, [])
-        target_folder = folder
-    elif tags:
-        _require_write_scope(actor, tags)
-        target_folder = folders.folder_for(1, tags) or folders.INBOX
-    else:
-        _require_write_scope(actor, [])
-        target_folder = folders.INBOX
-
-    # Serialize name-allocation + write against other writers so two concurrent
-    # uploads of the same filename can't resolve to the same path and clobber.
-    async with vault.write_lock:
-        written = vault.write_attachment(target_folder, filename, data)
-        # Before the embed below: the upload and the post edit that references it
-        # read as two steps in the log instead of the file appearing inside a
-        # post update. Committed while still holding `write_lock` (K-2) — see
-        # posts.create_post's comment for why the two must never be split by a
-        # lock release.
-        await history.commit(f"attachment add: {written.name}", author=actor.git_author if actor else None)
-    ref = f"![[{written.name}]]"
-
-    result_post_id = None
-    if row is not None and embed:  # append outside the lock — update_post takes it itself
-        from .posts import update_post  # posts imports this module; keep the cycle out of import time
-
-        new_content = row["content"].rstrip() + f"\n\n{ref}\n"
-        await update_post(db, row["id"], PostUpdate(content=new_content), actor=actor)
-        result_post_id = row["id"]
-
-    return AttachmentResponse(
-        filename=written.name, ref=ref, folder=target_folder, post_id=result_post_id
-    )
-
-
 async def list_attachments(
     db: aiosqlite.Connection, *, post_id: int | None = None, folder: str | None = None
 ) -> AttachmentListResponse:
@@ -236,7 +222,7 @@ async def list_attachments(
     if post_id is not None:
         row = await _fetch(db, post_id)
         if row is None:
-            raise PostNotFound
+            raise PostNotFound(f"Post #{post_id} not found")
         folder = folders.folder_of(row["path"], default=folders.INBOX)
     elif folder and not folders.is_valid_name(folder):
         raise InvalidFolder(f"invalid folder name: {folder!r}")
@@ -270,7 +256,7 @@ async def delete_attachment(
         owning_tags: set[str] = set()
         for r in rows:
             if r["id"] in referenced_by:
-                owning_tags |= set(_tags_from_sentinel(r["tags"]))
+                owning_tags |= set(tags_from_sentinel(r["tags"]))
         _require_write_scope(actor, owning_tags)
         removed = vault.delete_attachment(name)
         if removed is None:

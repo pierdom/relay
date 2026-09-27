@@ -4,6 +4,33 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.16.0] — 2026-09-27
+
+Full-scope audit: security fixes first, then bugs, then a leaner codebase (≈600 fewer lines of application code).
+
+### Security
+- `GET`/`DELETE /attachments/<path>` (and MCP `get_attachment`/`delete_attachment`) resolved *any* vault file. A path-form delete could unlink a post — the master document included — around every post-level check and scope rule; a read could return `.obsidian/` plugin config. Attachments now never resolve to a `.md` file, a dotfile, or anything under a dot-directory
+- A browser session minted by pasting a named key outlived that key: removing it from `RELAY_API_KEYS` left the cookie valid for up to 30 days. Key sessions are now checked against the configured keys on every request (and no longer get locked out by `OIDC_ALLOWED_SUBS`, which never applied to them)
+- MCP: a token with no derivable identity now fails closed instead of running the tool with `actor=None`, which every scope check exempts
+- `add_attachment` checks the caller's scope before fetching a `source_url` or claiming an upload slot — a denied key could still make the server fetch
+- SSRF guard: also blocks `0.0.0.0/8` and IPv4 addresses tunnelled in 6to4/Teredo
+- Control characters (NUL included) in a title or attachment name are stripped instead of 500ing every file operation
+
+### Fixed
+- **TTL sweep deleted the wrong posts**: per-tag expiry matched tags with an unescaped `LIKE`, and `_` is a legal tag character — a TTL on `my_notes` also expired posts tagged `my-notes`. Tag rename had the same bug (and read its rows outside the write lock)
+- An externally deleted note (Obsidian) left its embedding chunks behind until restart
+- Attaching a file to a post appends its `![[embed]]` through the etag-guarded `append_post` path (history action `append`, was `update`) instead of rewriting the body from a read taken before the upload — an edit landing mid-upload is no longer overwritten
+- Renaming a post rewrote `[[links]]` in other posts without streaming those posts over SSE, so live clients kept the old link text
+- `/events?tag=News` never matched (tags are stored lowercase), and every distinct tag ever subscribed to stayed in memory
+- Malformed `RELAY_API_KEYS`/`RELAY_API_KEY_SCOPES` entries logged a warning on every authenticated request; both are now parsed once per value
+
+### Changed
+- One error hierarchy (`relay/errors.py`): each error carries its HTTP status and message, mapped once by a FastAPI exception handler and once by an MCP tool decorator, replacing ~70 hand-written translations. Every status code is unchanged; wording is lightly normalised (MCP error strings lost their trailing period, not-found errors name the post id), and `ConcurrentModification`'s 409 still carries `current`. MCP `set_tag_config` with an empty tag now returns an `error` result instead of raising
+- Docs: README's MCP tool count (25 → 27), `get_related` added to docs/mcp.md's tool table, docs/recovery.md's commit-message table lists every post action, and docs/api.md/auth.md describe the attachment-resolution and key-session rules above
+- Removed dead code (`auth.bearer_matches`, `auth.revoke_session`, `Settings.mcp_resource_url`, an unused upload-slot field, unused TUI palette constants) and merged duplicate helpers (tag normalisation ×4, tag sentinel encoding, properties decoding, fenced-code regex ×3, `HistoryUnavailable` ×2, backlink computation ×2)
+
+---
+
 ## [1.15.0] — 2026-09-20
 
 Per-key scope, surfaced (relay #198, B-8 follow-up): `GET /status` gains a `caller` field, and the browser UI and TUI both use it so a restricted key finds out up front instead of from a rejected write.

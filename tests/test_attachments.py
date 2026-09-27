@@ -402,7 +402,7 @@ async def test_add_attachment_accepts_data_uri_and_whitespace(client):
 def test_decode_attachment_b64_rejects_garbage():
     from relay import service
 
-    with pytest.raises(ValueError):
+    with pytest.raises(service.AttachmentSourceError):
         service.decode_attachment_b64("!!!not base64!!!")
 
 

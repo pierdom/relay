@@ -14,36 +14,27 @@ _bearer = HTTPBearer(auto_error=False)
 SESSION_COOKIE = "relay_session"
 _SALT = "relay-session"
 
-# The break-glass API-key paste (`POST /session`) mints this subject. Possession
-# of API_KEY is itself the credential there, so the OIDC allowlist doesn't apply.
+# The primary API_KEY's identity, and the subject a pasted primary key's session
+# carries (`POST /session`).
 APIKEY_SUB = "apikey"
-
-
-def bearer_matches(token: str | None) -> bool:
-    """Whether a presented bearer matches *any* configured key — the primary
-    ``API_KEY`` or a named ``RELAY_API_KEYS`` entry (relay #198, B-7).
-
-    The single place a bearer is checked; delegates the actual (constant-time,
-    UTF-8-byte) comparison to ``identity.resolve_bearer`` so there is exactly
-    one comparison implementation — ``compare_digest`` on ``str`` raises
-    ``TypeError`` for non-ASCII input, which used to turn an unauthenticated
-    request carrying ``Bearer café`` into a 500 (once per copy of this check —
-    there used to be five).
-    """
-    return resolve_bearer(token) is not None
 
 
 def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.session_signing_key, salt=_SALT)
 
 
-def create_session(sub: str = "apikey", email: str = "") -> str:
+def create_session(sub: str = APIKEY_SUB, email: str = "", *, key: bool = False) -> str:
     """Sign an identity-carrying, expiring session token.
 
     The payload holds who the session is for; expiry is enforced at verify time
-    via the signed timestamp (``max_age``), not just the browser cookie.
+    via the signed timestamp (``max_age``), not just the browser cookie. ``key``
+    marks a session minted from a pasted API key (``POST /session``), which
+    stays valid only while that key is still configured.
     """
-    return _serializer().dumps({"sub": sub, "email": email})
+    payload: dict = {"sub": sub, "email": email}
+    if key:
+        payload["key"] = True
+    return _serializer().dumps(payload)
 
 
 def still_authorized(payload: dict) -> bool:
@@ -60,11 +51,15 @@ def still_authorized(payload: dict) -> bool:
     Sub-allowlist only, exactly like the refresh grant: the session carries
     ``email`` but not ``email_verified``, so an email allowlist can't be
     re-evaluated safely here and is left to login-time enforcement.
+
+    A pasted-key session is checked against the configured keys instead: the
+    OIDC allowlist doesn't apply to it (possession of the key was the
+    credential), and removing or renaming that key revokes it immediately.
     """
-    if not settings.allowed_subs:
-        return True
     sub = payload.get("sub", "")
-    return sub == APIKEY_SUB or sub in settings.allowed_subs
+    if payload.get("key") or sub == APIKEY_SUB:
+        return sub in settings.all_api_keys
+    return not settings.allowed_subs or sub in settings.allowed_subs
 
 
 def verify_session(token: str) -> dict | None:
@@ -75,16 +70,6 @@ def verify_session(token: str) -> dict | None:
     except (BadSignature, SignatureExpired):
         return None
     return payload if still_authorized(payload) else None
-
-
-def revoke_session(token: str) -> None:
-    """No-op: the session is a stateless signed cookie, so there is nothing to
-    delete server-side — the endpoint clearing the cookie is the logout.
-
-    Note this means a *captured* token stays valid until it expires; there is no
-    per-token revocation. Deauthorization (removing a sub from the allowlist) is
-    handled by :func:`still_authorized` on every request instead.
-    """
 
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})

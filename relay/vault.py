@@ -21,6 +21,7 @@ import aiosqlite
 
 from . import folders, frontmatter, vectors
 from .config import settings
+from .models import tags_from_sentinel, tags_to_sentinel
 
 logger = logging.getLogger(__name__)
 
@@ -125,10 +126,6 @@ def abspath(relpath: str) -> Path:
     return (vault_dir() / relpath).resolve()
 
 
-def _tags_to_sentinel(tags: list[str]) -> str:
-    return "," + ",".join(tags) + "," if tags else ""
-
-
 def encode_properties(properties: dict | None) -> str:
     """JSON-encode unknown front-matter keys (see ``frontmatter.parse``) for the
     index's ``properties`` column. ``default=str`` is a defensive fallback, not
@@ -137,18 +134,6 @@ def encode_properties(properties: dict | None) -> str:
     slipping through, the same way a post is never allowed to fail to index
     over derived data (see ``vectors.sync_post_chunks``)."""
     return json.dumps(properties or {}, ensure_ascii=False, default=str)
-
-
-def decode_properties(value: str | None) -> dict:
-    """Inverse of ``encode_properties`` — tolerant of missing/invalid JSON (e.g.
-    a pre-upgrade index row that predates the ``properties`` column)."""
-    if not value:
-        return {}
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
 
 
 # ── self-write suppression (used by the watcher) ────────────────────────────
@@ -281,23 +266,25 @@ def resolve_attachment(name: str) -> Path | None:
     ``name`` comes from an Obsidian embed (``![[file]]`` / ``[[file.pdf]]``) or a
     vault-relative path. A bare filename is located by scanning ``*/assets/``
     dirs (the convention for attachments); a path with separators is resolved
-    directly. Returns an existing file **inside the vault and outside ``.relay``**,
-    or ``None`` — the security boundary against path traversal.
+    directly. Returns an existing file inside the vault, or ``None`` — the
+    security boundary for both serving and deleting. Posts (``.md``), dotfiles
+    and anything under a dot-directory (``.relay``, ``.obsidian``, ``.trash``)
+    are never attachments: resolving them let ``DELETE /attachments/<path>``
+    unlink a post (the master document included) around every post-level check.
     """
     name = (name or "").strip()
     if not name:
         return None
     vault = vault_dir().resolve()
-    relay = Path(settings.relay_dir).resolve()
 
     def _ok(candidate: Path) -> Path | None:
         try:
             rp = candidate.resolve()
-        except OSError:
+        except (OSError, ValueError):
             return None
         if not rp.is_file() or not rp.is_relative_to(vault):
             return None
-        if rp == relay or relay in rp.parents:
+        if rp.suffix.lower() == ".md" or rp.name.startswith(".") or is_hidden_path(rp):
             return None
         return rp
 
@@ -536,7 +523,7 @@ async def index_upsert(
             updated_at=excluded.updated_at, expires_at=excluded.expires_at, properties=excluded.properties,
             updated_by=excluded.updated_by
         """,
-        (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
+        (id, title, relpath(path), content, tags_to_sentinel(tags), source,
          created_at, updated_at, expires_at, encode_properties(properties), updated_by),
     )
     if sync_embeddings:
@@ -571,7 +558,7 @@ async def index_insert(
                             properties, updated_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (id, title, relpath(path), content, _tags_to_sentinel(tags), source,
+        (id, title, relpath(path), content, tags_to_sentinel(tags), source,
          created_at, updated_at, expires_at, encode_properties(properties), updated_by),
     )
     await vectors.sync_post_chunks(db, post_id=id, title=title, content=content, tags=tags)
@@ -814,7 +801,7 @@ async def backfill_embeddings(db: aiosqlite.Connection) -> int:
         # sync_post_chunks never raises (see its docstring), but a SQL error
         # here must not abort the whole run either — one bad post is one bad post.
         try:
-            tags = [t for t in row["tags"].split(",") if t]
+            tags = tags_from_sentinel(row["tags"])
             await vectors.sync_post_chunks(db, post_id=row["id"], title=row["title"], content=row["content"], tags=tags)
             await db.commit()
         except Exception:

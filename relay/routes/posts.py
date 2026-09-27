@@ -51,16 +51,6 @@ def _resolve_if_match(header_value: str | None, body_value: str | None) -> str |
     return body_value
 
 
-def _conflict(post_id: int, current: PostResponse | None) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={
-            "error": f"post #{post_id} has changed since if_match was captured",
-            "current": current.model_dump() if current is not None else None,
-        },
-    )
-
-
 @router.post(
     "",
     response_model=PostCreateResponse,
@@ -72,12 +62,7 @@ async def create_post(
     db: aiosqlite.Connection = Depends(get_db),
     actor: Actor = Depends(require_api_key),
 ) -> PostCreateResponse:
-    try:
-        post = await service.create_post(db, body, actor=actor)
-    except service.ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
-        ) from None
+    post = await service.create_post(db, body, actor=actor)
     _set_etag(response, post)
     return post
 
@@ -123,34 +108,10 @@ async def list_posts(
     ),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostListResponse | PostSummaryListResponse:
-    try:
-        return await service.list_posts(
-            db,
-            tag=tag,
-            folder=folder,
-            limit=limit,
-            offset=offset,
-            search=search,
-            summary=summary,
-            sort=sort,
-            order=order,
-            mode=mode,
-            author=author,
-        )
-    except service.SemanticSearchUnavailable:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Semantic search is not enabled on this relay",
-        ) from None
-    except service.InvalidSearchMode:
-        # Defensive — Query(pattern=...) above already 422s this before the
-        # request reaches service.list_posts. Kept in sync in case that ever
-        # changes, and so this path isn't silently different from the
-        # in-process MCP server's, which has no such Query-layer validation.
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="mode must be 'keyword', 'semantic', or 'hybrid'",
-        ) from None
+    return await service.list_posts(
+        db, tag=tag, folder=folder, limit=limit, offset=offset, search=search,
+        summary=summary, sort=sort, order=order, mode=mode, author=author,
+    )
 
 
 @router.get(
@@ -173,13 +134,7 @@ async def list_deleted_posts(
     declaration order and `post_id` is an `int`, so with this route below it
     `/posts/deleted` answers 422 rather than falling through to here.
     """
-    try:
-        return await service.list_deleted_posts(db, limit=limit, include_expiry=include_expiry)
-    except service.HistoryUnavailable:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Vault history is disabled or git is unavailable",
-        ) from None
+    return await service.list_deleted_posts(db, limit=limit, include_expiry=include_expiry)
 
 
 @router.get(
@@ -208,10 +163,7 @@ async def get_backlinks(
     post_id: int,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> BacklinksResponse:
-    try:
-        return await service.get_backlinks(db, post_id)
-    except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
+    return await service.get_backlinks(db, post_id)
 
 
 @router.get(
@@ -227,15 +179,7 @@ async def get_related(
     already cross-link, in either direction (relay #198, N-7) — an automatic
     to-do list of missing ``[[wikilinks]]``, not a general "more like this".
     """
-    try:
-        return await service.get_related(db, post_id)
-    except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
-    except service.SemanticSearchUnavailable:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Semantic search is not enabled on this relay",
-        ) from None
+    return await service.get_related(db, post_id)
 
 
 @router.get(
@@ -253,13 +197,7 @@ async def get_post_history(
     Answers for a **deleted** post too (`exists: false`) — that's the case worth
     recovering — so this is deliberately not a 404 when the post is gone.
     """
-    try:
-        return await service.get_post_history(db, post_id, limit=limit)
-    except service.HistoryUnavailable:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Vault history is disabled or git is unavailable",
-        ) from None
+    return await service.get_post_history(db, post_id, limit=limit)
 
 
 @router.get(
@@ -276,18 +214,7 @@ async def get_post_revision(
 
     Read-only, and answers for a deleted post too. A short sha is accepted.
     """
-    try:
-        return await service.get_post_revision(db, post_id, sha)
-    except service.HistoryUnavailable:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Vault history is disabled or git is unavailable",
-        ) from None
-    except service.RevisionNotFound:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No revision '{sha}' in the history of post #{post_id}",
-        ) from None
+    return await service.get_post_revision(db, post_id, sha)
 
 
 @router.post(
@@ -305,24 +232,9 @@ async def restore_post(
 
     The restore is itself committed, so it can be undone the same way.
     """
-    try:
-        post = await service.restore_post(db, post_id, body.sha, actor=actor)
-        _set_etag(response, post)
-        return post
-    except service.HistoryUnavailable:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Vault history is disabled or git is unavailable",
-        ) from None
-    except service.RevisionNotFound:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No revision '{body.sha}' in the history of post #{post_id}",
-        ) from None
-    except service.ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
-        ) from None
+    post = await service.restore_post(db, post_id, body.sha, actor=actor)
+    _set_etag(response, post)
+    return post
 
 
 @router.patch(
@@ -338,21 +250,9 @@ async def update_post(
     actor: Actor = Depends(require_api_key),
 ) -> PostResponse:
     if_match = _resolve_if_match(if_match_header, body.if_match)
-    try:
-        post = await service.update_post(
-            db, post_id, body.model_copy(update={"if_match": if_match}), actor=actor
-        )
-        _set_etag(response, post)
-        return post
-    except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
-    except service.ConcurrentModification:
-        current = await service.get_post(db, post_id)
-        raise _conflict(post_id, current) from None
-    except service.ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
-        ) from None
+    post = await service.update_post(db, post_id, body.model_copy(update={"if_match": if_match}), actor=actor)
+    _set_etag(response, post)
+    return post
 
 
 @router.post(
@@ -370,36 +270,9 @@ async def edit_post(
     """`str_replace`-style partial edit (relay #198, N-1): ``old_str`` must
     match exactly once in the post's current content."""
     if_match = _resolve_if_match(if_match_header, body.if_match)
-    try:
-        post = await service.edit_post(
-            db, post_id, body.old_str, body.new_str, if_match=if_match, actor=actor
-        )
-        _set_etag(response, post)
-        return post
-    except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
-    except service.EditNoChange:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="new_str must be different from old_str",
-        ) from None
-    except service.EditTextNotFound:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"old_str not found in post #{post_id}'s content",
-        ) from None
-    except service.EditTextNotUnique as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"old_str matches {exc.count} times in post #{post_id}; must match exactly once",
-        ) from None
-    except service.ConcurrentModification:
-        current = await service.get_post(db, post_id)
-        raise _conflict(post_id, current) from None
-    except service.ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
-        ) from None
+    post = await service.edit_post(db, post_id, body.old_str, body.new_str, if_match=if_match, actor=actor)
+    _set_etag(response, post)
+    return post
 
 
 @router.post(
@@ -417,19 +290,9 @@ async def append_post(
     """Append to a post's content (relay #198, N-1) instead of resending the
     whole body."""
     if_match = _resolve_if_match(if_match_header, body.if_match)
-    try:
-        post = await service.append_post(db, post_id, body.content, if_match=if_match, actor=actor)
-        _set_etag(response, post)
-        return post
-    except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
-    except service.ConcurrentModification:
-        current = await service.get_post(db, post_id)
-        raise _conflict(post_id, current) from None
-    except service.ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
-        ) from None
+    post = await service.append_post(db, post_id, body.content, if_match=if_match, actor=actor)
+    _set_etag(response, post)
+    return post
 
 
 @router.delete(
@@ -441,16 +304,4 @@ async def delete_post(
     db: aiosqlite.Connection = Depends(get_db),
     actor: Actor = Depends(require_api_key),
 ) -> None:
-    try:
-        await service.delete_post(db, post_id, actor=actor)
-    except service.ProtectedPost:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Master document (id=0) cannot be deleted",
-        ) from None
-    except service.PostNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found") from None
-    except service.ScopeDenied:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="This API key's scope does not permit this write"
-        ) from None
+    await service.delete_post(db, post_id, actor=actor)

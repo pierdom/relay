@@ -153,7 +153,9 @@ curl -s -X POST -H "Authorization: Bearer sk-a-long-random-secret" -H 'Content-T
 Pasting a key into the browser's "paste your API key" login mints a session
 cookie for that key's own identity and scope — a read-only or tag-restricted
 key can't get full access just by going through the browser instead of
-sending a bearer header.
+sending a bearer header. The session lives only as long as the key: remove or
+rename it in `RELAY_API_KEYS` and every browser session minted from it stops
+working on the next request (the OIDC allowlist never applies to these).
 
 ### How this shows up in the UI and TUI
 

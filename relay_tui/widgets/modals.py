@@ -959,7 +959,6 @@ class PostHistoryModal(ModalScreen[api.Post | None]):
     def __init__(self, post: api.Post) -> None:
         super().__init__()
         self._post = post
-        self._revisions: list[api.Revision] = []
         self._current_rev: api.RevisionContent | None = None
         self._show_diff = False
 
@@ -997,7 +996,6 @@ class PostHistoryModal(ModalScreen[api.Post | None]):
                 f"[red]Failed to load history: {escape(str(exc))}[/red]",
             )
             return
-        self._revisions = revisions
         self.app.call_from_thread(self._populate_list, revisions)
 
     def _populate_list(self, revisions: list[api.Revision]) -> None:

@@ -12,7 +12,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+from .markdown_scan import FENCE_RE
+
 _HEADING_RE = re.compile(r"^(#{2,3})\s+(.+?)\s*$", re.MULTILINE)
 
 _RUNT_WORDS = 50
@@ -30,7 +31,7 @@ class Chunk:
 def _strip_code_fences(content: str) -> str:
     """Drop fenced code blocks before chunking — noise in embedding space
     (relay #253: keep them in the post and in FTS5, drop from the vector)."""
-    return _CODE_FENCE_RE.sub("", content)
+    return FENCE_RE.sub("", content)
 
 
 def _split_on_headings(content: str) -> list[tuple[str, str]]:

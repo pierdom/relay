@@ -17,6 +17,7 @@ from watchdog.observers import Observer
 
 from . import changes, database, events, frontmatter, history, service, vault
 from .config import settings
+from .models import decode_properties, tags_from_sentinel
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,6 @@ _CHANGE_EVENTS = {"created", "modified", "moved", "deleted"}
 class _Handler(FileSystemEventHandler):
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
-        self._relay_dir = str(Path(settings.relay_dir).resolve())
         self._lock = threading.Lock()
         self._pending: set[str] = set()
         self._timer: threading.Timer | None = None
@@ -39,18 +39,12 @@ class _Handler(FileSystemEventHandler):
     def _relevant(self, path: str) -> bool:
         if not path.endswith(".md"):
             return False
-        p = Path(path).resolve()
-        if str(p).startswith(self._relay_dir) or vault.is_hidden_path(p):
-            return False
-        # Syncthing conflict copies (.sync-conflict-YYYYMMDD-HHMMSS-DEVICEID.md)
-        # carry the original post's id: in front-matter — ingesting them would
-        # silently create a second index entry under an existing id. Skip them;
-        # the human resolves the conflict in Obsidian/Syncthing.
-        if ".sync-conflict-" in p.name:
-            return False
-        # Syncthing file versioning stores old copies under .stversions/ — same
-        # risk as conflict copies: stale ids, not canonical vault state.
-        return ".stversions" not in p.parts
+        # Dot-directories (.relay, .obsidian, .trash, Syncthing's .stversions)
+        # are bookkeeping. Syncthing conflict copies carry the original post's
+        # id — ingesting one would put a second file under an existing id; the
+        # human resolves the conflict in Obsidian/Syncthing.
+        p = Path(path)
+        return not vault.is_hidden_path(p) and ".sync-conflict-" not in p.name
 
     def on_any_event(self, event) -> None:
         if event.is_directory or event.event_type not in _CHANGE_EVENTS:
@@ -95,12 +89,11 @@ async def _reconcile(paths: list[str]) -> None:
         # the lock left a gap where another writer's own already-written,
         # not-yet-committed file could get swept into *this* commit, and
         # `changes._ingest` would then misattribute this batch's action to that
-        # other writer's post. `_reconcile_file_locked`/`_reconcile_delete`
-        # assume the lock is already held — only `_reconcile_file` (the direct
-        # single-file entry point tests use) acquires it itself.
+        # other writer's post. `_reconcile_file`/`_reconcile_delete` assume the
+        # lock is already held.
         async with vault.write_lock:
             for path in existing:
-                await _reconcile_file_locked(db, path)
+                await _reconcile_file(db, path)
             for path in missing:
                 await _reconcile_delete(db, path)
             # One commit per debounced batch, so a bulk edit in Obsidian is one
@@ -126,15 +119,7 @@ def _batch_message(existing: list[Path], missing: list[Path]) -> str:
 
 
 async def _reconcile_file(db: aiosqlite.Connection, path: Path) -> None:
-    """Single-file entry point (used directly by tests): acquires `write_lock`
-    itself. `_reconcile`'s batch path calls `_reconcile_file_locked` instead,
-    holding one lock across the whole batch — see its comment."""
-    async with vault.write_lock:
-        await _reconcile_file_locked(db, path)
-
-
-async def _reconcile_file_locked(db: aiosqlite.Connection, path: Path) -> None:
-    """Body of `_reconcile_file`, assuming `vault.write_lock` is already held."""
+    """Index one externally written note. Caller holds `vault.write_lock`."""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -201,13 +186,13 @@ async def _reconcile_delete(db: aiosqlite.Connection, path: Path) -> None:
             id=vault.MASTER_ID, title=vault.MASTER_TITLE, content=row["content"], tags=[],
             source=row["source"], created_at=row["created_at"],
             updated_at=row["updated_at"], expires_at=None,
-            properties=vault.decode_properties(row["properties"]),
+            properties=decode_properties(row["properties"]),
             updated_by=row["updated_by"],
         )
         return
-    await db.execute("DELETE FROM posts WHERE id = ?", (row["id"],))
+    await vault.index_delete(db, row["id"])
     await db.commit()
-    await events.publish_delete(row["id"], [t for t in row["tags"].split(",") if t])
+    await events.publish_delete(row["id"], tags_from_sentinel(row["tags"]))
     logger.info("Removed externally deleted note: %s (id=%s)", path.name, row["id"])
 
 

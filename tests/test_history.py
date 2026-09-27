@@ -143,7 +143,7 @@ async def test_attachment_upload_commits_before_the_embed(client):
         "/attachments", json={"filename": "pic.png", "data": PNG, "post_id": post["id"]}, headers=AUTH
     )
     messages = log()
-    assert messages[0] == f"post {post['id']} update: Embedder"   # the embed
+    assert messages[0] == f"post {post['id']} append: Embedder"   # the embed
     assert messages[1] == "attachment add: pic.png"               # the upload before it
 
 

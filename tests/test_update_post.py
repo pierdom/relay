@@ -11,7 +11,7 @@ import pytest_asyncio
 import yaml
 from httpx import ASGITransport, AsyncClient
 
-from relay import database, frontmatter, vault
+from relay import database, frontmatter, models, vault
 from relay.auth import require_api_key
 from relay.config import settings
 from relay.main import app
@@ -229,7 +229,7 @@ async def test_idless_note_with_a_bare_date_property_does_not_crash_rebuild(vaul
         await vault.rebuild_index(db)  # must not raise
         async with db.execute("SELECT properties FROM posts WHERE title = 'Hand Made'") as cur:
             row = await cur.fetchone()
-    assert vault.decode_properties(row["properties"]) == {"review_date": "2024-01-15T00:00:00Z"}
+    assert models.decode_properties(row["properties"]) == {"review_date": "2024-01-15T00:00:00Z"}
     meta, _ = frontmatter.parse((vault_dir / "Hand Made.md").read_text(encoding="utf-8"))
     assert meta["properties"] == {"review_date": "2024-01-15T00:00:00Z"}
 

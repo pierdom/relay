@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic import AliasChoices, Field
@@ -40,6 +41,97 @@ class ApiKeyScope:
 
 
 FULL_SCOPE = ApiKeyScope(mode="full")
+
+
+# Parsed once per distinct raw value, not per request: every authenticated
+# request reads these, and a malformed entry's warning would otherwise repeat
+# on each one. Keyed on the string, so a changed setting re-parses.
+@lru_cache(maxsize=8)
+def _parse_named_keys(raw: str) -> dict[str, str]:
+    """Parsed ``RELAY_API_KEYS`` ("name:key,name:key,..."). A malformed
+    entry, a name colliding with the reserved primary-key identity
+    (``apikey``), or a duplicate name is skipped with a warning rather
+    than failing startup — a typo'd extra key shouldn't take the relay
+    down, it just won't authenticate anything until fixed."""
+    keys: dict[str, str] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        name, _, key = entry.partition(":")
+        name, key = name.strip().lower(), key.strip()
+        if not key or not _KEY_NAME_RE.match(name):
+            logger.warning("RELAY_API_KEYS: skipping malformed entry %r", entry)
+            continue
+        if name == _RESERVED_KEY_NAME:
+            logger.warning("RELAY_API_KEYS: %r is reserved for the primary API_KEY — skipping", name)
+            continue
+        if name in keys:
+            logger.warning("RELAY_API_KEYS: duplicate name %r — keeping the first", name)
+            continue
+        keys[name] = key
+    return keys
+
+
+@lru_cache(maxsize=8)
+def _parse_key_scopes(raw: str) -> dict[str, ApiKeyScope]:
+    """Parsed ``RELAY_API_KEY_SCOPES`` ("name:mode[:tags]", comma-separated;
+    relay #198, B-8). A separate variable from ``RELAY_API_KEYS`` rather than
+    a third ``:``-delimited field on it: ``named_api_keys`` already partitions
+    each entry on its *first* colon only, so key material may itself legally
+    contain colons — appending a scope suffix to that same grammar would be
+    genuinely ambiguous to parse and risks corrupting already-deployed key
+    secrets. Keeping the two independent also means scopes can be layered
+    onto an existing key by name, with no redeploy of the key itself.
+
+    Same skip-with-warning philosophy as ``named_api_keys``: a malformed
+    entry, an unknown mode, a ``write`` entry with no (or an invalid) tag,
+    a duplicate name, or the reserved ``apikey`` name is skipped with a
+    warning, never a startup failure. The reserved-name exclusion mirrors
+    ``named_api_keys``'s own guard — the break-glass primary key is not
+    scopable, consistent with its exemption from the OIDC allowlist
+    (``auth.still_authorized``'s ``sub == APIKEY_SUB`` carve-out). Does
+    not otherwise cross-validate against ``all_api_keys`` — an entry for
+    a name that isn't (or isn't yet) a configured key is simply inert,
+    not an error, so scope config can be prepared ahead of the key it
+    will apply to.
+
+    ``tags`` are lowercased before validation, same as the ``name``
+    itself and as every vault tag already is (``tags.py``'s own
+    cleaning) — a `write:News` entry means the same thing as
+    `write:news`, rather than silently failing to parse (and falling
+    back to :data:`FULL_SCOPE`, the opposite of what a typo like that
+    should do) just because vault tags are conventionally lowercase but
+    this config value wasn't normalised to match.
+    """
+    scopes: dict[str, ApiKeyScope] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        parts = entry.split(":")
+        name = parts[0].strip().lower()
+        if not _KEY_NAME_RE.match(name):
+            logger.warning("RELAY_API_KEY_SCOPES: skipping malformed entry %r", entry)
+            continue
+        if name == _RESERVED_KEY_NAME:
+            logger.warning("RELAY_API_KEY_SCOPES: %r is reserved for the primary API_KEY — skipping", name)
+            continue
+        if name in scopes:
+            logger.warning("RELAY_API_KEY_SCOPES: duplicate name %r — keeping the first", name)
+            continue
+        mode = parts[1].strip().lower() if len(parts) > 1 else ""
+        if mode in ("full", "read") and len(parts) == 2:
+            scopes[name] = ApiKeyScope(mode=mode)
+        elif mode == "write" and len(parts) == 3:
+            tags = frozenset(t.strip().lower() for t in parts[2].split("+") if t.strip())
+            if tags and all(_KEY_NAME_RE.match(t) for t in tags):
+                scopes[name] = ApiKeyScope(mode="write", tags=tags)
+            else:
+                logger.warning("RELAY_API_KEY_SCOPES: skipping malformed entry %r", entry)
+        else:
+            logger.warning("RELAY_API_KEY_SCOPES: skipping malformed entry %r", entry)
+    return scopes
 
 
 class Settings(BaseSettings):
@@ -200,96 +292,19 @@ class Settings(BaseSettings):
 
     @property
     def named_api_keys(self) -> dict[str, str]:
-        """Parsed ``RELAY_API_KEYS`` ("name:key,name:key,..."). A malformed
-        entry, a name colliding with the reserved primary-key identity
-        (``apikey``), or a duplicate name is skipped with a warning rather
-        than failing startup — a typo'd extra key shouldn't take the relay
-        down, it just won't authenticate anything until fixed."""
-        keys: dict[str, str] = {}
-        for entry in self.api_keys.split(","):
-            entry = entry.strip()
-            if not entry:
-                continue
-            name, _, key = entry.partition(":")
-            name, key = name.strip().lower(), key.strip()
-            if not key or not _KEY_NAME_RE.match(name):
-                logger.warning("RELAY_API_KEYS: skipping malformed entry %r", entry)
-                continue
-            if name == _RESERVED_KEY_NAME:
-                logger.warning("RELAY_API_KEYS: %r is reserved for the primary API_KEY — skipping", name)
-                continue
-            if name in keys:
-                logger.warning("RELAY_API_KEYS: duplicate name %r — keeping the first", name)
-                continue
-            keys[name] = key
-        return keys
+        """Parsed ``RELAY_API_KEYS`` — see ``_parse_named_keys``."""
+        return _parse_named_keys(self.api_keys)
 
     @property
     def all_api_keys(self) -> dict[str, str]:
         """Every valid bearer key, by identity name — the primary ``API_KEY``
-        (under the reserved name ``apikey``) plus every named key. Single
-        source ``identity.resolve_bearer``/``auth.bearer_matches`` both read."""
+        (under the reserved name ``apikey``) plus every named key."""
         return {_RESERVED_KEY_NAME: self.api_key, **self.named_api_keys}
 
     @property
     def key_scopes(self) -> dict[str, ApiKeyScope]:
-        """Parsed ``RELAY_API_KEY_SCOPES`` ("name:mode[:tags]", comma-separated;
-        relay #198, B-8). A separate variable from ``RELAY_API_KEYS`` rather than
-        a third ``:``-delimited field on it: ``named_api_keys`` already partitions
-        each entry on its *first* colon only, so key material may itself legally
-        contain colons — appending a scope suffix to that same grammar would be
-        genuinely ambiguous to parse and risks corrupting already-deployed key
-        secrets. Keeping the two independent also means scopes can be layered
-        onto an existing key by name, with no redeploy of the key itself.
-
-        Same skip-with-warning philosophy as ``named_api_keys``: a malformed
-        entry, an unknown mode, a ``write`` entry with no (or an invalid) tag,
-        a duplicate name, or the reserved ``apikey`` name is skipped with a
-        warning, never a startup failure. The reserved-name exclusion mirrors
-        ``named_api_keys``'s own guard — the break-glass primary key is not
-        scopable, consistent with its exemption from the OIDC allowlist
-        (``auth.still_authorized``'s ``sub == APIKEY_SUB`` carve-out). Does
-        not otherwise cross-validate against ``all_api_keys`` — an entry for
-        a name that isn't (or isn't yet) a configured key is simply inert,
-        not an error, so scope config can be prepared ahead of the key it
-        will apply to.
-
-        ``tags`` are lowercased before validation, same as the ``name``
-        itself and as every vault tag already is (``tags.py``'s own
-        cleaning) — a `write:News` entry means the same thing as
-        `write:news`, rather than silently failing to parse (and falling
-        back to :data:`FULL_SCOPE`, the opposite of what a typo like that
-        should do) just because vault tags are conventionally lowercase but
-        this config value wasn't normalised to match.
-        """
-        scopes: dict[str, ApiKeyScope] = {}
-        for entry in self.api_key_scopes.split(","):
-            entry = entry.strip()
-            if not entry:
-                continue
-            parts = entry.split(":")
-            name = parts[0].strip().lower()
-            if not _KEY_NAME_RE.match(name):
-                logger.warning("RELAY_API_KEY_SCOPES: skipping malformed entry %r", entry)
-                continue
-            if name == _RESERVED_KEY_NAME:
-                logger.warning("RELAY_API_KEY_SCOPES: %r is reserved for the primary API_KEY — skipping", name)
-                continue
-            if name in scopes:
-                logger.warning("RELAY_API_KEY_SCOPES: duplicate name %r — keeping the first", name)
-                continue
-            mode = parts[1].strip().lower() if len(parts) > 1 else ""
-            if mode in ("full", "read") and len(parts) == 2:
-                scopes[name] = ApiKeyScope(mode=mode)
-            elif mode == "write" and len(parts) == 3:
-                tags = frozenset(t.strip().lower() for t in parts[2].split("+") if t.strip())
-                if tags and all(_KEY_NAME_RE.match(t) for t in tags):
-                    scopes[name] = ApiKeyScope(mode="write", tags=tags)
-                else:
-                    logger.warning("RELAY_API_KEY_SCOPES: skipping malformed entry %r", entry)
-            else:
-                logger.warning("RELAY_API_KEY_SCOPES: skipping malformed entry %r", entry)
-        return scopes
+        """Parsed ``RELAY_API_KEY_SCOPES`` — see ``_parse_key_scopes``."""
+        return _parse_key_scopes(self.api_key_scopes)
 
     @property
     def mcp_scopes(self) -> list[str]:
@@ -416,11 +431,6 @@ class Settings(BaseSettings):
         never touch it. Lives in ``.relay/`` so it rides the vault backup.
         """
         return str(Path(self.relay_dir) / "mcp_oauth")
-
-    @property
-    def mcp_resource_url(self) -> str:
-        """RFC 8707 resource identifier for the MCP endpoint (token audience)."""
-        return f"{self.relay_base_url.rstrip('/')}/mcp"
 
 
 settings = Settings()

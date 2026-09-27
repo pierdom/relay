@@ -26,6 +26,7 @@ import aiosqlite
 
 from . import __version__, database, embedding, events, folders, history, vault, vectors, watcher
 from .config import settings
+from .errors import BackfillAlreadyRunning, EmbeddingDimensionMismatch, EmbeddingsUnavailable
 from .identity import Actor
 from .models import (
     AuthStatus,
@@ -138,27 +139,6 @@ async def embedding_status(db: aiosqlite.Connection, posts_total: int) -> Embedd
 # sees the result of what it just did without a second round trip.
 
 
-class EmbeddingsUnavailable(Exception):
-    """Raised when a control action needs embeddings usable and they aren't —
-    sqlite-vec isn't loaded on this relay at all, or (for ``enable``)
-    ``EMBEDDING_MODEL`` isn't a model fastembed's registry knows about."""
-
-
-class BackfillAlreadyRunning(Exception):
-    """Raised by ``trigger_backfill`` when a run is already in progress —
-    two runs racing on ``vault._backfill_state``'s shared progress counters
-    would produce nonsense (a checked/total that jumps around)."""
-
-
-class EmbeddingDimensionMismatch(Exception):
-    """Raised by ``set_embeddings_enabled(True)`` when the configured
-    ``EMBEDDING_MODEL``'s dimension doesn't match the ``vec_chunks`` schema
-    actually on disk. That migration only runs in ``vectors.init_vec`` at
-    startup (relay #253, v1.2.0) — enabling live can't safely rebuild the
-    table out from under any in-flight reads, so this asks for a restart
-    instead of attempting it."""
-
-
 async def trigger_backfill(
     db: aiosqlite.Connection, *, force: bool = False, actor: Actor | None = None
 ) -> EmbeddingStatus:
@@ -200,12 +180,15 @@ async def set_embeddings_enabled(
     reasoning as ``trigger_backfill`` above."""
     _require_full_access(actor)
     if enabled:
+        unusable = EmbeddingsUnavailable(
+            "sqlite-vec is not available on this relay, or EMBEDDING_MODEL is not a known fastembed model"
+        )
         if not database.VEC_ENABLED:
-            raise EmbeddingsUnavailable
+            raise unusable
         try:
             target_dim = embedding.resolve_dim(settings.embedding_model)
         except ValueError:
-            raise EmbeddingsUnavailable from None
+            raise unusable from None
         if await vectors.current_schema_dim(db) != target_dim:
             raise EmbeddingDimensionMismatch
         settings.embedding_enabled = True

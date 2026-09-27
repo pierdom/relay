@@ -144,6 +144,22 @@ async def test_per_tag_ttl_deletes_after_window(client):
 
 
 @pytest.mark.asyncio
+async def test_per_tag_ttl_matches_the_tag_literally(client):
+    """`_` is a legal tag character and a LIKE wildcard: a TTL on `my_notes`
+    must not expire a post tagged `my-notes`."""
+    bystander = await _create(client, tags=["my-notes"])
+    db = await _db()
+    try:
+        await db.execute("INSERT INTO tag_config (tag, ttl_hours) VALUES ('my_notes', 1)")
+        await db.execute("UPDATE posts SET created_at = ? WHERE id = ?", (_iso(-2), bystander["id"]))
+        await db.commit()
+        assert await cleanup._delete_expired(db) == 0
+        assert await _file_exists(db, bystander["id"])
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_multi_tag_shortest_ttl_wins(client):
     # Two tags on one post — a short (1h) and a long (100h) TTL. Aged 2h, the
     # short window has elapsed, so the post goes; a sibling carrying only the

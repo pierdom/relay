@@ -27,7 +27,8 @@ from pathlib import PurePosixPath
 import aiosqlite
 
 from . import frontmatter, history
-from .models import normalize_expires_at
+from .errors import HistoryUnavailable
+from .models import normalize_expires_at, tags_to_sentinel
 
 logger = logging.getLogger(__name__)
 
@@ -59,18 +60,6 @@ _MAX_LIMIT = 200
 def _clamp_limit(value: int) -> int:
     return max(1, min(int(value), _MAX_LIMIT))
 
-
-class HistoryUnavailable(Exception):
-    """Raised by `list_changes` when history is off or git is missing — the
-    table would otherwise just look permanently empty rather than signalling
-    the feature can't work at all, the same distinction
-    `service.HistoryUnavailable` draws for `list_deleted_posts`/
-    `get_post_history`. A separate class (not that one) because `changes.py`
-    sits below `relay.service` and mustn't import from it — `relay.service`
-    already imports `changes`, and `service.__init__` importing `posts`
-    importing `changes` importing back into `service._common` would be a
-    real cycle, not just a style preference.
-    """
 
 # Matches every relay-initiated single-post write: "post 42 create: Title",
 # "post 42 restore: Title (from abc1234)", etc. — one regex covers all six
@@ -104,12 +93,6 @@ def _classify_action(message: str, status: str) -> str | None:
     return "other"
 
 
-def _tags_to_sentinel(tags: object) -> str:
-    if not isinstance(tags, list):
-        return ""
-    return "," + ",".join(str(t) for t in tags) + "," if tags else ""
-
-
 async def _resolve(status: str, path: str, sha: str) -> tuple[int, str, str] | None:
     """A post's (id, title, tags-as-sentinel-string) for one (status, path)
     touched at `sha`. Reads the blob at `sha` for an add/modify (the post as
@@ -131,7 +114,7 @@ async def _resolve(status: str, path: str, sha: str) -> tuple[int, str, str] | N
     post_id = meta.get("id")
     if not isinstance(post_id, int):
         return None
-    return post_id, PurePosixPath(path).stem, _tags_to_sentinel(meta.get("tags"))
+    return post_id, PurePosixPath(path).stem, tags_to_sentinel(meta.get("tags") or [])
 
 
 async def _ingest(db: aiosqlite.Connection, commits: list[history.CommitPaths]) -> dict[int, int]:

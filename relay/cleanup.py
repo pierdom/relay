@@ -8,9 +8,9 @@ from pathlib import Path
 
 import aiosqlite
 
-from . import changes, database, events, history, ingest, metrics, vault, vectors
+from . import changes, database, events, history, ingest, metrics, vault
 from .config import settings
-from .models import ISO_Z_RE
+from .models import ISO_Z_RE, tags_from_sentinel
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,15 @@ def _sweep_expired_oauth_records() -> int:
             continue
         dropped += 1
     return dropped
+
+
+# Tags may contain `_`, a LIKE wildcard — match them literally (a TTL on
+# `my_notes` must never expire `my-notes`).
+_TAG_LIKE = "tags LIKE ? ESCAPE '\\'"
+
+
+def _tag_pattern(tag: str) -> str:
+    return f"%,{database.escape_like(tag)},%"
 
 
 async def _ids_where(db: aiosqlite.Connection, clause: str, params: list) -> set[int]:
@@ -87,12 +96,12 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         ttl_modifier = f"-{settings.default_ttl_hours} hours"
         configured = [t for t, c in tag_configs.items() if c["ttl_hours"] or c["expires_at"]]
         if configured:
-            likes = " OR ".join(["tags LIKE ?"] * len(configured))
+            likes = " OR ".join([_TAG_LIKE] * len(configured))
             clause = (
                 f"id != 0 AND expires_at IS NULL AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?) "
                 f"AND id NOT IN (SELECT id FROM posts WHERE {likes})"
             )
-            params = [ttl_modifier] + [f"%,{t},%" for t in configured]
+            params = [ttl_modifier] + [_tag_pattern(t) for t in configured]
         else:
             clause = "id != 0 AND expires_at IS NULL AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
             params = [ttl_modifier]
@@ -105,15 +114,15 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         elif cfg["expires_at"]:
             to_delete |= await _ids_where(
                 db,
-                f"id != 0 AND expires_at IS NULL AND tags LIKE ? AND ? < {now}",
-                [f"%,{tag},%", cfg["expires_at"]],
+                f"id != 0 AND expires_at IS NULL AND {_TAG_LIKE} AND ? < {now}",
+                [_tag_pattern(tag), cfg["expires_at"]],
             )
         if cfg["ttl_hours"]:
             to_delete |= await _ids_where(
                 db,
-                "id != 0 AND expires_at IS NULL AND tags LIKE ? "
+                f"id != 0 AND expires_at IS NULL AND {_TAG_LIKE} "
                 "AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
-                [f"%,{tag},%", f"-{cfg['ttl_hours']} hours"],
+                [_tag_pattern(tag), f"-{cfg['ttl_hours']} hours"],
             )
 
     if not to_delete:
@@ -127,16 +136,9 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
             list(to_delete),
         ) as cur:
             expired = [(row["id"], row["path"], row["tags"]) for row in await cur.fetchall()]
-        for _id, rel, _tags in expired:
+        for post_id, rel, _tags in expired:
             vault.delete_file(vault.abspath(rel))
-        await db.execute(
-            f"DELETE FROM posts WHERE id IN ({','.join('?' * len(to_delete))})", list(to_delete)
-        )
-        # This path deletes via raw SQL, not vault.index_delete — chunk cleanup
-        # has to be called explicitly here too, or a TTL-expired post's chunks
-        # would silently outlive it.
-        for post_id in to_delete:
-            await vectors.delete_post_chunks(db, post_id)
+            await vault.index_delete(db, post_id)
         await db.commit()
         # K-2: commit while still holding `write_lock` — releasing it first (as
         # this used to) left a gap where a concurrent writer's own already-
@@ -149,7 +151,7 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
     # UI/TUI until the next reload. Deletes stream without an SSE `id:`, so they
     # can't rewind a client's replay cursor.
     for post_id, _rel, tags in expired:
-        await events.publish_delete(post_id, [t for t in tags.split(",") if t])
+        await events.publish_delete(post_id, tags_from_sentinel(tags))
     # relay #198, N-4: recorded after the fact, same reasoning as watcher.py's
     # batch commit — the changes-log row(s) don't exist until this commit
     # does, so the publishes above couldn't carry a `seq` either way. What

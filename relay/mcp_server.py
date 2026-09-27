@@ -9,9 +9,9 @@ transport can connect remotely with the relay's bearer key.
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import logging
-import re
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -40,6 +40,7 @@ from pydantic import ValidationError
 
 from . import __version__, changes, database, lint, metrics, service, status, vault
 from .config import FULL_SCOPE, settings
+from .errors import ScopeDenied, ServiceError
 from .identity import Actor, resolve_bearer
 from .models import AttachmentCreate, ChangeEntry, ChangeListResponse, PostCreate, PostUpdate, TagConfigCreate
 from .routes.auth import _authorized
@@ -614,25 +615,33 @@ mcp = FastMCP(
 _db = database.connect
 
 
+def _tool(**kwargs):
+    """``@mcp.tool`` plus what every tool shares: count the call, and answer a
+    ``ServiceError`` with the ``{"error": ...}`` result tools return instead of
+    raising (see ``relay.errors``)."""
+
+    def register(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kw):
+            metrics.record_tool_call(fn.__name__)
+            try:
+                return await fn(*args, **kw)
+            except ServiceError as exc:
+                return exc.detail if isinstance(exc.detail, dict) else {"error": exc.detail}
+
+        mcp.tool(**kwargs)(wrapper)
+        return wrapper
+
+    return register
+
+
 def _current_actor() -> Actor | None:
     """The identity behind the in-flight tool call (relay #198, B-7), or
-    ``None`` for a caller this server can't yet attribute (shouldn't happen —
-    every tool call is already authenticated by ``auth=_build_auth()``).
+    ``None`` outside an authenticated request (a direct call in a test).
 
-    Before B-8 this ``None`` was harmless: provenance is advisory enrichment,
-    never a reason to fail a write. **Since B-8, it is no longer harmless** —
-    every ``service.ScopeDenied`` check is a no-op for ``actor=None`` (by
-    design, for internal/test callers that bypass auth entirely), so a
-    write-tagged tool whose ``_current_actor()`` unexpectedly returns
-    ``None`` would skip its own tag-restriction check too, not just its
-    provenance. Every currently reachable path already rules this out before
-    a write tool's body ever runs: ``AuthMiddleware``'s coarse ``write``-scope
-    check (see the ``mcp = FastMCP(...)`` comment above) requires
-    ``get_access_token()`` to return a real token with a real ``subject``
-    just to reach this function at all, and both auth paths below always
-    populate ``subject``. The error log below exists so a future auth path
-    that somehow violates that invariant fails loudly instead of silently
-    granting an authenticated-but-unattributable write.
+    A token with no derivable identity raises ``ScopeDenied`` rather than
+    returning ``None``: every scope check exempts ``actor=None`` (internal and
+    test callers), so an unattributable token must never reach one.
 
     Two paths, confirmed by reading fastmcp's ``AccessToken`` construction
     directly (not assumed — same standard this file already holds every
@@ -661,11 +670,10 @@ def _current_actor() -> Actor | None:
     claims = token.claims or {}
     name = claims.get("email") or token.subject or claims.get("sub")
     if not name:
-        logging.getLogger(__name__).error(
-            "MCP tool call has an access token but no derivable identity (no email/subject/sub claim) — "
-            "proceeding unattributed, and any scope restriction (relay #198, B-8) is skipped for this call"
-        )
-        return None
+        # Fail closed: an unattributable token must not skip the scope checks
+        # that `actor=None` (internal callers) is exempt from.
+        logging.getLogger(__name__).error("MCP tool call has an access token but no derivable identity")
+        raise ScopeDenied("This token carries no identity")
     # scope (relay #198, B-8): looked up by `token.subject`, same key
     # `settings.key_scopes` is keyed by. For a static-bearer call that's the
     # matched key's own name (`_StaticBearerAuth.verify_token`'s
@@ -695,7 +703,7 @@ async def master_document() -> str:
     return post.content if post is not None else "Master document not found."
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Publish a post to the relay feed. Subscribers receive it in real time. The response's "
         "'similar' field (relay #198, N-7) is an advisory duplicate-guard: other posts already in "
@@ -713,7 +721,6 @@ async def publish_post(
     expires_at: str | None = None,
 ) -> dict:
     """`title` becomes the Markdown filename. `expires_at`: optional ISO 8601 datetime; overrides tag/global TTL."""
-    metrics.record_tool_call("publish_post")
     body = PostCreate(
         content=content,
         title=title,
@@ -722,14 +729,11 @@ async def publish_post(
         expires_at=expires_at,
     )
     async with _db() as db:
-        try:
-            post = await service.create_post(db, body, actor=_current_actor())
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        post = await service.create_post(db, body, actor=_current_actor())
     return post.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "List posts from the relay feed, optionally filtered by tag, folder or search term. "
         "Returns metadata-only summaries (id, title, tags, folder, and a short excerpt) "
@@ -759,23 +763,16 @@ async def list_posts(
     mode: str = "keyword",
     author: str | None = None,
 ) -> dict:
-    metrics.record_tool_call("list_posts")
     async with _db() as db:
-        try:
-            result = await service.list_posts(
-                db, tag=tag, folder=folder, search=search, limit=limit, offset=offset,
-                summary=summary, sort=sort, order=order, mode=mode, author=author,
-            )
-        except service.SemanticSearchUnavailable:
-            return {"error": "Semantic search is not enabled on this relay."}
-        except service.InvalidSearchMode:
-            return {"error": "mode must be 'keyword', 'semantic', or 'hybrid'."}
+        result = await service.list_posts(
+            db, tag=tag, folder=folder, search=search, limit=limit, offset=offset,
+            summary=summary, sort=sort, order=order, mode=mode, author=author,
+        )
     return result.model_dump()
 
 
-@mcp.tool(description="Get a single post by its ID. Use id=0 for the master document.")
+@_tool(description="Get a single post by its ID. Use id=0 for the master document.")
 async def get_post(id: int) -> dict:
-    metrics.record_tool_call("get_post")
     async with _db() as db:
         post = await service.get_post(db, id)
     if post is None:
@@ -783,7 +780,7 @@ async def get_post(id: int) -> dict:
     return post.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Update an existing post. Only provided fields change; omitted fields are left "
         "untouched. Providing tags replaces the list wholesale; an empty array clears them. "
@@ -802,7 +799,6 @@ async def update_post(
     expires_at: str | None = None,
     if_match: str | None = None,
 ) -> dict:
-    metrics.record_tool_call("update_post")
     # An omitted argument and an explicit null both arrive as None here, so a
     # None is "leave alone". PostUpdate turns "" into a clear for expires_at and
     # source — the documented way to unset either from MCP (AUDIT.md B-05).
@@ -816,22 +812,11 @@ async def update_post(
     }
     body = PostUpdate(**{k: v for k, v in fields.items() if v is not None})
     async with _db() as db:
-        try:
-            post = await service.update_post(db, id, body, actor=_current_actor())
-        except service.PostNotFound:
-            return {"error": f"Post #{id} not found."}
-        except service.ConcurrentModification:
-            current = await service.get_post(db, id)
-            return {
-                "error": f"post #{id} has changed since if_match was captured",
-                "current": current.model_dump() if current is not None else None,
-            }
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        post = await service.update_post(db, id, body, actor=_current_actor())
     return post.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Partial edit: old_str must match exactly once in the post's current content "
         "(like a code-agent str_replace) and is replaced with new_str — for changing a "
@@ -842,30 +827,12 @@ async def update_post(
     tags={"write"},
 )
 async def edit_post(id: int, old_str: str, new_str: str, if_match: str | None = None) -> dict:
-    metrics.record_tool_call("edit_post")
     async with _db() as db:
-        try:
-            post = await service.edit_post(db, id, old_str, new_str, if_match=if_match, actor=_current_actor())
-        except service.PostNotFound:
-            return {"error": f"Post #{id} not found."}
-        except service.EditNoChange:
-            return {"error": "new_str must be different from old_str."}
-        except service.EditTextNotFound:
-            return {"error": f"old_str not found in post #{id}'s content."}
-        except service.EditTextNotUnique as exc:
-            return {"error": f"old_str matches {exc.count} times in post #{id}; must match exactly once."}
-        except service.ConcurrentModification:
-            current = await service.get_post(db, id)
-            return {
-                "error": f"post #{id} has changed since if_match was captured",
-                "current": current.model_dump() if current is not None else None,
-            }
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        post = await service.edit_post(db, id, old_str, new_str, if_match=if_match, actor=_current_actor())
     return post.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Append content to the end of a post instead of resending the whole body. A "
         "blank line is inserted before it unless the post is currently empty. Pass "
@@ -875,24 +842,12 @@ async def edit_post(id: int, old_str: str, new_str: str, if_match: str | None = 
     tags={"write"},
 )
 async def append_post(id: int, content: str, if_match: str | None = None) -> dict:
-    metrics.record_tool_call("append_post")
     async with _db() as db:
-        try:
-            post = await service.append_post(db, id, content, if_match=if_match, actor=_current_actor())
-        except service.PostNotFound:
-            return {"error": f"Post #{id} not found."}
-        except service.ConcurrentModification:
-            current = await service.get_post(db, id)
-            return {
-                "error": f"post #{id} has changed since if_match was captured",
-                "current": current.model_dump() if current is not None else None,
-            }
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        post = await service.append_post(db, id, content, if_match=if_match, actor=_current_actor())
     return post.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "List a post's revision history from the vault's git history, newest first. "
         "Works for a deleted post too (exists=false), which is the case most worth "
@@ -901,16 +856,12 @@ async def append_post(id: int, content: str, if_match: str | None = None) -> dic
     )
 )
 async def get_post_history(id: int, limit: int = 20) -> dict:
-    metrics.record_tool_call("get_post_history")
     async with _db() as db:
-        try:
-            result = await service.get_post_history(db, id, limit=limit)
-        except service.HistoryUnavailable:
-            return {"error": "Vault history is disabled or git is unavailable."}
+        result = await service.get_post_history(db, id, limit=limit)
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "List posts that no longer exist but can still be restored, newest first. This is "
         "the discovery half of recovery: restore_post can put back any post whose id you "
@@ -923,16 +874,12 @@ async def get_post_history(id: int, limit: int = 20) -> dict:
     )
 )
 async def list_deleted_posts(limit: int = 50, include_expiry: bool = False) -> dict:
-    metrics.record_tool_call("list_deleted_posts")
     async with _db() as db:
-        try:
-            result = await service.list_deleted_posts(db, limit=limit, include_expiry=include_expiry)
-        except service.HistoryUnavailable:
-            return {"error": "Vault history is disabled or git is unavailable."}
+        result = await service.list_deleted_posts(db, limit=limit, include_expiry=include_expiry)
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "The vault changelog (relay #198, N-4): every post-affecting write, newest first — "
         "create, update, edit, append, delete, restore, tag rename, an external Obsidian "
@@ -946,16 +893,12 @@ async def list_deleted_posts(limit: int = 50, include_expiry: bool = False) -> d
     )
 )
 async def list_changes(since: str | None = None, limit: int = 50, author: str | None = None) -> dict:
-    metrics.record_tool_call("list_changes")
     async with _db() as db:
-        try:
-            rows = await changes.list_changes(db, since=since, limit=limit, author=author)
-        except changes.HistoryUnavailable:
-            return {"error": "Vault history is disabled or git is unavailable."}
+        rows = await changes.list_changes(db, since=since, limit=limit, author=author)
     return ChangeListResponse(items=[ChangeEntry.from_row(r) for r in rows]).model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Read a post exactly as it was at one revision — title, content and tags. Use this "
         "to see what a restore would give back before calling restore_post: the history "
@@ -965,18 +908,12 @@ async def list_changes(since: str | None = None, limit: int = 50, author: str | 
     )
 )
 async def get_post_revision(id: int, sha: str) -> dict:
-    metrics.record_tool_call("get_post_revision")
     async with _db() as db:
-        try:
-            result = await service.get_post_revision(db, id, sha)
-        except service.HistoryUnavailable:
-            return {"error": "Vault history is disabled or git is unavailable."}
-        except service.RevisionNotFound:
-            return {"error": f"No revision '{sha}' in the history of post #{id}."}
+        result = await service.get_post_revision(db, id, sha)
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "List a post's backlinks — the other posts that link to it via [[Title]] or #id. "
         "Check this before rewriting or deleting a post: relay keeps one canonical post per "
@@ -985,16 +922,12 @@ async def get_post_revision(id: int, sha: str) -> dict:
     )
 )
 async def get_backlinks(id: int) -> dict:
-    metrics.record_tool_call("get_backlinks")
     async with _db() as db:
-        try:
-            result = await service.get_backlinks(db, id)
-        except service.PostNotFound:
-            return {"error": f"Post #{id} not found."}
+        result = await service.get_backlinks(db, id)
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "List posts related to this one by embedding similarity that it does NOT already "
         "cross-link via [[Title]] or #id, in either direction (relay #198, N-7) — an automatic "
@@ -1004,18 +937,12 @@ async def get_backlinks(id: int) -> dict:
     )
 )
 async def get_related(id: int) -> dict:
-    metrics.record_tool_call("get_related")
     async with _db() as db:
-        try:
-            result = await service.get_related(db, id)
-        except service.PostNotFound:
-            return {"error": f"Post #{id} not found."}
-        except service.SemanticSearchUnavailable:
-            return {"error": "Semantic search is not enabled on this relay."}
+        result = await service.get_related(db, id)
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Rename a tag across every post that carries it, in one atomic pass. Use this to fix "
         "taxonomy rather than retagging posts one at a time — that is slower and leaves the "
@@ -1026,23 +953,12 @@ async def get_related(id: int) -> dict:
     tags={"write"},
 )
 async def rename_tag(tag: str, new_name: str) -> dict:
-    metrics.record_tool_call("rename_tag")
-    cleaned = re.sub(r"[^a-z0-9_-]", "", new_name.strip().lower())
-    if not cleaned:
-        return {"error": "new_name must contain at least one letter, digit, hyphen or underscore."}
     async with _db() as db:
-        try:
-            result = await service.rename_tag(db, tag, cleaned, actor=_current_actor())
-        except service.InvalidTag:
-            # `InvalidTag` carries no message (REST supplies its own static
-            # detail too — see routes/tags.py) — `str(exc)` here would be "".
-            return {"error": "tag must contain at least one letter, digit, hyphen or underscore."}
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        result = await service.rename_tag(db, tag, new_name, actor=_current_actor())
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Restore a post to an earlier revision, recreating it if it was deleted. Pass a "
         "sha from get_post_history. The restore is itself recorded in history, so it can "
@@ -1052,20 +968,12 @@ async def rename_tag(tag: str, new_name: str) -> dict:
     tags={"write"},
 )
 async def restore_post(id: int, sha: str) -> dict:
-    metrics.record_tool_call("restore_post")
     async with _db() as db:
-        try:
-            post = await service.restore_post(db, id, sha, actor=_current_actor())
-        except service.HistoryUnavailable:
-            return {"error": "Vault history is disabled or git is unavailable."}
-        except service.RevisionNotFound:
-            return {"error": f"No revision '{sha}' in the history of post #{id}."}
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        post = await service.restore_post(db, id, sha, actor=_current_actor())
     return post.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Report this relay's runtime status: version, uptime, which vault it is serving, counts of "
         "posts/tags/folders/attachments, semantic-search embedding coverage and backend state, and which "
@@ -1079,13 +987,12 @@ async def restore_post(id: int, sha: str) -> dict:
     )
 )
 async def get_status() -> dict:
-    metrics.record_tool_call("get_status")
     async with _db() as db:
         result = await status.build(db, actor=_current_actor())
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Lint the vault: check it against the rules already written down in #0 instead of "
         "relying on someone reading every post (relay #198, N-5): posts missing a domain and/or type tag, "
@@ -1116,13 +1023,12 @@ async def get_status() -> dict:
     )
 )
 async def lint_vault() -> dict:
-    metrics.record_tool_call("lint_vault")
     async with _db() as db:
         result = await lint.run(db)
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Re-run the embedding backfill without restarting relay — resumes from the content-addressed "
         "cache by default, or pass force=true to wipe every embedded chunk/vector/cache row first and "
@@ -1132,20 +1038,12 @@ async def lint_vault() -> dict:
     tags={"write"},
 )
 async def trigger_embedding_backfill(force: bool = False) -> dict:
-    metrics.record_tool_call("trigger_embedding_backfill")
     async with _db() as db:
-        try:
-            result = await status.trigger_backfill(db, force=force, actor=_current_actor())
-        except status.EmbeddingsUnavailable:
-            return {"error": "Semantic search is not enabled on this relay."}
-        except status.BackfillAlreadyRunning:
-            return {"error": "A backfill is already running."}
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        result = await status.trigger_backfill(db, force=force, actor=_current_actor())
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Turn semantic/hybrid search on or off at runtime, without a restart. Enabling only resumes "
         "against whatever model and vector schema are already on disk and kicks off a backfill for "
@@ -1157,44 +1055,22 @@ async def trigger_embedding_backfill(force: bool = False) -> dict:
     tags={"write"},
 )
 async def set_embeddings_enabled(enabled: bool) -> dict:
-    metrics.record_tool_call("set_embeddings_enabled")
     async with _db() as db:
-        try:
-            result = await status.set_embeddings_enabled(db, enabled, actor=_current_actor())
-        except status.EmbeddingsUnavailable:
-            return {
-                "error": "sqlite-vec is not available on this relay, or EMBEDDING_MODEL is not a known "
-                "fastembed model."
-            }
-        except status.EmbeddingDimensionMismatch:
-            return {
-                "error": "EMBEDDING_MODEL's dimension doesn't match the vector schema already on disk. "
-                "Restart relay to rebuild it before enabling."
-            }
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        result = await status.set_embeddings_enabled(db, enabled, actor=_current_actor())
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description="Delete a post from the relay feed by its ID. The master document (id=0) cannot be deleted.",
     tags={"write"},
 )
 async def delete_post(id: int) -> dict:
-    metrics.record_tool_call("delete_post")
     async with _db() as db:
-        try:
-            await service.delete_post(db, id, actor=_current_actor())
-        except service.ProtectedPost:
-            return {"error": "Master document (id=0) cannot be deleted."}
-        except service.PostNotFound:
-            return {"error": f"Post #{id} not found."}
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        await service.delete_post(db, id, actor=_current_actor())
     return {"ok": True, "deleted": id}
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Attach a file (image, PDF, …) to the vault. Provide the bytes exactly one way: "
         "`data` (base64 — only viable for tiny files, since you must emit the whole blob), "
@@ -1218,7 +1094,6 @@ async def add_attachment(
     embed: bool = True,
 ) -> dict:
     """Returns {filename, ref, folder, post_id}. `ref` is the ![[…]] embed to drop into a post."""
-    metrics.record_tool_call("add_attachment")
     try:
         body = AttachmentCreate(
             filename=filename, data=data, source_url=source_url,
@@ -1227,26 +1102,15 @@ async def add_attachment(
     except ValidationError as exc:
         return {"error": _first_error(exc)}
     async with _db() as db:
-        try:
-            result = await service.ingest_attachment(
-                db, filename=body.filename, data=body.data, source_url=body.source_url,
-                upload_id=body.upload_id, post_id=body.post_id, folder=body.folder,
-                tags=body.tags, embed=body.embed, actor=_current_actor(),
-            )
-        except ValueError:
-            return {"error": "data is not valid base64"}
-        except service.AttachmentSourceError as exc:
-            return {"error": str(exc)}
-        except service.PostNotFound:
-            return {"error": f"Post #{post_id} not found."}
-        except service.AttachmentError as exc:
-            return {"error": str(exc)}
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        result = await service.ingest_attachment(
+            db, filename=body.filename, data=body.data, source_url=body.source_url,
+            upload_id=body.upload_id, post_id=body.post_id, folder=body.folder,
+            tags=body.tags, embed=body.embed, actor=_current_actor(),
+        )
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Mint a presigned upload slot for a file too large to pass as base64. Returns "
         "{upload_id, upload_url, method, max_bytes, expires_at}: PUT the raw bytes to "
@@ -1256,11 +1120,10 @@ async def add_attachment(
     tags={"write"},
 )
 async def create_upload() -> dict:
-    metrics.record_tool_call("create_upload")
     return service.create_upload_slot().model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Retrieve an attachment from the vault by its filename (as used in ![[file]]). "
         "Images are returned so they can be viewed inline; other files return a note with "
@@ -1269,7 +1132,6 @@ async def create_upload() -> dict:
 )
 async def get_attachment(name: str):
     """Returns image content for images, else a dict describing the file."""
-    metrics.record_tool_call("get_attachment")
     try:
         result = vault.read_attachment(name, max_bytes=settings.attachment_max_bytes)
     except ValueError:
@@ -1286,7 +1148,7 @@ async def get_attachment(name: str):
             "note": "Non-image attachment; not shown inline."}
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Delete an attachment from the vault by its filename. Returns the removed name and "
         "any post ids that still embed/link it (now dangling) so you can fix them."
@@ -1294,18 +1156,14 @@ async def get_attachment(name: str):
     tags={"write"},
 )
 async def delete_attachment(name: str) -> dict:
-    metrics.record_tool_call("delete_attachment")
     async with _db() as db:
-        try:
-            result = await service.delete_attachment(db, name, actor=_current_actor())
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        result = await service.delete_attachment(db, name, actor=_current_actor())
     if result is None:
         return {"error": f"Attachment '{name}' not found."}
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "List attachments stored in the vault (filename, folder, size, and the ![[…]] "
         "embed ref). Scope with `post_id` (that post's folder) or `folder`; omit both to "
@@ -1313,18 +1171,12 @@ async def delete_attachment(name: str) -> dict:
     )
 )
 async def list_attachments(post_id: int | None = None, folder: str | None = None) -> dict:
-    metrics.record_tool_call("list_attachments")
     async with _db() as db:
-        try:
-            result = await service.list_attachments(db, post_id=post_id, folder=folder)
-        except service.PostNotFound:
-            return {"error": f"Post #{post_id} not found."}
-        except service.InvalidFolder as exc:
-            return {"error": str(exc)}
+        result = await service.list_attachments(db, post_id=post_id, folder=folder)
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "List the vault's first-level folders with their post counts. These are the names list_posts and l"
         "ist_attachments accept as `folder`; a post is filed by its first domain tag at creation, so t"
@@ -1332,21 +1184,19 @@ async def list_attachments(post_id: int | None = None, folder: str | None = None
     )
 )
 async def list_folders() -> dict:
-    metrics.record_tool_call("list_folders")
     async with _db() as db:
         result = await service.list_folders(db)
     return result.model_dump()
 
 
-@mcp.tool(description="List all tags in the relay feed with their post counts.")
+@_tool(description="List all tags in the relay feed with their post counts.")
 async def list_tags() -> dict:
-    metrics.record_tool_call("list_tags")
     async with _db() as db:
         result = await service.list_tags(db)
     return result.model_dump()
 
 
-@mcp.tool(
+@_tool(
     description=(
         "Set expiry configuration for a tag. Provide ttl_hours (relative to each post's "
         "creation), expires_at (absolute cutoff), or both. Only affects posts without their "
@@ -1359,13 +1209,9 @@ async def set_tag_config(
     ttl_hours: int | None = None,
     expires_at: str | None = None,
 ) -> dict:
-    metrics.record_tool_call("set_tag_config")
     body = TagConfigCreate(ttl_hours=ttl_hours, expires_at=expires_at)
     async with _db() as db:
-        try:
-            result = await service.set_tag_config(db, tag, body, actor=_current_actor())
-        except service.ScopeDenied:
-            return {"error": "This API key's scope does not permit this write."}
+        result = await service.set_tag_config(db, tag, body, actor=_current_actor())
     return result.model_dump()
 
 

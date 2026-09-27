@@ -14,9 +14,14 @@ QUEUE_MAXSIZE = 256
 OVERFLOW = {"type": "overflow"}
 
 
+def _key(tag: str | None) -> str | None:
+    """Tags are stored lowercased; a ``?tag=News`` subscription must still match."""
+    return tag.strip().lower() or None if tag else None
+
+
 def subscribe(tag: str | None) -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAXSIZE)
-    _subscribers[tag].add(q)
+    _subscribers[_key(tag)].add(q)
     return q
 
 
@@ -32,7 +37,12 @@ def _offer(q: asyncio.Queue, envelope: dict) -> None:
 
 
 def unsubscribe(q: asyncio.Queue, tag: str | None) -> None:
-    _subscribers[tag].discard(q)
+    key = _key(tag)
+    queues = _subscribers.get(key)
+    if queues is not None:
+        queues.discard(q)
+        if not queues:  # don't keep a key per tag ever subscribed to
+            del _subscribers[key]
 
 
 def subscriber_count() -> int:

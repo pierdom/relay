@@ -11,8 +11,5 @@ bg      = "#090a0d"   # near-black   — screen, header, footer background
 # Used for TTL expiry badges (post_panel) and Textual's success/warning/error
 # theme tokens (notifications, buttons).
 perf_great    = "#10b981"  # green         — success / far-future expiry
-perf_good     = "#10b981"  # green
-perf_flat     = "#f59e0b"  # amber         — neutral
 perf_bad      = "#d97706"  # amber-dim     — warning / expiry within 3 days
-perf_poor     = "#f87171"  # red
 perf_terrible = "#f87171"  # red           — error / expired / expiry within 24h

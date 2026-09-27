@@ -98,7 +98,12 @@ async def test_fetch_url_http_error(monkeypatch):
 
 def test_resolve_guarded_blocks_metadata_and_loopback():
     # IP literals resolve without DNS, so these run offline.
-    for blocked in ("169.254.169.254", "127.0.0.1", "0.0.0.0"):
+    for blocked in (
+        "169.254.169.254", "127.0.0.1", "0.0.0.0",
+        "0.0.0.1",                  # 0.0.0.0/8 reaches the local host on Linux
+        "2002:7f00:1::",            # 6to4 wrapping 127.0.0.1
+        "2002:a9fe:a9fe::",         # 6to4 wrapping the metadata endpoint
+    ):
         with pytest.raises(ingest.FetchError):
             ingest._resolve_guarded(blocked)
     # a public IP passes the guard and is returned
@@ -363,3 +368,49 @@ async def test_stdio_proxy_path_missing_file():
 
     res = await proxy._upload_local_path({"path": "/no/such/file.png"})
     assert "not found" in res[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_scope_denied_caller_never_triggers_a_fetch(client, monkeypatch):
+    """The scope check runs before the byte transport: a denied key must not be
+    able to make the server fetch a URL (or consume an upload slot)."""
+    from relay.config import ApiKeyScope
+    from relay.database import connect
+    from relay.identity import Actor
+
+    fetched: list[str] = []
+
+    async def spy(url, **_):
+        fetched.append(url)
+        return b"x", "x.png"
+
+    monkeypatch.setattr(ingest, "fetch_url", spy)
+    scoped = Actor("newsbot", "newsbot@relay.local", ApiKeyScope(mode="write", tags=frozenset({"news"})))
+    async with connect() as db:
+        with pytest.raises(service.ScopeDenied):
+            await service.ingest_attachment(
+                db, source_url="http://files.lan/x.png", folder="Finance", actor=scoped
+            )
+    assert fetched == []
+
+
+@pytest.mark.asyncio
+async def test_embed_append_keeps_an_edit_made_during_the_fetch(client, monkeypatch):
+    """The owning post is read before the (slow) byte fetch; appending the embed
+    must not rewrite the post from that stale read."""
+    from relay.database import connect
+    from relay.models import PostCreate, PostUpdate
+
+    async with connect() as db:
+        post = await service.create_post(db, PostCreate(title="Host", content="v1", tags=["homelab"]))
+
+        async def fetch_while_someone_edits(url, **_):
+            async with connect() as other:
+                await service.update_post(other, post.id, PostUpdate(content="v2 edited meanwhile"))
+            return b"png", "pic.png"
+
+        monkeypatch.setattr(ingest, "fetch_url", fetch_while_someone_edits)
+        await service.ingest_attachment(db, source_url="http://files.lan/pic.png", post_id=post.id)
+        final = await service.get_post(db, post.id)
+    assert final.content.startswith("v2 edited meanwhile")
+    assert "![[pic.png]]" in final.content

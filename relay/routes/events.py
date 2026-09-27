@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
-from .. import database
+from .. import database, service
 from ..auth import require_api_key
 from ..events import OVERFLOW, subscribe, unsubscribe
 from ..models import PostResponse
@@ -22,12 +22,6 @@ _KEEPALIVE_SECONDS = 30
 _DELETE_ACTIONS = {"delete", "external_delete", "expiry"}
 
 
-async def _current_post(db, post_id: int) -> PostResponse | None:
-    async with db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)) as cur:
-        row = await cur.fetchone()
-    return PostResponse.from_row(row) if row is not None else None
-
-
 async def catchup_frames(db, *, last_seq: int, tag: str | None) -> list[dict]:
     """Every post that changed since `last_seq` (relay #198, N-4), one SSE
     frame each, collapsed to its latest change in that window — reconnect
@@ -36,12 +30,9 @@ async def catchup_frames(db, *, last_seq: int, tag: str | None) -> list[dict]:
     post's revisions). Split out from `stream_events` so it's testable
     without driving a live SSE connection.
     """
-    conditions = ["seq > ?"]
-    params: list = [last_seq]
-    if tag:
-        conditions.append("tags LIKE ? ESCAPE '\\'")
-        params.append(f"%,{database.escape_like(tag.strip().lower())},%")
-    where = " AND ".join(conditions)
+    conditions, tag_params = database.tag_folder_filters(tag, None, alias=None)
+    where = " AND ".join(["seq > ?", *conditions])
+    params: list[int | str] = [last_seq, *tag_params]
     async with db.execute(
         f"""
         SELECT c.* FROM changes c
@@ -56,7 +47,7 @@ async def catchup_frames(db, *, last_seq: int, tag: str | None) -> list[dict]:
         missed = await cur.fetchall()
     frames: list[dict] = []
     for row in missed:
-        post = None if row["action"] in _DELETE_ACTIONS else await _current_post(db, row["post_id"])
+        post = None if row["action"] in _DELETE_ACTIONS else await service.get_post(db, row["post_id"])
         if post is None:
             # Either recorded as a delete, or recorded as a live change but
             # gone by the time we looked here (e.g. deleted moments later)

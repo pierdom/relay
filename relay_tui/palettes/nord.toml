@@ -9,8 +9,5 @@ bg      = "#2e3440"   # nord0  — screen, header, footer background
 
 # ── Semantic colours ───────────────────────────────────────────────────────────
 perf_great    = "#a3be8c"  # nord14 green   — success / far-future expiry
-perf_good     = "#a3be8c"
-perf_flat     = "#88c0d0"  # nord8
 perf_bad      = "#ebcb8b"  # nord13 yellow  — warning / expiry within 3 days
-perf_poor     = "#bf616a"  # nord11 red
 perf_terrible = "#bf616a"  # nord11 red     — error / expired / expiry within 24h
