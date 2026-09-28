@@ -274,7 +274,10 @@ Single-page app on the REST API + SSE. ES modules, no build step — nothing is 
 - **The post modal's "← previous post" breadcrumb doubles as "← Vault lint"** — opening a post from the lint pane sets `_externalOrigin`; `reopenLintModal` (not `openLintModal`) restores the same filter/selection on the way back rather than a fresh list.
 - **History panel is fixed height** — panes built once, only contents swap. `min(82vh, 860px)`.
 - **Header control order is a safety property**: `+ New Post` · theme · status · disconnect. Primary action and session-kill must not be adjacent. `test_header_controls_are_one_visual_set` pins this.
-- **Use inline SVG, not glyphs or emoji** for icons. Colour emoji ignores CSS `color`; Unicode glyphs render unpredictably at small sizes.
+- **Use inline SVG, not glyphs or emoji** for icons — drawn in `relay/static/ui/js/icons.js` (one 16px stroke style on `currentColor`), inlined verbatim in `index.html` for static buttons, and as a masked data-URI SVG for a CSS `::before`. Colour emoji ignores CSS `color`, and on a host without an emoji font (the headless browser the smokes run in) every emoji and supplemental-arrow glyph (`⤺`) renders as a blank box — the card Edit/Delete, post-modal History/Edit/Delete, Attach and Restore buttons all shipped that way. `tests/test_ui_glyphs.py` fails on any such character outside comments.
+- **Only the newest `loadPosts` may paint the feed** (`loadSeq`). A slow response landing after a newer one used to repaint stale results (clearing a search mid-flight), and two overlapping "load more" requests read the same offset and appended the same page twice.
+- **The sidebar's "all" row counts posts** (`postCount()`: the unfiltered feed's `total` plus the pinned master document) — never a sum of tag or folder counts, which counts a multi-tag post once per tag, an untagged post not at all, and skips the root master document.
+- **Live SSE posts aren't inserted into a search- or folder-filtered feed** — the stream only filters by tag, so they go through the "new posts" pill, which reloads with the real filters.
 - **iOS input zoom**: handled globally by `@media (hover: none) { input, textarea, select { font-size: 16px !important } }` — not per-form.
 - **CSP forbids inline event handlers and `javascript:` URLs** (`script-src` has no `'unsafe-inline'`). Wire handlers with `addEventListener`; `style=` attributes are fine (`style-src` allows inline).
 
@@ -354,7 +357,7 @@ relay_mcp/server.py              # stdio ↔ Streamable HTTP bridge (no tool def
 relay/static/index.html          # Browser UI markup (210 lines)
 relay/static/ui/app.css          # UI stylesheet
 relay/static/ui/js/main.js       # App entry point (ES module)
-relay/static/ui/js/{util,api,status,feed-query,view-prefs,post-history,sheet,theme,deleted,lint,edit-form}.js
+relay/static/ui/js/{util,api,icons,status,feed-query,view-prefs,post-history,sheet,theme,deleted,lint,edit-form}.js
 relay_tui/                       # Textual TUI — app.py · api.py · sse.py · theme.py · palettes/ · widgets/
 scripts/export_vault.py          # Pull a live relay into a fresh vault
 ```

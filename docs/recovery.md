@@ -9,7 +9,7 @@ the full-power path for anything the API doesn't express.
 
 ## In the browser
 
-The post modal has a **🕑 History** button: it lists the post's revisions, previews any of them, and restores with one click. That is the quickest route for the common case — you noticed a post looks wrong and want the previous version back. Each revision can be shown as a **diff against the post as it stands**, which is the question you actually have when you suspect a clobber: not "what did this commit do" but "what would restoring give me back".
+The post modal has a **History** button: it lists the post's revisions, previews any of them, and restores with one click. That is the quickest route for the common case — you noticed a post looks wrong and want the previous version back. Each revision can be shown as a **diff against the post as it stands**, which is the question you actually have when you suspect a clobber: not "what did this commit do" but "what would restoring give me back".
 
 For a post that is **gone**, the way in is the status panel (the header `i` button) → **Recovery**. It lists what was deleted but is still restorable, with the same preview-then-restore. It is there rather than in the sidebar because that panel already reports whether vault history works at all — when it does not, there is nothing to recover and the section says so.
 

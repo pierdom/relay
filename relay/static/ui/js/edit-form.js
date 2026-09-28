@@ -11,6 +11,7 @@
  * main.js beyond apiFetch/apiSend.
  */
 
+import { ICON_CLIP } from './icons.js';
 import { apiFetch, apiSend, getCallerScope, tagsAllowedByScope } from './api.js';
 import { CODE_SPAN_RE, escHtml, fmtBytes, toDatetimeLocal, toUtcIso } from './util.js';
 
@@ -299,7 +300,7 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
         </div>
         <div class="attach-row">
           <input type="file" class="ef-file" multiple style="display:none">
-          <button type="button" class="btn-attach ef-attach">📎 Attach</button>
+          <button type="button" class="btn-attach ef-attach">${ICON_CLIP}Attach</button>
           <span class="attach-status ef-attach-status"></span>
         </div>
         <div class="ef-attachments"></div>

@@ -4,6 +4,30 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.16.1] — 2026-09-28
+
+Web-UI audit: every screen captured at desktop and phone size against a seeded vault (long titles, many tags, code, tables, images, broken links, unicode), plus a read of the UI code.
+
+### Fixed
+- The sidebar's "all" count summed tag counts (Tags) or folder counts (Tree) — 44 and 27 for a 28-post vault. Both now count posts
+- A slow feed response could land after a newer one and repaint stale results (e.g. clearing a search while it was still loading); two overlapping "load more" requests could append the same page twice
+- Live posts arriving while a search or folder filter is active are no longer inserted into results they may not match — they go through the "new posts" pill, which reloads with the filters applied
+- Every emoji/rare-glyph icon (card Edit/Delete, post-modal History/Edit/Delete, Attach, Restore, Preview, media count, file and attachment-link glyphs) rendered as a blank box without an emoji font; all are drawn SVGs now, in one style, following the theme colour
+- Attachment images in the post modal sat at the panel's left edge instead of in the reading column
+- Ordered-list numbers were clipped in feed cards (`1.` showed as `.`) and hung outside the modal's text column
+- The Files tab left the post feed's search/sort/view controls live over a hidden feed
+- A search with no hits said "No posts yet"; it now names the query
+- Single-key shortcuts fired with Ctrl/Cmd/Alt held (Ctrl+J moved the feed selection) and while a `<select>` had focus
+- Renaming the active tag to a name the server normalises (e.g. with spaces) left the feed filtered on the raw input
+
+### Changed
+- Blockquotes use body-coloured italic text instead of `--muted`, which sat below the body contrast floor
+- Secondary Cancel buttons use body text colour — `--muted` read as disabled beside the primary button
+- The `j / k` separator in the shortcuts panel is vertically centred
+- Docs: docs/recovery.md and docs/usage.md name the History and Attach buttons instead of the emoji they used to carry
+
+---
+
 ## [1.16.0] — 2026-09-27
 
 Full-scope audit: security fixes first, then bugs, then a leaner codebase (≈600 fewer lines of application code).

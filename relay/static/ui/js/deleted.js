@@ -20,6 +20,7 @@
  * and this section says so instead of offering a button that cannot help.
  */
 
+import { ICON_EYE, ICON_HISTORY } from './icons.js';
 import { apiFetch } from './api.js';
 import { relativeTime } from './util.js';
 
@@ -136,10 +137,10 @@ function card(d, draw) {
   actions.className = 'del-actions';
   const preview = document.createElement('button');
   preview.className = 'btn-edit';
-  preview.textContent = '👁 Preview';
+  preview.innerHTML = `${ICON_EYE}Preview`;
   const restore = document.createElement('button');
   restore.className = 'btn-restore';
-  restore.textContent = '⤺ Restore';
+  restore.innerHTML = `${ICON_HISTORY}Restore`;
   actions.append(preview, restore);
 
   const body = document.createElement('pre');
@@ -175,7 +176,7 @@ function card(d, draw) {
       onRestored();
     } catch (err) {
       restore.disabled = false;
-      restore.textContent = '⤺ Restore';
+      restore.innerHTML = `${ICON_HISTORY}Restore`;
       const failed = document.createElement('div');
       failed.className = 'del-meta del-failed';
       failed.textContent = `Restore failed: ${err.message}`;
