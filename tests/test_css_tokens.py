@@ -273,6 +273,10 @@ TEXT_ROLES = [
 # is recorded here with its measured value rather than papered over with a
 # colour the scheme does not contain. Same drift rules as REPRODUCTIONS.
 TEXT_ROLE_EXCEPTIONS = {
+    ("ayu-dark", "--muted", "--surface"): 3.99,
+    ("ayu-dark", "--muted", "--bg"): 4.05,
+    ("night-owl", "--muted", "--surface"): 4.29,
+    ("night-owl", "--muted", "--bg"): 4.47,
     ("ansi-light", "--green", "--surface"): 3.11,
     ("catppuccin-latte", "--green", "--surface"): 2.96,
     ("dracula", "--muted", "--surface"): 3.03,

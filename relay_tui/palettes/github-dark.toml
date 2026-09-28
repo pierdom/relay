@@ -1,0 +1,15 @@
+# GitHub Dark (Primer)
+# Matches the "GitHub Dark" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=github-dark
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#58a6ff"   # accent.fg      — accent, interactive elements, borders
+border  = "#30363d"   # border.default — widget borders, badges, panel separators
+bg      = "#010409"   # canvas.inset   — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+# Used for TTL expiry badges (post_panel) and Textual's success/warning/error
+# theme tokens (notifications, buttons).
+perf_great    = "#3fb950"  # success / far-future expiry
+perf_bad      = "#d29922"  # warning / expiry within 3 days
+perf_terrible = "#f85149"  # error / expired / expiry within 24h

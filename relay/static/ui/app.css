@@ -835,6 +835,136 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
 }
+/* GitHub Dark / GitHub Light (Primer, "default" variants). Named Primer
+   functional colours throughout — canvas, border, fg, accent, success, danger,
+   done/sponsors — and nothing else. Dark lays cards (`canvas.default`) on the
+   page chrome's `canvas.inset`; Light lays white cards on `canvas.subtle`, as
+   github.com does. Light's two chip colours step one Primer scale down
+   (purple-6, pink-6): `done.fg` and `sponsors.fg` are 4.42 and 4.37:1 on
+   their own tint, under AA. Both clear every floor with no exception. */
+:root[data-theme="github-dark"], [data-theme="github-dark"] {
+  color-scheme: dark;
+  --bg:          #010409;   /* canvas.inset */
+  --surface:     #0d1117;   /* canvas.default */
+  --border:      #30363d;   /* border.default */
+  --text:        #e6edf3;   /* fg.default */
+  --muted:       #8b949e;   /* fg.muted */
+  --accent:      #58a6ff;   /* accent.fg */
+  --accent-dim:  #79c0ff;   /* blue-2 — hover fill */
+  --accent-glow: rgba(88, 166, 255, 0.10);
+  --tag-bg:      #161b22;   /* canvas.subtle */
+  --tag-active:  #21262d;   /* border.muted */
+  --green:       #3fb950;   /* success.fg */
+  --red:         #f85149;   /* danger.fg */
+  --body:        #e6edf3;   /* fg.default */
+  --body-strong: #f0f6fc;   /* fg.onEmphasis */
+  --wash-raise:  rgba(230, 237, 243, 0.03);
+  --accent-2:      #a371f7;   /* done.fg */
+  --accent-3:      #d29922;   /* attention.fg */
+  --on-accent:     #0d1117;   /* canvas.default */
+  --on-scrim:      #e6edf3;
+  --border-hover:  #484f58;   /* neutral.emphasis */
+  --scrim-rgb:     1, 4, 9;   /* canvas.inset */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+:root[data-theme="github-light"], [data-theme="github-light"] {
+  color-scheme: light;
+  --bg:          #f6f8fa;   /* canvas.subtle */
+  --surface:     #ffffff;   /* canvas.default */
+  --border:      #d0d7de;   /* border.default */
+  --text:        #1f2328;   /* fg.default */
+  --muted:       #656d76;   /* fg.muted */
+  --accent:      #0969da;   /* accent.fg */
+  --accent-dim:  #0550ae;   /* blue-6 — hover fill */
+  --accent-glow: rgba(9, 105, 218, 0.10);
+  --tag-bg:      #ddf4ff;   /* accent.subtle */
+  --tag-active:  #b6e3ff;   /* blue-1 */
+  --green:       #1a7f37;   /* success.fg */
+  --red:         #d1242f;   /* danger.fg */
+  --body:        #1f2328;   /* fg.default */
+  --body-strong: #1f2328;
+  --wash-raise:  rgba(31, 35, 40, 0.03);
+  --accent-2:      #6639ba;   /* purple-6 — done.fg is 4.42:1 on its chip */
+  --accent-3:      #99286e;   /* pink-6 — sponsors.fg is 4.37:1 on its chip */
+  --on-accent:     #ffffff;
+  --on-scrim:      #ffffff;
+  --border-hover:  #afb8c1;   /* neutral.muted */
+  --scrim-rgb:     31, 35, 40;   /* fg.default */
+  --shadow-card:   0 4px 16px rgba(0, 0, 0, 0.10);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.12);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.18);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.16);
+}
+/* Ayu Dark (ayu-theme/ayu-colors). `common.bg` is the canvas and `editor.bg`
+   the cards — on the editor background alone the foreground is 10.12:1, the
+   house target, and nowhere else in the palette is brighter. The accent is
+   Ayu's own `common.accent` gold, easing to the function orange on hover.
+   Ayu's greys are UI chrome, not text: the gutter grey is its brightest and
+   still sits at 3.99:1, recorded in TEXT_ROLE_EXCEPTIONS. */
+:root[data-theme="ayu-dark"], [data-theme="ayu-dark"] {
+  color-scheme: dark;
+  --bg:          #0b0e14;   /* common.bg */
+  --surface:     #0d1017;   /* editor.bg */
+  --border:      #1b1f29;   /* ui.line */
+  --text:        #bfbdb6;   /* editor.fg */
+  --muted:       #6c7380;   /* gutter.active — see block note */
+  --accent:      #e6b450;   /* common.accent */
+  --accent-dim:  #ffb454;   /* syntax.func */
+  --accent-glow: rgba(230, 180, 80, 0.10);
+  --tag-bg:      #131721;   /* editor.line */
+  --tag-active:  #1b1f29;   /* ui.line */
+  --green:       #7fd962;   /* vcs.added */
+  --red:         #f26d78;   /* vcs.removed */
+  --body:        #bfbdb6;   /* editor.fg */
+  --body-strong: #bfbdb6;
+  --wash-raise:  rgba(191, 189, 182, 0.04);
+  --accent-2:      #d2a6ff;   /* syntax.constant */
+  --accent-3:      #39bae6;   /* syntax.tag */
+  --on-accent:     #0b0e14;   /* common.bg */
+  --on-scrim:      #bfbdb6;
+  --border-hover:  #565b66;   /* ui.fg */
+  --scrim-rgb:     11, 14, 20;   /* common.bg */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+/* Night Owl (sdras/night-owl-vscode-theme). Cards on the editor's deep navy,
+   the canvas one step darker at the inactive-tab tone, chips on the input
+   background. `#5f7e97` is the theme's own UI grey and its brightest muted
+   tone — 4.29:1, recorded in TEXT_ROLE_EXCEPTIONS; the comment grey is
+   fainter still. Accents are the syntax blue, purple and string gold. */
+:root[data-theme="night-owl"], [data-theme="night-owl"] {
+  color-scheme: dark;
+  --bg:          #01111d;   /* tab.inactiveBackground */
+  --surface:     #011627;   /* editor.background */
+  --border:      #1d3b53;   /* selection */
+  --text:        #d6deeb;   /* editor.foreground */
+  --muted:       #5f7e97;   /* UI grey — see block note */
+  --accent:      #82aaff;   /* blue */
+  --accent-dim:  #7fdbca;   /* cyan */
+  --accent-glow: rgba(130, 170, 255, 0.10);
+  --tag-bg:      #0b253a;   /* input.background */
+  --tag-active:  #1d3b53;   /* selection */
+  --green:       #addb67;
+  --red:         #ef5350;   /* errorForeground */
+  --body:        #d6deeb;
+  --body-strong: #d6deeb;
+  --wash-raise:  rgba(214, 222, 235, 0.04);
+  --accent-2:      #c792ea;   /* purple */
+  --accent-3:      #ecc48d;   /* string */
+  --on-accent:     #011627;
+  --on-scrim:      #d6deeb;
+  --border-hover:  #5f7e97;   /* UI grey */
+  --scrim-rgb:     1, 17, 29;   /* tab.inactiveBackground */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
 html { color: var(--text); }   /* see note in tests/test_css_tokens.py */
 
 body {

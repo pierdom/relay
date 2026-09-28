@@ -4,6 +4,18 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.17.0] — 2026-09-28
+
+Four more themes, the ones the 1.16.2 review named as the notable remaining gaps.
+
+### Added
+- **GitHub Dark** and **GitHub Light** (Primer "default"), grouped as a GitHub family in the picker: cards on `canvas.default` over `canvas.inset` (dark) / `canvas.subtle` (light), as github.com lays them out. Light's chips step one Primer scale down (purple-6, pink-6) — `done.fg`/`sponsors.fg` are under AA on their own tint. No contrast exceptions
+- **Ayu Dark**: `editor.bg` cards on `common.bg`, the gold `common.accent`. Its brightest grey (the gutter, 3.99:1) is recorded in `TEXT_ROLE_EXCEPTIONS` as its muted tone
+- **Night Owl**: the editor navy on the inactive-tab tone, periwinkle accent. Its UI grey (4.29:1) is recorded the same way
+- All four as TUI palettes too (`RELAY_PALETTE=github-dark|github-light|ayu-dark|night-owl`); twenty-four themes in all
+
+---
+
 ## [1.16.2] — 2026-09-28
 
 Theme review: every theme rendered and compared against its upstream palette, and a contrast audit of the small-text roles no test covered. Across those roles, 48 pairs sat below WCAG AA in the 17 themes; 19 remain in 20, each a documented limit of its palette.
