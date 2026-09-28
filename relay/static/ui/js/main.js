@@ -22,6 +22,7 @@ import { initLint, isLintOpen, reopenLintModal, tryCloseLintModal } from './lint
 import { buildEditForm, confirmDeleteAttachment, wireAttachments } from './edit-form.js';
 import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
+import { ICON_CLOCK, ICON_FOLDER, ICON_IMAGE, ICON_PENCIL, ICON_TRASH } from './icons.js';
 import { CODE_SPAN_RE, escHtml, fmtBytes, relativeTime, toUtcIso } from './util.js';
 const LIMIT = 20;
 // The break-glass API key now lives in ./api.js (setApiKey/clearApiKey).
@@ -567,8 +568,20 @@ tagNewInput.addEventListener('keydown', async e => {
 });
 
 /* ── Tags ─────────────────────────────────────────────────── */
+// The "all" row counts posts, not tag or folder memberships: summing per-tag
+// counts counted a multi-tag post once per tag and an untagged post not at all,
+// and summing folders skipped the root master document. The unfiltered feed's
+// `total` excludes the pinned master document, so add it back.
+async function postCount() {
+  const d = await apiFetch('/posts?limit=1&summary=true');
+  return d.total + (d.pinned ? 1 : 0);
+}
+
 async function loadTags() {
-  try { const data = await apiFetch('/tags'); renderTags(data.tags); } catch {}
+  try {
+    const [data, count] = await Promise.all([apiFetch('/tags'), postCount()]);
+    renderTags(data.tags, count);
+  } catch {}
 }
 
 // Refresh whichever count view is active right now (Tags or Tree). Callers after
@@ -592,42 +605,12 @@ function scheduleLoadTags() {
   _tagsTimer = setTimeout(refreshSidebarCounts, 250);
 }
 
-function renderTags(tags) {
+function renderTags(tags, allCount) {
   openTagEditor = null;   // the DOM these forms lived in is about to be replaced
   tagList.innerHTML = '';
-  tagList.appendChild(makeTagItem('all', null, tags.reduce((s, t) => s + t.count, 0)));
+  tagList.appendChild(makeTagItem('all', null, allCount));
   tags.forEach(t => tagList.appendChild(makeTagItem(t.tag, t.tag, t.count)));
 }
-
-/* Inline SVG rather than ✏︎ / ⚙ glyphs.
- *
- * The pencil was U+270F with a text-presentation selector, which renders as a
- * thin *horizontal* stroke at this size — indistinguishable from a minus, and so
- * read as "remove tag" rather than "rename". A drawn, diagonal pencil cannot be
- * mistaken for one. The gear follows for consistency, and both now scale with the
- * icon size rather than the font's idea of a dingbat.
- */
-/* A folder, drawn rather than typed. U+1F4C1 shipped here first and was the
- * wrong answer for the same reason the ✏︎ glyph was in the tag row: it is a
- * *colour* emoji, so it ignores `color` and paints the same manila tab in all
- * fifteen themes — conspicuously the one thing on screen that does not answer to
- * the palette. `currentColor` puts it back under `--accent`, and drawing it also
- * settles its weight against the 13px monospace labels beside it, which an
- * emoji's own metrics do not. */
-const ICON_FOLDER = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
-  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-  <path d="M1.9 12.6V3.4h4l1.5 1.9h6.7v7.3z"/></svg>`;
-
-const ICON_PENCIL = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
-  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-  <path d="M11.4 2.4l2.2 2.2L6 12.2l-2.9.7.7-2.9z"/><path d="M10 3.8l2.2 2.2"/></svg>`;
-
-/* A clock, not a gear. The button sets TTL/expiry, so a clock says what it does —
- * and a gear at 13px renders as radiating spokes around a dot, which reads as a
- * brightness control rather than settings. */
-const ICON_CLOCK = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
-  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-  <circle cx="8" cy="8" r="5.8"/><path d="M8 4.6V8l2.3 1.7"/></svg>`;
 
 function makeTagItem(label, value, count) {
   const el = document.createElement('div');
@@ -670,6 +653,9 @@ function setSidebarMode(mode) {
 
   const replacing = mode in FEED_REPLACING;
   feed.style.display = replacing ? 'none' : '';
+  // Search, sort and list/grid all drive the post feed; beside the Files grid
+  // they were live controls acting on a hidden feed.
+  searchBar.style.display = replacing ? 'none' : '';
   for (const [name, id] of Object.entries(FEED_REPLACING)) {
     document.getElementById(id).style.display = mode === name ? '' : 'none';
   }
@@ -717,14 +703,14 @@ initLint({
 
 async function loadFolders() {
   if (!authed) return;
-  try { renderFolders((await apiFetch('/folders')).folders); } catch {}
+  try {
+    const [data, count] = await Promise.all([apiFetch('/folders'), postCount()]);
+    renderFolders(data.folders, count);
+  } catch {}
 }
 
-function renderFolders(folders) {
+function renderFolders(folders, allCount) {
   tagList.innerHTML = '';
-  // Local: the folder-count sum for the "all" row, unrelated to query.total
-  // (which is the feed's result count). It shadowed the old global `total`.
-  const allCount = folders.reduce((s, f) => s + f.count, 0);
   tagList.appendChild(makeFolderItem('all', null, allCount));
   folders.forEach(f => tagList.appendChild(makeFolderItem(f.folder, f.folder, f.count)));
 }
@@ -884,14 +870,16 @@ function startTagRename(el, oldName) {
   let committed = false;
   async function commit() {
     if (committed) return; committed = true;
-    const newName = input.value.trim().toLowerCase();
+    // The server's tag normal form (models.clean_tag) — so an active filter on
+    // the old tag follows it to the name actually stored, not the raw input.
+    const newName = input.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
     if (!newName || newName === oldName) { cancelRename(); return; }
     try {
       const data = await apiFetch(`/tags/${encodeURIComponent(oldName)}`, {
         method: 'PATCH', body: JSON.stringify({ new_name: newName }),
       });
       if (query.tag === oldName) query.tag = newName;
-      renderTags(data.tags);
+      renderTags(data.tags, await postCount());
     } catch (e) { alert(`Rename failed: ${e.message}`); cancelRename(); }
   }
 
@@ -992,8 +980,15 @@ async function selectTag(tag) {
 }
 
 /* ── Posts ────────────────────────────────────────────────── */
+// Only the newest request may paint the feed. Without this a slow response
+// landed after a newer one — clearing a search while it was still running
+// repainted the stale results — and two overlapping "load more" requests read
+// the same offset and appended the same page twice.
+let loadSeq = 0;
+
 async function loadPosts(replace = false) {
   if (!authed) return;
+  const seq = ++loadSeq;
   try {
     const params = new URLSearchParams({ limit: LIMIT, offset: query.offset });
     params.set('sort', prefs.sortField);
@@ -1006,6 +1001,7 @@ async function loadPosts(replace = false) {
     // plain rather than carrying an inert param.
     if (query.search && query.mode !== 'keyword') params.set('mode', query.mode);
     const data = await apiFetch(`/posts?${params}`);
+    if (seq !== loadSeq) return;
     query.total = data.total;
     query.offset += data.items.length;
 
@@ -1023,7 +1019,7 @@ async function loadPosts(replace = false) {
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
           </svg>
-          <p>No posts yet</p>
+          <p>${query.search ? `No posts match “${escHtml(query.search)}”` : (query.tag || query.folder ? 'Nothing here' : 'No posts yet')}</p>
         </div>`;
     } else {
       data.items.forEach((p, i) => {
@@ -1039,7 +1035,7 @@ async function loadPosts(replace = false) {
     // attacker-controlled HTML into `detail` for this request, so this
     // wasn't exploitable today, but it's the one spot a future change could
     // turn into real XSS.
-    if (replace) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${escHtml(e.message)}</p></div>`;
+    if (replace && seq === loadSeq) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${escHtml(e.message)}</p></div>`;
   }
 }
 
@@ -1130,7 +1126,7 @@ function renderPost(post) {
     ? `<div class="post-media"><img src="${escHtml(media.thumb)}" alt="" loading="lazy"></div>`
     : '';
   const mediaChip = media.count
-    ? `<span class="post-media-count">🖼 ${media.count}</span>`
+    ? `<span class="post-media-count">${ICON_IMAGE} ${media.count}</span>`
     : '';
 
   el.innerHTML = `
@@ -1147,8 +1143,8 @@ function renderPost(post) {
         ${expiresHtml}
       </div>
       <div class="post-actions">
-        <button class="btn-edit" title="Edit">✏️ <span class="btn-label">Edit</span></button>
-        <button class="btn-delete" title="Delete">🗑️ <span class="btn-label">Delete</span></button>
+        <button class="btn-edit" title="Edit">${ICON_PENCIL}<span class="btn-label">Edit</span></button>
+        <button class="btn-delete" title="Delete">${ICON_TRASH}<span class="btn-label">Delete</span></button>
       </div>
     </div>`;
 
@@ -1279,7 +1275,7 @@ function connectSSE() {
     if (existing) {
       if (existing.classList.contains('pinned')) el.classList.add('pinned');
       existing.replaceWith(el);   // edit: update in place (don't bump query.total)
-    } else if (isDefaultSort()) {
+    } else if (isDefaultSort() && !query.search && !query.folder) {
       const empty = feed.querySelector('.empty');
       if (empty) empty.remove();
       const pinnedEl = feed.querySelector('.post.pinned');
@@ -1287,8 +1283,9 @@ function connectSSE() {
       query.total++;
       announce(`New post: ${post.title}`);
     } else {
-      // Non-default sort: the new post doesn't belong at the top — count it and
-      // let the user pull it in via the pill rather than misplacing the card.
+      // Non-default sort, or a search/folder filter the stream can't apply (it
+      // only filters by tag): the post may not belong here at all, let alone at
+      // the top — count it and let the pill reload with the real filters.
       query.total++;
       bumpNewPostsPill();
       announce(`New post: ${post.title}`);
@@ -1613,7 +1610,7 @@ pmBody.addEventListener('mouseout', e => {
 });
 
 document.addEventListener('keydown', e => {
-  const typing = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
+  const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
 
   // Escape priority: most transient first. Lint stacks over status the same
   // way history/edit stack over the post modal, so it is checked first —
@@ -1627,7 +1624,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && postModal.classList.contains('open')) { popPostModal(); return; }
   if (e.key === 'Escape' && _focusedCard)        { clearFeedFocus(); return; }
 
-  if (typing) return;
+  // Single-key shortcuts only: Ctrl+J / Cmd+E belong to the browser and OS.
+  if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
 
   // Post modal single-key shortcuts (reading mode only).
   if (postModal.classList.contains('open') && !isHistoryOpen() && !isEditOpen()) {
