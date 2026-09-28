@@ -119,8 +119,14 @@ collapseBtn.addEventListener('click', () => {
 });
 try { applySidebarCollapsed(localStorage.getItem('relay-sidebar-collapsed') === '1'); } catch (e) {}
 
+// Login problems are shown under the form, not in a blocking alert() that
+// leaves nothing on the page once dismissed.
+const loginError = document.getElementById('loginError');
+function showLoginError(msg) { loginError.textContent = msg; loginError.hidden = false; }
+
 document.getElementById('connectForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  loginError.hidden = true;
   const val = apiKeyInput.value.trim();
   if (!val) return;
   try {
@@ -130,12 +136,12 @@ document.getElementById('connectForm').addEventListener('submit', async (ev) => 
       body: JSON.stringify({ key: val }),
       credentials: 'same-origin',
     });
-    if (!res.ok) { alert('Invalid API key'); return; }
+    if (!res.ok) { showLoginError('Invalid API key.'); return; }
     setApiKey(val);
     authed = true;
     init();
   } catch (e) {
-    alert('Connection failed: ' + e.message);
+    showLoginError('Connection failed: ' + e.message);
   }
 });
 
@@ -165,8 +171,8 @@ function applyNewPostVisibility() {
 // Otherwise show the right login control based on whether OIDC is configured.
 async function bootstrap() {
   const params = new URLSearchParams(location.search);
-  if (params.get('auth_error') === 'forbidden') alert('Your account is not authorized for relay.');
-  else if (params.get('auth_error')) alert('Login failed. Please try again.');
+  if (params.get('auth_error') === 'forbidden') showLoginError('Your account is not authorized for relay.');
+  else if (params.get('auth_error')) showLoginError('Login failed. Please try again.');
   if (params.has('auth_error')) history.replaceState(null, '', location.pathname);
 
   let me = { authenticated: false, oidc: false };
@@ -297,6 +303,51 @@ async function loadLinkIndex() {
 // link target/rel). marked + preprocessLinks output is sanitized through this.
 const SANITIZE_OPTS = { ADD_ATTR: ['target', 'rel', 'loading'] };
 const renderBody = (md) => DOMPurify.sanitize(marked.parse(preprocessLinks(md)), SANITIZE_OPTS);
+
+/* Every rendered table scrolls sideways inside its own box when it cannot fit
+   — see `.table-scroll` in app.css — in feed cards as well as the modal. */
+function wrapTables(root) {
+  root.querySelectorAll('.post-body table').forEach(t => {
+    const wrap = document.createElement('div');
+    wrap.className = 'table-scroll';
+    t.replaceWith(wrap);
+    wrap.appendChild(t);
+    t.querySelectorAll('td code').forEach(addPathBreaks);
+    floorProseColumns(t);
+  });
+}
+
+/* Once a table overflows, automatic layout shrinks *every* column to its
+   longest word — on a phone a paragraph column ended up 98px wide beside short
+   ones. A column whose longest cell reads as prose keeps a floor instead, and
+   the table scrolls rather than crushing it. Short columns are left tight. */
+const PROSE_CHARS = 30;
+function floorProseColumns(table) {
+  const longest = [];
+  for (const row of table.rows) {
+    [...row.cells].forEach((cell, i) => {
+      // Prose only: code already wraps at its joints (addPathBreaks).
+      const code = [...cell.querySelectorAll('code')].reduce((n, c) => n + c.textContent.length, 0);
+      longest[i] = Math.max(longest[i] || 0, cell.textContent.trim().length - code);
+    });
+  }
+  for (const row of table.rows) {
+    [...row.cells].forEach((cell, i) => { if (longest[i] >= PROSE_CHARS) cell.style.minWidth = '10em'; });
+  }
+}
+
+/* A path or dotted name in a table cell has no break opportunity, so one
+   `/var/lib/node_exporter/fleet.prom` sets its column's minimum width and
+   squeezes the prose column beside it. `<wbr>` after each separator lets it
+   wrap at its joints; unlike a zero-width space it adds no character, so a
+   copied command stays exact. */
+const PATH_JOINT_RE = /(?<=[/._=])/;
+function addPathBreaks(code) {
+  if (code.children.length || code.textContent.length < 16) return;
+  const parts = code.textContent.split(PATH_JOINT_RE);
+  if (parts.length < 2) return;
+  code.replaceChildren(...parts.flatMap((part, i) => (i ? [document.createElement('wbr'), part] : [part])));
+}
 
 // Convert wikilinks / id-refs to anchors, leaving fenced + inline code untouched.
 function preprocessLinks(md) {
@@ -1148,6 +1199,7 @@ function renderPost(post) {
       </div>
     </div>`;
 
+  wrapTables(el);
   el.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
   );
@@ -1407,18 +1459,7 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
     ? post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '')
     : post.content;
   pmBody.innerHTML = `<div class="post-body">${renderBody(pmContent)}</div><div class="pm-backlinks" id="pmBacklinks"></div>`;
-  pmBody.querySelectorAll('.post-body table').forEach(t => {
-    const wrap = document.createElement('div');
-    wrap.className = 'table-scroll';
-    t.parentNode.insertBefore(wrap, t);
-    wrap.appendChild(t);
-    // `min-width` on th/td is ignored under table-layout:fixed — only a
-    // min-width on the table element itself is honored as a floor, and CSS
-    // has no column count to compute it from. See app.css around
-    // `.pm-body .post-body table`.
-    const cols = t.rows[0]?.cells.length || 0;
-    if (cols > 0) t.style.minWidth = `${cols * 80}px`;
-  });
+  wrapTables(pmBody);
   pmBody.querySelectorAll('.post-body pre').forEach(pre => {
     const btn = document.createElement('button');
     btn.className = 'code-copy';

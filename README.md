@@ -72,13 +72,13 @@ Service on `http://localhost:8000`. Interactive docs at `/docs`. See [docs/setup
 
 ## Sample vault
 
-`sample_vault/` has 8 posts across 5 folders with `[[wikilinks]]`, auto-expiring digests, and a filled-out Master Document:
+`sample_vault/` has 6 posts across 4 folders — `[[wikilinks]]`, tables, code blocks and a filled-out Master Document with a tag taxonomy and house rules:
 
 ```bash
 RELAY_VAULT_PATH=./sample_vault uv run python -m uvicorn relay.main:app --reload
 ```
 
-Open `http://localhost:8000/ui`. See [docs/usage.md](docs/usage.md) for the patterns it demonstrates.
+Open `http://localhost:8000`. See [docs/usage.md](docs/usage.md) for the patterns it demonstrates. relay keeps its index and git history in `sample_vault/.relay/`, which is gitignored.
 
 ## How I use it
 
@@ -102,7 +102,7 @@ You can drop Syncthing entirely if you only use the Web UI or the TUI (both are 
 
 ## Interfaces
 
-**Browser UI** (`GET /ui`) — live feed with compose/edit forms, tag and folder filters, `[[wikilink]]` cross-references, attachment gallery, and twenty-four themes. The history panel diffs any revision against the current post; the status panel's Recovery section finds and restores deleted posts. On mobile every modal is a bottom sheet.
+**Browser UI** (`GET /ui`) — live feed with compose/edit forms, tag and folder filters, `[[wikilink]]` cross-references, attachment gallery, and [twenty-four themes](docs/themes.md). The history panel diffs any revision against the current post; the status panel's Recovery section finds and restores deleted posts. On mobile every modal is a bottom sheet.
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven split: TOPICS sidebar + FEED list. `n`/`e`/`d` new/edit/delete, `Enter` view (with `h` for history), `/` search, `v` recovery, `q` quit. Set `RELAY_PALETTE` to match your terminal. See [docs/tui.md](docs/tui.md).
 
@@ -122,15 +122,34 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 
 ## Docs
 
+**Using relay**
+
 | | |
 |---|---|
-| Installation, configuration, OIDC, MCP OAuth | [docs/setup.md](docs/setup.md) |
-| Named keys and per-key scopes (read-only / write-restricted-to-tags) | [docs/auth.md](docs/auth.md) |
+| Installation, configuration, OIDC, MCP OAuth, semantic search | [docs/setup.md](docs/setup.md) |
+| Best practices: Master Document, tags, folders, agents | [docs/usage.md](docs/usage.md) |
+| Browser themes, with screenshots | [docs/themes.md](docs/themes.md) |
+| Terminal UI: keybindings, palettes, transparency | [docs/tui.md](docs/tui.md) |
+| Recovering an overwritten or deleted post | [docs/recovery.md](docs/recovery.md) |
+
+**Integrating with relay**
+
+| | |
+|---|---|
 | REST API reference | [docs/api.md](docs/api.md) |
 | MCP tools and connection | [docs/mcp.md](docs/mcp.md) |
-| Terminal UI: keybindings, palettes, transparency | [docs/tui.md](docs/tui.md) |
-| Best practices: Master Document, tags, agents | [docs/usage.md](docs/usage.md) |
-| Recovering an overwritten or deleted post | [docs/recovery.md](docs/recovery.md) |
+| Named keys and per-key scopes (read-only / write-restricted-to-tags) | [docs/auth.md](docs/auth.md) |
+| What the version number promises: the stable API, MCP and config surface | [docs/stability.md](docs/stability.md) |
+
+**Project**
+
+| | |
+|---|---|
+| Release notes | [CHANGELOG.md](CHANGELOG.md) |
+| Contributing: dev setup, conventions, tests | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Reporting a vulnerability | [SECURITY.md](SECURITY.md) |
+| September 2026 code audit: findings and fixes | [docs/audit-2026-09.md](docs/audit-2026-09.md) |
+| Guide for AI coding agents working on this repo | [CLAUDE.md](CLAUDE.md) |
 
 ## Technologies
 

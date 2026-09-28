@@ -160,6 +160,9 @@ def test_grid_tiles_do_not_paint_outside_their_card(page):
                 for (const el of card.querySelectorAll('*')) {
                     const r = el.getBoundingClientRect();
                     if (r.width === 0 && r.height === 0) continue;
+                    // Content of a scroll box is clipped to it, not painted
+                    // outside the card; the box itself is still checked.
+                    if (el.parentElement.closest('.table-scroll')) continue;
                     if (r.right > cb.right + 1 || r.left < cb.left - 1) {
                         bad.push(`${el.className || el.tagName}: ${Math.round(r.left)}..${Math.round(r.right)}`
                                  + ` vs card ${Math.round(cb.left)}..${Math.round(cb.right)}`);

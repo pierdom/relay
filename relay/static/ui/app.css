@@ -1140,6 +1140,7 @@ header {
   transition: background 0.15s;
 }
 .btn-connect:hover { background: var(--accent-dim); }
+.login-error { color: var(--red); font-size: 12px; margin-top: 12px; text-align: center; }
 
 .oidc-login { display: flex; align-items: center; gap: 10px; }
 .link-btn {
@@ -1347,10 +1348,14 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
    one markup, pure-CSS switch. Editing cards fall back to block flow
    (their children become form fields with no grid areas). */
 .feed > .post:not(.editing) {
-  display: grid; column-gap: 14px; align-items: start;
+  display: grid; align-items: start;
   grid-template-columns: 1fr auto;
   grid-template-areas: "badge  badge" "header header" "body media" "footer footer";
 }
+/* The gap only when there is a thumbnail to hold apart: on an image-less card
+   the empty `auto` track still took the gap, and every body (text, tables)
+   stopped 14px short of the footer's edge. */
+.feed > .post:not(.editing):has(> .post-media) { column-gap: 14px; }
 /* Every area needs min-width:0: a `1fr` track's automatic minimum is the
    item's min-content width, so one non-shrinkable child (a nowrap source,
    a nowrap table) would otherwise widen the track past the card border and
@@ -1471,7 +1476,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .pm-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .pm-backlinks a { color: var(--accent); cursor: pointer; font-size: 12px; }
 .pm-backlinks .bl-id { color: var(--muted); margin-right: 6px; }
-.post-body code      { background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 11px; border: 1px solid var(--border); }
+.post-body code      { background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 11px; border: 1px solid var(--border); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .post-body pre       { position: relative; background: var(--bg); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; border: 1px solid var(--border); }
 .post-body pre code  { background: none; padding: 0; border: none; font-size: 11px; }
 .code-copy {
@@ -1491,46 +1496,40 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .post-body blockquote { border-left: 2px solid var(--accent); padding-left: 12px; color: var(--body); font-style: italic; margin: 8px 0; }
 .post-body strong    { color: var(--text); font-weight: 600; }
 .post-body em        { font-style: italic; color: var(--body-strong); }
+/* Tables size their columns to their content (automatic layout): a "#" column
+   stays narrow and a description column takes the room. Words never break
+   mid-word — a column is never narrower than its longest word — except URLs,
+   which may wrap anywhere so one long link can't claim the whole width.
+   A table that still doesn't fit scrolls inside `.table-scroll` (main.js wraps
+   every rendered table, feed and modal alike), whose edge shadows show there is
+   more to either side: iOS hides scrollbars, and an unmarked overflow reads as a
+   table that simply ends.
+
+   This replaced `table-layout: fixed`, which split every table into equal
+   columns — a 166px "#" beside a crushed description on desktop, one letter per
+   line in a ten-column table on a phone — and middle-aligned cells, which left
+   short cells looking empty beside a tall one. */
 .post-body table     { border-collapse: collapse; border-color: var(--border); width: 100%; margin: 8px 0; font-size: 12px; }
-.post-body th, .post-body td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; white-space: nowrap; }
+/* `overflow-wrap: normal` undoes `.post-body`'s `anywhere`, which let every cell
+   shrink below its longest word. */
+.post-body th, .post-body td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; vertical-align: top; overflow-wrap: normal; }
+/* Links only: a URL has no natural break and would claim the whole width. Code
+   wraps at spaces and hyphens like prose — `anywhere` split `fleet-health.sh`
+   into four one-syllable pills. */
+.post-body td a { overflow-wrap: anywhere; }
 .post-body th        { background: var(--bg); color: var(--text); font-weight: 600; }
 .post-body tr:nth-child(even) td { background: var(--wash-raise); }
-.table-scroll        { overflow-x: auto; margin: 8px 0; }
+.table-scroll {
+  overflow-x: auto; margin: 8px 0;
+  /* Scroll shadows: the two `local` covers travel with the content and hide
+     the fixed shadows beneath them whenever that edge is already reached. */
+  background:
+    linear-gradient(to right, var(--surface) 40%, transparent) left / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--surface) 40%, transparent) right / 28px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(var(--scrim-rgb), 0.45), transparent) left / 14px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(var(--scrim-rgb), 0.45), transparent) right / 14px 100% no-repeat scroll;
+}
 .table-scroll table  { margin: 0; }
-/* Feed previews have no room to scroll sideways, so cells wrap to fit the
-   card instead of being sliced off at its edge. `fixed` splits the width
-   evenly and — unlike auto layout — ignores cell min-content, which would
-   otherwise let a long cell squeeze its neighbours down to one character
-   per line.
-
-   The modal now does the same, and for a related reason. It kept nowrap cells
-   plus `.table-scroll` back when it was simply a wide panel — a fair trade with
-   the width to spend. As a reading column it is not: the horizontal overflow
-   carries no affordance, so a clipped column does not look clipped, it looks
-   absent, and the one that vanishes is the rightmost — in a table answering
-   "is this deployable?", the answer. Wrapping costs row height and shows every
-   cell. `.table-scroll` stays as the backstop for a table too wide even
-   wrapped. */
-.feed .post-body table,
-.pm-body .post-body table { table-layout: fixed; }
-.feed .post-body th, .feed .post-body td,
-.pm-body .post-body th, .pm-body .post-body td { white-space: normal; overflow-wrap: break-word; }
-/* A many-column table divides the fixed layout's width evenly, so on a narrow
-   modal a wide table (10+ columns) can land each cell under 40px — headers
-   wrap one syllable per line and the table reads as noise.
-
-   ⚠️ `min-width` on `th`/`td` cannot fix this — verified against a real
-   Chromium render, not just the spec: under `table-layout: fixed` the browser
-   computes column widths purely from the table's own resolved width and
-   ignores any per-cell min/width entirely, so a `min-width` on the cells is a
-   silent no-op (a build shipped with exactly that and the table stayed just
-   as crushed). `min-width` set on the `<table>` element itself, by contrast,
-   *is* honored as a hard floor even under fixed layout, and forces the table
-   wider than its `.table-scroll` wrapper — that's the actual backstop the
-   comment above describes. There is no column count in CSS, so main.js sets
-   it inline per table (colCount * 80px) when it wraps the table in
-   `.table-scroll`. The feed has no such wrapper, so its cards keep shrinking
-   columns to fit rather than overflow. */
 
 .post-footer {
   display: flex; align-items: center; justify-content: space-between;
@@ -2547,7 +2546,7 @@ kbd {
   border-radius: 2px;
 }
 .hm-d-del { color: var(--muted); text-decoration: line-through; }
-.hm-restore { width: 100%; margin-top: 10px; flex-shrink: 0; }
+.hm-restore { width: 100%; margin-top: 10px; flex-shrink: 0; justify-content: center; }
 /* Placeholder and loading share the pane's centre so neither changes its size. */
 .hm-placeholder {
   flex: 1; display: flex; align-items: center; justify-content: center;
@@ -2692,4 +2691,13 @@ kbd {
     white-space: normal; overflow: hidden; text-overflow: clip;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   }
+}
+
+/* Below two grid columns (minmax(250px) + gap) a grid tile has no row
+   neighbours to match, so its fixed 340px height was pure empty space — a
+   one-line post became a screen-tall card. Size to content with the list
+   view's clamp instead. */
+@media (max-width: 560px) {
+  .feed.grid > .post:not(.editing):not(.pinned) { height: auto; grid-template-rows: none; }
+  .feed.grid > .post:not(.pinned) .post-body-wrap { height: auto; max-height: 60px; }
 }
