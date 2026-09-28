@@ -51,6 +51,10 @@ Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`relay`) matche
 | `rose-pine` | Rosé Pine — rose accent |
 | `one-dark` | One Dark — blue accent |
 | `kanagawa` | Kanagawa — crystal-blue accent |
+| `github-dark` | GitHub Dark — blue accent |
+| `github-light` | GitHub Light (light) — blue accent |
+| `ayu-dark` | Ayu Dark — gold accent |
+| `night-owl` | Night Owl — periwinkle accent |
 | `candy` | Candy — hot-pink accent (TUI only) |
 | `earthy` | Earthy (TUI only) |
 | `pastel` | Pastel (TUI only) |

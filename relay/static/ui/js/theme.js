@@ -25,11 +25,15 @@ const CATALOGUE = [
   { id: 'catppuccin-frappe',   label: 'Catppuccin Frappé',   dark: true,  group: 'catppuccin' },
   { id: 'catppuccin-macchiato',label: 'Catppuccin Macchiato',dark: true,  group: 'catppuccin' },
   { id: 'catppuccin-mocha',    label: 'Catppuccin Mocha',    dark: true,  group: 'catppuccin' },
+  { id: 'ayu-dark',            label: 'Ayu Dark',            dark: true  },
   { id: 'dracula',             label: 'Dracula',             dark: true  },
+  { id: 'github-dark',         label: 'GitHub Dark',         dark: true,  group: 'github' },
+  { id: 'github-light',        label: 'GitHub Light',        dark: false, group: 'github' },
   { id: 'everforest-dark',     label: 'Everforest Dark',     dark: true  },
   { id: 'gruvbox',             label: 'Gruvbox',             dark: true,  group: 'gruvbox' },
   { id: 'gruvbox-light',       label: 'Gruvbox Light',       dark: false, group: 'gruvbox' },
   { id: 'molokai',             label: 'Molokai',             dark: true  },
+  { id: 'night-owl',           label: 'Night Owl',           dark: true  },
   { id: 'nord',                label: 'Nord',                dark: true  },
   { id: 'one-dark',            label: 'One Dark',            dark: true  },
   { id: 'rose-pine',           label: 'Rosé Pine',           dark: true  },
@@ -39,8 +43,8 @@ const CATALOGUE = [
   { id: 'tokyo-night',         label: 'Tokyo Night',         dark: true  },
 ];
 
-const GROUP_ORDER = ['relay', 'ansi', 'catppuccin', 'gruvbox', 'solarized'];
-const GROUP_LABELS = { relay: 'Relay', ansi: 'ANSI', catppuccin: 'Catppuccin', gruvbox: 'Gruvbox', solarized: 'Solarized' };
+const GROUP_ORDER = ['relay', 'ansi', 'catppuccin', 'github', 'gruvbox', 'solarized'];
+const GROUP_LABELS = { relay: 'Relay', ansi: 'ANSI', catppuccin: 'Catppuccin', github: 'GitHub', gruvbox: 'Gruvbox', solarized: 'Solarized' };
 
 export const THEMES = [
   // Signature themes (Relay Dark then Relay Light) always lead in declaration order.

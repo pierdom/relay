@@ -1,0 +1,15 @@
+# GitHub Light (Primer)
+# Matches the "GitHub Light" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=github-light
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#0969da"   # accent.fg      — accent, interactive elements, borders
+border  = "#d0d7de"   # border.default — widget borders, badges, panel separators
+bg      = "#f6f8fa"   # canvas.subtle  — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+# Used for TTL expiry badges (post_panel) and Textual's success/warning/error
+# theme tokens (notifications, buttons).
+perf_great    = "#1a7f37"  # success / far-future expiry
+perf_bad      = "#9a6700"  # warning / expiry within 3 days
+perf_terrible = "#d1242f"  # error / expired / expiry within 24h

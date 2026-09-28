@@ -1,0 +1,15 @@
+# Night Owl
+# Matches the "Night Owl" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=night-owl
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#82aaff"   # blue           — accent, interactive elements, borders
+border  = "#1d3b53"   # selection      — widget borders, badges, panel separators
+bg      = "#01111d"   # inactive tab   — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+# Used for TTL expiry badges (post_panel) and Textual's success/warning/error
+# theme tokens (notifications, buttons).
+perf_great    = "#addb67"  # success / far-future expiry
+perf_bad      = "#ecc48d"  # warning / expiry within 3 days
+perf_terrible = "#ef5350"  # error / expired / expiry within 24h
