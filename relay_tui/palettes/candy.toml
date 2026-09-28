@@ -1,18 +1,15 @@
-# tuidash colour palette — candy (bold neon sweets)
-# ───────────────────────────────────────────────────
-# Values are either hex colours (#rrggbb) or Rich colour names
-# (e.g. bright_green, cyan, red, bold red, …).
-#
-# Select this palette with:  TUIDASH_PALETTE=candy
+# candy (bold neon sweets)
+# A TUI-only palette — no browser UI theme counterpart.
+# Select with: RELAY_PALETTE=candy
 
-# ── Core palette ─────────────────────────────────────────────────────────────
-primary = "#ff4dd2"   # hot pink             — border titles, clock, nav arrows, accents
-border  = "#7a1a6e"   # deep magenta         — widget / button borders
-bg      = "#150010"   # near-black purple    — header & footer background
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#ff4dd2"   # hot pink      — accent, interactive elements, borders
+border  = "#7a1a6e"   # deep magenta  — widget borders, badges, panel separators
+bg      = "#150010"   # near-black purple — screen, header, footer background
 
-# ── Progress bar gradient (left → right as bar fills) ────────────────────────
-
-# ── Performance heatmap (Ghostfolio stat cells) ───────────────────────────────
-perf_great    = "#4dff91"  # electric lime   — > +10 %
-perf_bad      = "#ffdd00"  # lemon yellow    — −10 to  −5 %
-perf_terrible = "#ff2255"  # cherry red      — < −20 %
+# ── Semantic colours ───────────────────────────────────────────────────────────
+# Used for TTL expiry badges (post_panel) and Textual's success/warning/error
+# theme tokens (notifications, buttons).
+perf_great    = "#4dff91"  # success / far-future expiry
+perf_bad      = "#ffdd00"  # warning / expiry within 3 days
+perf_terrible = "#ff2255"  # error / expired / expiry within 24h

@@ -1,18 +1,15 @@
-# tuidash colour palette — earthy (warm terracotta and sandstone)
-# ──────────────────────────────────────────────────────────────
-# Values are either hex colours (#rrggbb) or Rich colour names
-# (e.g. bright_green, cyan, red, bold red, …).
-#
-# Select this palette with:  TUIDASH_PALETTE=earthy
+# earthy (warm terracotta and sandstone)
+# A TUI-only palette — no browser UI theme counterpart.
+# Select with: RELAY_PALETTE=earthy
 
-# ── Core palette ─────────────────────────────────────────────────────────────
-primary = "#c8a96e"   # warm amber/sandstone — border titles, clock, nav arrows, accents
-border  = "#5c4427"   # dark bark brown      — widget / button borders
-bg      = "#1a1208"   # very dark rich brown — header & footer background
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#c8a96e"   # warm amber/sandstone — accent, interactive elements, borders
+border  = "#5c4427"   # dark bark brown — widget borders, badges, panel separators
+bg      = "#1a1208"   # very dark rich brown — screen, header, footer background
 
-# ── Progress bar gradient (left → right as bar fills) ────────────────────────
-
-# ── Performance heatmap (Ghostfolio stat cells) ───────────────────────────────
-perf_great    = "#7a9e4e"  # sage green   — > +10 %
-perf_bad      = "#c8a96e"  # amber        — −10 to  −5 %
-perf_terrible = "#8b2a1a"  # deep rust    — < −20 %
+# ── Semantic colours ───────────────────────────────────────────────────────────
+# Used for TTL expiry badges (post_panel) and Textual's success/warning/error
+# theme tokens (notifications, buttons).
+perf_great    = "#7a9e4e"  # success / far-future expiry
+perf_bad      = "#c8a96e"  # warning / expiry within 3 days
+perf_terrible = "#8b2a1a"  # error / expired / expiry within 24h

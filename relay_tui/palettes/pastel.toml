@@ -1,18 +1,15 @@
-# tuidash colour palette — pastel (soft lavender and muted rainbow)
-# ────────────────────────────────────────────────────────────────
-# Values are either hex colours (#rrggbb) or Rich colour names
-# (e.g. bright_green, cyan, red, bold red, …).
-#
-# Select this palette with:  TUIDASH_PALETTE=pastel
+# pastel (soft lavender and muted rainbow)
+# A TUI-only palette — no browser UI theme counterpart.
+# Select with: RELAY_PALETTE=pastel
 
-# ── Core palette ─────────────────────────────────────────────────────────────
-primary = "#c9a0dc"   # soft lavender        — border titles, clock, nav arrows, accents
-border  = "#6b4f8a"   # muted violet         — widget / button borders
-bg      = "#13101c"   # very dark violet     — header & footer background
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#c9a0dc"   # soft lavender — accent, interactive elements, borders
+border  = "#6b4f8a"   # muted violet  — widget borders, badges, panel separators
+bg      = "#13101c"   # very dark violet — screen, header, footer background
 
-# ── Progress bar gradient (left → right as bar fills) ────────────────────────
-
-# ── Performance heatmap (Ghostfolio stat cells) ───────────────────────────────
-perf_great    = "#8ecf9e"  # soft mint green    — > +10 %
-perf_bad      = "#f0d090"  # soft buttercup     — −10 to  −5 %
-perf_terrible = "#f09090"  # soft rose          — < −20 %
+# ── Semantic colours ───────────────────────────────────────────────────────────
+# Used for TTL expiry badges (post_panel) and Textual's success/warning/error
+# theme tokens (notifications, buttons).
+perf_great    = "#8ecf9e"  # success / far-future expiry
+perf_bad      = "#f0d090"  # warning / expiry within 3 days
+perf_terrible = "#f09090"  # error / expired / expiry within 24h

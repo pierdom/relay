@@ -247,3 +247,68 @@ def test_decorative_chips_stay_legible():
             if got < FLOOR_CHIP:
                 failures.append(f"{theme}: {token} on its chip is {got:.2f}:1 (floor {FLOOR_CHIP})")
     assert not failures, "chips below the legibility floor:\n  " + "\n  ".join(failures)
+
+
+# ── Text roles the floors above never covered ────────────────────────────────
+# `--body`/`--text`/`--on-accent` and the chips were tested; the colours most of
+# the UI's *small* text is painted in were not. Timestamps, meta and placeholders
+# are `--muted`; links and tag pills are `--accent` (the pill on `--tag-bg`); the
+# Delete button and errors are `--red`; the live label and Restore are `--green`;
+# a hovered primary button is `--on-accent` on `--accent-dim`. The v1.16.2 audit
+# found Relay Dark's own muted text at 2.51:1 and six themes' hovered buttons
+# under 3.4:1. All are 9-12px, so the floor is WCAG AA for normal text.
+FLOOR_TEXT_ROLE = 4.5
+TEXT_ROLES = [
+    ("--muted", "--surface"),
+    ("--muted", "--bg"),          # the sidebar sits on the canvas
+    ("--accent", "--surface"),
+    ("--accent", "--tag-bg"),
+    ("--red", "--surface"),
+    ("--green", "--surface"),
+    ("--on-accent", "--accent-dim"),
+]
+
+# Where a faithful palette has no member that reaches the floor for a role —
+# its brightest red, its only green, Solarized's one-step-per-hue blue — the gap
+# is recorded here with its measured value rather than papered over with a
+# colour the scheme does not contain. Same drift rules as REPRODUCTIONS.
+TEXT_ROLE_EXCEPTIONS = {
+    ("ansi-light", "--green", "--surface"): 3.11,
+    ("catppuccin-latte", "--green", "--surface"): 2.96,
+    ("dracula", "--muted", "--surface"): 3.03,
+    ("dracula", "--muted", "--bg"): 3.36,
+    ("gruvbox", "--red", "--surface"): 4.29,
+    ("gruvbox-light", "--green", "--surface"): 4.29,
+    ("molokai", "--red", "--surface"): 4.07,
+    ("nord", "--red", "--surface"): 3.05,
+    ("one-dark", "--red", "--surface"): 4.38,
+    ("solarized-dark", "--accent", "--surface"): 4.08,
+    ("solarized-dark", "--accent", "--tag-bg"): 3.53,
+    ("solarized-dark", "--red", "--surface"): 3.25,
+    ("solarized-light", "--accent", "--surface"): 3.41,
+    ("solarized-light", "--accent", "--tag-bg"): 3.12,
+    ("solarized-light", "--red", "--surface"): 4.29,
+    ("solarized-light", "--green", "--surface"): 2.97,
+    ("solarized-light", "--muted", "--bg"): 4.39,
+    ("tokyo-night", "--muted", "--surface"): 4.10,
+    ("tokyo-night", "--muted", "--bg"): 4.31,
+}
+
+
+def test_small_text_roles_clear_aa():
+    themes = _hex_tokens()
+    failures = []
+    for theme, tokens in sorted(themes.items()):
+        for fg, bg in TEXT_ROLES:
+            got = _contrast(tokens[fg], tokens[bg])
+            recorded = TEXT_ROLE_EXCEPTIONS.get((theme, fg, bg))
+            if recorded is not None:
+                if abs(got - recorded) > 0.05:
+                    failures.append(f"{theme}: {fg} on {bg} recorded at {recorded}:1, now {got:.2f}:1 — update it")
+                elif got >= FLOOR_TEXT_ROLE:
+                    failures.append(f"{theme}: {fg} on {bg} now clears AA; drop it from TEXT_ROLE_EXCEPTIONS")
+            elif got < FLOOR_TEXT_ROLE:
+                failures.append(f"{theme}: {fg} on {bg} is {got:.2f}:1 (floor {FLOOR_TEXT_ROLE})")
+    stale = {key for key in TEXT_ROLE_EXCEPTIONS if key[0] not in themes}
+    assert not stale, f"exceptions for themes that no longer exist: {sorted(stale)}"
+    assert not failures, "small text below AA:\n  " + "\n  ".join(failures)

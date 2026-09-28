@@ -171,7 +171,8 @@ def test_the_picker_orders_by_family_group_then_alphabetically(page):
     ungrouped singletons trail alphabetically.
 
     Named families: Relay → ANSI → Catppuccin → Gruvbox → Solarized.
-    Singletons (Dracula, Everforest Dark, Molokai, Nord, Tokyo Night) come last.
+    Singletons (Dracula, Everforest Dark, Kanagawa, Molokai, Nord, One Dark,
+    Rosé Pine, Tokyo Night) come last.
     Within each group themes are alphabetical.
     """
     page.locator("#themeBtn").click()
@@ -189,7 +190,8 @@ def test_the_picker_orders_by_family_group_then_alphabetically(page):
         'Gruvbox':    ['Gruvbox', 'Gruvbox Light'],
         'Solarized':  ['Solarized Dark', 'Solarized Light'],
     }
-    singles = sorted(['Dracula', 'Everforest Dark', 'Molokai', 'Nord', 'Tokyo Night'])
+    singles = sorted(['Dracula', 'Everforest Dark', 'Kanagawa', 'Molokai', 'Nord', 'One Dark',
+                      'Rosé Pine', 'Tokyo Night'])
 
     for family, members in families.items():
         positions = [labels.index(m) for m in members]
