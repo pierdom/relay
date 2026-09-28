@@ -8,14 +8,14 @@
 # is base01 (shared with Dark — Solarized reuses it as-is on both), `bg` is
 # base2. See app.css's Solarized Light block for the full rationale.
 
-# ── Core palette ─────────────────────────────────────────────────────────────
-primary = "#268bd2"   # blue   — border titles, clock, nav arrows, accents
-border  = "#586e75"   # base01 — widget / button borders
-bg      = "#eee8d5"   # base2  — header & footer background
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#268bd2"   # blue          — accent, interactive elements, borders
+border  = "#586e75"   # base01        — widget borders, badges, panel separators
+bg      = "#eee8d5"   # base2         — screen, header, footer background
 
-# ── Progress bar gradient (left → right as bar fills) ────────────────────────
-
-# ── Performance heatmap ───────────────────────────────────────────────────────
-perf_great    = "#859900"  # green   — > +10 %
-perf_bad      = "#b58900"  # yellow  — −10 to  −5 %
-perf_terrible = "#dc322f"  # red     — < −20 %
+# ── Semantic colours ───────────────────────────────────────────────────────────
+# Used for TTL expiry badges (post_panel) and Textual's success/warning/error
+# theme tokens (notifications, buttons).
+perf_great    = "#859900"  # success / far-future expiry
+perf_bad      = "#b58900"  # warning / expiry within 3 days
+perf_terrible = "#dc322f"  # error / expired / expiry within 24h

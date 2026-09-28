@@ -89,7 +89,7 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `MCP_OAUTH_ENABLED` | `false` | Turn `/mcp` into an OAuth 2.1 AS+RS for remote clients via Dynamic Client Registration; the static `API_KEY` still works |
 | `MCP_REQUIRED_SCOPES` | `relay` | Scope required on `/mcp` |
 | `MCP_ALLOWED_REDIRECT_HOSTS` | `claude.ai,claude.com,chatgpt.com,*.mistral.ai` | DCR redirect-URI host allowlist, https only; blank = any https. Each entry is an exact host or a `*.`-prefixed suffix matching that domain's subdomains only — not its own bare apex, so list both (`mistral.ai,*.mistral.ai`) if you need the apex too. Add other clients as needed |
-| `RELAY_PALETTE` | `default` | TUI colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `solarized-light`, `molokai`, `candy`, `earthy`, `pastel`, `tango`, `tokyo-night`, `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`) |
+| `RELAY_PALETTE` | `default` | TUI colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `solarized-light`, `molokai`, `candy`, `earthy`, `pastel`, `tango`, `tokyo-night`, `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `rose-pine`, `one-dark`, `kanagawa`) |
 | `RELAY_TRANSPARENT` | `0` | TUI: let the terminal background show through the canvas |
 
 **Docker-only**, read by `docker-compose.yml` rather than by relay itself:

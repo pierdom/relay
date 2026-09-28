@@ -28,7 +28,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --surface:     #0f1116;
   --border:      #1d2230;
   --text:        #d8dde8;
-  --muted:       #4a5568;
+  --muted:       #718096;   /* 4.70:1 on --surface — #4a5568 was 2.51, timestamps barely there */
   --accent:      #f59e0b;
   --accent-dim:  #d97706;
   --accent-glow: rgba(245, 158, 11, 0.10);
@@ -75,10 +75,10 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --surface:     #ffffff;
   --border:      #d2ccbb;
   --text:        #1c1e24;
-  --muted:       #736e5d;
-  --accent:      #b96809;
-  --accent-dim:  #914f06;
-  --accent-glow: rgba(185, 104, 9, 0.12);
+  --muted:       #6b6656;   /* 4.77:1 on --bg (the sidebar), 5.74 on --surface — #736e5d was 4.24 */
+  --accent:      #935305;   /* 6.03:1 as text on white, 5.15 on --tag-bg */
+  --accent-dim:  #7a4404;   /* hover fill: 7.91:1 under --on-accent */
+  --accent-glow: rgba(147, 83, 5, 0.12);
   --tag-bg:      #f7ecd6;
   --tag-active:  #efe0c0;
   --green:       #047857;
@@ -89,7 +89,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
 
   --accent-2:      #6d28d9;            /* violet, deep step to match this theme */
   --accent-3:      #0e7490;            /* cyan, deep step */
-  --on-accent:     #000;               /* 5.05:1 on #b96809 — white would be 4.16:1 */
+  --on-accent:     #fff;   /* 6.03:1 on #935305 */
   --on-scrim:      #eee;
   --border-hover:  #b8b09a;
   --scrim-rgb:     0, 0, 0;
@@ -115,7 +115,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --surface:     #282828;   /* bg0 */
   --border:      #504945;   /* bg2 */
   --text:        #fbf1c7;   /* fg0 — the brightest fg, not fg1 */
-  --muted:       #928374;   /* gray */
+  --muted:       #a89984;   /* fg4 — gray was 4.02:1 */
   --accent:      #fabd2f;   /* yellow */
   --accent-dim:  #d79921;   /* neutral yellow */
   --accent-glow: rgba(250, 189, 47, 0.10);
@@ -170,7 +170,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --surface:     #1a1b26;   /* night bg — cards sit on the theme's signature tone */
   --border:      #3b4261;   /* fg_gutter */
   --text:        #c0caf5;   /* fg */
-  --muted:       #565f89;   /* comment */
+  --muted:       #737aa2;   /* dark5 — comment (#565f89) was 2.76:1; see TEXT_ROLE_EXCEPTIONS */
   --accent:      #0db9d7;   /* blue2 — see block note on why not the pastel `blue` */
   --accent-dim:  #41a6b5;   /* green2 — blue2's hue-neighbour, not blue0 */
   --accent-glow: rgba(13, 185, 215, 0.10);
@@ -279,7 +279,9 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
 
 /* Catppuccin — four flavours, from catppuccin.com/palette. Role mapping follows
    the project's own guidance: `mantle` is the canvas and `base` the raised
-   surface, `surface0/1/2` step up through borders, `overlay1` is muted.
+   surface, `surface0/1/2` step up through borders. Muted is the first step of
+   the text ramp that reaches AA as meta text — `overlay2` (subtext1 on Latte);
+   `overlay1`, the guidance's "subtle" tone, sat at 2.8–4.1:1.
 
    **The three dark flavours carry different accents on purpose.** Built to the
    letter they were near-indistinguishable: Catppuccin varies its backgrounds
@@ -332,11 +334,11 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --surface:     #eff1f5;     /* base */
   --border:      #ccd0da;     /* surface0 */
   --text:        #4c4f69;     /* text */
-  --muted:       #8c8fa1;     /* overlay1 */
+  --muted:       #5c5f77;   /* subtext1 — overlay1 was 2.83:1 */
   --accent:      #8839ef;     /* mauve — Catppuccin's own default accent */
-  --accent-dim:  #7287fd;     /* lavender */
+  --accent-dim:  #4c4f69;   /* text — hover fill; lavender under base was 2.81:1 */
   --accent-glow: rgba(136, 57, 239, 0.10);
-  --tag-bg:      #ccd0da;     /* surface0 */
+  --tag-bg:      #eff1f5;   /* base — mauve on surface0 was 3.51:1; the pill is its outline */
   --tag-active:  #bcc0cc;     /* surface1 */
   --green:       #40a02b;     /* green */
   --red:         #d20f39;     /* red */
@@ -362,11 +364,11 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --surface:     #303446;     /* base */
   --border:      #414559;     /* surface0 */
   --text:        #c6d0f5;     /* text */
-  --muted:       #838ba7;     /* overlay1 */
+  --muted:       #949cbb;   /* overlay2 — overlay1 was 3.65:1 */
   --accent:      #ef9f76;     /* peach — Frappé's signature here, see note */
   --accent-dim:  #e5c890;     /* yellow */
   --accent-glow: rgba(239, 159, 118, 0.10);
-  --tag-bg:      #414559;     /* surface0 */
+  --tag-bg:      #292c3c;   /* mantle — peach on surface0 was 4.45:1 */
   --tag-active:  #51576d;     /* surface1 */
   --green:       #a6d189;     /* green */
   --red:         #e78284;     /* red */
@@ -392,7 +394,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --surface:     #24273a;     /* base */
   --border:      #363a4f;     /* surface0 */
   --text:        #cad3f5;     /* text */
-  --muted:       #8087a2;     /* overlay1 */
+  --muted:       #939ab7;   /* overlay2 — overlay1 was 4.14:1 */
   --accent:      #8aadf4;     /* blue — Macchiato's signature here */
   --accent-dim:  #7dc4e4;     /* sapphire */
   --accent-glow: rgba(138, 173, 244, 0.10);
@@ -447,13 +449,15 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
 }
 
 /* Dracula.
-   Dracula publishes four neutrals — Background, Current Line/Selection, Comment,
-   Foreground — and no darker shade, so cards are framed rather than filled, the
-   same answer the ANSI pair reached for the same reason. `Current Line` is
-   Dracula's own divider colour, which is exactly what a card border is. */
+   The spec's four neutrals — Background, Current Line/Selection, Comment,
+   Foreground — plus BGDark (#21222c), which the official VS Code theme uses for
+   its sidebar and panels: that is the canvas, so cards on Background read as
+   raised instead of the page being one flat colour. `Current Line` is Dracula's
+   own divider colour, which is exactly what a card border is. Comment is the
+   palette's only muted tone and sits at 3.03:1 — see TEXT_ROLE_EXCEPTIONS. */
 :root[data-theme="dracula"], [data-theme="dracula"] {
   color-scheme: dark;
-  --bg:          #282a36;
+  --bg:          #21222c;   /* BGDark — canvas one step below the cards */
   --surface:     #282a36;
   --border:      #44475a;
   --text:        #f8f8f2;
@@ -461,7 +465,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --accent:      #bd93f9;
   --accent-dim:  #ff79c6;
   --accent-glow: rgba(189, 147, 249, 0.10);
-  --tag-bg:      #44475a;
+  --tag-bg:      #21222c;   /* BGDark — purple on Current Line was 3.79:1 */
   --tag-active:  #6272a4;
   --green:       #50fa7b;
   --red:         #ff5555;
@@ -485,15 +489,16 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
    `--green` takes **aqua** rather than green: Everforest's green is its accent,
    and a connected-dot indistinguishable from the accent is the trade the ANSI
    themes already refused. Aqua still reads as green, so the signal survives.
-   Cards are framed on bg0 rather than filled with bg1 — on bg1 its own
-   foreground falls to 6.40:1, under the accessibility floor. */
+   Cards are bg0 on a bg_dim canvas — the palette's own "dimmed" step, so the
+   foreground stays on bg0 (on bg1 it falls to 6.40:1, under the floor) while
+   the page still gets depth. Muted is grey2: grey1 was 3.84:1. */
 :root[data-theme="everforest-dark"], [data-theme="everforest-dark"] {
   color-scheme: dark;
-  --bg:          #2d353b;
+  --bg:          #232a2e;   /* bg_dim — canvas one step below the cards */
   --surface:     #2d353b;
   --border:      #475258;
   --text:        #d3c6aa;
-  --muted:       #859289;
+  --muted:       #9da9a0;   /* grey2 — grey1 was 3.84:1 */
   --accent:      #a7c080;
   --accent-dim:  #dbbc7f;
   --accent-glow: rgba(167, 192, 128, 0.10);
@@ -530,11 +535,11 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --surface:     #fbf1c7;
   --border:      #d5c4a1;
   --text:        #282828;
-  --muted:       #7c6f64;
+  --muted:       #665c54;   /* fg3 — fg4 was 4.29:1 */
   --accent:      #af3a03;
-  --accent-dim:  #b57614;
+  --accent-dim:  #9d0006;   /* faded_red — hover fill; faded_yellow under bg0 was 3.33:1 */
   --accent-glow: rgba(175, 58, 3, 0.10);
-  --tag-bg:      #ebdbb2;
+  --tag-bg:      #f2e5bc;   /* bg0_s — orange on bg1 was 4.46:1 */
   --tag-active:  #d5c4a1;
   --green:       #79740e;
   --red:         #9d0006;
@@ -615,7 +620,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --text:        #eceff4;
   --muted:       #81a1c1;
   --accent:      #88c0d0;
-  --accent-dim:  #5e81ac;
+  --accent-dim:  #81a1c1;   /* nord9 — hover fill; nord10 under nord0 was 3.10:1 */
   --accent-glow: rgba(136, 192, 208, 0.10);
   --tag-bg:      #3b4252;
   --tag-active:  #434c5e;
@@ -637,10 +642,14 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
 }
 
-/* Solarized Dark / Solarized Light (Ethan Schoonover). Both draw only from the
-   official 8-tone base scale (base03…base3) plus the 8 accent hues — nothing
-   mixed in — but the scale is *reassigned*, not read off in its canonical
-   roles.
+/* Solarized Dark / Solarized Light (Ethan Schoonover). Drawn from the official
+   8-tone base scale (base03…base3) and the 8 accent hues, except the tag fills
+   (Dark's hover fill, Light's fill and hover), which sit between base tones the
+   scale has no step for. The scale is *reassigned*, not read off in its canonical roles.
+   Dark frames its cards on base03 — Solarized's own background — with base02
+   (its "background highlight") for fills and borders; base02 as a raised card
+   surface put every accent a full step closer to the text it sits on. Hover
+   fills take cyan: the darkened blue under black text was 3.32:1.
 
    Solarized's own prose colour is base0 on dark / base00 on light, and both
    sit below this project's 7:1 accessibility floor (4.75:1 and 4.13:1 against
@@ -648,9 +657,11 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
    thesis, not an oversight, but it fails the floor here regardless. So `--body`
    and `--text` are promoted to the scale's brighter step — base2/base3 on
    dark, base02/base03 on light — the "background highlight" tones in the
-   official spec, repurposed as foreground. Still nothing outside the 8 tones;
-   it clears the house target outright (10.6:1 / 12.1:1 body), so unlike the
-   Catppuccin flavours this needed no entry in REPRODUCTIONS.
+   official spec, repurposed as foreground. It clears the house target
+   outright (12.3:1 / 12.1:1 body), so unlike the Catppuccin flavours this
+   needed no entry in REPRODUCTIONS. The accents cannot be lifted the same way —
+   one step per hue — so blue as link/pill text and red and green as text stay
+   under AA; each is recorded in TEXT_ROLE_EXCEPTIONS.
 
    `--accent` is the signature blue. `--on-accent` is plain black rather than
    base03 — base03-on-blue is 4.08:1, under the floor; black reaches 5.71:1,
@@ -662,14 +673,14 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
 :root[data-theme="solarized-dark"], [data-theme="solarized-dark"] {
   color-scheme: dark;
   --bg:          #002b36;   /* base03 */
-  --surface:     #073642;   /* base02 — background highlights, raised over base03 */
-  --border:      #586e75;   /* base01 — "comments", the palette's only mid-grey */
+  --surface:     #002b36;   /* base03 — Solarized's own background; cards are framed */
+  --border:      #073642;   /* base02 — base01 framed every card at 2.4:1, harsher than any peer */
   --text:        #fdf6e3;   /* base3 — promoted; see block note */
-  --muted:       #657b83;   /* base00 */
+  --muted:       #839496;   /* base0 — base00 was 2.92:1 */
   --accent:      #268bd2;   /* blue */
-  --accent-dim:  #1b6497;   /* blue, darkened — Solarized has one step per hue */
+  --accent-dim:  #2aa198;   /* cyan — hover fill; darkened blue under black was 3.32:1 */
   --accent-glow: rgba(38, 139, 210, 0.10);
-  --tag-bg:      #093d4e;
+  --tag-bg:      #073642;   /* base02 */
   --tag-active:  #0d455c;
   --green:       #859900;
   --red:         #dc322f;
@@ -681,7 +692,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --accent-3:      #fdf6e3;   /* text — see block note */
   --on-accent:     #000;      /* 5.71:1 on #268bd2 — base03 only reaches 4.08:1 */
   --on-scrim:      #fdf6e3;
-  --border-hover:  #819090;
+  --border-hover:  #586e75;   /* base01 */
   --scrim-rgb:     0, 43, 54;   /* base03 */
   --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.40);
   --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.40);
@@ -693,11 +704,11 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   color-scheme: light;
   --bg:          #eee8d5;   /* base2 */
   --surface:     #fdf6e3;   /* base3 — the lightest tone, cards at the ceiling */
-  --border:      #586e75;   /* base01 — same value as Dark; Solarized reuses it as-is */
+  --border:      #93a1a1;   /* base1 — base01 framed every card at 5:1, harsher than any peer */
   --text:        #002b36;   /* base03 — promoted; see block note */
-  --muted:       #657b83;   /* base00 — the palette's own "body text on light" role */
+  --muted:       #586e75;   /* base01 — base00 was 4.13:1 */
   --accent:      #268bd2;   /* blue */
-  --accent-dim:  #1b6497;   /* blue, darkened */
+  --accent-dim:  #2aa198;   /* cyan — hover fill, as in Dark */
   --accent-glow: rgba(38, 139, 210, 0.10);
   --tag-bg:      #ecede2;
   --tag-active:  #d6e3e0;
@@ -711,7 +722,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --accent-3:      #002b36;   /* text — see block note */
   --on-accent:     #000;      /* 5.71:1 on #268bd2, same accent as Dark */
   --on-scrim:      #fdf6e3;
-  --border-hover:  #466168;
+  --border-hover:  #586e75;   /* base01 */
   --scrim-rgb:     0, 43, 54;   /* base03, matching --text like Gruvbox Light does */
   --shadow-card:   0 4px 16px rgba(0, 0, 0, 0.12);
   --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.14);
@@ -719,6 +730,111 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.16);
 }
 
+/* Rosé Pine (rose-pine.io, main variant). Every value is a named palette member:
+   `base` canvas, `surface` cards, `overlay` chip fills, the three `highlight`
+   steps for borders. Muted is `subtle`, not `muted` — the palette's own
+   "muted" is 3.20:1 on surface, below AA for meta text. The accent is the
+   name-sake `rose`, deepening to `love` on hover as the palette pairs them.
+   Rosé Pine has no green: `foam` stands in for `--green`, the way Everforest's
+   aqua does, since the connected dot and Restore only need to read as "ok". */
+:root[data-theme="rose-pine"], [data-theme="rose-pine"] {
+  color-scheme: dark;
+  --bg:          #191724;   /* base */
+  --surface:     #1f1d2e;   /* surface */
+  --border:      #403d52;   /* highlight med */
+  --text:        #e0def4;   /* text */
+  --muted:       #908caa;   /* subtle — `muted` is 3.20:1 */
+  --accent:      #ebbcba;   /* rose */
+  --accent-dim:  #eb6f92;   /* love */
+  --accent-glow: rgba(235, 188, 186, 0.10);
+  --tag-bg:      #26233a;   /* overlay */
+  --tag-active:  #403d52;   /* highlight med */
+  --green:       #9ccfd8;   /* foam — the palette has no green */
+  --red:         #eb6f92;   /* love */
+  --body:        #e0def4;   /* text */
+  --body-strong: #e0def4;   /* text */
+  --wash-raise:  rgba(224, 222, 244, 0.04);
+  --accent-2:      #c4a7e7;   /* iris */
+  --accent-3:      #f6c177;   /* gold */
+  --on-accent:     #191724;   /* base */
+  --on-scrim:      #e0def4;
+  --border-hover:  #524f67;   /* highlight high */
+  --scrim-rgb:     25, 23, 36;   /* base */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+/* One Dark (Atom). The editor background #282c34 carries the cards and the UI
+   chrome's darker #21252b is the canvas, as Atom itself lays them out. One
+   Dark's foreground #abb2bf is 6.57:1 — under the 7:1 floor — so it steps down
+   to muted, and text/body are promoted to the palette's white #dcdfe4 (its
+   terminal white), the same promotion Solarized makes. The comment grey
+   (#5c6370, 2.32:1) is too faint for any text role. Chips skip the purple
+   (4.09:1 on its tint) for cyan and yellow; red is recorded in
+   TEXT_ROLE_EXCEPTIONS at 4.38:1, the palette's only red. */
+:root[data-theme="one-dark"], [data-theme="one-dark"] {
+  color-scheme: dark;
+  --bg:          #21252b;   /* UI chrome */
+  --surface:     #282c34;   /* editor background */
+  --border:      #3e4451;   /* selection */
+  --text:        #dcdfe4;   /* white — promoted; see block note */
+  --muted:       #abb2bf;   /* foreground, stepped down */
+  --accent:      #61afef;   /* blue */
+  --accent-dim:  #56b6c2;   /* cyan */
+  --accent-glow: rgba(97, 175, 239, 0.10);
+  --tag-bg:      #21252b;   /* UI chrome */
+  --tag-active:  #3e4451;   /* selection */
+  --green:       #98c379;
+  --red:         #e06c75;
+  --body:        #dcdfe4;   /* white */
+  --body-strong: #dcdfe4;
+  --wash-raise:  rgba(220, 223, 228, 0.04);
+  --accent-2:      #56b6c2;   /* cyan */
+  --accent-3:      #e5c07b;   /* yellow */
+  --on-accent:     #282c34;
+  --on-scrim:      #dcdfe4;
+  --border-hover:  #4b5263;   /* gutter grey */
+  --scrim-rgb:     33, 37, 43;   /* UI chrome */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
+/* Kanagawa (rebelot/kanagawa.nvim, wave). The sumiInk ramp does the layout —
+   ink0 canvas, ink3 cards (the editor background), ink4 chip fills, ink5/ink6
+   borders — with fujiWhite text at 11.3:1. The accent is crystalBlue, the
+   palette's function colour, easing to springBlue on hover. Muted is
+   springViolet1: the comment grey fujiGray is 3.33:1. Chips are sakuraPink and
+   carpYellow — the violets land under AA on their own tint. */
+:root[data-theme="kanagawa"], [data-theme="kanagawa"] {
+  color-scheme: dark;
+  --bg:          #16161d;   /* sumiInk0 */
+  --surface:     #1f1f28;   /* sumiInk3 */
+  --border:      #363646;   /* sumiInk5 */
+  --text:        #dcd7ba;   /* fujiWhite */
+  --muted:       #938aa9;   /* springViolet1 — fujiGray is 3.33:1 */
+  --accent:      #7e9cd8;   /* crystalBlue */
+  --accent-dim:  #7fb4ca;   /* springBlue */
+  --accent-glow: rgba(126, 156, 216, 0.10);
+  --tag-bg:      #2a2a37;   /* sumiInk4 */
+  --tag-active:  #363646;   /* sumiInk5 */
+  --green:       #98bb6c;   /* springGreen */
+  --red:         #e46876;   /* waveRed */
+  --body:        #dcd7ba;   /* fujiWhite */
+  --body-strong: #dcd7ba;
+  --wash-raise:  rgba(220, 215, 186, 0.04);
+  --accent-2:      #d27e99;   /* sakuraPink */
+  --accent-3:      #e6c384;   /* carpYellow */
+  --on-accent:     #16161d;   /* sumiInk0 */
+  --on-scrim:      #dcd7ba;
+  --border-hover:  #54546d;   /* sumiInk6 */
+  --scrim-rgb:     22, 22, 29;   /* sumiInk0 */
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.42);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.42);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
+}
 html { color: var(--text); }   /* see note in tests/test_css_tokens.py */
 
 body {
@@ -791,7 +907,7 @@ header {
   min-width: 236px; padding: 4px;
   /* Fifteen themes is taller than a short window. Scroll the menu rather than
      letting it run off the bottom of the screen. */
-  max-height: min(70vh, 560px); overflow-y: auto; overscroll-behavior: contain;
+  max-height: min(80vh, 760px); overflow-y: auto; overscroll-behavior: contain;
   background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
   box-shadow: var(--shadow-modal);
   animation: modalIn 0.14s ease backwards;
@@ -1864,8 +1980,12 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .post-footer-left { display: flex; align-items: center; gap: 8px; }
 
 /* ── Post expires label ──────────────────────────────── */
+/* --accent, not --accent-dim: -dim is tuned as a hover *fill* under --on-accent
+   (its text contrast is not a theme's concern), and as 10px text it fell to
+   2.93:1 on Solarized Light. --accent's text contrast is held by
+   test_small_text_roles_clear_aa. */
 .post-expires {
-  font-size: 10px; color: var(--accent-dim); letter-spacing: 0.02em;
+  font-size: 10px; color: var(--accent); letter-spacing: 0.02em;
   margin-left: 8px;
 }
 

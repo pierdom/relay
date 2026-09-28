@@ -1,0 +1,17 @@
+# Rosé Pine (main)
+# Matches the "Rosé Pine" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=rose-pine
+#
+# foam stands in for success: the palette has no green.
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#ebbcba"   # rose          — accent, interactive elements, borders
+border  = "#403d52"   # highlight med — widget borders, badges, panel separators
+bg      = "#191724"   # base          — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+# Used for TTL expiry badges (post_panel) and Textual's success/warning/error
+# theme tokens (notifications, buttons).
+perf_great    = "#9ccfd8"  # success / far-future expiry
+perf_bad      = "#f6c177"  # warning / expiry within 3 days
+perf_terrible = "#eb6f92"  # error / expired / expiry within 24h

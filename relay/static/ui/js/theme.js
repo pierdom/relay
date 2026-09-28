@@ -31,6 +31,9 @@ const CATALOGUE = [
   { id: 'gruvbox-light',       label: 'Gruvbox Light',       dark: false, group: 'gruvbox' },
   { id: 'molokai',             label: 'Molokai',             dark: true  },
   { id: 'nord',                label: 'Nord',                dark: true  },
+  { id: 'one-dark',            label: 'One Dark',            dark: true  },
+  { id: 'rose-pine',           label: 'Rosé Pine',           dark: true  },
+  { id: 'kanagawa',            label: 'Kanagawa',            dark: true  },
   { id: 'solarized-dark',      label: 'Solarized Dark',      dark: true,  group: 'solarized' },
   { id: 'solarized-light',     label: 'Solarized Light',     dark: false, group: 'solarized' },
   { id: 'tokyo-night',         label: 'Tokyo Night',         dark: true  },
@@ -104,14 +107,13 @@ function buildMenu() {
         sep.setAttribute('role', 'separator');
         themeMenu.appendChild(sep);
       }
-      // Named groups get a label; the ungrouped trailing section gets only the hairline.
-      if (theme.group) {
-        const gl = document.createElement('div');
-        gl.className = 'theme-group-label';
-        gl.setAttribute('aria-hidden', 'true');
-        gl.textContent = GROUP_LABELS[theme.group];
-        themeMenu.appendChild(gl);
-      }
+      // Every section gets a label — the ungrouped trailing one too: at eight
+      // singletons a bare hairline read as "the list ends here".
+      const gl = document.createElement('div');
+      gl.className = 'theme-group-label';
+      gl.setAttribute('aria-hidden', 'true');
+      gl.textContent = theme.group ? GROUP_LABELS[theme.group] : 'More';
+      themeMenu.appendChild(gl);
       prevGroup = theme.group;
     }
 

@@ -1,15 +1,15 @@
-# Tango (GNOME / freedesktop.org)
-# A TUI-only palette — no browser UI theme counterpart.
-# Select with: RELAY_PALETTE=tango
+# Kanagawa (wave)
+# Matches the "Kanagawa" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=kanagawa
 
 # ── Core ──────────────────────────────────────────────────────────────────────
-primary = "#729fcf"   # sky blue 1    — accent, interactive elements, borders
-border  = "#555753"   # aluminium 4   — widget borders, badges, panel separators
-bg      = "#2e3436"   # aluminium 6   — screen, header, footer background
+primary = "#7e9cd8"   # crystalBlue   — accent, interactive elements, borders
+border  = "#363646"   # sumiInk5      — widget borders, badges, panel separators
+bg      = "#16161d"   # sumiInk0      — screen, header, footer background
 
 # ── Semantic colours ───────────────────────────────────────────────────────────
 # Used for TTL expiry badges (post_panel) and Textual's success/warning/error
 # theme tokens (notifications, buttons).
-perf_great    = "#73d216"  # success / far-future expiry
-perf_bad      = "#edd400"  # warning / expiry within 3 days
-perf_terrible = "#cc0000"  # error / expired / expiry within 24h
+perf_great    = "#98bb6c"  # success / far-future expiry
+perf_bad      = "#e6c384"  # warning / expiry within 3 days
+perf_terrible = "#e46876"  # error / expired / expiry within 24h

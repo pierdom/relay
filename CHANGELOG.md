@@ -4,6 +4,27 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.16.2] — 2026-09-28
+
+Theme review: every theme rendered and compared against its upstream palette, and a contrast audit of the small-text roles no test covered. Across those roles, 48 pairs sat below WCAG AA in the 17 themes; 19 remain in 20, each a documented limit of its palette.
+
+### Added
+- Three themes: **Rosé Pine** (main), **One Dark** and **Kanagawa** (wave), each built from its own palette, in the browser UI and as TUI palettes (`RELAY_PALETTE=rose-pine|one-dark|kanagawa`). Considered and rejected: Rosé Pine Dawn and Everforest Light — their own text colours sit at or below the 7:1 body floor, and most of their accents under AA
+- `test_small_text_roles_clear_aa`: muted text (on cards and on the sidebar canvas), accent text on cards and tag pills, red/green text, and hovered primary buttons must clear 4.5:1; palette limits are recorded with their measured value in `TEXT_ROLE_EXCEPTIONS`
+
+### Fixed
+- Muted text (timestamps, meta, placeholders, sidebar labels) was below AA in twelve themes — Relay Dark, the default, at 2.51:1. Raised by moving to the next tone of each palette's own ramp (Catppuccin overlay2/subtext1, Gruvbox fg4/fg3, Everforest grey2, Solarized base0/base01, Tokyo Night dark5); Dracula, Tokyo Night and Solarized Light remain recorded where the palette has nothing brighter
+- Hovered primary buttons were unreadable in six themes (Catppuccin Latte 2.81:1, Nord 3.10, Relay Light and both Solarized 3.32, Gruvbox Light 3.33); each hover now uses a palette member that clears AA under the button text
+- Relay Light: the accent moves to a deeper amber (#935305) with white button text — as link and tag text it was 4.16:1 on white and 3.55 on its pill
+- Tag pills below AA in Catppuccin Latte/Frappé, Dracula and Gruvbox Light now sit on a fill the accent reads on
+- The "expires in…" card label used the hover colour as text; it now uses the accent
+- Solarized: cards are framed on base03 — Solarized's own background — with base02 borders; the base01 borders (5:1 on Light, 2.4:1 on Dark) outlined every card far harder than any other theme. The block's "nothing mixed in" claim is corrected to name the tag fills that are
+- Dracula and Everforest were a single flat colour; the canvas now uses each palette's darker step (Dracula BGDark, Everforest bg_dim) so cards read as raised
+- Theme picker: the eight single themes get a "More" heading, and the menu uses up to 80vh so most of the list shows without scrolling
+- TUI palettes: stale headers and comments from another project ("tuidash", "Ghostfolio stat cells", "> +10 %") and the empty sections left when unused keys were removed in 1.16.0 are gone; `docs/tui.md` now lists every palette
+
+---
+
 ## [1.16.1] — 2026-09-28
 
 Web-UI audit: every screen captured at desktop and phone size against a seeded vault (long titles, many tags, code, tables, images, broken links, unicode), plus a read of the UI code.

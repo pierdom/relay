@@ -1,15 +1,15 @@
-# Tango (GNOME / freedesktop.org)
-# A TUI-only palette — no browser UI theme counterpart.
-# Select with: RELAY_PALETTE=tango
+# One Dark (Atom)
+# Matches the "One Dark" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=one-dark
 
 # ── Core ──────────────────────────────────────────────────────────────────────
-primary = "#729fcf"   # sky blue 1    — accent, interactive elements, borders
-border  = "#555753"   # aluminium 4   — widget borders, badges, panel separators
-bg      = "#2e3436"   # aluminium 6   — screen, header, footer background
+primary = "#61afef"   # blue          — accent, interactive elements, borders
+border  = "#3e4451"   # selection     — widget borders, badges, panel separators
+bg      = "#21252b"   # UI chrome     — screen, header, footer background
 
 # ── Semantic colours ───────────────────────────────────────────────────────────
 # Used for TTL expiry badges (post_panel) and Textual's success/warning/error
 # theme tokens (notifications, buttons).
-perf_great    = "#73d216"  # success / far-future expiry
-perf_bad      = "#edd400"  # warning / expiry within 3 days
-perf_terrible = "#cc0000"  # error / expired / expiry within 24h
+perf_great    = "#98c379"  # success / far-future expiry
+perf_bad      = "#e5c07b"  # warning / expiry within 3 days
+perf_terrible = "#e06c75"  # error / expired / expiry within 24h

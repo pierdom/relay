@@ -46,6 +46,15 @@ Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`relay`) matche
 | `catppuccin-frappe` | Catppuccin Frappé — peach accent |
 | `catppuccin-macchiato` | Catppuccin Macchiato — blue accent |
 | `catppuccin-mocha` | Catppuccin Mocha — mauve accent |
+| `solarized` | Solarized Dark — blue accent |
+| `solarized-light` | Solarized Light — blue accent |
+| `rose-pine` | Rosé Pine — rose accent |
+| `one-dark` | One Dark — blue accent |
+| `kanagawa` | Kanagawa — crystal-blue accent |
+| `candy` | Candy — hot-pink accent (TUI only) |
+| `earthy` | Earthy (TUI only) |
+| `pastel` | Pastel (TUI only) |
+| `tango` | Tango — sky-blue accent (TUI only) |
 
 Palette files live in `relay_tui/palettes/`. Each is a small TOML file — copy one to create your own.
 
