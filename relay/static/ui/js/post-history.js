@@ -263,7 +263,7 @@ async function selectRevision(rev, row, pane) {
     body.textContent = d.content;          // never innerHTML: this is vault content
 
     const restore = document.createElement('button');
-    restore.className = 'btn-edit hm-restore';
+    restore.className = 'btn-restore hm-restore';
     restore.type = 'button';
     restore.textContent = `Restore this version (${rev.short_sha})`;
     restore.addEventListener('click', () => restoreRevision(rev, restore, pane));

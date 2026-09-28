@@ -4,6 +4,26 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.18.0] — 2026-09-28
+
+Tables that read on a phone, a theme gallery, a complete docs index, and a second deep pass over the UI.
+
+### Fixed
+- **Tables** were laid out with `table-layout: fixed` — every column the same width whatever its content (a 166px "#" beside a crushed description on desktop; on a phone words broken mid-word, "Componen/t", and ten columns reduced to one letter per line), cells middle-aligned so short ones looked empty, and a clipped last column with nothing to say the table scrolled. Tables now size columns to their content, never break a word (URLs excepted), align cells to the top, and — in feed cards as well as the modal — scroll inside a box whose edge shadows show there is more. Paths in cell code wrap at their `/`, `.`, `_` joints (`<wbr>`, so copied commands stay exact), and prose columns keep a 10em floor so an overflowing table scrolls instead of crushing them
+- Every image-less feed card lost 14px of body width to a column gap reserved for a thumbnail it didn't have
+- Grid view on a phone kept the 340px uniform tile height in a single column — a one-line post became a screen-tall card
+- A failed login (wrong key, network error, OIDC denial) was reported in a blocking `alert()` and left nothing on the page; it now shows inline under the form
+- The history panel's "Restore this version" was a full-width grey button that read as a text field; it now looks like the action it is
+
+### Added
+- **docs/themes.md**: all twenty-four themes with screenshots, grouped as in the picker, and their TUI palette names. `scripts/theme_gallery.py` regenerates the page and its screenshots from `theme.js`
+- README: a complete, grouped docs index (every `docs/` page, plus CHANGELOG, CONTRIBUTING, SECURITY, CLAUDE.md), enforced by `tests/test_docs_index.py`; corrected the sample vault description
+
+### Changed
+- CLAUDE.md rewritten and condensed (372 → ~155 lines): every rule and its reason kept, incident narratives dropped, updated for errors.py, icons, tables, themes and the docs index
+
+---
+
 ## [1.17.0] — 2026-09-28
 
 Four more themes, the ones the 1.16.2 review named as the notable remaining gaps.
