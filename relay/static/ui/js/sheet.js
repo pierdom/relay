@@ -73,6 +73,12 @@ export function attachSheetDismiss({ inner, handle, backdrop, onDismiss, canDism
 
   handle.addEventListener('touchmove', (e) => {
     if (!dragging) return;
+    // The header isn't a scroll container, so an unclaimed vertical pan chains
+    // to the document — and on iOS Safari a downward one at the top of the page
+    // is pull-to-refresh: the whole page slid down under the sheet and reloaded.
+    // Claiming the gesture is the only reliable stop; `overscroll-behavior`
+    // doesn't suppress Safari's refresh. Hence `passive: false` below.
+    if (e.cancelable) e.preventDefault();
     const y = e.touches[0].clientY;
     // Floor the interval at roughly one frame: browsers can deliver a burst of
     // coalesced touchmoves microseconds apart, and dividing by that turns a
@@ -96,7 +102,13 @@ export function attachSheetDismiss({ inner, handle, backdrop, onDismiss, canDism
       const progress = Math.min(Math.max(delta, 0) / (inner.offsetHeight || 1), 1);
       backdrop.style.opacity = String(1 - progress * 0.7);
     }
-  }, { passive: true });
+  }, { passive: false });
+
+  // Same chain from the dimmed strip above the sheet: nothing there scrolls,
+  // so a pull on it would reach the page and refresh it.
+  backdrop?.addEventListener('touchmove', (e) => {
+    if (MOBILE.matches && e.cancelable) e.preventDefault();
+  }, { passive: false });
 
   const release = () => {
     if (!dragging) return;

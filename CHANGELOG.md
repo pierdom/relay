@@ -4,6 +4,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.18.1] — 2026-10-05
+
+### Fixed
+- **Dragging a bottom sheet down refreshed the page on iOS Safari.** The sheet's touch handlers were passive, so the downward pan also chained to the document, and at the top of the page Safari read it as pull-to-refresh: the whole app slid down under the sheet and reloaded. The drag now claims the gesture (`preventDefault` on a non-passive `touchmove`), and so does the dimmed backdrop above the sheet, for all six sheets. Covered by `test_a_drag_never_reaches_the_page`
+
+---
+
 ## [1.18.0] — 2026-09-28
 
 Tables that read on a phone, a theme gallery, a complete docs index, and a second deep pass over the UI.
