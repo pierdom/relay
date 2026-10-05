@@ -164,6 +164,42 @@ def test_sheet_follows_the_thumb_while_dragging(mobile_page, name, opener, modal
     assert mobile_page.locator(f"{inner_sel}.sheet-armed").count() == 1
 
 
+PULL_JS = """
+([selector]) => {
+  const el = document.querySelector(selector);
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2, y = r.top + Math.min(12, r.height / 2);
+  const fire = (type, cy) => {
+    const t = new Touch({ identifier: 1, target: el, clientX: x, clientY: cy, pageX: x, pageY: cy });
+    const ev = new TouchEvent(type, {
+      bubbles: true, cancelable: true, composed: true,
+      touches: type === 'touchend' ? [] : [t], targetTouches: type === 'touchend' ? [] : [t],
+      changedTouches: [t],
+    });
+    el.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  };
+  if (selector.endsWith('Backdrop')) return fire('touchmove', y + 40);
+  fire('touchstart', y);
+  const claimed = fire('touchmove', y + 40);
+  fire('touchend', y + 40);
+  return claimed;
+}
+"""
+
+
+@pytest.mark.parametrize("name,opener,modal", SHEETS, ids=[s[0] for s in SHEETS])
+def test_a_drag_never_reaches_the_page(mobile_page, name, opener, modal):
+    """Pulling a sheet down must not also pull the page: on iOS Safari an unclaimed
+    downward pan at the top of the document is pull-to-refresh, and dragging the
+    post sheet reloaded the whole app. Only a cancelled touchmove stops that."""
+    _open(mobile_page, opener)
+    header_sel = f"{modal} .pm-header" if name == "post" else f"{modal} .sm-head"
+    assert mobile_page.evaluate(PULL_JS, [header_sel]), f"{name} sheet drag left the pan to the page"
+    backdrop = "#" + mobile_page.evaluate("sel => document.querySelector(sel + ' > .pm-backdrop').id", modal)
+    assert mobile_page.evaluate(PULL_JS, [backdrop]), f"{name} backdrop let a pull reach the page"
+
+
 @pytest.mark.parametrize("name,opener,modal", SHEETS, ids=[s[0] for s in SHEETS])
 def test_a_long_drag_dismisses_the_sheet(mobile_page, name, opener, modal):
     _open(mobile_page, opener)
