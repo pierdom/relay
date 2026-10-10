@@ -4,7 +4,7 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
-## [Unreleased]
+## [1.20.0] — 2026-10-10
 
 The web UI review (relay #198, B-13): what the API already knew about a post — who wrote it, what changed, what reads alike — is now in the browser, along with writing aids and a quick switcher.
 
@@ -25,6 +25,7 @@ The web UI review (relay #198, B-13): what the API already knew about a post —
 ### Fixed
 - A post opening on a heading that isn't its title (say `## Part 1`) lost that heading in cards and the post view; only a heading that restates the title is dropped now, punctuation the filename lost included
 - A post opened from a link (`/id/N`) could render before the app knew semantic search was on
+- Docs: the reference `docker-compose.yml` pin moves to `1.20`
 
 ---
 
