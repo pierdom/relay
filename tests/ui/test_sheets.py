@@ -33,6 +33,7 @@ SHEETS = [
     ("history", "open_history", "#historyModal"),
     ("shortcuts", "open_shortcuts", "#shortcutsModal"),
     ("lint", "open_lint", "#lintModal"),
+    ("compose", "open_compose", "#composePanel"),
 ]
 
 # Dispatches a real touch sequence on an element. Playwright's touchscreen API
@@ -108,6 +109,11 @@ def open_lint(page):
     from .test_lint_panel import open_lint as _open_lint
 
     _open_lint(page)
+
+
+def open_compose(page):
+    page.locator("#newPostBtn").click()
+    page.wait_for_selector("#composePanel.open")
 
 
 def open_shortcuts(page):

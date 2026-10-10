@@ -4,12 +4,38 @@
  * lifted out of main.js: nothing can depend on it in the wrong direction.
  */
 
+// Past this, "412d ago" stops meaning anything; a date does.
+const RELATIVE_DAYS = 30;
+
 export function relativeTime(iso) {
-  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const when = new Date(iso);
+  const s = Math.floor((Date.now() - when.getTime()) / 1000);
   if (Math.abs(s) < 60)    return s < 0 ? 'in a moment' : 'just now';
   if (Math.abs(s) < 3600)  return s < 0 ? `in ${Math.floor(-s/60)}m` : `${Math.floor(s/60)}m ago`;
   if (Math.abs(s) < 86400) return s < 0 ? `in ${Math.floor(-s/3600)}h` : `${Math.floor(s/3600)}h ago`;
-  return s < 0 ? `in ${Math.floor(-s/86400)}d` : `${Math.floor(s/86400)}d ago`;
+  const days = Math.floor(Math.abs(s) / 86400);
+  if (days <= RELATIVE_DAYS) return s < 0 ? `in ${days}d` : `${days}d ago`;
+  return (s < 0 ? 'on ' : '') + shortDate(when);
+}
+
+/** "12 Mar", or "12 Mar 2025" outside the current year. */
+function shortDate(d) {
+  const opts = { day: 'numeric', month: 'short' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString(undefined, opts);
+}
+
+/** A post's `source` as shown on a card: a URL's host ("pve.proxmox.com"),
+ *  anything else as written. `href` is set only for an http(s) URL, so a
+ *  stored `javascript:` source can never become a link. */
+export function sourceParts(source) {
+  try {
+    const u = new URL(source);
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      return { label: u.hostname.replace(/^www\./, ''), href: u.href };
+    }
+  } catch { /* not a URL */ }
+  return { label: source, href: null };
 }
 
 export function toUtcIso(localDatetimeStr) {
@@ -27,6 +53,12 @@ export function toDatetimeLocal(utcIso) {
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+/** A tag in the server's normal form (models.clean_tag). */
+export const cleanTag = (value) => value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+
+/** A comma-separated Tags field as a list ("a, b,," → ["a", "b"]). */
+export const parseTags = (value) => value.split(',').map(t => t.trim()).filter(Boolean);
 
 export function escHtml(str) {
   return String(str)

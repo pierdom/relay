@@ -166,7 +166,7 @@ up front instead of from a rejected write:
 - **Browser UI** — the status panel's "Access" section always shows it
   (`Full access` / `Read-only` / `Write — restricted to tags` with the
   allowed list). `+ New Post` is hidden outright for a read-only key. For a
-  write-restricted key, the compose Publish button and the Edit
+  write-restricted key, New Post's Publish button and the Edit
   modal/vault-lint pane's Save button validate the Tags field live — the
   exact same ALL-of/non-empty rule the server enforces — and disable with an
   explanation when the current tags aren't fully in scope. This is UX

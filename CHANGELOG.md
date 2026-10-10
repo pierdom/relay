@@ -4,6 +4,39 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.19.0] — 2026-10-10
+
+A full audit of the web UI: every finding reproduced in Chromium first, fixed, and pinned by a browser test that was seen to fail without the fix.
+
+### Fixed
+- **Saving an edit could silently overwrite a change made elsewhere** (an Obsidian save, an agent) while the form was open — even when only Tags was touched. Saves now send `if_match`; a conflict is refused with a note, and a second Save overwrites deliberately
+- **Back left the app** instead of closing an open post (the first post opened pushed no history entry), and Back/Forward onto the master document (#0) closed the modal
+- An **expired session** left every request failing in place ("Invalid API key"); any 401, or a refused live stream, now returns to the login card with a reason
+- The **live stream stayed filtered by the previous tag** after picking a folder or renaming the active tag, so new posts never appeared
+- **Load more** repeated or skipped a post after a live insert or delete
+- A **wikilink hover preview** could stick on screen over every later modal; previews also showed raw `Title|alias` syntax
+- Deleting or restoring on the **Tree tab** switched the sidebar to the tag list
+- Clicking a **link inside a feed card** opened the card's post too; **external links** replaced the app tab (they now open a new one)
+- **History**: a slow revision could overwrite the one picked after it, Restore button included
+- **New Post**: re-clicking the button discarded the draft unasked; an empty body failed silently
+- The sidebar's **+ new tag** did nothing (since 1.6.0: it posted an empty config, which the server reads as "remove"); it now starts a post carrying the tag
+- Pressing **`e`** to edit typed an "e" into the post's title
+- Editing the master document lost its pinned layout; it no longer offers a Delete the server always refuses
+- A tag named **"all"** lit two sidebar rows; the **copy** button threw on plain-HTTP deployments (no Clipboard API — it now falls back); blocked browser storage stopped the app from loading; the signed-out page kept a live sidebar and read "offline"
+
+### Added
+- **Keyboard and screen-reader access**: every modal is a real dialog (focus moves in, Tab stays inside, focus returns on close); tag rows and card titles are reachable by Tab; `prefers-reduced-motion` is honoured everywhere
+- **Delete with Undo** (when vault history is on) instead of a confirm box; failures show inline or in a toast instead of `alert()`
+- **Search scope chip**: the active tag or folder is shown beside the search box, and an empty result offers to search everything
+- `GET /tags` and MCP `list_tags` return each tag's expiry config (`ttl_hours`, `expires_at`; `null` when unset); the expiry form opens pre-filled, can remove an expiry, and tags that expire their posts keep their clock icon visible
+
+### Changed
+- New Post is a modal sharing Edit's layout; long titles keep their row (tags wrap beneath); tag pills are muted so links stand out; sources show as a hostname; dates older than 30 days show as dates; the phone search field gets its own row; the reading column also holds backlinks and the editor; headings use the UI's monospace face; the status panel shows semantic search in one line when it is off
+- Web UI code: modal plumbing in one place (`wireModal`), shared DOM helpers and link index, no dead code — about 400 lines lighter
+- Docs: README and usage guide describe the browser UI's behaviour; CLAUDE.md's browser section condensed; the reference `docker-compose.yml` pin moves to `1.19` (it had been left at `1.15`)
+
+---
+
 ## [1.18.1] — 2026-10-05
 
 ### Fixed

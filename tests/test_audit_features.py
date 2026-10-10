@@ -82,7 +82,9 @@ async def test_mcp_list_folders_matches_rest(client):
 async def test_tag_config_with_neither_field_removes_it(client, vault_dir):
     r = await client.post("/tags/digest/config", json={"ttl_hours": 24}, headers=AUTH)
     assert r.status_code == 200
-    assert {"tag": "digest", "count": 0} in (await client.get("/tags", headers=AUTH)).json()["tags"]
+    assert {"tag": "digest", "count": 0, "ttl_hours": 24, "expires_at": None} in (
+        await client.get("/tags", headers=AUTH)
+    ).json()["tags"]
     assert "digest" in yaml.safe_load((vault_dir / ".relay" / "tags.yml").read_text(encoding="utf-8"))
 
     r = await client.post("/tags/digest/config", json={}, headers=AUTH)
@@ -92,8 +94,22 @@ async def test_tag_config_with_neither_field_removes_it(client, vault_dir):
 
 
 @pytest.mark.asyncio
+async def test_tag_list_carries_each_tags_expiry_config(client):
+    """The browser's expiry form opened empty because nothing reported what a
+    tag was already set to (relay #198, B-12): each tag carries its config, and
+    a tag without one says so with nulls rather than zeroes."""
+    await client.post("/posts", json={"title": "Plain", "content": "x", "tags": ["plain"]}, headers=AUTH)
+    await client.post("/tags/news/config", json={"expires_at": "2030-01-01T00:00:00Z"}, headers=AUTH)
+    await client.post("/tags/digest/config", json={"ttl_hours": 48}, headers=AUTH)
+    tags = {t["tag"]: t for t in (await client.get("/tags", headers=AUTH)).json()["tags"]}
+    assert (tags["plain"]["ttl_hours"], tags["plain"]["expires_at"]) == (None, None)
+    assert (tags["news"]["ttl_hours"], tags["news"]["expires_at"]) == (None, "2030-01-01T00:00:00Z")
+    assert (tags["digest"]["ttl_hours"], tags["digest"]["expires_at"]) == (48, None)
+
+
+@pytest.mark.asyncio
 async def test_mcp_set_tag_config_clears_too(client):
     await mcp_set_tag_config(tag="news", ttl_hours=1)
-    assert {"tag": "news", "count": 0} in (await mcp_list_tags())["tags"]
+    assert {"tag": "news", "count": 0, "ttl_hours": 1, "expires_at": None} in (await mcp_list_tags())["tags"]
     await mcp_set_tag_config(tag="news")
     assert all(t["tag"] != "news" for t in (await mcp_list_tags())["tags"])

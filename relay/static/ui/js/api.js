@@ -38,57 +38,39 @@ export function tagsAllowedByScope(tags, scope) {
   return tags.length > 0 && tags.every(t => allowed.has(t));
 }
 
-export async function apiFetch(path, opts = {}) {
-  // Cookie carries the session by default; only add the bearer header on the
-  // API-key break-glass path.
-  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+/* Every request: the session cookie authenticates by default, and the bearer
+   header is added only on the API-key break-glass path. A non-ok status always
+   throws — a blocked DELETE (the protected master document) once looked
+   exactly like a successful one because a helper here returned it silently.
+   A 401 also announces itself, so an expired session goes back to the login
+   card (main.js) instead of every panel failing on its own. */
+async function send(path, opts = {}, json = true) {
+  const headers = { ...(json ? { 'Content-Type': 'application/json' } : {}), ...(opts.headers || {}) };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   const res = await fetch(path, { credentials: 'same-origin', ...opts, headers });
-  if (!res.ok) {
-    // FastAPI's HTTPException(detail=...) is the one thing worth showing a user
-    // over the generic status text — "A backfill is already running" beats
-    // "409 Conflict". Best-effort: a body that isn't JSON, or has no `detail`,
-    // falls back to the status line exactly as before.
-    let detail;
-    try { detail = (await res.json())?.detail; } catch { /* not JSON, or no body */ }
-    const err = new Error(detail || `${res.status} ${res.statusText}`);
-    // Carried alongside the message so a caller can distinguish e.g. "history
-    // disabled" (503) from any other failure without pattern-matching the
-    // detail text itself — matching on `err.message` would silently break
-    // again the moment the server's wording changes (K-12: the history
-    // panel's own "friendly 503" branch checked `err.message.startsWith('503')`,
-    // which never matched — `detail` is always a human sentence, never a
-    // string starting with a status code).
-    err.status = res.status;
-    throw err;
-  }
-  return res.json();
-}
-
-// Like apiFetch but returns the raw Response (no JSON parse) — for DELETEs.
-// Never throws on a non-ok status; callers that need to know whether the
-// request actually succeeded should use apiSendChecked instead (K-11: three
-// call sites used to `await apiSend(...)` and unconditionally treat that as
-// success, so a blocked delete — e.g. the protected master document — looked
-// identical to a real one in the UI).
-export async function apiSend(path, opts = {}) {
-  const headers = { ...(opts.headers || {}) };
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-  return fetch(path, { credentials: 'same-origin', ...opts, headers });
-}
-
-// Like apiSend, but throws on a non-ok status (with the server's `detail`
-// when there is one) instead of silently returning the failed Response.
-// Deliberately does NOT parse the body as JSON on success like apiFetch
-// does — DELETE endpoints return 204 No Content, and apiFetch's own
-// `res.json()` would throw on that empty body and turn every *successful*
-// delete into an apparent failure.
-export async function apiSendChecked(path, opts = {}) {
-  const res = await apiSend(path, opts);
-  if (!res.ok) {
-    let detail;
-    try { detail = (await res.json())?.detail; } catch { /* not JSON, or no body */ }
-    throw new Error(detail || `${res.status} ${res.statusText}`);
-  }
+  if (res.status === 401) window.dispatchEvent(new Event('relay:unauthorized'));
+  if (!res.ok) throw await failure(res);
   return res;
+}
+
+/* The server's `detail` is the message worth showing ("A backfill is already
+   running" beats "409 Conflict"); a structured one (a 409's `{error, current}`)
+   rides along whole on `err.detail`, and `err.status` lets a caller branch on
+   the status without matching wording. */
+async function failure(res) {
+  let detail;
+  try { detail = (await res.json())?.detail; } catch { /* not JSON, or no body */ }
+  const message = detail && typeof detail === 'object' ? detail.error : detail;
+  return Object.assign(new Error(message || `${res.status} ${res.statusText}`), { detail, status: res.status });
+}
+
+/** A JSON request, answered with the parsed JSON body. */
+export async function apiFetch(path, opts = {}) {
+  return (await send(path, opts)).json();
+}
+
+/** A request whose body isn't JSON (a raw upload) or whose reply is empty (a
+ *  204 DELETE, which `.json()` would turn into a failure). Returns the Response. */
+export function apiSend(path, opts = {}) {
+  return send(path, opts, false);
 }

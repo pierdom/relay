@@ -22,6 +22,7 @@
 
 import { ICON_EYE, ICON_HISTORY } from './icons.js';
 import { apiFetch } from './api.js';
+import { el } from './dom.js';
 import { relativeTime } from './util.js';
 
 // Why a post went away. The API reports all three; the filter row uses them.
@@ -68,8 +69,7 @@ function paint(container, onBack, draw) {
   container.replaceChildren();
 
   if (onBack) {
-    const back = document.createElement('button');
-    back.className = 'sm-back';
+    const back = el('button', 'sm-back');
     back.id = 'delBack';
     back.textContent = '← Status';
     back.addEventListener('click', onBack);
@@ -79,11 +79,9 @@ function paint(container, onBack, draw) {
   const counts = {};
   for (const d of items) counts[d.reason] = (counts[d.reason] || 0) + 1;
 
-  const bar = document.createElement('div');
-  bar.className = 'del-filters';
+  const bar = el('div', 'del-filters');
   const chip = (key, label, count) => {
-    const b = document.createElement('button');
-    b.className = 'del-filter' + (filter === key ? ' active' : '');
+    const b = el('button', 'del-filter' + (filter === key ? ' active' : ''));
     b.dataset.reason = key ?? 'all';
     b.textContent = `${label} ${count}`;
     if (key) b.title = REASONS[key].hint;
@@ -98,9 +96,7 @@ function paint(container, onBack, draw) {
 
   const rows = filter ? items.filter(d => d.reason === filter) : items;
   if (!rows.length) {
-    const empty = document.createElement('div');
-    empty.className = 'sm-section-title';
-    empty.textContent = 'Nothing deleted — or nothing left to recover.';
+    const empty = el('div', 'sm-section-title', 'Nothing deleted — or nothing left to recover.');
     container.appendChild(empty);
     return;
   }
@@ -108,43 +104,30 @@ function paint(container, onBack, draw) {
 }
 
 function card(d, draw) {
-  const el = document.createElement('div');
-  el.className = 'del-card';
-  el.dataset.id = String(d.id);
+  const row = el('div', 'del-card');
+  row.dataset.id = String(d.id);
 
-  const head = document.createElement('div');
-  head.className = 'del-head';
-  const pill = document.createElement('span');
-  pill.className = 'post-id-pill';
-  pill.textContent = `#${d.id}`;
-  const title = document.createElement('span');
-  title.className = 'del-title';
-  title.textContent = d.title;
-  const reason = document.createElement('span');
-  reason.className = `del-reason del-reason-${d.reason}`;
-  reason.textContent = (REASONS[d.reason] || { label: d.reason }).label;
+  const head = el('div', 'del-head');
+  const pill = el('span', 'post-id-pill', `#${d.id}`);
+  const title = el('span', 'del-title', d.title);
+  const reason = el('span', `del-reason del-reason-${d.reason}`, (REASONS[d.reason] || { label: d.reason }).label);
   reason.title = (REASONS[d.reason] || {}).hint || '';
   head.append(pill, title, reason);
 
   // The panel is 560px, so the full path does not earn its line here — the
   // title is the filename, and the folder is the only part that adds anything.
-  const meta = document.createElement('div');
-  meta.className = 'del-meta';
+  const meta = el('div', 'del-meta');
   const folder = d.path.includes('/') ? d.path.slice(0, d.path.lastIndexOf('/')) : '';
   meta.textContent = [relativeTime(d.when), d.short_sha, folder].filter(Boolean).join(' · ');
 
-  const actions = document.createElement('div');
-  actions.className = 'del-actions';
-  const preview = document.createElement('button');
-  preview.className = 'btn-edit';
+  const actions = el('div', 'del-actions');
+  const preview = el('button', 'btn-edit');
   preview.innerHTML = `${ICON_EYE}Preview`;
-  const restore = document.createElement('button');
-  restore.className = 'btn-restore';
+  const restore = el('button', 'btn-restore');
   restore.innerHTML = `${ICON_HISTORY}Restore`;
   actions.append(preview, restore);
 
-  const body = document.createElement('pre');
-  body.className = 'del-body';
+  const body = el('pre', 'del-body');
   body.hidden = true;
 
   preview.addEventListener('click', async () => {
@@ -165,9 +148,6 @@ function card(d, draw) {
     restore.disabled = true;
     restore.textContent = 'Restoring…';
     try {
-      // apiFetch, not apiSend: apiSend is the raw-Response helper for DELETEs —
-      // it sends no Content-Type and never throws on a non-ok status, so a
-      // failed restore would look exactly like a successful one.
       await apiFetch(`/posts/${d.id}/restore`, {
         method: 'POST', body: JSON.stringify({ sha: d.sha }),
       });
@@ -177,13 +157,11 @@ function card(d, draw) {
     } catch (err) {
       restore.disabled = false;
       restore.innerHTML = `${ICON_HISTORY}Restore`;
-      const failed = document.createElement('div');
-      failed.className = 'del-meta del-failed';
-      failed.textContent = `Restore failed: ${err.message}`;
-      el.appendChild(failed);
+      const failed = el('div', 'del-meta del-failed', `Restore failed: ${err.message}`);
+      row.appendChild(failed);
     }
   });
 
-  el.append(head, meta, actions, body);
-  return el;
+  row.append(head, meta, actions, body);
+  return row;
 }

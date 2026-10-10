@@ -1,33 +1,29 @@
-/* Relay browser UI — application entry point.
+/* Relay browser UI — the app body: session, feed, sidebar, post and edit
+ * modals, live updates. Self-contained concerns live in sibling modules
+ * (status, lint, history, recovery, themes, modal plumbing in dialog.js).
  *
- * Stage 2 of splitting index.html: the whole script moved out of the markup and
- * became an ES module. Leaf concerns are being lifted into ./util.js, ./api.js
- * and ./status.js; what remains here is the app body, still to be split along the
- * section markers below.
- *
- * Module scope matters: nothing here is on `window` any more. That is safe
- * because the markup carries no inline `onclick` handlers and nothing assigned to
- * `window.*` — both checked before the move. `marked` and `DOMPurify` are still
- * read as globals; they are classic CDN scripts in <head> and so run before this
- * deferred module.
+ * `marked` and `DOMPurify` are globals from vendored classic scripts in <head>,
+ * which run before this deferred module.
  */
 
-import { apiFetch, apiSendChecked, clearApiKey, clearCallerScope, getCallerScope, setApiKey, setCallerScope, tagsAllowedByScope } from './api.js';
-import { closeStatusModal, fetchInitStatus, isStatusOpen } from './status.js';   // also self-wires its own controls
+import { apiFetch, apiSend, clearApiKey, clearCallerScope, getCallerScope, setApiKey, setCallerScope, tagsAllowedByScope } from './api.js';
+import { closeStatusModal, fetchInitStatus, isStatusOpen } from './status.js';
 import { query, resetPaging } from './feed-query.js';
-import { closeHistoryModal, initPostHistory, isHistoryOpen, openPostHistory } from './post-history.js';
-import { attachSheetDismiss } from './sheet.js';
+import { initPostHistory, openPostHistory } from './post-history.js';
+import { anyModalOpen, closeAllModals, dismissTopModal, topModal, wireModal } from './dialog.js';
+import { showToast } from './toast.js';
 import { initDeleted } from './deleted.js';
-import { initLint, isLintOpen, reopenLintModal, tryCloseLintModal } from './lint.js';
+import { initLint, reopenLintModal, tryCloseLintModal } from './lint.js';
 import { buildEditForm, confirmDeleteAttachment, wireAttachments } from './edit-form.js';
+import { idForTitle, postExists, refreshLinks } from './links.js';
 import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
 import { ICON_CLOCK, ICON_FOLDER, ICON_IMAGE, ICON_PENCIL, ICON_TRASH } from './icons.js';
-import { CODE_SPAN_RE, escHtml, fmtBytes, relativeTime, toUtcIso } from './util.js';
+import { CODE_SPAN_RE, cleanTag, escHtml, fmtBytes, parseTags, relativeTime, sourceParts, toDatetimeLocal, toUtcIso } from './util.js';
+
 const LIMIT = 20;
-// The break-glass API key now lives in ./api.js (setApiKey/clearApiKey).
-let authed = false;    // true once a session exists (cookie or key) — the real "logged in" flag
-let sidebarMode = 'tags';   // 'tags' | 'tree' | 'files' | 'deleted'
+let authed = false;         // true once a session exists (cookie or key)
+let sidebarMode = 'tags';   // 'tags' | 'tree' | 'files'
 let attachCache = [];       // last-fetched attachment list (for the gallery)
 let attachFolder = null;    // active gallery folder filter (null = all)
 let searchDebounce = null;
@@ -43,21 +39,17 @@ const liveDot      = document.getElementById('liveDot');
 const liveLabel    = document.getElementById('liveLabel');
 const a11yAnnouncer = document.getElementById('a11yAnnouncer');
 const apiKeyInput  = document.getElementById('apiKeyInput');
-const connectBtn   = document.getElementById('connectBtn');
 const connectForm  = document.getElementById('connectForm');
 const oidcLogin    = document.getElementById('oidcLogin');
 const oidcLoginBtn = document.getElementById('oidcLoginBtn');
 const useKeyBtn    = document.getElementById('useKeyBtn');
 const newPostBtn   = document.getElementById('newPostBtn');
-const statusBtn    = document.getElementById('statusBtn');
 const collapseBtn  = document.getElementById('collapseBtn');
 const composePanel = document.getElementById('composePanel');
 const newTagBtn    = document.getElementById('newTagBtn');
 const tagNewWrap   = document.getElementById('tagNew');
 const tagNewInput  = document.getElementById('tagNewInput');
-const connectedBar    = document.getElementById('connectedBar');
 const disconnectBtn   = document.getElementById('disconnectBtn');
-const loginView       = document.getElementById('loginView');
 const menuBtn         = document.getElementById('menuBtn');
 const sidebarEl       = document.getElementById('sidebarEl');
 const sidebarOverlay  = document.getElementById('sidebarOverlay');
@@ -67,16 +59,14 @@ const lightbox        = document.getElementById('lightbox');
 const searchInput     = document.getElementById('searchInput');
 const searchClear     = document.getElementById('searchClear');
 const modeSelect      = document.getElementById('modeSelect');
-// The mode a fresh search starts from — 'hybrid' once fetchEmbeddingsEnabled
-// confirms it's usable, 'keyword' otherwise (or before that check resolves).
-// Every place that resets the mode to "no particular ranking requested" reads
-// this instead of hardcoding 'keyword', so enabling embeddings makes hybrid
-// the standard rather than an opt-in extra. Combines freely with an active
-// tag/folder filter (server-supported since v1.5.0) — see selectTag/selectFolder
-// below, which used to force a drop back to 'keyword' and no longer do (K-14).
+const searchScope     = document.getElementById('searchScope');
+// The ranking a fresh search starts from: 'hybrid' once /status confirms
+// embeddings are on (it beats keyword alone on this relay's eval, #253),
+// 'keyword' otherwise.
 let defaultMode = 'keyword';
-const vtList          = document.getElementById('vtList');
-const vtGrid          = document.getElementById('vtGrid');
+// Whether a delete can be undone (vault history on) — set from /status in init().
+// Until that answers, deletes ask first, the safe assumption.
+let historyOn = false;
 
 // View/sort preferences live in ./view-prefs.js; reloading on a sort change is
 // this module's job, so it is passed in.
@@ -96,9 +86,6 @@ function clearNewPostsPill() {
   newPostsPill.style.display = 'none';
 }
 newPostsPill.addEventListener('click', () => { clearNewPostsPill(); reloadSorted(); });
-
-// Themes live in ./theme.js, which self-wires its picker (see status.js for the
-// same pattern). Only the Escape handler below needs anything from it.
 
 function openSidebar()  { sidebarEl.classList.add('open'); sidebarOverlay.classList.add('visible'); menuBtn.classList.add('active'); }
 function closeSidebar() { sidebarEl.classList.remove('open'); sidebarOverlay.classList.remove('visible'); menuBtn.classList.remove('active'); }
@@ -155,10 +142,7 @@ useKeyBtn.addEventListener('click', () => {
   apiKeyInput.focus();
 });
 
-// Single source of truth for New Post's visibility (relay #198, B-8) — it's
-// set from two independent places (init() and setSidebarMode()'s Files-tab
-// swap), and both need to agree on read-only gating or the button would
-// reappear for a read-only key the moment they switch to Files and back.
+// New Post's one visibility rule — hidden on the Files tab and for a read-only key.
 function applyNewPostVisibility() {
   const scope = getCallerScope();
   const hiddenByTab = sidebarMode === 'files';
@@ -178,93 +162,64 @@ async function bootstrap() {
   let me = { authenticated: false, oidc: false };
   try { me = await (await fetch('/auth/me', { credentials: 'same-origin' })).json(); } catch {}
   if (me.authenticated) { authed = true; init(); return; }
-  // Logged out: hide the feed, show the centered login card.
-  feed.style.display = 'none';
-  loginView.style.display = '';
+  document.body.classList.add('signed-out');
   if (me.oidc) { oidcLogin.style.display = ''; connectForm.style.display = 'none'; }
   else { connectForm.style.display = ''; oidcLogin.style.display = 'none'; }
 }
 
-disconnectBtn.addEventListener('click', async () => {
+/* Back to the login card — from Disconnect, or because the server stopped
+   accepting the session (any 401, or the live stream refused). `reason` is
+   shown under the form. */
+async function signOut(reason = '') {
+  if (!authed) return;
+  authed = false;
   clearApiKey();
   clearCallerScope();
-  authed = false;
   // Await so the cookie is cleared before bootstrap() re-checks /auth/me below.
   await fetch('/session', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
   if (es) { es.close(); es = null; }
   if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
+  closeAllModals();
   closeSidebar();
-  closeCompose();
   feed.innerHTML = '';
   tagList.innerHTML = '';
   loadMoreWrap.style.display = 'none';
-  newPostBtn.style.display = 'none';
-  newTagBtn.style.display = 'none';
-  statusBtn.style.display = 'none';
-  searchBar.style.display = 'none';
   query.search = null; searchInput.value = ''; searchBar.classList.remove('active');
-  connectedBar.style.display = 'none';
-  collapseBtn.style.display = 'none';
   apiKeyInput.value = '';
   setDot('');
-  // Show whichever login control fits the deployment (OIDC button vs key form).
-  bootstrap();
-});
+  await bootstrap();   // shows whichever login control the deployment uses
+  if (reason) showLoginError(reason);
+}
+disconnectBtn.addEventListener('click', () => signOut());
+window.addEventListener('relay:unauthorized', () => signOut('Your session has ended — sign in again.'));
 
 
 
 async function init() {
+  document.body.classList.remove('signed-out');
+  syncSearchScope();
   resetPaging();
   feed.innerHTML = '';
-  // Reset to the default Tags + feed view (in case we reconnect from Files/Tree mode).
-  sidebarMode = 'tags'; attachFolder = null;
-  document.getElementById('tabTags').classList.add('active');
-  document.getElementById('tabTree').classList.remove('active');
-  document.getElementById('tabFiles').classList.remove('active');
-  feed.style.display = '';
-  attachmentsView.style.display = 'none';
-  loginView.style.display = 'none';
+  attachFolder = null;
+  showSidebarMode('tags');   // a reconnect may come from the Tree or Files tab
   loadMoreWrap.style.display = 'none';
-  connectForm.style.display = 'none';
-  oidcLogin.style.display = 'none';
-  connectedBar.style.display = '';
-  collapseBtn.style.display = '';
-  applyNewPostVisibility();   // scope isn't known yet here — re-run below once fetchInitStatus resolves
-  newTagBtn.style.display = '';
-  statusBtn.style.display = '';
-  searchBar.style.display = '';
-  // Reset each (re)connect — mode is meaningless without a search term and
-  // isn't persisted, same as query.search itself; a stale 'semantic' from a
-  // prior session could otherwise silently 503 the first search after a
-  // reconnect to a relay with embeddings off.
+  // Not carried across sessions: a stale 'semantic' would 503 the first
+  // search on a relay with embeddings off.
   query.mode = 'keyword';
   modeSelect.value = 'keyword';
   modeSelect.style.display = 'none';
-  fetchInitStatus().then(({ embeddingsEnabled: on, caller }) => {
+  fetchInitStatus().then(({ embeddingsEnabled: on, caller, historyEnabled }) => {
+    historyOn = historyEnabled;
     modeSelect.style.display = on ? '' : 'none';
-    // Hybrid, not keyword, is the mode worth defaulting to once it's actually
-    // usable — it's the one that beats keyword-alone on this relay's own eval
-    // (relay #253). Every reset point below routes through defaultMode instead
-    // of a hardcoded 'keyword' so this stays the standard, not a one-off.
     defaultMode = on ? 'hybrid' : 'keyword';
-    // K-14: used to only apply when no tag/folder was active — the server has
-    // accepted the combination since v1.5.0, so there's no reason left to
-    // withhold the better default just because a filter is set.
-    if (on) { query.mode = defaultMode; modeSelect.value = defaultMode; }
-
+    query.mode = modeSelect.value = defaultMode;
     setCallerScope(caller);
-    applyNewPostVisibility();
-    applyComposeScopeGate();   // no-op if compose isn't open; corrects it if it already is
+    applyNewPostVisibility();   // scope was unknown until now
+    applyComposeScopeGate();
   });
-  // openPostFromUrl has no dependency on tags/posts, so it runs concurrently
-  // with those — but it does depend on loadLinkIndex: the modal renders the
-  // post body through the same linkIndex-reading path as a feed card, and
-  // unlike a card (which just silently shows unresolved links until the next
-  // re-render), the deep-linked modal only ever renders once. Gating on
-  // linkIndexReady specifically, not the whole group, is what keeps this from
-  // both being unnecessarily serialized after tags/posts *and* racing ahead
-  // of the one thing it actually needs.
-  const linkIndexReady = loadLinkIndex();
+  // A deep-linked post renders once, so it waits for the link index (but not
+  // for tags or the feed) — otherwise its [[links]] would all show as broken.
+  const linkIndexReady = refreshLinks();
   linkIndexReady.then(openPostFromUrl);
   await Promise.all([loadTags(), loadPosts(true), linkIndexReady]);
   setDot('connected');
@@ -280,29 +235,29 @@ async function openPostFromUrl() {
   if (raw === null) return;
   history.replaceState(null, '', location.pathname);
   if (!/^\d+$/.test(raw)) return;
-  // Unlike a wikilink click (silent on failure — broken in-content links are
-  // common and not worth interrupting reading for), this is the one thing an
-  // /id/<id> visit is *for*, so a failure — including an expired session's
-  // real 401, not just a missing post — is worth surfacing with its own detail.
-  await openPostById(raw, { onError: (e) => alert(`Could not open post #${raw}: ${e.message}`) });
+  // Unlike a silent broken wikilink, opening this post is what the visit is for.
+  await openPostById(raw, { onError: (e) => showToast(`Couldn’t open post #${raw}: ${e.message}`, { error: true }) });
 }
 
 // ── Wikilinks: [[Title]] / [[Title|alias]] and #NNN cross-references ──────────
-let linkIndex = new Map();   // normalised title -> id
-let linkIds = new Set();     // existing post ids
-
-async function loadLinkIndex() {
-  try {
-    const d = await apiFetch('/links');
-    linkIndex = new Map(d.items.map(i => [i.title.trim().toLowerCase(), i.id]));
-    linkIds = new Set(d.items.map(i => i.id));
-  } catch {}
-}
-
 // DOMPurify config: keep the attrs our attachment embeds/links add (img loading,
 // link target/rel). marked + preprocessLinks output is sanitized through this.
 const SANITIZE_OPTS = { ADD_ATTR: ['target', 'rel', 'loading'] };
+// A link out of the vault opens in a new tab: in this tab it would replace the
+// whole app, mid-read, with no way back to the open post.
+DOMPurify.addHook('afterSanitizeAttributes', node => {
+  if (node.tagName === 'A' && /^https?:/i.test(node.getAttribute('href') || '')) {
+    node.setAttribute('target', '_blank');
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
 const renderBody = (md) => DOMPurify.sanitize(marked.parse(preprocessLinks(md)), SANITIZE_OPTS);
+
+// A titled post's body usually opens with that title as a heading; cards, the
+// modal and link previews all show the title already, so they drop it.
+const stripTitleHeading = (md) => md.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '');
+const postName = (post) => post.title || `#${post.id}`;
+const tagPills = (tags) => tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
 
 /* Every rendered table scrolls sideways inside its own box when it cannot fit
    — see `.table-scroll` in app.css — in feed cards as well as the modal. */
@@ -380,7 +335,7 @@ function linkifySegment(text) {
     }
     if (HAS_EXT_RE.test(name)) return attLink(name, o || name);   // any file (pdf/zip/…) → link
     // No extension → note transclusion; relay doesn't transclude, so link to the note.
-    const id = linkIndex.get(name.toLowerCase());
+    const id = idForTitle(name);
     return (id !== undefined)
       ? `<a class="wikilink" data-post-id="${id}">${escHtml(o || name)}</a>`
       : `<span class="wikilink broken" title="unresolved embed">${escHtml(o || name)}</span>`;
@@ -388,14 +343,14 @@ function linkifySegment(text) {
   text = text.replace(/\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (m, target, heading, alias) => {
     const label = escHtml((alias || target).trim());
     const t = target.trim();
-    const id = linkIndex.get(t.toLowerCase());
+    const id = idForTitle(t);
     if (id !== undefined) return `<a class="wikilink" data-post-id="${id}">${label}</a>`;
     // Unresolved but a known attachment type (e.g. [[doc.pdf]]) → attachment link, not broken.
     if (ATTACH_EXT_RE.test(t)) return attLink(t, (alias || target).trim());
     return `<span class="wikilink broken" title="unresolved link">${label}</span>`;
   });
   text = text.replace(/(^|[^\w#])#(\d{1,5})\b/g, (m, pre, n) =>
-    linkIds.has(Number(n)) ? `${pre}<a class="wikilink" data-post-id="${n}">#${n}</a>` : m);
+    postExists(n) ? `${pre}<a class="wikilink" data-post-id="${n}">#${n}</a>` : m);
   return text;
 }
 
@@ -417,8 +372,8 @@ function extractMedia(content) {
   return { thumb, count, stripped };
 }
 
-async function openPostById(id, { onError, origin } = {}) {
-  try { openPostModal(await apiFetch(`/posts/${id}`), { origin }); }
+async function openPostById(id, { onError, origin, pushHistory = true } = {}) {
+  try { openPostModal(await apiFetch(`/posts/${id}`), { origin, pushHistory }); }
   catch (e) { if (onError) onError(e); }
 }
 
@@ -427,6 +382,7 @@ document.addEventListener('click', e => {
   const a = e.target.closest('a.wikilink[data-post-id]');
   if (!a) return;
   e.preventDefault(); e.stopPropagation();
+  hideLinkPreview();   // also cancels a hover preview still on its timer
   openPostById(Number(a.dataset.postId));
 });
 
@@ -456,23 +412,21 @@ async function renderBacklinks(id) {
 }
 
 /* ── Compose ──────────────────────────────────────────────── */
+const cpTitle = document.getElementById('cpTitle');
+const cpContent = document.getElementById('cpContent');
 const cpTags = document.getElementById('cpTags');
 const cpPublish = document.getElementById('cpPublish');
 const cpGateMsg = document.createElement('div');
 cpGateMsg.className = 'ef-gate-msg';
 cpPublish.insertAdjacentElement('beforebegin', cpGateMsg);
 
-// Write-restricted-to-tags gating (relay #198, B-8) — a read-only key never
-// reaches this: applyNewPostVisibility() hides New Post entirely for it, so
-// only 'full' (always allowed) and 'write' (validated below) show up here.
-// Live as the user edits Tags, and re-run whenever the panel opens since
-// closeCompose() resets the field to empty (which a write-restricted key
-// never satisfies — see tagsAllowedByScope's non-empty rule). Also re-run
-// once fetchInitStatus() actually resolves (see init()) — scope is unknown
-// for a brief window right after login, and treating "unknown" the same as
-// "full access" would let Publish sit enabled during that window instead of
-// correctly disabled-until-proven-otherwise.
+// Publish follows the key's scope, live as Tags is edited. Scope arrives after
+// login (fetchInitStatus), and until it does Publish stays disabled — treating
+// "unknown" as "full access" was a race CI caught.
 function applyComposeScopeGate() {
+  // Closed, there is nothing to gate — and a message parked in the hidden
+  // form is still text in the page (a "Read-only" lookup found two).
+  if (!isComposeOpen()) return;
   const scope = getCallerScope();
   if (!scope) {
     cpGateMsg.textContent = 'Checking access…';
@@ -480,18 +434,12 @@ function applyComposeScopeGate() {
     return;
   }
   if (scope.mode === 'full') { cpGateMsg.textContent = ''; cpPublish.disabled = false; return; }
-  if (scope.mode === 'read') {
-    // Belt-and-suspenders: applyNewPostVisibility() already hides New Post
-    // outright for a read-only key, so this branch should be unreachable in
-    // practice — but scope resolves asynchronously (fetchInitStatus, after
-    // init()'s synchronous first paint), so there's a real window right
-    // after login where the button is still visible. Gate Publish here too
-    // rather than relying solely on the button being hidden in time.
+  if (scope.mode === 'read') {   // New Post is hidden then, but may be open from before scope arrived
     cpGateMsg.textContent = 'This key is read-only — publishing is disabled.';
     cpPublish.disabled = true;
     return;
   }
-  const tags = parseTagsField(cpTags.value);
+  const tags = parseTags(cpTags.value);
   if (tagsAllowedByScope(tags, scope)) {
     cpGateMsg.textContent = '';
     cpPublish.disabled = false;
@@ -502,62 +450,73 @@ function applyComposeScopeGate() {
 }
 cpTags.addEventListener('input', applyComposeScopeGate);
 
+// What the panel held when it opened (Tags may be prefilled from the active
+// filter), so leaving it can ask before throwing a draft away — the same guard
+// the Edit modal has. Toggling New Post shut used to wipe a draft unasked.
+const COMPOSE_FIELDS = ['cpTitle', 'cpContent', 'cpTags', 'cpSource', 'cpExpires'];
+let composeBaseline = null;
+const composeValues = () => COMPOSE_FIELDS.map(id => document.getElementById(id).value);
+function isComposeDirty() {
+  return !!composeBaseline && composeValues().some((v, i) => v !== composeBaseline[i]);
+}
+function isComposeOpen() { return composePanel.classList.contains('open'); }
+
 newPostBtn.addEventListener('click', () => {
-  if (composePanel.classList.contains('open')) {
-    closeCompose();
-  } else {
-    composePanel.classList.add('open');
-    if (query.tag) cpTags.value = query.tag;
-    applyComposeScopeGate();
-    document.getElementById('cpContent').focus();
-  }
+  composePanel.classList.add('open');
+  if (query.tag) cpTags.value = query.tag;
+  composeBaseline = composeValues();
+  applyComposeScopeGate();
+  cpTitle.focus();
 });
 
-document.getElementById('cpCancel').addEventListener('click', closeCompose);
+const tryCloseCompose = wireModal(composePanel, {
+  close: closeCompose,
+  confirmDiscard: () => !isComposeDirty() || confirm('Discard this unpublished post?'),
+});
+document.getElementById('cpCancel').addEventListener('click', tryCloseCompose);
+
+// Said where the user is looking, beside Publish, instead of in an alert() —
+// or, for an empty body, not at all.
+function composeProblem(msg, field) {
+  cpGateMsg.textContent = msg;
+  field.focus();
+}
 
 cpPublish.addEventListener('click', async () => {
-  const content = document.getElementById('cpContent').value.trim();
-  if (!content) return;
-  const title = document.getElementById('cpTitle').value.trim();
-  if (!title) { alert('Title is required'); return; }
+  const title = cpTitle.value.trim();
+  if (!title) { composeProblem('Add a title — it becomes the file name.', cpTitle); return; }
+  const content = cpContent.value.trim();
+  if (!content) { composeProblem('Write something before publishing.', cpContent); return; }
   const body = {
     title,
     content,
-    tags:   parseTagsField(cpTags.value),
+    tags:   parseTags(cpTags.value),
     source: document.getElementById('cpSource').value.trim() || null,
     expires_at: toUtcIso(document.getElementById('cpExpires').value) || null,
   };
-  const btn = cpPublish;
-  btn.disabled = true; btn.textContent = 'Publishing…';
+  cpPublish.disabled = true; cpPublish.textContent = 'Publishing…';
   try {
     await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
     closeCompose();
     refreshSidebarCounts();
-    await loadLinkIndex();
-  } catch (e) { alert(`Publish failed: ${e.message}`); }
-  finally { btn.disabled = false; btn.textContent = 'Publish'; }
+    await refreshLinks();
+  } catch (e) { cpGateMsg.textContent = `Publish failed: ${e.message}`; }
+  finally { cpPublish.textContent = 'Publish'; cpPublish.disabled = false; applyComposeScopeGate(); }
 });
 
 function closeCompose() {
   composePanel.classList.remove('open');
-  ['cpTitle', 'cpContent', 'cpTags', 'cpSource'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('cpExpires').value = '';
+  composeBaseline = null;
+  COMPOSE_FIELDS.forEach(id => { document.getElementById(id).value = ''; });
   const st = document.getElementById('cpAttachStatus');
-  if (st) { st.textContent = ''; st.classList.remove('error'); }
+  st.textContent = ''; st.classList.remove('error');
   cpGateMsg.textContent = '';
 }
 
-/* ── Attachment upload ─────────────────────────────────────── */
-// The upload pipeline and the edit-form builder now live in ./edit-form.js —
-// shared with the vault-lint pane (lint.js), which hosts the same editor
-// inline instead of a read-only preview plus a button leading away from it.
-
-const parseTagsField = (v) => v.split(',').map(s => s.trim()).filter(Boolean);
-
 wireAttachments(
-  document.getElementById('cpContent'), document.getElementById('cpFile'),
+  cpContent, document.getElementById('cpFile'),
   document.getElementById('cpAttach'), document.getElementById('cpAttachStatus'),
-  () => ({ tags: parseTagsField(document.getElementById('cpTags').value) }),
+  () => ({ tags: parseTags(cpTags.value) }),
 );
 
 /* ── Search ───────────────────────────────────────────────── */
@@ -579,10 +538,6 @@ searchInput.addEventListener('keydown', e => {
 searchClear.addEventListener('click', async () => {
   searchInput.value = '';
   query.search = null;
-  // mode is only ever sent alongside a search term (see loadPosts), so its
-  // value here doesn't affect the request — just land back on the default
-  // for whenever a search starts again. K-14: no longer downgraded to
-  // 'keyword' for an active tag/folder — the server accepts the combination.
   query.mode = defaultMode;
   modeSelect.value = query.mode;
   searchBar.classList.remove('active');
@@ -604,18 +559,22 @@ newTagBtn.addEventListener('click', () => {
   if (!visible) { tagNewInput.value = ''; tagNewInput.focus(); }
 });
 
-tagNewInput.addEventListener('keydown', async e => {
-  if (e.key === 'Escape') { tagNewWrap.style.display = 'none'; return; }
+/* A tag exists while a post carries it — there is nothing to create on its
+   own. This used to POST an empty config, which the server reads as "remove
+   this tag's config" (set_tag_config), so the new tag silently never
+   appeared. It now starts a post carrying the tag, the one way a tag begins. */
+tagNewInput.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { tagNewWrap.style.display = 'none'; newTagBtn.focus(); return; }
   if (e.key !== 'Enter') return;
-  const name = tagNewInput.value.trim().toLowerCase();
+  const name = cleanTag(tagNewInput.value);
   if (!name) return;
-  try {
-    await apiFetch(`/tags/${encodeURIComponent(name)}/config`, {
-      method: 'POST', body: JSON.stringify({}),
-    });
-    tagNewWrap.style.display = 'none';
-    await loadTags();
-  } catch (e) { alert(`Failed: ${e.message}`); }
+  tagNewWrap.style.display = 'none';
+  closeSidebar();
+  if (!isComposeOpen()) newPostBtn.click();
+  const current = parseTags(cpTags.value);
+  if (!current.includes(name)) cpTags.value = [...current, name].join(', ');
+  cpTags.dispatchEvent(new Event('input'));   // re-run the scope gate
+  cpTitle.focus();
 });
 
 /* ── Tags ─────────────────────────────────────────────────── */
@@ -635,54 +594,82 @@ async function loadTags() {
   } catch {}
 }
 
-// Refresh whichever count view is active right now (Tags or Tree). Callers after
-// a local create/edit/delete must use this rather than loadTags() directly, or a
-// Tree-mode sidebar briefly flips to the Tags list before the SSE echo swaps it
-// back. Files mode has no post-driven counts to refresh.
+// Refresh whichever count view is showing (Tags or Tree). Use this, not
+// loadTags(), after a local change: loadTags() on the Tree tab swaps the
+// sidebar to the tag list. Files has no post-driven counts.
 function refreshSidebarCounts() {
   if (sidebarMode === 'tags') loadTags();
   else if (sidebarMode === 'tree') loadFolders();
 }
 
-// Debounced sidebar-count refresh — a burst of SSE events (e.g. reconnect replay
-// or an edit that retags/moves a post) must not trigger a storm of fetches +
-// rebuilds. Refreshes only the *active* count view (Tags and Tree share the same
-// sidebar element, so refreshing the inactive one would clobber what's shown):
-// tag counts, or the Tree's folder counts (which go stale on an Inbox→domain move
-// now streamed via a post edit).
-let _tagsTimer = null;
-function scheduleLoadTags() {
-  clearTimeout(_tagsTimer);
-  _tagsTimer = setTimeout(refreshSidebarCounts, 250);
+// After live updates, debounced so a burst of SSE events (a reconnect replay)
+// costs one round of fetches, not one per event.
+let _refreshTimer = null;
+function scheduleRefresh() {
+  clearTimeout(_refreshTimer);
+  _refreshTimer = setTimeout(() => { refreshSidebarCounts(); refreshLinks(); }, 250);
 }
 
 function renderTags(tags, allCount) {
   openTagEditor = null;   // the DOM these forms lived in is about to be replaced
   tagList.innerHTML = '';
   tagList.appendChild(makeTagItem('all', null, allCount));
-  tags.forEach(t => tagList.appendChild(makeTagItem(t.tag, t.tag, t.count)));
+  tags.forEach(t => tagList.appendChild(makeTagItem(t.tag, t.tag, t.count, t)));
 }
 
-function makeTagItem(label, value, count) {
-  const el = document.createElement('div');
-  el.className = 'tag-item' + (query.tag === value ? ' active' : '');
-  const renameBtn = value !== null
-    ? `<button class="tag-rename" title="Rename tag" aria-label="Rename tag">${ICON_PENCIL}</button>` : '';
-  const configBtn = value !== null
-    ? `<button class="tag-config-btn" title="Expiry settings" aria-label="Expiry settings">${ICON_CLOCK}</button>` : '';
-  el.innerHTML = `<span class="tag-name">${escHtml(label)}</span>${renameBtn}${configBtn}<span class="tag-count">${count}</span>`;
-  el.addEventListener('click', () => selectTag(value));
-  if (value !== null) {
-    el.querySelector('.tag-rename').addEventListener('click', e => {
-      e.stopPropagation();
-      startTagRename(el, value);
-    });
-    el.querySelector('.tag-config-btn').addEventListener('click', e => {
-      e.stopPropagation();
-      startTagConfig(el, value);
-    });
-  }
-  return el;
+/* One sidebar row — a tag, a folder, or a Files group. Its label is a real
+   <button> so Tab reaches it; the click bubbles to the row, which keeps the
+   whole row a target. `labelHtml` and `controls` are already escaped. */
+function sidebarRow({ labelHtml, count, active, onClick, className = 'tag-item', controls = '' }) {
+  const row = document.createElement('div');
+  row.className = className + (active ? ' active' : '');
+  row.innerHTML = `<button type="button" class="tag-name"${active ? ' aria-current="true"' : ''}>${labelHtml}</button>`
+    + `${controls}<span class="tag-count">${count}</span>`;
+  row.addEventListener('click', onClick);
+  return row;
+}
+
+// Folder rows reserve the icon's gutter even without one ("all"), so every
+// label starts on the same left edge.
+const folderLabel = (name, icon = true) =>
+  `<span class="folder-ico">${icon ? ICON_FOLDER : ''}</span>${escHtml(name)}`;
+
+/** Mark the active sidebar row, for sight (`.active`) and for screen readers. */
+function markActiveRow(el, active) {
+  el.classList.toggle('active', active);
+  const btn = el.querySelector('.tag-name');
+  if (btn) { if (active) btn.setAttribute('aria-current', 'true'); else btn.removeAttribute('aria-current'); }
+}
+
+/** "48h after posting", "at <date>", both, or '' — a tag's expiry config. */
+function expirySummary(cfg) {
+  if (!cfg) return '';
+  const parts = [];
+  if (cfg.ttl_hours) parts.push(`${cfg.ttl_hours}h after posting`);
+  if (cfg.expires_at) parts.push(`at ${new Date(cfg.expires_at).toLocaleString()}`);
+  return parts.join(', ');
+}
+
+function makeTagItem(label, value, count, cfg = null) {
+  const expiry = cfg && (cfg.ttl_hours || cfg.expires_at) ? { ttl_hours: cfg.ttl_hours, expires_at: cfg.expires_at } : null;
+  // A tag that expires its posts keeps its clock visible (.has-expiry).
+  const summary = escHtml(expirySummary(expiry));
+  const controls = value === null ? '' :
+    `<button class="tag-rename" title="Rename tag" aria-label="Rename tag">${ICON_PENCIL}</button>`
+    + `<button class="tag-config-btn${summary ? ' has-expiry' : ''}" title="${summary ? `Posts expire ${summary}` : 'Expiry settings'}"`
+    + ` aria-label="Expiry settings${summary ? ` (posts expire ${summary})` : ''}">${ICON_CLOCK}</button>`;
+  const row = sidebarRow({
+    labelHtml: escHtml(label), count, controls, active: query.tag === value, onClick: () => selectTag(value),
+  });
+  row._expiry = expiry;
+  row.dataset.tag = value ?? '';   // by value: a tag may well be called "all"
+  if (value !== null) wireTagControls(row, value);
+  return row;
+}
+
+function wireTagControls(row, tag) {
+  row.querySelector('.tag-rename').addEventListener('click', e => { e.stopPropagation(); startTagRename(row, tag); });
+  row.querySelector('.tag-config-btn').addEventListener('click', e => { e.stopPropagation(); startTagConfig(row, tag); });
 }
 
 /* ── Sidebar: Tags ⇄ Tree toggle ───────────────────────────── */
@@ -694,7 +681,8 @@ function makeTagItem(label, value, count) {
 const SIDEBAR_TABS = { tags: 'tabTags', tree: 'tabTree', files: 'tabFiles' };
 const FEED_REPLACING = { files: 'attachmentsView' };
 
-function setSidebarMode(mode) {
+/** Switch tabs: the UI part, without loading anything (init loads its own). */
+function showSidebarMode(mode) {
   sidebarMode = mode;
   for (const [name, id] of Object.entries(SIDEBAR_TABS)) {
     document.getElementById(id).classList.toggle('active', mode === name);
@@ -713,7 +701,10 @@ function setSidebarMode(mode) {
   applyNewPostVisibility();
   if (replacing) loadMoreWrap.style.display = 'none';
   else if (query.offset < query.total) loadMoreWrap.style.display = 'block';
+}
 
+function setSidebarMode(mode) {
+  showSidebarMode(mode);
   if (mode === 'tags') loadTags();
   else if (mode === 'tree') loadFolders();
   else loadAttachments();
@@ -723,32 +714,21 @@ for (const [name, id] of Object.entries(SIDEBAR_TABS)) {
 }
 // A restore puts a post back in the feed, so the feed has to hear about it.
 // The recovery browser itself lives in the status panel (`js/status.js`).
-initDeleted(() => { resetPaging(); loadPosts(true); loadTags(); });
+initDeleted(() => { resetPaging(); loadPosts(true); refreshSidebarCounts(); });
 initLint({
-  // "Open post" needs to leave both the lint modal and the status modal
-  // beneath it — the post modal renders under both otherwise (they share a
-  // higher z-index) — before opening the real post. tryCloseLintModal (not
-  // the raw close) first: the pane's editor may have unsaved changes, and a
-  // decline there must cancel this whole navigation, not just skip a step of
-  // it. The post modal's own "← Vault lint" breadcrumb (`_externalOrigin`
-  // below) is how you get back: reopenLintModal, not openLintModal, so it's
-  // the same filter and finding you left, not a fresh full list. Status is
-  // deliberately not reopened behind it on the way back — the lint modal
-  // never needed it open beneath it technically, only entered that way, and
-  // closing lint from here falls through to the feed same as closing any
-  // other modal does.
+  // Leave lint (asking about unsaved edits — a "no" cancels) and status, which
+  // would cover the post modal; its "← Vault lint" breadcrumb returns to the
+  // same filter and finding.
   openPost: id => {
     if (!tryCloseLintModal()) return;
     if (isStatusOpen()) closeStatusModal();
     openPostById(id, { origin: { label: 'Vault lint', onBack: reopenLintModal } });
   },
-  // The pane's own editor (edit-form.js, shared with the standalone Edit
-  // modal) saves directly against the post — this is the feed/sidebar half
-  // of that, the same refresh enterEditMode's onSave does.
+  // The pane's editor saved the post itself; this is the feed/sidebar half.
   onSaved: updated => {
-    const card = feed.querySelector(`[data-id="${updated.id}"]`);
-    if (card) card.replaceWith(renderPost(updated));
+    replaceCard(updated);
     refreshSidebarCounts();
+    refreshLinks();
   },
 });
 
@@ -767,26 +747,29 @@ function renderFolders(folders, allCount) {
 }
 
 function makeFolderItem(label, value, count) {
-  const el = document.createElement('div');
-  el.className = 'tag-item folder-item' + (query.folder === value ? ' active' : '');
-  el.dataset.folder = value === null ? '__all__' : value;
-  // Empty on the "all" row rather than absent: `.folder-ico` reserves a fixed
-  // gutter, so every label starts on the same left edge whether or not its row
-  // has an icon. With the icon simply omitted, "all" sat left of the folders.
-  const ico = `<span class="folder-ico">${value === null ? '' : ICON_FOLDER}</span>`;
-  el.innerHTML = `<span class="tag-name">${ico}${escHtml(label)}</span><span class="tag-count">${count}</span>`;
-  el.addEventListener('click', () => selectFolder(value));
-  return el;
+  const row = sidebarRow({
+    labelHtml: folderLabel(label, value !== null), count, className: 'tag-item folder-item',
+    active: query.folder === value, onClick: () => selectFolder(value),
+  });
+  row.dataset.folder = value === null ? '__all__' : value;
+  return row;
+}
+
+/** Point the feed at a tag or a folder (never both) and start it over. */
+function setFilter({ tag = null, folder = null }) {
+  closeSidebar();
+  const tagChanged = query.tag !== tag;
+  query.tag = tag; query.folder = folder; resetPaging();
+  if (tagChanged) connectSSE();   // the stream is filtered by tag server-side
+  syncSearchScope();
+  feed.innerHTML = '';
+  loadMoreWrap.style.display = 'none';
 }
 
 async function selectFolder(folder) {
-  closeSidebar();
-  query.folder = folder; query.tag = null; resetPaging();
-  feed.innerHTML = '';
-  loadMoreWrap.style.display = 'none';
+  setFilter({ folder });
   const key = folder === null ? '__all__' : folder;
-  tagList.querySelectorAll('.folder-item').forEach(el =>
-    el.classList.toggle('active', el.dataset.folder === key));
+  tagList.querySelectorAll('.folder-item').forEach(el => markActiveRow(el, el.dataset.folder === key));
   await loadPosts(true);
 }
 
@@ -810,19 +793,14 @@ function selectAttachFolder(folder) {
 function renderAttachSidebar() {
   const counts = new Map();
   attachCache.forEach(a => counts.set(a.folder, (counts.get(a.folder) || 0) + 1));
-  tagList.innerHTML = '';
-  const all = document.createElement('div');
-  all.className = 'tag-item folder-item' + (attachFolder === null ? ' active' : '');
-  all.innerHTML = `<span class="tag-name"><span class="folder-ico"></span>All files</span><span class="tag-count">${attachCache.length}</span>`;
-  all.addEventListener('click', () => selectAttachFolder(null));
-  tagList.appendChild(all);
-  [...counts.keys()].sort().forEach(folder => {
-    const el = document.createElement('div');
-    el.className = 'tag-item folder-item' + (attachFolder === folder ? ' active' : '');
-    el.innerHTML = `<span class="tag-name"><span class="folder-ico">${ICON_FOLDER}</span>${escHtml(folder)}</span><span class="tag-count">${counts.get(folder)}</span>`;
-    el.addEventListener('click', () => selectAttachFolder(folder));
-    tagList.appendChild(el);
+  const row = (folder, label, count) => sidebarRow({
+    labelHtml: folderLabel(label, folder !== null), count, className: 'tag-item folder-item',
+    active: attachFolder === folder, onClick: () => selectAttachFolder(folder),
   });
+  tagList.replaceChildren(
+    row(null, 'All files', attachCache.length),
+    ...[...counts.keys()].sort().map(folder => row(folder, folder, counts.get(folder))),
+  );
 }
 
 function renderAttachGallery() {
@@ -866,14 +844,8 @@ function closeLightbox() { lightbox.style.display = 'none'; document.getElementB
 lightbox.addEventListener('click', closeLightbox);
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && lightbox.style.display === 'flex') closeLightbox(); });
 
-/* Only one tag editor may be open at a time.
- *
- * Both the rename and the TTL form replace a row's contents in place, and nothing
- * previously closed the last one — so a second click left two forms stacked over
- * the tag list, and the tag they belonged to was no longer readable. This tracks
- * the open one so opening another (or clicking away, or pressing Escape) closes
- * it first. Re-clicking the same control toggles it shut.
- */
+/* One tag editor (rename or expiry) open at a time: opening another, clicking
+   away or Escape closes the current one; re-clicking its control toggles it. */
 let openTagEditor = null;   // { el, kind, cancel }
 
 function closeTagEditor() {
@@ -893,14 +865,9 @@ function toggledTagEditor(el, kind) {
   return false;
 }
 
-// Clicking anywhere outside the open editor dismisses it. Without this the only
-// way out of a form was Escape while it still had focus — click elsewhere first
-// and the row was stuck open until a page reload.
-//
-// Tag controls are exempt: closing on mousedown collapses the open row, which
-// shifts every row below it *between* mousedown and mouseup, so the click landed
-// somewhere other than the gear that was pressed and appeared to do nothing.
-// Those buttons close the previous editor themselves, after the click resolves.
+// A click anywhere outside the open editor dismisses it. Tag controls are
+// exempt: closing on mousedown shifts the rows below before mouseup, so the
+// click would land on the wrong row; they close the previous editor themselves.
 document.addEventListener('mousedown', e => {
   if (!openTagEditor) return;
   if (openTagEditor.el.contains(e.target)) return;
@@ -921,26 +888,27 @@ function startTagRename(el, oldName) {
   let committed = false;
   async function commit() {
     if (committed) return; committed = true;
-    // The server's tag normal form (models.clean_tag) — so an active filter on
-    // the old tag follows it to the name actually stored, not the raw input.
-    const newName = input.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    // Normalised as the server stores it, so an active filter follows the rename.
+    const newName = cleanTag(input.value);
     if (!newName || newName === oldName) { cancelRename(); return; }
     try {
       const data = await apiFetch(`/tags/${encodeURIComponent(oldName)}`, {
         method: 'PATCH', body: JSON.stringify({ new_name: newName }),
       });
-      if (query.tag === oldName) query.tag = newName;
       renderTags(data.tags, await postCount());
-    } catch (e) { alert(`Rename failed: ${e.message}`); cancelRename(); }
+      if (query.tag === oldName) selectTag(newName);   // feed and live stream follow the rename
+    } catch (e) { showToast(`Couldn’t rename #${oldName}: ${e.message}`, { error: true }); committed = false; cancelRename(); }
   }
 
   function cancelRename() {
     if (committed) return;
     committed = true;
     if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
-    const span = document.createElement('span');
-    span.className = 'tag-name'; span.textContent = oldName;
-    input.replaceWith(span);
+    const label = document.createElement('button');
+    label.type = 'button'; label.className = 'tag-name'; label.textContent = oldName;
+    if (query.tag === oldName) label.setAttribute('aria-current', 'true');
+    input.replaceWith(label);
+    label.focus();   // focus was on the input that just went away
   }
 
   input.addEventListener('keydown', e => {
@@ -957,15 +925,20 @@ function startTagConfig(el, tagName) {
   form.className = 'tag-config-form';
   // Explicit Save/Cancel, not just Enter/Escape: the keyboard-only version was
   // undiscoverable, and unreachable once focus had left the inputs.
+  const current = el._expiry;
   form.innerHTML = `
     <div class="tc-label"></div>
-    <input type="number" class="tc-ttl" placeholder="TTL hours (optional)" min="1">
-    <input type="datetime-local" class="tc-expires">
+    <input type="number" class="tc-ttl" placeholder="Hours after posting" min="1" aria-label="Expire posts this many hours after posting">
+    <input type="datetime-local" class="tc-expires" aria-label="Expire all posts at">
     <div class="tc-actions">
       <button type="button" class="tc-save">Save</button>
       <button type="button" class="tc-cancel">Cancel</button>
+      ${current ? '<button type="button" class="tc-remove">Remove expiry</button>' : ''}
     </div>`;
-  form.querySelector('.tc-label').textContent = `expiry for #${tagName}`;
+  form.querySelector('.tc-label').textContent = current ? `Expiry for #${tagName}` : `Set an expiry for #${tagName}`;
+  // What is set now — the form used to open empty whatever the tag carried.
+  if (current?.ttl_hours) form.querySelector('.tc-ttl').value = current.ttl_hours;
+  if (current?.expires_at) form.querySelector('.tc-expires').value = toDatetimeLocal(current.expires_at);
   el.innerHTML = '';
   el.classList.add('tag-editing');
   el.appendChild(form);
@@ -980,16 +953,24 @@ function startTagConfig(el, tagName) {
     if (committed) return; committed = true;
     const ttlVal = ttlInput.value.trim();
     const expiresVal = expiresInput.value;
-    if (!ttlVal && !expiresVal) { cancel(); return; }
+    // Both cleared on a tag that had an expiry means remove it; on one that
+    // had none it means nothing was asked for.
+    if (!ttlVal && !expiresVal) { if (current) { await save({}); } else { committed = false; cancel(); } return; }
     const body = {};
     if (ttlVal) body.ttl_hours = parseInt(ttlVal, 10);
     if (expiresVal) body.expires_at = toUtcIso(expiresVal);
+    await save(body);
+  }
+
+  // `{}` removes the tag's config server-side (set_tag_config).
+  async function save(body) {
     try {
       await apiFetch(`/tags/${encodeURIComponent(tagName)}/config`, {
         method: 'POST', body: JSON.stringify(body),
       });
+      if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
       await loadTags();
-    } catch (e) { alert(`Config failed: ${e.message}`); cancel(); }
+    } catch (e) { showToast(`Couldn’t save expiry for #${tagName}: ${e.message}`, { error: true }); committed = false; cancel(); }
   }
 
   function cancel() {
@@ -998,16 +979,17 @@ function startTagConfig(el, tagName) {
     if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
     el.classList.remove('tag-editing');
     el.innerHTML = savedHtml;
-    el.querySelector('.tag-rename')?.addEventListener('click', ev => {
-      ev.stopPropagation(); startTagRename(el, tagName);
-    });
-    el.querySelector('.tag-config-btn')?.addEventListener('click', ev => {
-      ev.stopPropagation(); startTagConfig(el, tagName);
-    });
+    wireTagControls(el, tagName);
   }
 
   form.querySelector('.tc-save').addEventListener('click', e => { e.stopPropagation(); commit(); });
   form.querySelector('.tc-cancel').addEventListener('click', e => { e.stopPropagation(); cancel(); });
+  form.querySelector('.tc-remove')?.addEventListener('click', e => {
+    e.stopPropagation();
+    if (committed) return;
+    committed = true;
+    save({});
+  });
   // The row itself filters the feed on click; a click inside the form must not.
   form.addEventListener('click', e => e.stopPropagation());
   form.addEventListener('keydown', e => {
@@ -1016,18 +998,41 @@ function startTagConfig(el, tagName) {
   });
 }
 
+/* The active filter, shown beside the search box: a search runs inside it,
+   and "No posts match" used to say nothing about the tag it had been limited
+   to. Clicking the chip drops the filter. */
+function syncSearchScope() {
+  const label = query.tag ? `#${query.tag}` : query.folder ? `${query.folder}/` : '';
+  searchScope.hidden = !label;
+  searchScope.textContent = label ? `${label} ×` : '';
+  searchScope.setAttribute('aria-label', label ? `Remove filter ${label}` : '');
+  searchScope.title = label ? 'Show all posts' : '';
+}
+function clearScope() {
+  if (query.tag) selectTag(null);
+  else if (query.folder) selectFolder(null);
+}
+searchScope.addEventListener('click', clearScope);
+feed.addEventListener('click', e => {
+  if (e.target.closest('[data-action="clear-scope"]')) clearScope();
+});
+
+/** Empty-feed copy: says what was searched, where, and what to do next. */
+function emptyFeedHtml() {
+  const scope = query.tag ? `tagged #${escHtml(query.tag)}` : query.folder ? `in ${escHtml(query.folder)}/` : '';
+  const widen = scope ? '<button type="button" class="empty-action" data-action="clear-scope">Search all posts</button>' : '';
+  if (query.search) {
+    const q = `“${escHtml(query.search)}”`;
+    return scope ? `<p>No posts ${scope} match ${q}.</p>${widen}` : `<p>No posts match ${q}.</p>`;
+  }
+  if (scope) return `<p>No posts ${scope} yet.</p>${widen.replace('Search all posts', 'Show all posts')}`;
+  return '<p>No posts yet. Write one with New Post, or publish from an agent over MCP or the API.</p>';
+}
+
 async function selectTag(tag) {
-  closeSidebar();
-  query.tag = tag; query.folder = null; resetPaging();
-  feed.innerHTML = '';
-  loadMoreWrap.style.display = 'none';
-  tagList.querySelectorAll('.tag-item').forEach(el => {
-    el.classList.remove('active');
-    const name = el.querySelector('.tag-name').textContent;
-    if ((tag === null && name === 'all') || name === tag) el.classList.add('active');
-  });
+  setFilter({ tag });
+  tagList.querySelectorAll('.tag-item').forEach(el => markActiveRow(el, el.dataset.tag === (tag ?? '')));
   await loadPosts(true);
-  connectSSE();
 }
 
 /* ── Posts ────────────────────────────────────────────────── */
@@ -1070,10 +1075,13 @@ async function loadPosts(replace = false) {
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
           </svg>
-          <p>${query.search ? `No posts match “${escHtml(query.search)}”` : (query.tag || query.folder ? 'Nothing here' : 'No posts yet')}</p>
+          ${emptyFeedHtml()}
         </div>`;
     } else {
       data.items.forEach((p, i) => {
+        // Offsets drift when posts arrive or go while paging; a post already
+        // on screen must not appear twice.
+        if (!replace && feed.querySelector(`[data-id="${p.id}"]`)) return;
         const el = renderPost(p);
         if (replace) el.style.animationDelay = `${i * 35}ms`;
         feed.appendChild(el);
@@ -1081,11 +1089,6 @@ async function loadPosts(replace = false) {
     }
     loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
   } catch (e) {
-    // K-15: escHtml, not raw interpolation — the one innerHTML sink in the
-    // whole UI that skipped it. No current server error path echoes
-    // attacker-controlled HTML into `detail` for this request, so this
-    // wasn't exploitable today, but it's the one spot a future change could
-    // turn into real XSS.
     if (replace && seq === loadSeq) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${escHtml(e.message)}</p></div>`;
   }
 }
@@ -1108,6 +1111,7 @@ feed.addEventListener('scroll', () => {
 const MASTER_PEEK_PX = 21;
 function toggleMasterAccordion(el, wrap) {
   const collapsing = !el.classList.contains('collapsed');
+  el.querySelector('.master-badge')?.setAttribute('aria-expanded', String(!collapsing));
   if (collapsing) {
     wrap.style.maxHeight = wrap.scrollHeight + 'px';   // pin current height first
     requestAnimationFrame(() => {
@@ -1124,6 +1128,17 @@ function toggleMasterAccordion(el, wrap) {
     };
     wrap.addEventListener('transitionend', onEnd);
   }
+}
+
+/** Swap a card for a fresh render of `post`, keeping what its place in the
+ *  feed gave it (the pinned master document stays pinned). */
+function replaceCard(post) {
+  const card = feed.querySelector(`[data-id="${post.id}"]`);
+  if (!card) return null;
+  const fresh = renderPost(post);
+  if (card.classList.contains('pinned')) fresh.classList.add('pinned');
+  card.replaceWith(fresh);
+  return fresh;
 }
 
 function renderPost(post) {
@@ -1145,11 +1160,18 @@ function renderPost(post) {
     ? `<span class="post-expires">expires ${relativeTime(post.expires_at)}</span>`
     : '';
   const masterBadge = post.id === 0
-    ? `<div class="master-badge">✦ master document<span class="accordion-chevron">▾</span></div>`
+    ? `<button type="button" class="master-badge" aria-expanded="false">✦ master document<span class="accordion-chevron" aria-hidden="true">▾</span></button>`
     : '';
-  const titleHtml  = post.title ? `<span class="post-title">${escHtml(post.title)}</span>` : '';
-  const tagsHtml   = post.tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
-  const srcHtml    = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
+  // A real link (the /id/<id> deep link), so a card is reachable by Tab and
+  // opens in a new tab on Ctrl/Cmd-click; a plain click opens the modal as the
+  // rest of the card does. The master document toggles in place instead.
+  const titleHtml  = !post.title ? ''
+    : post.id === 0 ? `<span class="post-title">${escHtml(post.title)}</span>`
+    : `<a class="post-title" href="/id/${post.id}">${escHtml(post.title)}</a>`;
+  const tagsHtml   = tagPills(post.tags);
+  // Host only on a card — the full URL is its tooltip, and a link in the modal.
+  const src        = post.source ? sourceParts(post.source) : null;
+  const srcHtml    = src ? `<span class="post-source" title="${escHtml(post.source)}">via ${escHtml(src.label)}</span>` : '';
   const tagsRow    = (tagsHtml || srcHtml) ? `<div class="post-tags">${tagsHtml}${srcHtml}</div>` : '';
   const headerHtml = (titleHtml || tagsRow) ? `<div class="post-header">${titleHtml}${tagsRow}</div>` : '';
 
@@ -1162,7 +1184,7 @@ function renderPost(post) {
   let contentToRender = media.stripped;
   let extractedUpdated = null;
   if (post.title) {
-    contentToRender = contentToRender.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '');
+    contentToRender = stripTitleHeading(contentToRender);
     // Tolerate the line being wrapped in * / _ emphasis (*Last updated: …*).
     const lu = /^\s*[*_]*\s*Last updated:\s*([^\n]+?)\s*[*_]*\s*(?:\n|$)/i;
     const m = contentToRender.match(lu);
@@ -1195,7 +1217,7 @@ function renderPost(post) {
       </div>
       <div class="post-actions">
         <button class="btn-edit" title="Edit">${ICON_PENCIL}<span class="btn-label">Edit</span></button>
-        <button class="btn-delete" title="Delete">${ICON_TRASH}<span class="btn-label">Delete</span></button>
+        ${post.id === 0 ? '' : `<button class="btn-delete" title="Delete">${ICON_TRASH}<span class="btn-label">Delete</span></button>`}
       </div>
     </div>`;
 
@@ -1203,20 +1225,18 @@ function renderPost(post) {
   el.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
   );
+  el.querySelector('a.post-title')?.addEventListener('click', e => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) { e.stopPropagation(); return; }   // browser's own
+    e.preventDefault();   // bubble on to the card, which opens the modal
+  });
   // A broken/unauthorised thumbnail just drops the media block (text stays).
   const mediaImg = el.querySelector('.post-media img');
   if (mediaImg) mediaImg.addEventListener('error', () => el.querySelector('.post-media')?.remove());
-  el.querySelector('.btn-delete').addEventListener('click', async (e) => {
+  el.querySelector('.btn-delete')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!confirm('Delete this post?')) return;
-    try {
-      await apiSendChecked(`/posts/${post.id}`, { method: 'DELETE' });
-      el.remove(); query.total--;
-      loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
-      refreshSidebarCounts();
-    } catch (err) { alert(`Delete failed: ${err.message}`); }
+    deletePost(post);
   });
-  el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); enterEditMode(el, post); });
+  el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); openEditModal(post); });
   if (post.id === 0) {
     // Master doc → inline accordion (collapsed by default → a few-line peek).
     // Clicking the card toggles it; body links/buttons still work via the guard.
@@ -1224,81 +1244,52 @@ function renderPost(post) {
     const wrap = el.querySelector('.post-body-wrap');
     wrap.style.maxHeight = MASTER_PEEK_PX + 'px';   // collapsed on first paint
     el.addEventListener('click', (e) => {
-      if (el.classList.contains('editing')) return;
+      if (e.target.closest('.master-badge')) { toggleMasterAccordion(el, wrap); return; }
       if (e.target.closest('a, button, .tag-pill, .post-actions')) return;
       toggleMasterAccordion(el, wrap);
     });
   } else {
-    el.addEventListener('click', () => { if (!el.classList.contains('editing')) openPostModal(post); });
+    // A link inside the card (wikilink, external, attachment) is that link,
+    // not the card — it used to open the card's post under the target too.
+    el.addEventListener('click', e => { if (!e.target.closest('a:not(.post-title)')) openPostModal(post); });
   }
   return el;
 }
 
-/* Editing happens in its own modal, not inside the card.
- *
- * The form used to replace the post card's contents, which in grid view meant a
- * ~200px column: the textarea was a few words wide and a long note was unusable.
- * The markup is unchanged — it just gets the room the reading modal already had,
- * with the content field taking whatever height is left.
- */
+/* ── Edit modal (the same form the lint pane hosts, edit-form.js) ─────────── */
 const editModal = document.getElementById('editModal');
 const emBody = document.getElementById('emBody');
 const emTitle = document.getElementById('emTitle');
 let editForm = null;   // { isDirty } from the current buildEditForm, or null
 
-function isEditOpen() {
-  return editModal.classList.contains('open');
-}
-
 function closeEditModal() {
   editModal.classList.remove('open');
-  if (!postModal.classList.contains('open')) document.body.style.overflow = '';
   emBody.innerHTML = '';
   editForm = null;
 }
 
-/** True unless there are unsaved changes the user declines to throw away.
- *  Used by the swipe gesture (which must ask *before* it animates the sheet
- *  away — a dismissal that gets vetoed has to spring back) and by Escape/the
- *  × button; the Cancel button inside the form asks this same question
- *  itself, via buildEditForm, before ever calling back here. */
-function confirmDiscardEdit() {
-  return !editForm?.isDirty() || confirm('Discard your changes to this post?');
-}
+// × / backdrop / swipe / Escape ask first; the form's own Cancel asks itself.
+wireModal(editModal, {
+  close: closeEditModal,
+  confirmDiscard: () => !editForm?.isDirty() || confirm('Discard your changes to this post?'),
+});
 
-/** Close, asking first if the body was touched — the modal is easy to dismiss. */
-function tryCloseEditModal() {
-  if (!confirmDiscardEdit()) return;
-  closeEditModal();
-}
-
-function enterEditMode(_el, post) {
+function openEditModal(post) {
   editModal.classList.add('open');
-  document.body.style.overflow = 'hidden';
   emTitle.textContent = `#${post.id}`;
   editForm = buildEditForm(emBody, post, {
     onCancel: closeEditModal,   // buildEditForm already confirmed the discard
     onSave: updated => {
       // The card is looked up rather than held: the feed may have re-rendered
       // (a filter, a sort, an SSE push) while the modal was open.
-      const card = feed.querySelector(`[data-id="${post.id}"]`);
-      if (card) card.replaceWith(renderPost(updated));
+      replaceCard(updated);
       closeEditModal();
-      if (postModal.classList.contains('open')) openPostModal(updated, { pushHistory: false });
+      if (isPostOpen()) openPostModal(updated, { pushHistory: false });
       refreshSidebarCounts();
+      refreshLinks();   // a new title changes what [[links]] resolve to
     },
   });
 }
-
-document.getElementById('emClose').onclick = tryCloseEditModal;
-document.getElementById('emBackdrop').onclick = tryCloseEditModal;
-attachSheetDismiss({
-  inner: editModal.querySelector('.sm-inner'),
-  handle: editModal.querySelector('.sm-head'),
-  backdrop: document.getElementById('emBackdrop'),
-  canDismiss: confirmDiscardEdit,
-  onDismiss: closeEditModal,
-});
 
 /* ── SSE ──────────────────────────────────────────────────── */
 function connectSSE() {
@@ -1311,28 +1302,23 @@ function connectSSE() {
 
   es.addEventListener('post', e => {
     const post = JSON.parse(e.data);
-    // A 'post' event is either a brand-new post or an edit streamed in from
-    // outside relay (e.g. an Obsidian save picked up by the vault watcher).
-    // If this post is *currently* open in the detail modal, refresh it in place.
-    // Guard on the modal actually being open (not just _modalPost) so a late or
-    // duplicate edit event that lands right after the user hits × can never
-    // resurrect a modal they just closed.
-    if (_modalPost && _modalPost.id === post.id && postModal.classList.contains('open'))
+    // A new post, or an edit (including one made outside relay). If it is the
+    // post open in the modal, refresh that in place — only while it is open, so
+    // a late event can't resurrect a modal just closed.
+    if (_modalPost && _modalPost.id === post.id && isPostOpen())
       openPostModal(post, { pushHistory: false });
-    const existing = feed.querySelector(`[data-id="${post.id}"]`);
-    // Don't clobber an inline edit the user has open on this card.
-    if (existing && existing.classList.contains('editing')) { scheduleLoadTags(); return; }
-    const el = renderPost(post);
-    el.classList.add('new');
-    if (existing) {
-      if (existing.classList.contains('pinned')) el.classList.add('pinned');
-      existing.replaceWith(el);   // edit: update in place (don't bump query.total)
+    const edited = replaceCard(post);   // an edit updates in place
+    if (edited) {
+      edited.classList.add('new');
     } else if (isDefaultSort() && !query.search && !query.folder) {
       const empty = feed.querySelector('.empty');
       if (empty) empty.remove();
+      const el = renderPost(post);
+      el.classList.add('new');
       const pinnedEl = feed.querySelector('.post.pinned');
       if (pinnedEl) pinnedEl.after(el); else feed.prepend(el);  // keep master on top
       query.total++;
+      query.offset++;   // the server's list shifted too; the next page starts one later
       announce(`New post: ${post.title}`);
     } else {
       // Non-default sort, or a search/folder filter the stream can't apply (it
@@ -1342,7 +1328,7 @@ function connectSSE() {
       bumpNewPostsPill();
       announce(`New post: ${post.title}`);
     }
-    scheduleLoadTags();
+    scheduleRefresh();
   });
 
   es.addEventListener('delete', e => {
@@ -1351,8 +1337,9 @@ function connectSSE() {
     if (!card) return;            // idempotent: already gone (e.g. we deleted it)
     card.remove();
     query.total = Math.max(0, query.total - 1);
+    query.offset = Math.max(0, query.offset - 1);   // or the next page skips a post
     if (_modalPost && _modalPost.id === id) closePostModal();
-    scheduleLoadTags();
+    scheduleRefresh();
   });
 
   es.onopen = () => {
@@ -1362,6 +1349,13 @@ function connectSSE() {
   es.onerror = () => {
     if (sseErrorTimer) clearTimeout(sseErrorTimer);
     sseErrorTimer = setTimeout(() => setDot('error'), 3000);
+    // EventSource retries on its own unless the server refused outright (a
+    // 401 closes it for good) — then ask whether the session is still there.
+    if (es?.readyState === EventSource.CLOSED) {
+      fetch('/auth/me', { credentials: 'same-origin' }).then(r => r.json())
+        .then(me => { if (!me.authenticated) signOut('Your session has ended — sign in again.'); })
+        .catch(() => {});
+    }
   };
 }
 
@@ -1378,8 +1372,6 @@ function setDot(state) {
 
 /* ── Post modal ───────────────────────────────────────────── */
 const postModal  = document.getElementById('postModal');
-const pmBackdrop = document.getElementById('pmBackdrop');
-const pmClose    = document.getElementById('pmClose');
 const pmBack     = document.getElementById('pmBack');
 const pmTitle    = document.getElementById('pmTitle');
 const pmMeta     = document.getElementById('pmMeta');
@@ -1388,21 +1380,15 @@ const pmBodyFade = document.getElementById('pmBodyFade');
 const pmEdit     = document.getElementById('pmEdit');
 const pmDelete   = document.getElementById('pmDelete');
 const pmInner    = document.querySelector('.pm-inner');
-const pmHeader   = document.querySelector('.pm-header');
 let _modalPost        = null;
 let _modalStack       = [];   // entries: { post, scrollTop }
 let _historyDepth     = 0;
 let _suppressPopstate = false;
-// Set when the post modal is entered from somewhere other than another post
-// (currently: the lint pane's "Open post" button) — { label, onBack }. Only
-// consulted once the in-modal stack above is empty: navigating via wikilinks
-// still shows "← <previous post>" as it always has, and popping back through
-// all of those eventually reaches this instead of closing outright, the same
-// way `_modalStack` reaching empty falls through to a plain close today.
-// Cleared by closePostModal (a full session ending), never by pushing onto
-// the stack — so it survives however deep a wikilink chain goes and is still
-// there once you unwind back to the root post.
+// Where the modal was opened from when that wasn't another post — { label,
+// onBack }, e.g. the lint pane. Once the followed-links stack is unwound, Back
+// returns there instead of just closing. Survives any depth of link-following.
 let _externalOrigin = null;
+const isPostOpen = () => postModal.classList.contains('open');
 
 function syncBackButton() {
   if (_modalStack.length === 0) {
@@ -1418,7 +1404,7 @@ function syncBackButton() {
     return;
   }
   const { post } = _modalStack[_modalStack.length - 1];
-  pmBack.textContent = `← ${post.title || `#${post.id}`}`;
+  pmBack.textContent = `← ${postName(post)}`;
   pmBack.style.display = 'inline-flex';
   pmInner.classList.add('has-back');
 }
@@ -1429,17 +1415,24 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
     history.replaceState({ postId: _modalPost.id }, '');
     history.pushState({ postId: post.id }, '');
     _historyDepth++;
+  } else if (pushHistory) {
+    // The first post opened gets its own entry too, so Back (the Android
+    // gesture, the browser button) closes the modal instead of leaving relay.
+    history.pushState({ postId: post.id }, '');
+    _historyDepth++;
   }
-  // `origin` is only ever passed by a fresh open from outside the post modal
-  // (never by the wikilink-navigation or back/forward paths below, which omit
-  // it) — undefined there leaves whatever origin is already set untouched.
-  if (origin !== undefined) _externalOrigin = origin;
+  hideLinkPreview();
+  if (origin !== undefined) _externalOrigin = origin;   // only a fresh open passes one
   _modalPost = post;
   pmTitle.textContent = post.title || '';
+  pmDelete.hidden = post.id === 0;   // the master document is undeletable
   pmTitle.style.display = post.title ? '' : 'none';
 
-  const tagsHtml  = post.tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
-  const srcHtml   = post.source ? `<span class="post-source">via ${escHtml(post.source)}</span>` : '';
+  const tagsHtml  = tagPills(post.tags);
+  const src       = post.source ? sourceParts(post.source) : null;
+  const srcHtml   = !src ? ''
+    : src.href ? `<a class="post-source" href="${escHtml(src.href)}" target="_blank" rel="noopener noreferrer" title="${escHtml(post.source)}">via ${escHtml(src.label)}</a>`
+    : `<span class="post-source">via ${escHtml(src.label)}</span>`;
   const timeLabel = post.updated_at
     ? `${relativeTime(post.created_at)} · edited ${relativeTime(post.updated_at)}`
     : relativeTime(post.created_at);
@@ -1455,21 +1448,17 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
     pill.addEventListener('click', e => { e.stopPropagation(); closePostModal(); selectTag(pill.dataset.tag); })
   );
 
-  const pmContent = post.title
-    ? post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '')
-    : post.content;
+  const pmContent = post.title ? stripTitleHeading(post.content) : post.content;
   pmBody.innerHTML = `<div class="post-body">${renderBody(pmContent)}</div><div class="pm-backlinks" id="pmBacklinks"></div>`;
   wrapTables(pmBody);
   pmBody.querySelectorAll('.post-body pre').forEach(pre => {
     const btn = document.createElement('button');
     btn.className = 'code-copy';
     btn.textContent = 'copy';
-    btn.addEventListener('click', () => {
-      const text = pre.querySelector('code')?.textContent ?? pre.textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        btn.classList.add('copied'); btn.textContent = 'copied';
-        setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'copy'; }, 1500);
-      }).catch(() => {});
+    btn.addEventListener('click', async () => {
+      const ok = await copyText(pre.querySelector('code')?.textContent ?? pre.textContent);
+      btn.classList.toggle('copied', ok); btn.textContent = ok ? 'copied' : 'copy failed';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'copy'; }, 1500);
     });
     pre.appendChild(btn);
   });
@@ -1477,10 +1466,24 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
   clearFeedFocus();
 
   postModal.classList.add('open');
-  document.body.style.overflow = 'hidden';
   pmBody.scrollTop = 0;
   requestAnimationFrame(updateModalFade);
   syncBackButton();
+}
+
+/* The Clipboard API exists only in secure contexts, and relay is often served
+   over plain HTTP on a LAN — there it falls back to a selected textarea. */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard) { await navigator.clipboard.writeText(text); return true; }
+    const ta = Object.assign(document.createElement('textarea'), { value: text, readOnly: true });
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
 }
 
 function updateModalFade() {
@@ -1489,21 +1492,26 @@ function updateModalFade() {
 }
 
 
+/** Close and forget the whole session: followed links, origin, history. */
 function closePostModal() {
-  _modalStack = [];
-  _externalOrigin = null;
   if (_historyDepth > 0) {
     _suppressPopstate = true;
     history.go(-_historyDepth);
-    _historyDepth = 0;
   }
-  postModal.classList.remove('open');
-  document.body.style.overflow = '';
-  pmBody.innerHTML = '';
+  resetPostModal();
+}
+
+/** The close itself, minus driving history — popstate calls this directly,
+ *  since a history.go() there would fight the navigation in progress. */
+function resetPostModal() {
+  hideLinkPreview();
+  _modalStack = [];
+  _externalOrigin = null;
+  _historyDepth = 0;
   _modalPost = null;
-  pmBack.style.display = '';
-  pmBack.textContent = '← back';
-  pmInner.classList.remove('has-back');
+  postModal.classList.remove('open');
+  pmBody.innerHTML = '';
+  syncBackButton();
 }
 
 function popPostModal() {
@@ -1527,18 +1535,9 @@ function popPostModal() {
 }
 
 pmBody.addEventListener('scroll', updateModalFade);
-pmClose.addEventListener('click', popPostModal);
 pmBack.addEventListener('click', popPostModal);
-postModal.addEventListener('click', (e) => { if (!e.target.closest('.pm-inner')) closePostModal(); });
-
-/* Swipe-down-to-dismiss (mobile bottom-sheet) — shared with the other three
-   sheets, which had no gesture at all before. */
-attachSheetDismiss({
-  inner: pmInner,
-  handle: pmHeader,
-  backdrop: pmBackdrop,
-  onDismiss: closePostModal,
-});
+// × and Escape step back through followed links; backdrop and swipe close.
+wireModal(postModal, { close: closePostModal, back: popPostModal });
 // History opens over the post modal (which stays behind it), so returning from a
 // revision leaves you where you were.
 const pmHistory = document.getElementById('pmHistory');
@@ -1548,50 +1547,61 @@ pmHistory.addEventListener('click', () => {
 });
 initPostHistory(() => { resetPaging(); loadPosts(true); });
 
-pmEdit.addEventListener('click', () => {
-  const post = _modalPost; if (!post) return;
-  // Edit modal (z-index 110) opens over the post modal (100) — post modal stays open behind it.
-  enterEditMode(null, post);
-});
+pmEdit.addEventListener('click', () => { if (_modalPost) openEditModal(_modalPost); });
 pmDelete.addEventListener('click', async () => {
   const post = _modalPost; if (!post) return;
-  if (!confirm('Delete this post?')) return;
-  try {
-    await apiSendChecked(`/posts/${post.id}`, { method: 'DELETE' });
-    closePostModal();
-    const card = feed.querySelector(`[data-id="${post.id}"]`);
-    if (card) { card.remove(); query.total--; }
-    loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
-    await loadTags();
-  } catch (err) { alert(`Delete failed: ${err.message}`); }
+  if (await deletePost(post)) closePostModal();
 });
+
+/* Delete, then offer Undo — not "Delete this post?" up front. With history on
+   a delete is recoverable, so the confirm only taxed every deliberate delete
+   while naming nothing (which post?). With history off it is final, and that
+   is when to ask, by name. Returns whether the post was deleted. */
+async function deletePost(post) {
+  const name = postName(post);
+  if (!historyOn && !confirm(`Delete “${name}”? Vault history is off, so this can’t be undone.`)) return false;
+  try {
+    await apiSend(`/posts/${post.id}`, { method: 'DELETE' });
+  } catch (err) {
+    showToast(`Couldn’t delete “${name}”: ${err.message}`, { error: true });
+    return false;
+  }
+  const card = feed.querySelector(`[data-id="${post.id}"]`);
+  if (card) { card.remove(); query.total--; query.offset = Math.max(0, query.offset - 1); }
+  loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
+  refreshSidebarCounts();
+  showToast(`Deleted “${name}”.`, historyOn ? { action: { label: 'Undo', onClick: () => undoDelete(post) } } : {});
+  return true;
+}
+
+async function undoDelete(post) {
+  // The restorable revision is the one before the delete commit; the recovery
+  // list already resolves it, so ask it rather than walk history here.
+  const { items } = await apiFetch('/posts/deleted?limit=100');
+  const gone = items.find(d => d.id === post.id);
+  if (!gone) throw new Error('it is no longer in the recovery list');
+  await apiFetch(`/posts/${post.id}/restore`, { method: 'POST', body: JSON.stringify({ sha: gone.sha }) });
+  resetPaging(); loadPosts(true); refreshSidebarCounts(); refreshLinks();
+  showToast(`Restored “${postName(post)}”.`);
+}
+
 /* ── Keyboard shortcuts modal ─────────────────────────────── */
 const shortcutsModal = document.getElementById('shortcutsModal');
-const kbBackdrop = document.getElementById('kbBackdrop');
-document.getElementById('kbClose').onclick   = () => shortcutsModal.classList.remove('open');
-kbBackdrop.onclick = () => shortcutsModal.classList.remove('open');
-// The other four sm-head/pm-head modals all get the swipe-to-dismiss gesture
-// (sheet.js) — this one only had the close button and the backdrop tap, the
-// exact gap that motivated attachSheetDismiss in the first place (see its
-// module docstring). Its grab handle already rendered (the ::before is
-// generic to every .sm-inner), so on a phone it looked draggable and wasn't.
-attachSheetDismiss({
-  inner: shortcutsModal.querySelector('.sm-inner'),
-  handle: shortcutsModal.querySelector('.sm-head'),
-  backdrop: kbBackdrop,
-  onDismiss: () => shortcutsModal.classList.remove('open'),
-});
-function isShortcutsOpen() { return shortcutsModal.classList.contains('open'); }
+wireModal(shortcutsModal, { close: () => shortcutsModal.classList.remove('open') });
 
 /* ── Feed keyboard focus ──────────────────────────────────── */
 let _focusedCard = null;
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-function getFeedCards() { return [...feed.querySelectorAll('.post:not(.editing)')]; }
+function getFeedCards() { return [...feed.querySelectorAll('.post')]; }
 
 function setFocusedCard(card) {
   if (_focusedCard) _focusedCard.classList.remove('card-focused');
   _focusedCard = card;
-  if (card) { card.classList.add('card-focused'); card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+  if (card) {
+    card.classList.add('card-focused');
+    card.scrollIntoView({ block: 'nearest', behavior: REDUCED_MOTION.matches ? 'auto' : 'smooth' });
+  }
 }
 
 function moveFeedFocus(delta) {
@@ -1619,6 +1629,9 @@ function hideLinkPreview() {
 
 function showLinkPreview(postId, anchor) {
   hideLinkPreview();
+  // The body re-renders on navigation; a detached anchor measures as 0,0 and
+  // nothing would ever fire its mouseout, so the preview stuck in the corner.
+  if (!anchor.isConnected) return;
   const el = document.createElement('div');
   el.className = 'link-preview';
   const rect = anchor.getBoundingClientRect();
@@ -1629,11 +1642,12 @@ function showLinkPreview(postId, anchor) {
   _previewEl = el;
   apiFetch(`/posts/${postId}`).then(post => {
     if (_previewEl !== el) return;
-    const raw     = post.content.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '');
-    const snippet = raw.replace(/[#*`_[\]]/g, '').trim();
+    const raw     = stripTitleHeading(post.content);
+    // [[Target|alias]] reads as its alias, the way the body renders it.
+    const snippet = raw.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/[#*`_[\]]/g, '').trim();
     const clipped = snippet.length > 150 ? snippet.slice(0, 150) + '…' : snippet;
     el.innerHTML  =
-      `<div class="lp-title">${escHtml(post.title || `#${post.id}`)}</div>` +
+      `<div class="lp-title">${escHtml(postName(post))}</div>` +
       (post.tags.length ? `<div class="lp-tags">${post.tags.map(t => `<span class="lp-tag">${escHtml(t)}</span>`).join('')}</div>` : '') +
       (clipped ? `<div class="lp-body">${escHtml(clipped)}</div>` : '');
   }).catch(hideLinkPreview);
@@ -1653,37 +1667,35 @@ pmBody.addEventListener('mouseout', e => {
 document.addEventListener('keydown', e => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
 
-  // Escape priority: most transient first. Lint stacks over status the same
-  // way history/edit stack over the post modal, so it is checked first —
-  // closing it must reveal status, not fall through to closing that too.
-  if (e.key === 'Escape' && isThemeMenuOpen())  { closeThemeMenu(); return; }
-  if (e.key === 'Escape' && isEditOpen())        { tryCloseEditModal(); return; }
-  if (e.key === 'Escape' && isShortcutsOpen())   { shortcutsModal.classList.remove('open'); return; }
-  if (e.key === 'Escape' && isLintOpen())        { tryCloseLintModal(); return; }
-  if (e.key === 'Escape' && isStatusOpen())      { closeStatusModal(); return; }
-  if (e.key === 'Escape' && isHistoryOpen())     { closeHistoryModal(); return; }
-  if (e.key === 'Escape' && postModal.classList.contains('open')) { popPostModal(); return; }
-  if (e.key === 'Escape' && _focusedCard)        { clearFeedFocus(); return; }
+  // Escape: the most transient thing first — the theme menu, then whichever
+  // modal is on top (dialog.js), then the j/k selection.
+  if (e.key === 'Escape') {
+    if (isThemeMenuOpen()) closeThemeMenu();
+    else if (!dismissTopModal()) clearFeedFocus();
+    return;
+  }
 
   // Single-key shortcuts only: Ctrl+J / Cmd+E belong to the browser and OS.
   if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
 
-  // Post modal single-key shortcuts (reading mode only).
-  if (postModal.classList.contains('open') && !isHistoryOpen() && !isEditOpen()) {
-    if (e.key === 'e') { pmEdit.click(); return; }
-    if (e.key === 'h') { pmHistory.click(); return; }
+  // Post modal shortcuts, while it is the modal on top.
+  if (topModal() === postModal) {
+    // preventDefault: the click moves focus into the editor's Title field
+    // before the key's character is inserted, which typed an "e" into it.
+    if (e.key === 'e') { e.preventDefault(); pmEdit.click(); return; }
+    if (e.key === 'h') { e.preventDefault(); pmHistory.click(); return; }
   }
 
   // Global.
-  if (e.key === '?') { shortcutsModal.classList.toggle('open'); return; }
+  if (e.key === '?') { e.preventDefault(); shortcutsModal.classList.toggle('open'); return; }
 
   // Feed navigation — only when no modal is open.
-  const noModal = !isThemeMenuOpen() && !isEditOpen() && !isStatusOpen() && !isHistoryOpen()
-               && !isLintOpen() && !postModal.classList.contains('open') && !isShortcutsOpen();
-  if (noModal) {
+  if (!isThemeMenuOpen() && !anyModalOpen()) {
     if (e.key === 'j') { e.preventDefault(); moveFeedFocus(1);  return; }
     if (e.key === 'k') { e.preventDefault(); moveFeedFocus(-1); return; }
-    if (e.key === 'Enter' && _focusedCard) {
+    // Not when Enter lands on a link or button: it activates that already, and
+    // opening the j/k-selected card on top would stack a second post.
+    if (e.key === 'Enter' && _focusedCard && !e.target.closest?.('a, button')) {
       e.preventDefault();
       openPostById(Number(_focusedCard.dataset.id));
       clearFeedFocus();
@@ -1694,39 +1706,22 @@ document.addEventListener('keydown', e => {
 
 window.addEventListener('popstate', e => {
   if (_suppressPopstate) { _suppressPopstate = false; return; }
-  if (e.state?.postId) {
+  if (e.state?.postId != null) {   // != null: the master document is #0
     if (_modalStack.length > 0) {
       const { post, scrollTop } = _modalStack.pop();
       _historyDepth--;
       openPostModal(post, { pushHistory: false });
       requestAnimationFrame(() => { pmBody.scrollTop = scrollTop; });
     } else {
+      // Forward into a post's entry: that entry already exists, so reopening
+      // it must not push another one.
       _historyDepth = Math.max(0, _historyDepth - 1);
-      openPostById(e.state.postId);
+      openPostById(e.state.postId, { pushHistory: false });
     }
   } else {
-    _historyDepth = 0;
-    _modalStack = [];
-    // Mirrors closePostModal's own reset (not a call to it: that function
-    // also drives `history.go()`, which would fight the back-navigation
-    // already in progress here). _externalOrigin needs the same reset this
-    // duplicates it into by hand, or a lint-opened post closed this way
-    // leaves the breadcrumb pointed at lint for whatever post opens next.
-    _externalOrigin = null;
-    postModal.classList.remove('open');
-    document.body.style.overflow = '';
-    pmBody.innerHTML = '';
-    _modalPost = null;
-    pmBack.style.display = '';
-    pmBack.textContent = '← back';
-    pmInner.classList.remove('has-back');
+    resetPostModal();
   }
 });
-
-/* ── Helpers ──────────────────────────────────────────────── */
-
-
-
 
 // Kick off: restore an existing session (cookie) or show the login control.
 bootstrap();

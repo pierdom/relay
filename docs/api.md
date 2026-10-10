@@ -40,7 +40,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may
 | GET | `/attachments` | List attachments (`folder`/`post_id` scope) |
 | GET | `/attachments/{path}` | Serve a vault attachment (a bare name or a vault-relative path — never a `.md` post, a dotfile, or anything under a dot-directory) |
 | DELETE | `/attachments/{path}` | Delete an attachment (same resolution rule); reports posts still referencing it |
-| GET | `/tags` | List tags with post counts |
+| GET | `/tags` | List tags with post counts, plus each tag's own expiry config (`ttl_hours`, `expires_at`; `null` when unset) |
 | POST | `/tags/{tag}/config` | Set per-tag TTL (`ttl_hours` and/or `expires_at`); an empty body `{}` removes the tag's config |
 | PATCH | `/tags/{tag}` | Rename a tag across all posts |
 | GET | `/events` | SSE stream (`?tag=` filter). `Last-Event-ID` (a `seq` from a prior frame's `id:`) replays every change since — including an edit or delete to a post that already existed, not just a new one |

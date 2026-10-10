@@ -18,25 +18,35 @@ const vtGrid      = document.getElementById('vtGrid');
 const sortFieldEl = document.getElementById('sortField');
 const sortDirEl   = document.getElementById('sortDir');
 
+// Storage can throw (blocked site data, some private modes). This module runs
+// at import time, so an unguarded read here took the whole app down with it —
+// preferences are a convenience and fall back to the defaults instead.
+function load(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function save(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* not persisted this session */ }
+}
+
 export const prefs = {
-  view:      localStorage.getItem('relay-view')  === 'grid'    ? 'grid'    : 'list',
-  sortField: localStorage.getItem('relay-sort')  === 'created' ? 'created' : 'updated',
-  sortOrder: localStorage.getItem('relay-order') === 'asc'     ? 'asc'     : 'desc',
+  view:      load('relay-view')  === 'grid'    ? 'grid'    : 'list',
+  sortField: load('relay-sort')  === 'created' ? 'created' : 'updated',
+  sortOrder: load('relay-order') === 'asc'     ? 'asc'     : 'desc',
 };
 
-export function applyViewMode() {
+function applyViewMode() {
   feed.classList.toggle('grid', prefs.view === 'grid');
   vtList.classList.toggle('active', prefs.view === 'list');
   vtGrid.classList.toggle('active', prefs.view === 'grid');
-  localStorage.setItem('relay-view', prefs.view);
+  save('relay-view', prefs.view);
 }
 
 export function applySort() {
   sortFieldEl.value = prefs.sortField;
   sortDirEl.textContent = prefs.sortOrder === 'asc' ? '↑' : '↓';
   sortDirEl.title = 'Sort direction: ' + (prefs.sortOrder === 'asc' ? 'oldest first' : 'newest first');
-  localStorage.setItem('relay-sort', prefs.sortField);
-  localStorage.setItem('relay-order', prefs.sortOrder);
+  save('relay-sort', prefs.sortField);
+  save('relay-order', prefs.sortOrder);
 }
 
 // A live post belongs at the top of the feed only under the default sort

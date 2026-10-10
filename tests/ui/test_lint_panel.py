@@ -50,9 +50,14 @@ def test_vault_lint_sits_in_the_status_panel(page, relay_server):
     assert "health" in titles and "vault lint" in titles, f"sections are {titles}"
     assert titles.index("health") < titles.index("vault lint"), f"sections are {titles}"
 
+    # Wait for the headline itself: "Checking…" is non-empty too, and on a slow
+    # runner the lint is still in flight when it first renders.
     page.wait_for_function(
-        "() => document.querySelector('.lint-summary-line')?.textContent.trim().length > 0",
-        timeout=10_000,
+        """() => {
+            const t = document.querySelector('.lint-summary-line')?.textContent.trim().toLowerCase();
+            return t && t !== 'checking…';
+        }""",
+        timeout=20_000,
     )
     line = page.locator(".lint-summary-line").inner_text().lower()
     assert "issue" in line or "checked" in line, f"no headline count: {line!r}"
