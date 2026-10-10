@@ -435,6 +435,30 @@ async def test_changes_record_the_real_actor_and_can_filter_by_it(monkeypatch):
         assert [i["title"] for i in filtered] == ["By The Agent"]
 
 
+@pytest.mark.asyncio
+async def test_post_history_names_who_made_each_revision(monkeypatch):
+    """A revision carries its git author, the same identity `changes.author`
+    records — and none for relay's own pinned identity (TTL sweep, external
+    edits), which `actor_name` maps to null."""
+    monkeypatch.setattr(settings, "history_enabled", True)
+    monkeypatch.setattr(settings, "api_keys", "news-agent:sk-news")
+    await database.init_db()
+    await history.init()
+    await _db_sync()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        post = (await c.post(
+            "/posts", json={"title": "Two Hands", "content": "v1", "tags": []},
+            headers={"Authorization": "Bearer sk-news"},
+        )).json()
+        await c.patch(f"/posts/{post['id']}", json={"content": "v2"}, headers=AUTH)
+        items = (await c.get(f"/posts/{post['id']}/history", headers=AUTH)).json()["items"]
+        assert [i["author"] for i in items] == ["apikey", "news-agent"]
+
+    assert history.actor_name("relay") is None
+    assert history.actor_name("news-agent") == "news-agent"
+
+
 # ── K-4: list_changes must clamp `limit` like every sibling paginated call ───
 #
 # REST is protected by FastAPI's own `Query(ge=1, le=200)`, but `changes.py`

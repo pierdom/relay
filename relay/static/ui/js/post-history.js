@@ -80,6 +80,7 @@ function renderRevisions(data, panes) {
     const sha = el('span', 'hm-sha', rev.short_sha);
     const when = el('span', 'hm-when', rev.when.replace('T', ' ').slice(0, 16));
     meta.append(sha, when);
+    if (rev.author) meta.appendChild(el('span', 'hm-author', `by ${rev.author}`));
     if (i === 0 && data.exists) {
       const badge = el('span', 'hm-badge', 'current');
       meta.appendChild(badge);

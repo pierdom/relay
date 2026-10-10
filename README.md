@@ -102,7 +102,7 @@ You can drop Syncthing entirely if you only use the Web UI or the TUI (both are 
 
 ## Interfaces
 
-**Browser UI** (`GET /ui`) — live feed in list or grid, tag and folder filters, search, `[[wikilink]]` cross-references with hover previews, an attachment gallery and [twenty-four themes](docs/themes.md). Edits are conflict-safe (a post changed elsewhere is never silently overwritten), deletes offer Undo, the history panel diffs any revision against the current post, and the status panel's Recovery section restores deleted posts. Fully keyboard-driven (`?` lists the shortcuts); on mobile every modal is a bottom sheet.
+**Browser UI** (`GET /ui`) — live feed in list or grid, tag, folder and author filters, search, a Ctrl/Cmd-K quick switcher, `[[wikilink]]` cross-references with hover previews, an attachment gallery and [twenty-four themes](docs/themes.md). Every post and revision names who wrote it, and the status panel lists recent activity. The editor completes `[[titles]]`, `#ids` and tags, previews the post, and keeps an unpublished draft. Edits are conflict-safe (a post changed elsewhere is never silently overwritten), deletes offer Undo, the history panel diffs any revision against the current post, and the status panel's Recovery section restores deleted posts. Fully keyboard-driven (`?` lists the shortcuts); on mobile every modal is a bottom sheet.
 
 **Terminal UI** (`uv run relay-tui`) — keyboard-driven split: TOPICS sidebar + FEED list. `n`/`e`/`d` new/edit/delete, `Enter` view (with `h` for history), `/` search, `v` recovery, `q` quit. Set `RELAY_PALETTE` to match your terminal. See [docs/tui.md](docs/tui.md).
 

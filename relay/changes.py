@@ -150,12 +150,7 @@ async def _ingest(db: aiosqlite.Connection, commits: list[history.CommitPaths]) 
                 at = normalize_expires_at(commit.when) or commit.when
             except ValueError:
                 at = commit.when   # malformed timestamp: keep it rather than drop the row
-            # "relay" is `CommitPaths`'s own default (relay #198, B-7) for a
-            # commit with no explicit `--author` — no specific actor made
-            # this write (TTL sweep, external-edit batch) — and maps to NULL
-            # here, not the literal string, matching `ChangeEntry.author`'s
-            # "always null until B-7" contract for those cases.
-            author = None if commit.author_name == "relay" else commit.author_name
+            author = history.actor_name(commit.author_name)
             cur = await db.execute(
                 "INSERT INTO changes (post_id, title, tags, action, at, sha, author) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (post_id, title, tags, action, at, commit.sha, author),

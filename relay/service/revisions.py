@@ -47,7 +47,8 @@ async def get_post_history(
         exists=row is not None,
         items=[
             PostRevision(
-                sha=r.sha, short_sha=r.short_sha, when=r.when, message=r.message, path=r.path
+                sha=r.sha, short_sha=r.short_sha, when=r.when, message=r.message, path=r.path,
+                author=r.author,
             )
             for r in revs
         ],

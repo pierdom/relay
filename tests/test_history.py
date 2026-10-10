@@ -254,3 +254,18 @@ async def test_commit_author_is_the_given_actor_not_the_committer(client):
     assert committed
     assert git("log", "-1", "--format=%an <%ae>") == "news-agent <news-agent@relay.local>"
     assert git("log", "-1", "--format=%cn <%ce>") == "relay <relay@localhost>"
+
+
+def test_a_log_header_that_does_not_parse_drops_its_paths():
+    """A field separator inside an author name splits the header wrongly; that
+    commit's paths must be dropped, never filed under the previous commit — the
+    deletion scan (`_parse_log_paths`) would otherwise list a path twice."""
+    rs, fs = history._RS, history._FS
+    out = (
+        f"{rs}aaa{fs}2026-10-01T00:00:00Z{fs}alice{fs}post 1 create: A\n\nA.md\n"
+        f"{rs}bbb{fs}2026-10-02T00:00:00Z{fs}bad{fs}name{fs}post 1 update: A\n\nA.md\n"
+    )
+    revs = history._parse_log(out)
+    assert [(r.sha, r.author) for r in revs] == [("aaa", "alice")]
+    assert [row[0] for row in history._parse_log_paths(out)] == ["aaa"]
+    assert history._parse_log(f"{rs}ccc{fs}2026-10-03T00:00:00Z{fs}relay{fs}ttl expiry\n\nB.md\n")[0].author is None

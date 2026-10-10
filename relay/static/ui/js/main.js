@@ -7,7 +7,7 @@
  */
 
 import { apiFetch, apiSend, clearApiKey, clearCallerScope, getCallerScope, setApiKey, setCallerScope, tagsAllowedByScope } from './api.js';
-import { closeStatusModal, fetchInitStatus, isStatusOpen } from './status.js';
+import { closeStatusModal, fetchInitStatus, initStatus, isStatusOpen, openStatusModal } from './status.js';
 import { query, resetPaging } from './feed-query.js';
 import { initPostHistory, openPostHistory } from './post-history.js';
 import { anyModalOpen, closeAllModals, dismissTopModal, topModal, wireModal } from './dialog.js';
@@ -15,11 +15,14 @@ import { showToast } from './toast.js';
 import { initDeleted } from './deleted.js';
 import { initLint, reopenLintModal, tryCloseLintModal } from './lint.js';
 import { buildEditForm, confirmDeleteAttachment, wireAttachments } from './edit-form.js';
-import { idForTitle, postExists, refreshLinks } from './links.js';
+import { enhanceEditor } from './editor.js';
+import { refreshLinks } from './links.js';
+import { extractMedia, IMAGE_EXT_RE, renderBody, stripTitleHeading, wrapTables } from './render.js';
+import { initSwitcher, openSwitcher } from './switcher.js';
 import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
 import { ICON_CLOCK, ICON_FOLDER, ICON_IMAGE, ICON_PENCIL, ICON_TRASH } from './icons.js';
-import { CODE_SPAN_RE, cleanTag, escHtml, fmtBytes, parseTags, relativeTime, sourceParts, toDatetimeLocal, toUtcIso } from './util.js';
+import { cleanTag, escHtml, fmtBytes, parseTags, relativeTime, sourceParts, toDatetimeLocal, toUtcIso } from './util.js';
 
 const LIMIT = 20;
 let authed = false;         // true once a session exists (cookie or key)
@@ -67,6 +70,8 @@ let defaultMode = 'keyword';
 // Whether a delete can be undone (vault history on) — set from /status in init().
 // Until that answers, deletes ask first, the safe assumption.
 let historyOn = false;
+// Whether /posts/{id}/related can answer (semantic search on) — also from /status.
+let embeddingsOn = false;
 
 // View/sort preferences live in ./view-prefs.js; reloading on a sort change is
 // this module's job, so it is passed in.
@@ -175,6 +180,7 @@ async function signOut(reason = '') {
   authed = false;
   clearApiKey();
   clearCallerScope();
+  if (!reason) dropDraft();   // Disconnect is deliberate; an expired session keeps the draft
   // Await so the cookie is cleared before bootstrap() re-checks /auth/me below.
   await fetch('/session', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
   if (es) { es.close(); es = null; }
@@ -185,6 +191,8 @@ async function signOut(reason = '') {
   tagList.innerHTML = '';
   loadMoreWrap.style.display = 'none';
   query.search = null; searchInput.value = ''; searchBar.classList.remove('active');
+  query.tag = query.folder = query.author = null;   // the next session starts unfiltered
+  syncSearchScope();
   apiKeyInput.value = '';
   setDot('');
   await bootstrap();   // shows whichever login control the deployment uses
@@ -208,8 +216,9 @@ async function init() {
   query.mode = 'keyword';
   modeSelect.value = 'keyword';
   modeSelect.style.display = 'none';
-  fetchInitStatus().then(({ embeddingsEnabled: on, caller, historyEnabled }) => {
+  const statusReady = fetchInitStatus().then(({ embeddingsEnabled: on, caller, historyEnabled }) => {
     historyOn = historyEnabled;
+    embeddingsOn = on;
     modeSelect.style.display = on ? '' : 'none';
     defaultMode = on ? 'hybrid' : 'keyword';
     query.mode = modeSelect.value = defaultMode;
@@ -218,9 +227,10 @@ async function init() {
     applyComposeScopeGate();
   });
   // A deep-linked post renders once, so it waits for the link index (but not
-  // for tags or the feed) — otherwise its [[links]] would all show as broken.
+  // for tags or the feed) — otherwise its [[links]] would all show as broken —
+  // and for /status, which says whether it can list related posts.
   const linkIndexReady = refreshLinks();
-  linkIndexReady.then(openPostFromUrl);
+  Promise.all([linkIndexReady, statusReady]).then(openPostFromUrl);
   await Promise.all([loadTags(), loadPosts(true), linkIndexReady]);
   setDot('connected');
   connectSSE();
@@ -239,148 +249,22 @@ async function openPostFromUrl() {
   await openPostById(raw, { onError: (e) => showToast(`Couldn’t open post #${raw}: ${e.message}`, { error: true }) });
 }
 
-// ── Wikilinks: [[Title]] / [[Title|alias]] and #NNN cross-references ──────────
-// DOMPurify config: keep the attrs our attachment embeds/links add (img loading,
-// link target/rel). marked + preprocessLinks output is sanitized through this.
-const SANITIZE_OPTS = { ADD_ATTR: ['target', 'rel', 'loading'] };
-// A link out of the vault opens in a new tab: in this tab it would replace the
-// whole app, mid-read, with no way back to the open post.
-DOMPurify.addHook('afterSanitizeAttributes', node => {
-  if (node.tagName === 'A' && /^https?:/i.test(node.getAttribute('href') || '')) {
-    node.setAttribute('target', '_blank');
-    node.setAttribute('rel', 'noopener noreferrer');
-  }
-});
-const renderBody = (md) => DOMPurify.sanitize(marked.parse(preprocessLinks(md)), SANITIZE_OPTS);
-
-// A titled post's body usually opens with that title as a heading; cards, the
-// modal and link previews all show the title already, so they drop it.
-const stripTitleHeading = (md) => md.replace(/^\s*#{1,6}\s+[^\n]*\n*/, '');
 const postName = (post) => post.title || `#${post.id}`;
+// Who wrote the current version (a key name or an OIDC email); a click filters by them.
+const authorChip = (post) => !post.updated_by ? ''
+  : `<button type="button" class="post-author" title="Show posts by ${escHtml(post.updated_by)}">by ${escHtml(post.updated_by)}</button>`;
 const tagPills = (tags) => tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
-
-/* Every rendered table scrolls sideways inside its own box when it cannot fit
-   — see `.table-scroll` in app.css — in feed cards as well as the modal. */
-function wrapTables(root) {
-  root.querySelectorAll('.post-body table').forEach(t => {
-    const wrap = document.createElement('div');
-    wrap.className = 'table-scroll';
-    t.replaceWith(wrap);
-    wrap.appendChild(t);
-    t.querySelectorAll('td code').forEach(addPathBreaks);
-    floorProseColumns(t);
-  });
-}
-
-/* Once a table overflows, automatic layout shrinks *every* column to its
-   longest word — on a phone a paragraph column ended up 98px wide beside short
-   ones. A column whose longest cell reads as prose keeps a floor instead, and
-   the table scrolls rather than crushing it. Short columns are left tight. */
-const PROSE_CHARS = 30;
-function floorProseColumns(table) {
-  const longest = [];
-  for (const row of table.rows) {
-    [...row.cells].forEach((cell, i) => {
-      // Prose only: code already wraps at its joints (addPathBreaks).
-      const code = [...cell.querySelectorAll('code')].reduce((n, c) => n + c.textContent.length, 0);
-      longest[i] = Math.max(longest[i] || 0, cell.textContent.trim().length - code);
-    });
-  }
-  for (const row of table.rows) {
-    [...row.cells].forEach((cell, i) => { if (longest[i] >= PROSE_CHARS) cell.style.minWidth = '10em'; });
-  }
-}
-
-/* A path or dotted name in a table cell has no break opportunity, so one
-   `/var/lib/node_exporter/fleet.prom` sets its column's minimum width and
-   squeezes the prose column beside it. `<wbr>` after each separator lets it
-   wrap at its joints; unlike a zero-width space it adds no character, so a
-   copied command stays exact. */
-const PATH_JOINT_RE = /(?<=[/._=])/;
-function addPathBreaks(code) {
-  if (code.children.length || code.textContent.length < 16) return;
-  const parts = code.textContent.split(PATH_JOINT_RE);
-  if (parts.length < 2) return;
-  code.replaceChildren(...parts.flatMap((part, i) => (i ? [document.createElement('wbr'), part] : [part])));
-}
-
-// Convert wikilinks / id-refs to anchors, leaving fenced + inline code untouched.
-function preprocessLinks(md) {
-  return md.split(CODE_SPAN_RE)
-    .map((seg, i) => (i % 2 === 1) ? seg : linkifySegment(seg)).join('');
-}
-
-const IMAGE_EXT_RE  = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
-// Any file extension. Only used on the ![[…]] embed path, which is *always* a file
-// in Obsidian — so a bare note title (no `!`) can never be mistaken for a file.
-const HAS_EXT_RE    = /\.[a-z0-9]{1,12}$/i;
-// Curated types for the plain [[…]] link path, where a dotted note title like
-// [[Section 2.1]] must NOT be treated as a file.
-const ATTACH_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|pdf|canvas|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|zip|epub|mp3|m4a|wav|flac|ogg|aac|opus|mp4|mov|webm|mkv|avi)$/i;
-
-// /attachments/ URL, encoding each path segment (bare filenames stay bare).
-const attUrl = (name) => '/attachments/' + name.split('/').map(encodeURIComponent).join('/');
-const attLink = (name, label) =>
-  `<a class="attachment-link" href="${attUrl(name)}" target="_blank" rel="noopener noreferrer">${escHtml(label)}</a>`;
-
-function linkifySegment(text) {
-  // Obsidian embeds: ![[target(|opts)]] — image, other-file link, or note transclusion.
-  text = text.replace(/!\[\[([^\]|#]+?)(?:\|([^\]]+))?\]\]/g, (m, target, opts) => {
-    const name = target.trim(), o = (opts || '').trim();
-    if (IMAGE_EXT_RE.test(name)) {
-      const dim = o.match(/^(\d+)(?:x(\d+))?$/);   // Obsidian sizing: |W or |WxH
-      const size = dim ? ` width="${dim[1]}"${dim[2] ? ` height="${dim[2]}"` : ''}` : '';
-      const alt = dim || !o ? name : o;
-      return `<img class="attachment" src="${attUrl(name)}" alt="${escHtml(alt)}" loading="lazy"${size}>`;
-    }
-    if (HAS_EXT_RE.test(name)) return attLink(name, o || name);   // any file (pdf/zip/…) → link
-    // No extension → note transclusion; relay doesn't transclude, so link to the note.
-    const id = idForTitle(name);
-    return (id !== undefined)
-      ? `<a class="wikilink" data-post-id="${id}">${escHtml(o || name)}</a>`
-      : `<span class="wikilink broken" title="unresolved embed">${escHtml(o || name)}</span>`;
-  });
-  text = text.replace(/\[\[([^\]|#]+?)(#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (m, target, heading, alias) => {
-    const label = escHtml((alias || target).trim());
-    const t = target.trim();
-    const id = idForTitle(t);
-    if (id !== undefined) return `<a class="wikilink" data-post-id="${id}">${label}</a>`;
-    // Unresolved but a known attachment type (e.g. [[doc.pdf]]) → attachment link, not broken.
-    if (ATTACH_EXT_RE.test(t)) return attLink(t, (alias || target).trim());
-    return `<span class="wikilink broken" title="unresolved link">${label}</span>`;
-  });
-  text = text.replace(/(^|[^\w#])#(\d{1,5})\b/g, (m, pre, n) =>
-    postExists(n) ? `${pre}<a class="wikilink" data-post-id="${n}">#${n}</a>` : m);
-  return text;
-}
-
-// First image embed → thumbnail URL + image count, plus the content with image
-// embeds removed so a card's text preview shows prose instead of an image slice.
-// Non-image embeds (pdf, note transclusions) are left in place.
-function extractMedia(content) {
-  let thumb = null, count = 0;
-  const stripped = content.split(CODE_SPAN_RE).map((seg, i) => {
-    if (i % 2 === 1) return seg;   // code — never a real embed, leave untouched
-    return seg.replace(/!\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]/g, (m, target) => {
-      const name = target.trim();
-      if (!IMAGE_EXT_RE.test(name)) return m;
-      count++;
-      if (!thumb) thumb = attUrl(name);
-      return '';
-    });
-  }).join('');
-  return { thumb, count, stripped };
-}
 
 async function openPostById(id, { onError, origin, pushHistory = true } = {}) {
   try { openPostModal(await apiFetch(`/posts/${id}`), { origin, pushHistory }); }
   catch (e) { if (onError) onError(e); }
 }
 
-// Delegated: any rendered wikilink opens its target post.
+// Delegated: any rendered wikilink opens its target post — except in an
+// editor's Preview, where it would open behind the editor it is shown in.
 document.addEventListener('click', e => {
   const a = e.target.closest('a.wikilink[data-post-id]');
-  if (!a) return;
+  if (!a || a.closest('.ef-preview')) return;
   e.preventDefault(); e.stopPropagation();
   hideLinkPreview();   // also cancels a hover preview still on its timer
   openPostById(Number(a.dataset.postId));
@@ -398,13 +282,13 @@ document.addEventListener('error', e => {
   img.replaceWith(a);
 }, true);
 
-async function renderBacklinks(id) {
-  const el = document.getElementById('pmBacklinks');
-  if (!el) return;
+/* A list of other posts under the open one — those linking to it, and (with
+   semantic search on) those that read alike but are not linked either way. */
+async function renderPostList(el, heading, path) {
   try {
-    const d = await apiFetch(`/posts/${id}/backlinks`);
+    const d = await apiFetch(path);
     el.innerHTML = d.items.length
-      ? `<h4>Linked mentions (${d.items.length})</h4><ul>${d.items.map(i =>
+      ? `<h4>${heading} (${d.items.length})</h4><ul>${d.items.map(i =>
           `<li><a class="wikilink" data-post-id="${i.id}"><span class="bl-id">#${i.id}</span>${escHtml(i.title)}</a></li>`
         ).join('')}</ul>`
       : '';
@@ -456,6 +340,24 @@ cpTags.addEventListener('input', applyComposeScopeGate);
 const COMPOSE_FIELDS = ['cpTitle', 'cpContent', 'cpTags', 'cpSource', 'cpExpires'];
 let composeBaseline = null;
 const composeValues = () => COMPOSE_FIELDS.map(id => document.getElementById(id).value);
+
+// An unpublished post survives a reload, a closed tab or an expired session:
+// kept in this browser until it is published, discarded, or you Disconnect.
+const DRAFT_KEY = 'relay-draft';
+function saveDraft() {
+  try {
+    if (isComposeDirty()) localStorage.setItem(DRAFT_KEY, JSON.stringify(composeValues()));
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch { /* not kept this session */ }
+}
+function restoreDraft() {
+  let values = null;
+  try { values = JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch { /* none, or unreadable */ }
+  if (!Array.isArray(values)) return;
+  COMPOSE_FIELDS.forEach((id, i) => { if (typeof values[i] === 'string') document.getElementById(id).value = values[i]; });
+}
+function dropDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ } }
+composePanel.addEventListener('input', () => { if (isComposeOpen()) saveDraft(); });
 function isComposeDirty() {
   return !!composeBaseline && composeValues().some((v, i) => v !== composeBaseline[i]);
 }
@@ -465,13 +367,20 @@ newPostBtn.addEventListener('click', () => {
   composePanel.classList.add('open');
   if (query.tag) cpTags.value = query.tag;
   composeBaseline = composeValues();
+  restoreDraft();   // after the baseline, so a restored draft still asks before it is discarded
   applyComposeScopeGate();
   cpTitle.focus();
 });
 
+// A deliberate discard drops the saved draft; closing for any other reason
+// (the session ended, closeAllModals) leaves it to come back next time.
 const tryCloseCompose = wireModal(composePanel, {
   close: closeCompose,
-  confirmDiscard: () => !isComposeDirty() || confirm('Discard this unpublished post?'),
+  confirmDiscard: () => {
+    if (isComposeDirty() && !confirm('Discard this unpublished post?')) return false;
+    dropDraft();
+    return true;
+  },
 });
 document.getElementById('cpCancel').addEventListener('click', tryCloseCompose);
 
@@ -497,6 +406,7 @@ cpPublish.addEventListener('click', async () => {
   cpPublish.disabled = true; cpPublish.textContent = 'Publishing…';
   try {
     await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
+    dropDraft();
     closeCompose();
     refreshSidebarCounts();
     await refreshLinks();
@@ -506,6 +416,7 @@ cpPublish.addEventListener('click', async () => {
 
 function closeCompose() {
   composePanel.classList.remove('open');
+  resetComposePreview();
   composeBaseline = null;
   COMPOSE_FIELDS.forEach(id => { document.getElementById(id).value = ''; });
   const st = document.getElementById('cpAttachStatus');
@@ -513,6 +424,7 @@ function closeCompose() {
   cpGateMsg.textContent = '';
 }
 
+const resetComposePreview = enhanceEditor({ content: cpContent, tags: cpTags, previewBtn: document.getElementById('cpPreview') });
 wireAttachments(
   cpContent, document.getElementById('cpFile'),
   document.getElementById('cpAttach'), document.getElementById('cpAttachStatus'),
@@ -573,7 +485,7 @@ tagNewInput.addEventListener('keydown', e => {
   if (!isComposeOpen()) newPostBtn.click();
   const current = parseTags(cpTags.value);
   if (!current.includes(name)) cpTags.value = [...current, name].join(', ');
-  cpTags.dispatchEvent(new Event('input'));   // re-run the scope gate
+  cpTags.dispatchEvent(new Event('input', { bubbles: true }));   // re-run the scope gate, save the draft
   cpTitle.focus();
 });
 
@@ -731,6 +643,18 @@ initLint({
     refreshLinks();
   },
 });
+// The status panel's activity list: a post opens over the feed, and its
+// "← Status" breadcrumb goes back to the panel.
+initStatus({
+  openPost: id => {
+    closeStatusModal();
+    openPostById(id, {
+      origin: { label: 'Status', onBack: openStatusModal },
+      onError: e => showToast(`Couldn’t open post #${id}: ${e.message}`, { error: true }),
+    });
+  },
+});
+initSwitcher(id => openPostById(id, { onError: e => showToast(`Couldn’t open post #${id}: ${e.message}`, { error: true }) }));
 
 async function loadFolders() {
   if (!authed) return;
@@ -755,15 +679,22 @@ function makeFolderItem(label, value, count) {
   return row;
 }
 
-/** Point the feed at a tag or a folder (never both) and start it over. */
-function setFilter({ tag = null, folder = null }) {
+/** Point the feed at a tag, a folder or an author (one at a time) and start it over. */
+function setFilter({ tag = null, folder = null, author = null }) {
   closeSidebar();
   const tagChanged = query.tag !== tag;
-  query.tag = tag; query.folder = folder; resetPaging();
+  query.tag = tag; query.folder = folder; query.author = author; resetPaging();
   if (tagChanged) connectSSE();   // the stream is filtered by tag server-side
   syncSearchScope();
   feed.innerHTML = '';
   loadMoreWrap.style.display = 'none';
+}
+
+/** Posts whose current version this identity wrote — from a card's author chip. */
+async function selectAuthor(author) {
+  setFilter({ author });
+  tagList.querySelectorAll('.tag-item').forEach(el => markActiveRow(el, false));
+  await loadPosts(true);
 }
 
 async function selectFolder(folder) {
@@ -1002,15 +933,16 @@ function startTagConfig(el, tagName) {
    and "No posts match" used to say nothing about the tag it had been limited
    to. Clicking the chip drops the filter. */
 function syncSearchScope() {
-  const label = query.tag ? `#${query.tag}` : query.folder ? `${query.folder}/` : '';
+  const label = query.tag ? `#${query.tag}` : query.folder ? `${query.folder}/`
+    : query.author ? `by ${query.author}` : '';
   searchScope.hidden = !label;
   searchScope.textContent = label ? `${label} ×` : '';
   searchScope.setAttribute('aria-label', label ? `Remove filter ${label}` : '');
   searchScope.title = label ? 'Show all posts' : '';
 }
 function clearScope() {
-  if (query.tag) selectTag(null);
-  else if (query.folder) selectFolder(null);
+  if (query.folder || (query.author && sidebarMode === 'tree')) selectFolder(null);
+  else selectTag(null);
 }
 searchScope.addEventListener('click', clearScope);
 feed.addEventListener('click', e => {
@@ -1019,7 +951,8 @@ feed.addEventListener('click', e => {
 
 /** Empty-feed copy: says what was searched, where, and what to do next. */
 function emptyFeedHtml() {
-  const scope = query.tag ? `tagged #${escHtml(query.tag)}` : query.folder ? `in ${escHtml(query.folder)}/` : '';
+  const scope = query.tag ? `tagged #${escHtml(query.tag)}` : query.folder ? `in ${escHtml(query.folder)}/`
+    : query.author ? `by ${escHtml(query.author)}` : '';
   const widen = scope ? '<button type="button" class="empty-action" data-action="clear-scope">Search all posts</button>' : '';
   if (query.search) {
     const q = `“${escHtml(query.search)}”`;
@@ -1051,6 +984,7 @@ async function loadPosts(replace = false) {
     params.set('order', prefs.sortOrder);
     if (query.tag) params.set('tag', query.tag);
     if (query.folder) params.set('folder', query.folder);
+    if (query.author) params.set('author', query.author);
     if (query.search) params.set('search', query.search);
     // Only meaningful alongside a search term — the server ignores mode without
     // one anyway, but omitting it here keeps a plain listing's request obviously
@@ -1104,31 +1038,6 @@ feed.addEventListener('scroll', () => {
     loadPosts(false).finally(() => { loadingMore = false; });
   }
 });
-
-// Master-doc accordion: collapsed shows a single line (~1× the 1.55/13px body
-// line-height); expanded animates max-height to the content's scrollHeight, then
-// releases to `none` so late reflow (images, wraps) isn't clipped.
-const MASTER_PEEK_PX = 21;
-function toggleMasterAccordion(el, wrap) {
-  const collapsing = !el.classList.contains('collapsed');
-  el.querySelector('.master-badge')?.setAttribute('aria-expanded', String(!collapsing));
-  if (collapsing) {
-    wrap.style.maxHeight = wrap.scrollHeight + 'px';   // pin current height first
-    requestAnimationFrame(() => {
-      el.classList.add('collapsed');
-      wrap.style.maxHeight = MASTER_PEEK_PX + 'px';
-    });
-  } else {
-    el.classList.remove('collapsed');
-    wrap.style.maxHeight = wrap.scrollHeight + 'px';
-    const onEnd = (ev) => {
-      if (ev.propertyName !== 'max-height') return;
-      wrap.style.maxHeight = 'none';
-      wrap.removeEventListener('transitionend', onEnd);
-    };
-    wrap.addEventListener('transitionend', onEnd);
-  }
-}
 
 /** Swap a card for a fresh render of `post`, keeping what its place in the
  *  feed gave it (the pinned master document stays pinned). */
@@ -1184,7 +1093,7 @@ function renderPost(post) {
   let contentToRender = media.stripped;
   let extractedUpdated = null;
   if (post.title) {
-    contentToRender = stripTitleHeading(contentToRender);
+    contentToRender = stripTitleHeading(contentToRender, post.title);
     // Tolerate the line being wrapped in * / _ emphasis (*Last updated: …*).
     const lu = /^\s*[*_]*\s*Last updated:\s*([^\n]+?)\s*[*_]*\s*(?:\n|$)/i;
     const m = contentToRender.match(lu);
@@ -1211,6 +1120,7 @@ function renderPost(post) {
       <div class="post-footer-left">
         <span class="post-id-pill">#${post.id}</span>
         <span class="post-time" title="${timeTitle}">${timeLabel}</span>
+        ${authorChip(post)}
         ${extractedUpdated ? `<span class="post-time t-doc-updated">updated ${escHtml(extractedUpdated)}</span>` : ''}
         ${mediaChip}
         ${expiresHtml}
@@ -1225,6 +1135,7 @@ function renderPost(post) {
   el.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); selectTag(pill.dataset.tag); })
   );
+  el.querySelector('.post-author')?.addEventListener('click', e => { e.stopPropagation(); selectAuthor(post.updated_by); });
   el.querySelector('a.post-title')?.addEventListener('click', e => {
     if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) { e.stopPropagation(); return; }   // browser's own
     e.preventDefault();   // bubble on to the card, which opens the modal
@@ -1238,15 +1149,13 @@ function renderPost(post) {
   });
   el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); openEditModal(post); });
   if (post.id === 0) {
-    // Master doc → inline accordion (collapsed by default → a few-line peek).
-    // Clicking the card toggles it; body links/buttons still work via the guard.
+    // Master doc → one line (its badge) until opened, then the whole note.
+    // Clicking the card toggles it; links and buttons inside keep their clicks.
     el.classList.add('accordion', 'collapsed');
-    const wrap = el.querySelector('.post-body-wrap');
-    wrap.style.maxHeight = MASTER_PEEK_PX + 'px';   // collapsed on first paint
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.master-badge')) { toggleMasterAccordion(el, wrap); return; }
-      if (e.target.closest('a, button, .tag-pill, .post-actions')) return;
-      toggleMasterAccordion(el, wrap);
+      if (!e.target.closest('.master-badge') && e.target.closest('a, button, .tag-pill')) return;
+      const open = !el.classList.toggle('collapsed');
+      el.querySelector('.master-badge').setAttribute('aria-expanded', String(open));
     });
   } else {
     // A link inside the card (wikilink, external, attachment) is that link,
@@ -1310,7 +1219,7 @@ function connectSSE() {
     const edited = replaceCard(post);   // an edit updates in place
     if (edited) {
       edited.classList.add('new');
-    } else if (isDefaultSort() && !query.search && !query.folder) {
+    } else if (isDefaultSort() && !query.search && !query.folder && !query.author) {
       const empty = feed.querySelector('.empty');
       if (empty) empty.remove();
       const el = renderPost(post);
@@ -1321,7 +1230,7 @@ function connectSSE() {
       query.offset++;   // the server's list shifted too; the next page starts one later
       announce(`New post: ${post.title}`);
     } else {
-      // Non-default sort, or a search/folder filter the stream can't apply (it
+      // Non-default sort, or a search/folder/author filter the stream can't apply (it
       // only filters by tag): the post may not belong here at all, let alone at
       // the top — count it and let the pill reload with the real filters.
       query.total++;
@@ -1433,23 +1342,26 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
   const srcHtml   = !src ? ''
     : src.href ? `<a class="post-source" href="${escHtml(src.href)}" target="_blank" rel="noopener noreferrer" title="${escHtml(post.source)}">via ${escHtml(src.label)}</a>`
     : `<span class="post-source">via ${escHtml(src.label)}</span>`;
-  const timeLabel = post.updated_at
+  const timeLabel = (post.updated_at
     ? `${relativeTime(post.created_at)} · edited ${relativeTime(post.updated_at)}`
-    : relativeTime(post.created_at);
+    : relativeTime(post.created_at)) + (post.updated_by ? ' · ' : '');
   const pmExpiresHtml = post.expires_at
     ? `<div class="pm-time">expires ${relativeTime(post.expires_at)}</div>`
     : '';
   const pmMasterBadge = post.id === 0 ? `<div class="master-badge" style="margin-bottom:8px">✦ master document</div>` : '';
   const pmIdPill = `<span class="post-id-pill" style="margin-right:6px">#${post.id}</span>`;
+  const pmTime = `<div class="pm-time">${pmIdPill}${timeLabel}${authorChip(post)}</div>`;
   pmMeta.innerHTML = (tagsHtml || srcHtml)
-    ? `${pmMasterBadge}<div class="post-tags">${tagsHtml}${srcHtml}</div><div class="pm-time">${pmIdPill}${timeLabel}</div>${pmExpiresHtml}`
-    : `${pmMasterBadge}<div class="pm-time">${pmIdPill}${timeLabel}</div>${pmExpiresHtml}`;
+    ? `${pmMasterBadge}<div class="post-tags">${tagsHtml}${srcHtml}</div>${pmTime}${pmExpiresHtml}`
+    : `${pmMasterBadge}${pmTime}${pmExpiresHtml}`;
   pmMeta.querySelectorAll('.tag-pill').forEach(pill =>
     pill.addEventListener('click', e => { e.stopPropagation(); closePostModal(); selectTag(pill.dataset.tag); })
   );
+  pmMeta.querySelector('.post-author')?.addEventListener('click', () => { closePostModal(); selectAuthor(post.updated_by); });
 
-  const pmContent = post.title ? stripTitleHeading(post.content) : post.content;
-  pmBody.innerHTML = `<div class="post-body">${renderBody(pmContent)}</div><div class="pm-backlinks" id="pmBacklinks"></div>`;
+  const pmContent = stripTitleHeading(post.content, post.title);
+  pmBody.innerHTML = `<div class="post-body">${renderBody(pmContent)}</div>`
+    + '<div class="pm-backlinks" id="pmBacklinks"></div><div class="pm-backlinks" id="pmRelated"></div>';
   wrapTables(pmBody);
   pmBody.querySelectorAll('.post-body pre').forEach(pre => {
     const btn = document.createElement('button');
@@ -1462,13 +1374,31 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
     });
     pre.appendChild(btn);
   });
-  renderBacklinks(post.id);
+  renderPostList(document.getElementById('pmBacklinks'), 'Linked mentions', `/posts/${post.id}/backlinks`);
+  if (embeddingsOn) renderPostList(document.getElementById('pmRelated'), 'Related, not linked', `/posts/${post.id}/related`);
+  renderOutline();
   clearFeedFocus();
 
   postModal.classList.add('open');
   pmBody.scrollTop = 0;
   requestAnimationFrame(updateModalFade);
   syncBackButton();
+}
+
+/* The post's H2/H3s, in the empty gutter beside the reading column (wide
+   screens only — see `.pm-outline`). A short note with one heading gets none. */
+const pmOutline = document.getElementById('pmOutline');
+function renderOutline() {
+  const heads = [...pmBody.querySelectorAll('.post-body h2, .post-body h3')];
+  pmOutline.hidden = heads.length < 2;
+  pmOutline.replaceChildren(...(heads.length < 2 ? [] : heads.map(h => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `pm-outline-item ${h.tagName.toLowerCase()}`;
+    btn.textContent = h.textContent;
+    btn.addEventListener('click', () => h.scrollIntoView({ behavior: REDUCED_MOTION.matches ? 'auto' : 'smooth' }));
+    return btn;
+  })));
 }
 
 /* The Clipboard API exists only in secure contexts, and relay is often served
@@ -1511,6 +1441,7 @@ function resetPostModal() {
   _modalPost = null;
   postModal.classList.remove('open');
   pmBody.innerHTML = '';
+  pmOutline.hidden = true;
   syncBackButton();
 }
 
@@ -1642,7 +1573,7 @@ function showLinkPreview(postId, anchor) {
   _previewEl = el;
   apiFetch(`/posts/${postId}`).then(post => {
     if (_previewEl !== el) return;
-    const raw     = stripTitleHeading(post.content);
+    const raw     = stripTitleHeading(post.content, post.title);
     // [[Target|alias]] reads as its alias, the way the body renders it.
     const snippet = raw.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/[#*`_[\]]/g, '').trim();
     const clipped = snippet.length > 150 ? snippet.slice(0, 150) + '…' : snippet;
@@ -1667,6 +1598,14 @@ pmBody.addEventListener('mouseout', e => {
 document.addEventListener('keydown', e => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
 
+  // Ctrl/Cmd-K, even mid-typing: over the feed or a post, never over an editor.
+  if ((e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && authed
+      && (!anyModalOpen() || topModal() === postModal)) {
+    e.preventDefault();
+    openSwitcher();
+    return;
+  }
+
   // Escape: the most transient thing first — the theme menu, then whichever
   // modal is on top (dialog.js), then the j/k selection.
   if (e.key === 'Escape') {
@@ -1688,6 +1627,10 @@ document.addEventListener('keydown', e => {
 
   // Global.
   if (e.key === '?') { e.preventDefault(); shortcutsModal.classList.toggle('open'); return; }
+  if (!anyModalOpen() && authed) {
+    if (e.key === '/' && searchBar.style.display !== 'none') { e.preventDefault(); searchInput.focus(); return; }
+    if (e.key === 'n' && newPostBtn.style.display !== 'none') { e.preventDefault(); newPostBtn.click(); return; }
+  }
 
   // Feed navigation — only when no modal is open.
   if (!isThemeMenuOpen() && !anyModalOpen()) {

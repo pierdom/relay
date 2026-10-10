@@ -169,12 +169,17 @@ def test_new_tag_starts_a_post_carrying_it(page):
 
 
 def test_status_panel_says_semantic_search_is_off_in_one_line(page):
+    """Off, it was a Health row *and* a section of its own saying the same thing
+    twice. Now it is the Health row alone, carrying the switch to turn it on."""
     page.locator("#statusBtn").click()
     page.locator("#statusModal.open").wait_for(timeout=10_000)
-    page.get_by_text("Off — search matches words only").wait_for(timeout=10_000)
-    rows = page.evaluate("""() => {
-        const title = [...document.querySelectorAll('.sm-section-title')]
-            .find(t => t.textContent === 'Semantic search');
-        return title.parentElement.querySelectorAll('dt').length;
-    }""")
-    assert rows <= 2
+    page.get_by_text("off — search matches words only").wait_for(timeout=10_000)
+    found = page.evaluate("""() => ({
+        sections: [...document.querySelectorAll('#smBody .sm-section-title')]
+            .filter(t => t.textContent === 'Semantic search').length,
+        mentions: [...document.querySelectorAll('#smBody .sm-feat-name')]
+            .filter(n => n.textContent === 'Semantic search').length,
+        switchInRow: [...document.querySelectorAll('#smBody .sm-feat-note button')]
+            .some(b => b.textContent === 'Turn on'),
+    })""")
+    assert found == {"sections": 0, "mentions": 1, "switchInRow": True}, found

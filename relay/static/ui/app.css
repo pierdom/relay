@@ -1175,7 +1175,7 @@ header {
 .connected-bar { display: flex; align-items: center; }
 
 .btn-new-post {
-  height: 28px; display: inline-flex; align-items: center; flex-shrink: 0;
+  height: 28px; display: inline-flex; align-items: center; gap: 0.5em; flex-shrink: 0;
   background: var(--accent); border: none; color: var(--on-accent);
   padding: 0 12px; border-radius: 4px; cursor: pointer;
   font-family: inherit; font-size: 11px; font-weight: 600;
@@ -1348,7 +1348,6 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 12px;
 }
-.feed.grid > .post { align-self: start; }
 .feed.grid > .post.pinned,
 .feed.grid > .empty,
 .feed.grid > .auth-prompt { grid-column: 1 / -1; }   /* master doc / states span full width */
@@ -1398,13 +1397,13 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   grid-template-columns: 1fr;
   grid-template-areas: "media" "badge" "header" "body" "footer";
 }
-/* Uniform tile height so rows never go ragged (CSS grid sizes a row to its
-   tallest cell — one hero-image tile would otherwise blow out the whole row).
-   The body row flex-fills and clips with the fade; the footer pins to the
-   bottom. Image tiles show a short excerpt, text-only tiles use the freed
-   space for more text. The full-width master banner keeps its own height. */
+/* A tile is as tall as its content, up to 340px: a row of one-line notes stays
+   short instead of being 340px of empty space, and one long note or hero image
+   cannot blow a row out. Tiles stretch to their row's tallest, so a row's
+   edges still line up. The body row flex-fills and clips with the fade; the
+   footer pins to the bottom. The full-width master banner keeps its own height. */
 .feed.grid > .post:not(.pinned) {
-  height: 340px;
+  max-height: 340px;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
 }
 .feed.grid > .post:not(.pinned) .post-body-wrap {
@@ -1575,6 +1574,16 @@ a.post-title { text-decoration: none; }
 /* Never break a stamp mid-phrase — an orphaned "ago" on its own line was
    the ugliest part of a wrapped footer. Chunks wrap whole or not at all. */
 .post-time { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; white-space: nowrap; }
+/* Who wrote the current version. A button — it filters the feed by them — but
+   set as part of the meta line, not as another pill beside the tags. */
+.post-author {
+  background: none; border: none; padding: 0; cursor: pointer; font-family: inherit;
+  font-size: 10px; color: var(--muted); letter-spacing: 0.02em;
+  max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-decoration: underline dotted; text-underline-offset: 2px;
+}
+.post-author:hover { color: var(--accent); }
+.pm-time .post-author { max-width: none; }
 .post-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; }
 .post:hover .post-actions { opacity: 1; }
 
@@ -1711,6 +1720,35 @@ a.post-title { text-decoration: none; }
 .ef-attach-size { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
 .ef-attach-del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; }
 .ef-attach-del:hover { color: var(--red); }
+
+/* ── Writing aids (js/editor.js) ─────────────────────── */
+/* Fixed, placed under the caret by script: inside a scrolling form an absolute
+   menu would be clipped by the sheet's own overflow. */
+.ac-menu {
+  position: fixed; z-index: 250; list-style: none;
+  min-width: 200px; max-width: 280px; max-height: 240px; overflow-y: auto; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: var(--shadow-modal);
+}
+.ac-item, .sw-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 6px 9px; border-radius: 4px; cursor: pointer;
+  font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* --accent on --tag-bg: an accent-chip pairing the contrast tests already hold. */
+.ac-item[aria-selected="true"], .sw-item[aria-selected="true"], .ac-item:hover, .sw-item:hover {
+  background: var(--tag-bg); color: var(--accent);
+}
+:is(.ac-item, .sw-item)[aria-selected="true"] .ac-hint { color: inherit; }
+.ac-hint { flex-shrink: 0; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ef-preview {
+  border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px;
+  overflow-y: auto; max-height: 60vh;
+}
+.ef-preview > :first-child { margin-top: 0; }
+.ef-preview a.wikilink { cursor: default; }   /* inert here — see main.js */
+.ef-preview-btn[aria-pressed="true"], #cpPreview[aria-pressed="true"] { color: var(--accent); border-color: var(--accent-dim); }
 
 /* ── Attachment gallery ─────────────────────────────── */
 .attachments-view { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 20px 40px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
@@ -2066,14 +2104,22 @@ a.post-title { text-decoration: none; }
 @media (max-width: 768px) {
   /* Header */
   header { padding: 0 14px; gap: 10px; }
-  .menu-btn { display: flex; }
+  /* The drawer opens from the left, so its button leads the bar — and is a
+     thumb-sized target, not the 18x12 of its three bars. */
+  .menu-btn { display: flex; order: -1; box-sizing: content-box; padding: 14px 11px; margin: 0 -11px; }
   /* Drawer model on mobile — desktop collapse is meaningless here */
   .collapse-btn { display: none !important; }
   aside.collapsed { width: 260px; opacity: 1; }
   .brand-sep { display: none; }
   .live-label { display: none; }
   .key-wrap input { width: 140px; }
-  .btn-new-post { height: 40px; font-size: 10px; padding: 0 11px; letter-spacing: 0.06em; }
+  /* "+" alone, the same square as the icon buttons beside it; the words stay
+     for screen readers. */
+  .btn-new-post { width: 40px; height: 40px; padding: 0; justify-content: center; font-size: 18px; }
+  .np-label {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden;
+    clip: rect(0, 0, 0, 0); white-space: nowrap;
+  }
 
   /* Sidebar → slide-in drawer */
   aside {
@@ -2139,7 +2185,6 @@ a.post-title { text-decoration: none; }
   header { gap: 8px; }
   .key-wrap input { width: 110px; font-size: 11px; }
   .btn-connect { padding: 5px 8px; }
-  .btn-new-post { padding: 0 9px; }
 }
 
 /* ── Post ID pill ────────────────────────────────────── */
@@ -2177,12 +2222,12 @@ a.post-title { text-decoration: none; }
 .post.master-doc.accordion.collapsed .accordion-chevron { transform: rotate(-90deg); }
 
 /* ── Master document accordion ───────────────────────── */
-/* max-height is driven by JS (scrollHeight ↔ a few-line peek) for a smooth
-   animation over arbitrary content; the collapsed peek keeps the fade. */
-.post.master-doc.accordion .post-body-wrap {
-  overflow: hidden;
-  transition: max-height 0.3s cubic-bezier(0.4,0,0.2,1);
-}
+/* Collapsed it is one line — its badge — so it never costs a phone its first
+   screen. Open, the whole note shows, unclamped. */
+.post.master-doc.accordion.collapsed { padding-block: 10px; }
+.post.master-doc.accordion.collapsed > :not(.master-badge) { display: none; }
+.post.master-doc.accordion.collapsed .master-badge { margin-bottom: 0; }
+.post.master-doc.accordion:not(.collapsed) .post-body-wrap { max-height: none; }
 .post.master-doc.accordion .post-body-wrap::after { display: none; }
 
 /* ── Post footer left group ──────────────────────────── */
@@ -2300,7 +2345,7 @@ a.post-title { text-decoration: none; }
 .sm-rows dd { margin: 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 /* Health is the same grid; the row is `contents` so the dot+label pair and the
    note fall into those two columns rather than forming a flex row of their own. */
-.sm-health { gap: 7px 14px; }
+.sm-health { gap: 7px 14px; align-items: start; }
 .sm-feat { display: contents; }
 .sm-feat-name { display: flex; align-items: center; gap: 8px; color: var(--muted); min-width: 0; }
 .sm-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
@@ -2312,6 +2357,16 @@ a.post-title { text-decoration: none; }
 .sm-recovery-line, .lint-summary-line { font-size: 12.5px; color: var(--text); margin-bottom: 10px; }
 .sm-error { font-size: 12.5px; color: var(--red); }
 .sm-embed-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.sm-feat-note .sm-embed-controls { margin-top: 6px; }
+.sm-activity { list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.sm-act { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sm-act-title {
+  align-self: flex-start; max-width: 100%; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+button.sm-act-title { background: none; border: none; padding: 0; font: inherit; cursor: pointer; text-align: left; }
+button.sm-act-title:hover { color: var(--accent); }
+.sm-act-meta, .sm-act-note { font-size: 11px; color: var(--muted); }
 .sm-embed-controls .btn-edit:disabled { opacity: 0.5; cursor: default; }
 .sm-embed-controls .btn-edit:disabled:hover { border-color: var(--border); color: var(--muted); }
 
@@ -2463,6 +2518,45 @@ a.post-title { text-decoration: none; }
 .lp-tag   { font-size: 10px; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
 .lp-body  { font-size: 11px; color: var(--muted); line-height: 1.5; }
 
+/* ── Quick switcher (js/switcher.js) ─────────────────────────── */
+/* Near the top, like any command palette: the list grows downward from where
+   the eye already is, and the panel does not jump as results change. A phone
+   keeps the bottom sheet every other panel is. */
+@media (min-width: 769px) {
+  #switcherModal.open { align-items: flex-start; padding-top: 12vh; }
+}
+.sw-inner { max-width: 520px; }
+.sw-inner .sm-body { gap: 10px; }
+#swInput {
+  width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 4px; outline: none;
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  font-family: inherit; font-size: 13px;
+}
+#swInput:focus { border-color: var(--accent); }
+.sw-list { list-style: none; display: flex; flex-direction: column; gap: 1px; max-height: 50vh; overflow-y: auto; }
+.sw-empty { padding: 6px 9px; font-size: 12px; color: var(--muted); }
+
+/* ── Post outline (main.js renderOutline) ──────────────────── */
+/* In the gutter left of the reading column, which only exists on a wide
+   screen: the panel is 94% of the viewport up to 1320px and the column is
+   --measure, so at 1280px the gutter is ~165px — the narrowest it is useful. */
+.pm-outline { display: none; }
+@media (min-width: 1280px) {
+  .pm-outline:not([hidden]) {
+    display: flex; flex-direction: column; gap: 2px;
+    position: absolute; z-index: 2; top: 16px; left: 20px; bottom: 16px; overflow-y: auto;
+    width: calc((100% - var(--measure)) / 2 - 44px);
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+}
+.pm-outline-item {
+  background: none; border: none; text-align: left; cursor: pointer;
+  padding: 3px 0; font-family: inherit; font-size: 11px; line-height: 1.4; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0;
+}
+.pm-outline-item.h3 { padding-left: 12px; }
+.pm-outline-item:hover { color: var(--accent); }
+
 /* ── Keyboard shortcuts modal ───────────────────────────────── */
 .kb-inner { max-width: 360px; }
 .kb-inner .sm-body { gap: 20px; }
@@ -2605,6 +2699,7 @@ kbd {
   overflow: hidden; overflow-wrap: anywhere;
 }
 .hm-when { color: var(--muted); font-size: 10.5px; flex-shrink: 0; }
+.hm-author { color: var(--muted); font-size: 10.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .hm-pane-head { flex-shrink: 0; margin-bottom: 8px; }
 .hm-body-text {
@@ -2764,6 +2859,13 @@ kbd {
     display: inline-flex; align-items: center; justify-content: center;
     margin: -12px -8px -12px 0;
   }
+  /* Text-sized buttons in a meta line (the author, an activity row's title):
+     a thumb-sized hit area that overlaps its neighbours rather than pushing
+     the line apart. */
+  .post-author, button.sm-act-title {
+    min-height: 44px; display: inline-flex; align-items: center; margin-block: -14px;
+  }
+  .post-author { min-width: 44px; }
 
   /* List-mode cards keep the single-row header (title + tags side by side)
      at any width otherwise, so a handful of tags squeeze the title down to a
@@ -2778,9 +2880,7 @@ kbd {
 }
 
 /* Below two grid columns (minmax(250px) + gap) a grid tile has no row
-   neighbours to match, so its fixed 340px height was pure empty space — a
-   one-line post became a screen-tall card. Size to content with the list
-   view's clamp instead. */
+   neighbours to match: size to content with the list view's clamp. */
 @media (max-width: 560px) {
   .feed.grid > .post:not(.pinned) { height: auto; grid-template-rows: none; }
   .feed.grid > .post:not(.pinned) .post-body-wrap { height: auto; max-height: 60px; }

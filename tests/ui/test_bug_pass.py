@@ -81,6 +81,7 @@ def test_saving_the_master_document_keeps_it_pinned(page):
     """Edit's save replaced the card with a fresh render that lost `pinned`."""
     master = page.locator('.post.pinned[data-id="0"]')
     master.wait_for(timeout=10_000)
+    master.locator(".master-badge").click()   # collapsed, it is one line with no actions
     master.hover()
     master.locator(".btn-edit").click()
     page.locator("#editModal.open .ef-content").wait_for(timeout=10_000)

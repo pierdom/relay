@@ -629,6 +629,9 @@ class PostRevision(BaseModel):
     when: str
     message: str
     path: str
+    author: str | None = Field(
+        default=None, description="Who made this write (relay #198, B-7); null for relay's own (TTL, external edit)"
+    )
 
 
 class PostRevisionContent(BaseModel):
@@ -684,7 +687,9 @@ class ChangeEntry(BaseModel):
     )
     when: str
     sha: str = Field(description="The commit this change was recorded from")
-    author: str | None = Field(default=None, description="Always null until relay #198's N-3 ships")
+    author: str | None = Field(
+        default=None, description="Who made this write (relay #198, B-7); null for relay's own (TTL, external edit)"
+    )
 
     @classmethod
     def from_row(cls, row) -> ChangeEntry:

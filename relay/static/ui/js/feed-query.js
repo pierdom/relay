@@ -1,6 +1,6 @@
 /* What the feed is currently showing.
  *
- * These six values were separate top-level `let`s spread across the search, tags,
+ * These values were separate top-level `let`s spread across the search, tags,
  * sidebar, files, posts, SSE and modal sections — which is why almost every part
  * of main.js could reach almost every other part. They are not really shared
  * globals though: together they are one thing, the query the feed is rendering.
@@ -9,13 +9,14 @@
  * Exported as an object so properties stay mutable across module boundaries (an
  * imported binding itself is read-only).
  *
- * `tag` and `folder` are mutually exclusive — the UI never applies both — and
- * `search` combines with either.
+ * `tag`, `folder` and `author` are mutually exclusive — the UI applies one at a
+ * time — and `search` combines with any of them.
  */
 
 export const query = {
   tag: null,       // active tag filter, or null
   folder: null,    // active folder filter, or null
+  author: null,    // active author filter (a post's `updated_by`), or null
   search: null,    // active search term, or null
   mode: 'keyword', // search ranking mode — 'keyword' (default), 'semantic', or 'hybrid'
                     // (relay #253). Freely combines with tag/folder (server-supported since

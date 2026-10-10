@@ -4,6 +4,31 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.20.0] — 2026-10-10
+
+The web UI review (relay #198, B-13): what the API already knew about a post — who wrote it, what changed, what reads alike — is now in the browser, along with writing aids and a quick switcher.
+
+### Added
+- **Who wrote it**: cards and the post view name the writer of the current version (`updated_by`); clicking it lists that writer's posts. History names the writer of each revision — `GET /posts/{id}/history` and MCP `get_post_history` gain `author`, the same identity `/changes` records
+- **Recent activity** in the status panel: the latest changes from `/changes`, each opening its post (with a way back to the panel)
+- **Related, not linked** under a post when semantic search is on (`/posts/{id}/related`)
+- **Quick switcher** (`Ctrl/Cmd-K`): jump to a post by title or `#id`. `/` focuses search, `n` starts a post
+- **Writing aids** in New Post and Edit: `[[` completes a post title, `#` a post id, Tags complete from the vault; a **Preview** toggle; an unpublished post is kept in the browser until it is published, discarded, or you disconnect
+- **Outline**: long posts list their sections beside the text on wide screens
+
+### Changed
+- The master document's card is one line until opened
+- Grid tiles size to their content (up to 340px) and line up within a row, instead of a fixed 340px of mostly empty space
+- On a phone, the drawer button leads the header and New Post is a square `+`
+- The status panel shows semantic search once — as a Health row with its switch while off, as a section once on
+
+### Fixed
+- A post opening on a heading that isn't its title (say `## Part 1`) lost that heading in cards and the post view; only a heading that restates the title is dropped now, punctuation the filename lost included
+- A post opened from a link (`/id/N`) could render before the app knew semantic search was on
+- Docs: the reference `docker-compose.yml` pin moves to `1.20`
+
+---
+
 ## [1.19.0] — 2026-10-10
 
 A full audit of the web UI: every finding reproduced in Chromium first, fixed, and pinned by a browser test that was seen to fail without the fix.

@@ -34,6 +34,7 @@ SHEETS = [
     ("shortcuts", "open_shortcuts", "#shortcutsModal"),
     ("lint", "open_lint", "#lintModal"),
     ("compose", "open_compose", "#composePanel"),
+    ("switcher", "open_switcher", "#switcherModal"),
 ]
 
 # Dispatches a real touch sequence on an element. Playwright's touchscreen API
@@ -126,6 +127,11 @@ def open_shortcuts(page):
     page.evaluate("document.activeElement && document.activeElement.blur()")
     page.keyboard.press("?")
     page.wait_for_selector("#shortcutsModal.open")
+
+
+def open_switcher(page):
+    page.keyboard.press("Control+k")
+    page.wait_for_selector("#switcherModal.open")
 
 
 def _open(page, name: str):

@@ -151,12 +151,14 @@ Notes without a domain tag land in `Inbox/`. As soon as the note gets its first 
 
 | | |
 |---|---|
-| Write | **+ New Post** (Tags start from the active tag filter). The sidebar's **+** starts a post carrying a new tag — a tag exists while a post carries it |
-| Find | Pick a tag or folder, then search: the chip beside the search box shows the filter the search runs inside; click it to search everything |
+| Write | **+ New Post** (Tags start from the active tag filter). The sidebar's **+** starts a post carrying a new tag — a tag exists while a post carries it. In the editor, `[[` completes a post title, `#` a post id, and Tags complete from the vault's tags; **Preview** shows the post as it will read. An unpublished post is kept in the browser until you publish or discard it (Disconnect drops it too) |
+| Read | Long posts list their sections beside the text on wide screens; under the post, **Linked mentions** and, with semantic search on, **Related, not linked** |
+| Find | Pick a tag or folder, then search: the chip beside the search box shows the filter the search runs inside; click it to search everything. **Ctrl/Cmd-K** jumps to a post by title or `#id` |
+| Who | Each post names who wrote its current version (a named API key or a login); click it to list that writer's posts. History names the writer of each revision, and the status panel's **Recent activity** lists the latest changes |
 | Edit | Saving over a post changed elsewhere (Obsidian, an agent) is refused with a note; Save again to overwrite deliberately |
 | Delete | Deletes offer **Undo** while vault history is on; with it off they ask first |
 | Expire | A tag's clock button sets a TTL or a date for its posts; tags that expire their posts keep the clock visible |
-| Keyboard | `j`/`k` move through the feed, `Enter` opens, `e` edit, `h` history, `Esc` back, `?` all shortcuts |
+| Keyboard | `j`/`k` move through the feed, `Enter` opens, `e` edit, `h` history, `Esc` back, `/` search, `n` new post, `Ctrl/Cmd-K` go to a post, `?` all shortcuts |
 
 ### Cross-links and attachments
 
