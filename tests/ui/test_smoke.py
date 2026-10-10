@@ -865,20 +865,27 @@ def test_every_form_control_has_an_accessible_name(page):
     placeholder disappears the moment you type. `for`/`id` on all nine, plus an
     `aria-label` on the search field, which had no label at all.
     """
+    find_unnamed = """() => [...document.querySelectorAll('input, textarea, select')]
+         .filter(e => e.getBoundingClientRect().width > 0 && e.type !== 'hidden')
+         .filter(e => !(e.labels && e.labels.length) && !e.getAttribute('aria-label'))
+         .map(e => e.id || e.className || e.tagName)"""
+
+    # New Post is a modal now (it was an inline panel), so the two forms are
+    # checked one at a time rather than both open at once.
     page.locator("#newPostBtn").click()
+    page.locator("#composePanel.open").wait_for(timeout=10_000)
     page.wait_for_timeout(250)
+    unnamed = page.evaluate(find_unnamed)
+    assert not unnamed, f"controls with no accessible name (placeholder is not one): {unnamed}"
+    page.keyboard.press("Escape")
+    page.locator("#composePanel.open").wait_for(state="detached", timeout=5_000)
+
     page.locator(".post-title").nth(2).click()
     page.locator("#postModal.open").wait_for(timeout=10_000)
     page.locator("#pmEdit").click()
     page.locator("#editModal.open").wait_for(timeout=10_000)
     page.wait_for_timeout(250)
-
-    unnamed = page.evaluate(
-        """() => [...document.querySelectorAll('input, textarea, select')]
-             .filter(e => e.getBoundingClientRect().width > 0 && e.type !== 'hidden')
-             .filter(e => !(e.labels && e.labels.length) && !e.getAttribute('aria-label'))
-             .map(e => e.id || e.className || e.tagName)"""
-    )
+    unnamed = page.evaluate(find_unnamed)
     assert not unnamed, f"controls with no accessible name (placeholder is not one): {unnamed}"
 
 

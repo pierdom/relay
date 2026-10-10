@@ -13,7 +13,8 @@
  */
 
 import { apiFetch } from './api.js';
-import { attachSheetDismiss } from './sheet.js';
+import { wireModal } from './dialog.js';
+import { el, note, placeholder, setPane } from './dom.js';
 
 const historyModal = document.getElementById('historyModal');
 const hmTitle = document.getElementById('hmTitle');
@@ -23,28 +24,18 @@ let currentPostId = null;
 let currentBody = null;      // the live post body, for the diff
 let paneView = 'body';      // 'body' | 'diff', remembered across revisions
 let onRestored = () => {};
+let selectedSha = null;      // the revision the pane is meant to show
 
 /** main.js supplies the callback that refreshes the feed after a restore. */
 export function initPostHistory(refresh) {
   onRestored = refresh;
 }
 
-export function isHistoryOpen() {
-  return historyModal.classList.contains('open');
-}
-
-export function closeHistoryModal() {
+function closeHistoryModal() {
   historyModal.classList.remove('open');
-  document.body.style.overflow = '';
   hmBody.innerHTML = '';
   currentPostId = null;
-}
-
-function note(text, className = 'sm-section-title') {
-  const el = document.createElement('div');
-  el.className = className;
-  el.textContent = text;
-  return el;
+  selectedSha = null;
 }
 
 /* The panes are built once and then only their *contents* change.
@@ -55,29 +46,14 @@ function note(text, className = 'sm-section-title') {
  * A fixed-height shell with two internally-scrolling panes cannot do that. */
 function buildLayout() {
   hmBody.innerHTML = '';
-  const layout = document.createElement('div');
-  layout.className = 'hm-layout';
-  const list = document.createElement('div');
-  list.className = 'hm-list';
-  const pane = document.createElement('div');
-  pane.className = 'hm-pane';
+  const layout = el('div', 'hm-layout');
+  const list = el('div', 'hm-list');
+  const pane = el('div', 'hm-pane');
   layout.append(list, pane);
   hmBody.appendChild(layout);
   return { list, pane };
 }
 
-function placeholder(text) {
-  const el = document.createElement('div');
-  el.className = 'hm-placeholder';
-  el.textContent = text;
-  return el;
-}
-
-/** Swap only what is inside the preview pane, so its box never changes size. */
-function setPane(pane, ...nodes) {
-  pane.innerHTML = '';
-  pane.append(...nodes);
-}
 
 function renderRevisions(data, panes) {
   const { list, pane } = panes;
@@ -94,28 +70,18 @@ function renderRevisions(data, panes) {
     // On one line the message was squeezed between them and ellipsized to a
     // couple of characters — "post 86 update: …" became "va…", which identifies
     // nothing, and picking a revision to restore is the entire job here.
-    const row = document.createElement('button');
-    row.className = 'hm-rev';
+    const row = el('button', 'hm-rev');
     row.type = 'button';
 
-    const msg = document.createElement('span');
-    msg.className = 'hm-msg';
-    msg.textContent = rev.message;
+    const msg = el('span', 'hm-msg', rev.message);
     msg.title = rev.message;
 
-    const meta = document.createElement('span');
-    meta.className = 'hm-meta';
-    const sha = document.createElement('span');
-    sha.className = 'hm-sha';
-    sha.textContent = rev.short_sha;
-    const when = document.createElement('span');
-    when.className = 'hm-when';
-    when.textContent = rev.when.replace('T', ' ').slice(0, 16);
+    const meta = el('span', 'hm-meta');
+    const sha = el('span', 'hm-sha', rev.short_sha);
+    const when = el('span', 'hm-when', rev.when.replace('T', ' ').slice(0, 16));
     meta.append(sha, when);
     if (i === 0 && data.exists) {
-      const badge = document.createElement('span');
-      badge.className = 'hm-badge';
-      badge.textContent = 'current';
+      const badge = el('span', 'hm-badge', 'current');
       meta.appendChild(badge);
     }
 
@@ -216,8 +182,7 @@ function diffTokens(before, after) {
 
 function renderDiff(revisionText, currentText) {
   const rows = diffTokens(revisionText, currentText);
-  const wrap = document.createElement('pre');
-  wrap.className = 'hm-body-text hm-diff';
+  const wrap = el('pre', 'hm-body-text hm-diff');
   if (rows === null) {
     wrap.textContent = 'Too much changed to diff word by word — use Body to read the revision.';
     return wrap;
@@ -234,9 +199,7 @@ function renderDiff(revisionText, currentText) {
     // No +/- marker: the accent/strikethrough treatment already says
     // "added"/"removed", and leaving it out means a copied selection reads
     // as plain text with nothing to strip before pasting it back.
-    const span = document.createElement('span');
-    span.className = `hm-d-${kind}`;
-    span.textContent = text;
+    const span = el('span', `hm-d-${kind}`, text);
     wrap.appendChild(span);
   }
   return wrap;
@@ -246,24 +209,29 @@ async function selectRevision(rev, row, pane) {
   for (const el of hmBody.querySelectorAll('.hm-rev.active')) el.classList.remove('active');
   row.classList.add('active');
   setPane(pane, placeholder('loading…'));
+  selectedSha = rev.sha;
+  const postId = currentPostId;
+  // Another revision can be picked (or the panel closed) while these load; a
+  // slow answer must not paint its body — and its Restore — under that one.
+  const stale = () => selectedSha !== rev.sha || currentPostId !== postId;
 
   try {
-    const d = await apiFetch(`/posts/${currentPostId}/history/${rev.sha}`);
+    const d = await apiFetch(`/posts/${postId}/history/${rev.sha}`);
+    if (stale()) return;
     const head = note(`${d.title} — as of ${rev.short_sha}`, 'sm-section-title hm-pane-head');
 
     // The current body, for the diff. Fetched once per panel: a deleted post
     // has none, and then Diff is simply not offered.
     if (currentBody === null) {
-      try { currentBody = (await apiFetch(`/posts/${currentPostId}`)).content ?? null; }
+      try { currentBody = (await apiFetch(`/posts/${postId}`)).content ?? null; }
       catch { currentBody = null; }
+      if (stale()) return;
     }
 
-    const body = document.createElement('pre');
-    body.className = 'hm-body-text';
+    const body = el('pre', 'hm-body-text');
     body.textContent = d.content;          // never innerHTML: this is vault content
 
-    const restore = document.createElement('button');
-    restore.className = 'btn-restore hm-restore';
+    const restore = el('button', 'btn-restore hm-restore');
     restore.type = 'button';
     restore.textContent = `Restore this version (${rev.short_sha})`;
     restore.addEventListener('click', () => restoreRevision(rev, restore, pane));
@@ -277,8 +245,7 @@ async function selectRevision(rev, row, pane) {
      * The question this panel answers is "what would restoring give me back",
      * which is the one you have when you suspect something was clobbered — and
      * that is the gap this view exists to close. */
-    const toggle = document.createElement('div');
-    toggle.className = 'hm-view-toggle';
+    const toggle = el('div', 'hm-view-toggle');
     const showBody = document.createElement('button');
     showBody.type = 'button';
     showBody.className = 'vt-btn active';
@@ -307,7 +274,7 @@ async function selectRevision(rev, row, pane) {
     // and having it snap back to Body on every click makes that tedious.
     if (paneView === 'diff') pick(true);
   } catch (err) {
-    setPane(pane, placeholder(`Could not load that revision: ${err.message}`));
+    if (!stale()) setPane(pane, placeholder(`Could not load that revision: ${err.message}`));
   }
 }
 
@@ -334,7 +301,6 @@ export async function openPostHistory(postId, title) {
   currentBody = null;
   paneView = 'body';
   historyModal.classList.add('open');
-  document.body.style.overflow = 'hidden';
   hmTitle.textContent = `#${postId}${title ? ' · ' + title : ''}`;
   // Build the shell before fetching so the panel opens at its final size.
   const panes = buildLayout();
@@ -344,12 +310,8 @@ export async function openPostHistory(postId, title) {
     renderRevisions(await apiFetch(`/posts/${postId}/history`), panes);
   } catch (err) {
     panes.list.innerHTML = '';
-    // 503 is the one expected failure — the server has history switched off, or no
-    // git binary — and deserves plain words rather than a bare status line.
-    // K-12: this used to check `err.message.startsWith('503')`, which never
-    // matched — apiFetch always uses the server's `detail` sentence as the
-    // message, never a string starting with a status code — so this branch
-    // was dead and every failure fell through to the generic one below.
+    // 503 is the one expected failure — history switched off, or no git
+    // binary — and deserves plain words rather than a bare status line.
     panes.list.appendChild(err.status === 503
       ? note('Vault history is not enabled on this server, so there is nothing to restore from.', 'sm-error')
       : note(`Could not load history: ${err.message}`, 'sm-error'));
@@ -357,12 +319,4 @@ export async function openPostHistory(postId, title) {
   }
 }
 
-document.getElementById('hmClose').onclick = closeHistoryModal;
-const hmBackdrop = document.getElementById('hmBackdrop');
-hmBackdrop.onclick = closeHistoryModal;
-attachSheetDismiss({
-  inner: historyModal.querySelector('.sm-inner'),
-  handle: historyModal.querySelector('.sm-head'),
-  backdrop: hmBackdrop,
-  onDismiss: closeHistoryModal,
-});
+wireModal(historyModal, { close: closeHistoryModal });

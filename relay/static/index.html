@@ -35,10 +35,10 @@
   <script src="/static/__ASSETS__/vendor/purify.min.js"></script>
   <link rel="stylesheet" href="/static/__ASSETS__/app.css">
 </head>
-<body>
+<body class="signed-out">
 
 <header>
-  <button class="collapse-btn" id="collapseBtn" aria-label="Collapse sidebar" title="Collapse sidebar" style="display:none">
+  <button class="collapse-btn" id="collapseBtn" aria-label="Collapse sidebar" title="Collapse sidebar">
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
       <rect x="2" y="3" width="12" height="10" rx="1.5"></rect>
       <line x1="6" y1="3" x2="6" y2="13"></line>
@@ -59,7 +59,7 @@
          between it and Disconnect. "+ New Post" next to a one-click session
          kill is a misfire waiting to happen — pinned by
          test_header_controls_are_one_visual_set. -->
-    <button class="btn-new-post" id="newPostBtn" style="display:none">+ New Post</button>
+    <button class="btn-new-post" id="newPostBtn">+ New Post</button>
     <div class="theme-picker">
       <!-- A palette, not a sun/moon: this stopped being a two-state toggle when it
            became a menu, and a glyph that flips between ☀ and ☾ promises the wrong
@@ -77,13 +77,13 @@
       </button>
       <div class="theme-menu" id="themeMenu" role="menu" aria-label="Theme"></div>
     </div>
-    <button class="icon-btn" id="statusBtn" aria-label="Server status" title="Server status" style="display:none">
+    <button class="icon-btn" id="statusBtn" aria-label="Server status" title="Server status">
       <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
         <circle cx="8" cy="8" r="6.4"/><path d="M8 7.3v3.9"/>
         <circle cx="8" cy="4.9" r=".85" fill="currentColor" stroke="none"/>
       </svg>
     </button>
-    <div class="connected-bar" id="connectedBar" style="display:none">
+    <div class="connected-bar" id="connectedBar">
       <!-- Was the word "disconnect" in muted text — the only control in the row
            without a shape, so it read as a footnote rather than a button. -->
       <button class="icon-btn icon-btn-danger" id="disconnectBtn"
@@ -105,16 +105,16 @@
         <button class="sb-tab" id="tabTree">Tree</button>
         <button class="sb-tab" id="tabFiles">Files</button>
       </div>
-      <button class="sidebar-add-btn" id="newTagBtn" title="New tag" style="display:none">+</button>
+      <button class="sidebar-add-btn" id="newTagBtn" title="New tag — starts a post with it" aria-label="New tag">+</button>
     </div>
     <div class="tag-new" id="tagNew" style="display:none">
-      <input class="tag-new-input" id="tagNewInput" placeholder="tag name" autocomplete="off">
+      <input class="tag-new-input" id="tagNewInput" placeholder="tag name, then Enter" aria-label="New tag — starts a post with it" autocomplete="off">
     </div>
     <div class="tag-list" id="tagList"></div>
   </aside>
 
   <main>
-    <div class="login-view" id="loginView" style="display:none">
+    <div class="login-view" id="loginView">
       <div class="login-card">
         <img class="login-mark" src="/assets/relay-mark-on-dark.svg" alt="" width="56" height="56">
         <h2 class="login-title">Relay</h2>
@@ -133,33 +133,16 @@
         <p class="login-error" id="loginError" role="alert" hidden></p>
       </div>
     </div>
-    <div class="compose-panel" id="composePanel">
-      <div class="post">
-        <div class="edit-form">
-          <div><label for="cpTitle">Title</label><input type="text" id="cpTitle" placeholder="(required — becomes the filename)"></div>
-          <div><label for="cpContent">Content</label><textarea id="cpContent" placeholder="Write something… (drop, paste, or attach a file)"></textarea>
-            <div class="attach-row">
-              <input type="file" id="cpFile" multiple style="display:none">
-              <button type="button" class="btn-attach" id="cpAttach"><svg class="icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 7.4l-5.1 5.1a3 3 0 0 1-4.3-4.3l5.3-5.3a2 2 0 0 1 2.8 2.8l-5.1 5.1a1 1 0 0 1-1.4-1.4L10 4.6"/></svg>Attach</button>
-              <span class="attach-status" id="cpAttachStatus"></span>
-            </div>
-          </div>
-          <div><label for="cpTags">Tags</label><input type="text" id="cpTags" placeholder="comma-separated"></div>
-          <div><label for="cpSource">Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
-          <div><label for="cpExpires">Expires</label><input type="datetime-local" id="cpExpires"></div>
-          <div class="edit-actions">
-            <button class="btn-cancel" id="cpCancel">Cancel</button>
-            <button class="btn-save" id="cpPublish">Publish</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="search-bar" id="searchBar" style="display:none">
+    <div class="search-bar" id="searchBar">
       <span class="search-label">search</span>
-      <input type="text" id="searchInput" aria-label="Search posts"
-             placeholder="Search title, content, source…" autocomplete="off">
-      <button class="search-clear" id="searchClear" title="Clear search">×</button>
+      <div class="search-field">
+        <input type="text" id="searchInput" aria-label="Search posts"
+               placeholder="Search title, content, source…" autocomplete="off">
+        <button class="search-clear" id="searchClear" title="Clear search" aria-label="Clear search">×</button>
+      </div>
+      <!-- The active tag/folder filter, said where the search is typed: a search
+           is scoped by it, and on a phone the sidebar showing it is closed. -->
+      <button class="search-scope" id="searchScope" type="button" hidden></button>
       <select class="mode-select" id="modeSelect" title="Ranking mode (semantic search, proof of concept)"
               aria-label="Ranking mode" style="display:none">
         <option value="keyword">Keyword</option>
@@ -196,6 +179,38 @@
     <div class="lightbox-inner">
       <img id="lightboxImg" alt="">
       <div class="lightbox-cap" id="lightboxCap"></div>
+    </div>
+  </div>
+</div>
+
+<!-- New post: the same shell and room as Edit (it used to be an inline panel
+     above the feed that pushed the search bar down). The outer element keeps
+     the `composePanel` id and the `open` class it always had. -->
+<div class="status-modal" id="composePanel">
+  <div class="pm-backdrop" id="cmBackdrop"></div>
+  <div class="sm-inner em-inner">
+    <div class="sm-head">
+      <span class="sm-name">New post</span>
+      <button class="sm-close" id="cmClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="sm-body">
+      <div class="edit-form">
+        <div><label for="cpTitle">Title</label><input type="text" id="cpTitle" placeholder="(required — becomes the filename)"></div>
+        <div class="ef-content-wrap"><label for="cpContent">Content</label><textarea id="cpContent" placeholder="Write something… (drop, paste, or attach a file)"></textarea>
+          <div class="attach-row">
+            <input type="file" id="cpFile" multiple style="display:none">
+            <button type="button" class="btn-attach" id="cpAttach"><svg class="icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 7.4l-5.1 5.1a3 3 0 0 1-4.3-4.3l5.3-5.3a2 2 0 0 1 2.8 2.8l-5.1 5.1a1 1 0 0 1-1.4-1.4L10 4.6"/></svg>Attach</button>
+            <span class="attach-status" id="cpAttachStatus"></span>
+          </div>
+        </div>
+        <div><label for="cpTags">Tags</label><input type="text" id="cpTags" placeholder="comma-separated"></div>
+        <div><label for="cpSource">Source</label><input type="text" id="cpSource" placeholder="(optional)"></div>
+        <div><label for="cpExpires">Expires</label><input type="datetime-local" id="cpExpires"></div>
+        <div class="edit-actions">
+          <button class="btn-cancel" id="cpCancel">Cancel</button>
+          <button class="btn-save" id="cpPublish">Publish</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -257,7 +272,7 @@
     <div class="pm-header">
       <button class="pm-back" id="pmBack">← back</button>
       <span class="pm-title" id="pmTitle"></span>
-      <button class="pm-close" id="pmClose">×</button>
+      <button class="pm-close" id="pmClose" aria-label="Close">×</button>
     </div>
     <div class="pm-meta" id="pmMeta"></div>
     <div class="pm-body-wrap">

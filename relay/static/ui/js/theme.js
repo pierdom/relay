@@ -46,7 +46,7 @@ const CATALOGUE = [
 const GROUP_ORDER = ['relay', 'ansi', 'catppuccin', 'github', 'gruvbox', 'solarized'];
 const GROUP_LABELS = { relay: 'Relay', ansi: 'ANSI', catppuccin: 'Catppuccin', github: 'GitHub', gruvbox: 'Gruvbox', solarized: 'Solarized' };
 
-export const THEMES = [
+const THEMES = [
   // Signature themes (Relay Dark then Relay Light) always lead in declaration order.
   ...CATALOGUE.filter(t => t.signature),
   // Named family groups in GROUP_ORDER (skipping 'relay' which already led).
@@ -89,7 +89,7 @@ function reflect() {
   });
 }
 
-export function setTheme(id) {
+function setTheme(id) {
   // `dark` stays the bare `:root` block rather than a stamped attribute, so an
   // absent or unrecognised stored value degrades to a complete theme instead of
   // an unstyled page.

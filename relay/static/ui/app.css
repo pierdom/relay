@@ -20,6 +20,23 @@
    found it the moment a fixture first contained a horizontal rule. */
 button, input, select, textarea, hr { color: inherit; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Dialog panels take focus from script when they open (js/dialog.js) so a
+   screen reader announces them; that landing spot is not a control and must
+   not draw a ring around the whole sheet. */
+.pm-inner:focus, .sm-inner:focus { outline: none; }
+
+/* One switch for the whole UI: card entrances, the new-post flash, sheet and
+   modal entrances, the accordion. Durations collapse rather than vanish, so
+   anything waiting on animationend/transitionend still hears it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
 :root, [data-theme="dark"] {
@@ -965,6 +982,10 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
 }
+/* `hidden` always hides: otherwise any class setting `display` (buttons are
+   inline-flex here) silently overrides it. */
+[hidden] { display: none !important; }
+
 html { color: var(--text); }   /* see note in tests/test_css_tokens.py */
 
 body {
@@ -1165,6 +1186,13 @@ header {
 
 /* ── Login view (logged-out) ─────────────────────────── */
 .login-view { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
+/* Signed in or out is one class on <body> (main.js bootstrap/init), not a
+   dozen inline toggles. Signed out there is only the login card: the sidebar
+   used to stay live behind it, and the header read "offline" about a server
+   that was up. */
+body.signed-out :is(aside, .sidebar-overlay, .menu-btn, .brand-sep, .live-indicator, #collapseBtn,
+  #newPostBtn, #statusBtn, #connectedBar, #searchBar, .feed, #newPostsPill) { display: none; }
+body:not(.signed-out) .login-view { display: none; }
 .login-card {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   text-align: center; width: 100%; max-width: 300px;
@@ -1260,6 +1288,12 @@ aside.collapsed > * { min-width: 220px; }
 .tag-item.active { background: var(--tag-active); border-left-color: var(--accent); }
 
 .tag-name  { font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The label is a <button> so the row is reachable by keyboard (main.js
+   tagLabel); stripped back to look exactly like the text it replaced. */
+button.tag-name {
+  background: none; border: 0; padding: 0; margin: 0; min-width: 0;
+  font-family: inherit; color: inherit; text-align: left; cursor: pointer;
+}
 .tag-count {
   font-size: 9px; color: var(--accent-3);
   background: color-mix(in srgb, var(--accent-3) 10%, transparent);
@@ -1283,6 +1317,8 @@ aside.collapsed > * { min-width: 220px; }
 .tag-item:hover .tag-config-btn { opacity: 0.75; }
 .tag-rename:hover, .tag-config-btn:hover { opacity: 1 !important; color: var(--accent); }
 .tag-rename:focus-visible, .tag-config-btn:focus-visible { opacity: 1; color: var(--accent); }
+/* A tag that expires its posts says so without a hover. */
+.tag-config-btn.has-expiry { opacity: 0.75; color: var(--accent-3); }
 /* Touch devices have no hover, so the controls would never appear at all. */
 @media (hover: none) {
   .tag-rename, .tag-config-btn { opacity: 0.55; }
@@ -1297,13 +1333,6 @@ aside.collapsed > * { min-width: 220px; }
 /* ── Feed ────────────────────────────────────────────── */
 main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
-.compose-panel {
-  overflow: hidden; max-height: 0; opacity: 0;
-  transition: max-height 0.28s ease, opacity 0.2s ease, padding 0.28s ease;
-  padding: 0 20px;
-}
-.compose-panel.open { max-height: 660px; opacity: 1; padding: 16px 20px 0; }
-.compose-panel .post { border-style: dashed; border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 
 .feed {
   flex: 1; overflow-y: auto; overflow-x: hidden;
@@ -1319,7 +1348,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 12px;
 }
-.feed.grid > .post:not(.editing) { align-self: start; }
+.feed.grid > .post { align-self: start; }
 .feed.grid > .post.pinned,
 .feed.grid > .empty,
 .feed.grid > .auth-prompt { grid-column: 1 / -1; }   /* master doc / states span full width */
@@ -1345,9 +1374,8 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 /* Feed cards lay their parts out on a grid so the media thumbnail can sit
    beside the text in list mode and jump on top as a hero in grid mode —
-   one markup, pure-CSS switch. Editing cards fall back to block flow
-   (their children become form fields with no grid areas). */
-.feed > .post:not(.editing) {
+   one markup, pure-CSS switch. */
+.feed > .post {
   display: grid; align-items: start;
   grid-template-columns: 1fr auto;
   grid-template-areas: "badge  badge" "header header" "body media" "footer footer";
@@ -1355,18 +1383,18 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 /* The gap only when there is a thumbnail to hold apart: on an image-less card
    the empty `auto` track still took the gap, and every body (text, tables)
    stopped 14px short of the footer's edge. */
-.feed > .post:not(.editing):has(> .post-media) { column-gap: 14px; }
+.feed > .post:has(> .post-media) { column-gap: 14px; }
 /* Every area needs min-width:0: a `1fr` track's automatic minimum is the
    item's min-content width, so one non-shrinkable child (a nowrap source,
    a nowrap table) would otherwise widen the track past the card border and
    everything inside it would paint outside the frame. */
-.feed > .post:not(.editing) > * { min-width: 0; }
+.feed > .post > * { min-width: 0; }
 .feed > .post .master-badge   { grid-area: badge; }
 .feed > .post .post-header    { grid-area: header; }
 .feed > .post .post-body-wrap { grid-area: body; }
 .feed > .post .post-media     { grid-area: media; }
 .feed > .post .post-footer    { grid-area: footer; }
-.feed.grid > .post:not(.editing) {
+.feed.grid > .post {
   grid-template-columns: 1fr;
   grid-template-areas: "media" "badge" "header" "body" "footer";
 }
@@ -1375,7 +1403,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
    The body row flex-fills and clips with the fade; the footer pins to the
    bottom. Image tiles show a short excerpt, text-only tiles use the freed
    space for more text. The full-width master banner keeps its own height. */
-.feed.grid > .post:not(.editing):not(.pinned) {
+.feed.grid > .post:not(.pinned) {
   height: 340px;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
 }
@@ -1424,25 +1452,34 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 .post-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .post-title  { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+a.post-title { text-decoration: none; }
+/* List mode: the title sizes to its text and the tags wrap under it once they
+   no longer fit beside it — five tags used to shrink a title to "A very long
+   title that goes on and on to test how the card header handles wrapping acros…"
+   while every pill stayed whole. */
+.feed:not(.grid) .post-title { flex: 1 1 auto; max-width: 100%; }   /* a link for keyboard and Ctrl-click, styled as the title it is */
 
 .post-tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; flex-shrink: 0; min-width: 0; max-width: 100%; }
 .tag-pill {
+  /* Muted, not accent: a pill painted like a wikilink sat beside real links
+     in the same orange, and the card's one accent was spent on metadata. The
+     accent comes back on hover, where the pill is the thing being pointed at. */
   font-size: 10px; padding: 2px 7px; border-radius: 3px;
-  background: var(--tag-bg); color: var(--accent); cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); letter-spacing: 0.02em;
-  transition: background 0.12s;
+  background: transparent; color: var(--muted); cursor: pointer;
+  border: 1px solid var(--border); letter-spacing: 0.02em;
+  transition: color 0.12s, border-color 0.12s;
 }
-.tag-pill:hover { background: var(--tag-active); }
+.tag-pill:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 /* A long "via …" is one unbreakable run: cap + ellipsis it so it can never
    push the header (and with it the card's 1fr track) wider than the card. */
 .post-source {
-  font-size: 10px; color: var(--accent-2);
+  font-size: 10px; color: var(--accent-2); text-decoration: none;
   display: inline-block; min-width: 0; max-width: 100%; vertical-align: bottom;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .post-body { color: var(--body); line-height: 1.72; font-size: 13px; overflow-wrap: anywhere; }
-.post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 16px 0 6px; font-weight: 700; font-family: system-ui, -apple-system, sans-serif; }
+.post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 16px 0 6px; font-weight: 700; }
 .post-body h1 { font-size: 16px; }
 .post-body h2 { font-size: 14px; }
 .post-body h3 { font-size: 13px; color: var(--body-strong); }
@@ -1560,6 +1597,35 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .btn-edit, .btn-delete, .btn-attach, .btn-restore, .post-media-count { display: inline-flex; align-items: center; gap: 5px; }
 .btn-edit .icon, .btn-delete .icon, .btn-attach .icon, .btn-restore .icon, .post-media-count .icon { flex-shrink: 0; }
 
+/* ── Toast (js/toast.js) ─────────────────────────────── */
+.toast {
+  position: fixed; z-index: 300; left: 50%; transform: translateX(-50%);
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 10px 10px 14px; font-size: 12px;
+  box-shadow: var(--shadow-modal);
+  animation: toastIn 0.18s ease backwards;
+}
+/* Its own keyframes, no `to`: modalIn ends on `transform: none`, which would
+   drop the centring translate for the length of the entrance. */
+@keyframes toastIn { from { opacity: 0; transform: translate(-50%, 8px); } }
+.toast-error { border-color: var(--red); }
+.toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast-action {
+  background: none; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent); border-radius: 4px; padding: 4px 10px; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 600; flex-shrink: 0;
+}
+.toast-action:hover { border-color: var(--accent); }
+.toast-close {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-family: inherit; font-size: 16px; line-height: 1; padding: 2px 4px; flex-shrink: 0;
+}
+.toast-close:hover { color: var(--text); }
+
 /* ── Edit / Compose form ─────────────────────────────── */
 .edit-form { display: flex; flex-direction: column; gap: 10px; }
 .edit-form input, .edit-form textarea, .edit-form select, .ef-content-backdrop {
@@ -1573,8 +1639,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .edit-form textarea:focus,
 .edit-form select:focus   { outline: none; border-color: var(--accent); }
 .edit-form label {
-  font-size: 9px; color: var(--accent-3); margin-bottom: 3px;
-  display: block; text-transform: uppercase; letter-spacing: 0.12em;
+  font-size: 11px; color: var(--muted); margin-bottom: 4px; display: block;
 }
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
 
@@ -1866,8 +1931,9 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   padding: 8px 20px; border-bottom: 1px solid var(--border);
   background: var(--surface); flex-shrink: 0;
 }
+.search-field { position: relative; flex: 1; display: flex; min-width: 0; }
 .search-bar input {
-  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border);
   color: var(--text); padding: 5px 10px; border-radius: 4px;
   font-size: 12px; font-family: inherit; transition: border-color 0.15s;
 }
@@ -1875,11 +1941,22 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .search-bar input::placeholder { color: var(--muted); }
 .search-clear {
   background: none; border: none; color: var(--muted); cursor: pointer;
-  font-family: inherit; font-size: 18px; line-height: 1; padding: 0 2px;
+  font-family: inherit; font-size: 18px; line-height: 1; padding: 0 4px;
   transition: color 0.15s; display: none;
+  /* Inside the field rather than after it, so the field can take a whole row
+     on a phone without stranding its own × on the next one. */
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
 }
+/* The active tag/folder filter (main.js syncSearchScope). */
+.search-scope {
+  flex-shrink: 0; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--tag-bg); color: var(--accent); cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 4px;
+  font-family: inherit; font-size: 11px; padding: 4px 8px;
+}
+.search-scope:hover { border-color: var(--accent); }
 .search-clear:hover { color: var(--text); }
-.search-bar.active input { border-color: var(--accent); }
+.search-bar.active input { border-color: var(--accent); padding-right: 26px; }
 .search-bar.active .search-clear { display: block; }
 .search-label {
   font-size: 10px; color: var(--accent); letter-spacing: 0.08em;
@@ -1947,7 +2024,12 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   color: var(--muted); padding: 64px 16px; gap: 14px; flex: 1;
 }
 .empty svg { opacity: 0.25; }
-.empty p   { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.empty p   { font-size: 12px; text-align: center; max-width: 42ch; line-height: 1.6; }
+.empty-action {
+  background: none; border: 1px solid var(--border); color: var(--text); cursor: pointer;
+  font-family: inherit; font-size: 12px; padding: 6px 14px; border-radius: 4px;
+}
+.empty-action:hover { border-color: var(--accent); color: var(--accent); }
 
 .auth-prompt {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -2036,8 +2118,6 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
   /* Feed — full width, tighter spacing */
   .feed { padding: 12px; gap: 8px; }
-  .compose-panel { padding: 0 12px; }
-  .compose-panel.open { padding: 12px 12px 0; }
   .post { padding: 12px; }
   .load-more { padding: 10px 12px; }
   /* Per-card Edit/Delete are hazardous in a touch scroll feed — drive
@@ -2084,7 +2164,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   box-shadow: inset 3px 0 0 var(--accent);
 }
 .master-badge {
-  display: inline-flex; align-items: center; gap: 5px;
+  display: inline-flex; align-items: center; gap: 5px; font-family: inherit;
   font-size: 9px; font-weight: 600; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   padding: 2px 8px; border-radius: 3px; letter-spacing: 0.14em;
@@ -2137,7 +2217,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   min-width: 0; max-width: 100%;
 }
 .tc-label {
-  font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  font-size: 11px;
   color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .tag-config-form input {
@@ -2146,7 +2226,9 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   width: 100%; min-width: 0; max-width: 100%;
   outline: none; font-family: inherit;
 }
-.tc-actions { display: flex; gap: 6px; min-width: 0; }
+.tc-actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.tc-actions .tc-remove { flex-basis: 100%; }
+.tc-actions .tc-remove:hover { color: var(--red); border-color: var(--red); }
 .tc-actions button {
   flex: 1; min-width: 0;
   background: none; border: 1px solid var(--border); border-radius: 3px;
@@ -2161,7 +2243,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 /* .tag-config-btn is styled with .tag-rename above — same shape, same behaviour. */
 
 /* ── Card truncation ─────────────────────────────────── */
-.post:not(.editing) { cursor: pointer; }
+.post { cursor: pointer; }
 .post-body-wrap { position: relative; max-height: 72px; overflow: hidden; }
 .post-body-wrap::after {
   content: ''; position: absolute; bottom: 0; left: 0; right: 0;
@@ -2169,9 +2251,6 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   background: linear-gradient(transparent, var(--surface));
   pointer-events: none;
 }
-.post.editing { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 2.5%, transparent); }
-.post.editing .post-body-wrap { max-height: none; overflow: visible; }
-.post.editing .post-body-wrap::after { display: none; }
 /* The pinned master doc is a reference, not a read — keep its preview short. */
 .post.pinned .post-body-wrap { max-height: 44px; }
 /* Tighter previews on mobile so more posts fit per screen. Must follow the
@@ -2332,13 +2411,16 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
    cannot fit scrolls inside the column rather than out of it.
 
    ⚠️ **The measure is `rem`, never `ch`.** `ch` resolves against each element's
-   *own* font, and headings render in a proportional sans-serif while the body is
-   monospace — 88ch gave paragraphs 704px and an h3 654px, so once the column was
-   centred every block landed on a different left edge and the headings appeared
-   to hang outward. `rem` resolves against the root size whatever the element is
+   *own* font and size, so blocks set differently (headings, code) got different
+   widths, and once the column was centred each landed on a different left edge. `rem` resolves against the root size whatever the element is
    set in. 64rem is 832px at the root's 13px, about 104 monospace characters. */
 .pm-inner { --measure: 64rem; }
 .pm-body .post-body > * { max-width: var(--measure); margin-inline: auto; }
+/* Backlinks belong to the post, so they sit in its reading column too. */
+.pm-body .pm-backlinks { max-width: var(--measure); margin-inline: auto; }
+/* An image that failed to load becomes a link (main.js); give it the
+   column the image would have had instead of the panel's left edge. */
+.pm-body .post-body > a.attachment-link { display: block; width: fit-content; margin-inline: auto 0; margin-inline-start: max(0px, calc((100% - var(--measure)) / 2)); }
 
 /* The title and meta ride the same column, or centring the prose alone just
    moves it away from everything else — the header stays hard left and the text
@@ -2565,22 +2647,24 @@ kbd {
    column: the textarea was a few words wide and long notes were unusable. The
    form is the same, it just gets the room the reading modal already had. */
 .em-inner {
-  max-width: 1320px;
+  max-width: calc(64rem + 40px);   /* the reading measure: lines past ~120 characters are hard to edit */
   width: 94%;
   height: min(92vh, 1040px);
 }
-#editModal .sm-body { flex: 1; min-height: 0; display: flex; }
-#editModal .edit-form {
+:is(#editModal, #composePanel) .sm-body { flex: 1; min-height: 0; display: flex; }
+:is(#editModal, #composePanel) .edit-form {
   display: flex; flex-direction: column; gap: 10px;
   flex: 1; min-height: 0; min-width: 0;
 }
 /* The content field takes whatever is left, so a long note gets the whole panel
    rather than a fixed few rows. */
-#editModal .edit-form > .ef-content-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-#editModal .edit-form .ef-content-highlight { flex: 1; min-height: 140px; }
-#editModal .edit-form textarea.ef-content { resize: none; }
-#editModal .edit-form .ef-attachments { max-height: 22vh; overflow-y: auto; }
-#editModal .edit-actions {
+:is(#editModal, #composePanel) .edit-form > .ef-content-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+:is(#editModal, #composePanel) .edit-form .ef-content-highlight { flex: 1; min-height: 140px; }
+:is(#editModal, #composePanel) .edit-form textarea.ef-content { resize: none; }
+/* Compose's body field has no highlight backdrop, so it fills the column itself. */
+#composePanel .edit-form textarea#cpContent { flex: 1; min-height: 140px; resize: none; }
+:is(#editModal, #composePanel) .edit-form .ef-attachments { max-height: 22vh; overflow-y: auto; }
+:is(#editModal, #composePanel) .edit-actions {
   margin: 4px -20px -18px; padding: 12px 20px; flex-shrink: 0;
   border-top: 1px solid var(--border); background: var(--surface);
 }
@@ -2648,7 +2732,7 @@ kbd {
     margin-top: -10px; margin-right: -12px; margin-left: auto;
   }
   .pm-footer button,
-  #editModal .edit-actions button,
+  :is(#editModal, #composePanel) .edit-actions button,
   #lintModal .edit-actions button,
   .btn-attach {
     min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
@@ -2656,9 +2740,9 @@ kbd {
   /* Delete sits next to Edit; a wider gap is cheap insurance now that both are
      comfortable to hit. Same reasoning for Save/Cancel in the lint pane's
      inline editor (edit-form.js's buildEditForm, shared with #editModal). */
-  .pm-footer, #editModal .edit-actions, #lintModal .edit-actions { gap: 12px; }
+  .pm-footer, :is(#editModal, #composePanel) .edit-actions, #lintModal .edit-actions { gap: 12px; }
   .sm-body { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
-  #editModal .edit-actions {
+  :is(#editModal, #composePanel) .edit-actions {
     padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     margin-bottom: calc(-18px - env(safe-area-inset-bottom, 0px));
   }
@@ -2698,6 +2782,15 @@ kbd {
    one-line post became a screen-tall card. Size to content with the list
    view's clamp instead. */
 @media (max-width: 560px) {
-  .feed.grid > .post:not(.editing):not(.pinned) { height: auto; grid-template-rows: none; }
+  .feed.grid > .post:not(.pinned) { height: auto; grid-template-rows: none; }
   .feed.grid > .post:not(.pinned) .post-body-wrap { height: auto; max-height: 60px; }
+}
+
+/* Phones: the search field takes its own row, so its placeholder reads in
+   full and the sort menu says "Updated" instead of "Up…"; filter chip, sort
+   and view controls share the row below, view toggle pinned right. */
+@media (max-width: 560px) {
+  .search-bar .search-field { flex: 1 1 100%; }
+  .search-bar .sort-select { max-width: none; }
+  .search-bar .view-toggle { margin-left: auto; }
 }

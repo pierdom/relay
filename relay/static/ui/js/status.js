@@ -11,7 +11,8 @@
 
 import { apiFetch } from './api.js';
 import { fmtBytes, fmtUptime } from './util.js';
-import { attachSheetDismiss } from './sheet.js';
+import { wireModal } from './dialog.js';
+import { el, note } from './dom.js';
 import { fetchDeleted, recoverableCount, renderDeleted } from './deleted.js';
 import { fetchLint, issueCount, openLintModal } from './lint.js';
 
@@ -25,9 +26,13 @@ import { fetchLint, issueCount, openLintModal } from './lint.js';
 export async function fetchInitStatus() {
   try {
     const d = await apiFetch('/status');
-    return { embeddingsEnabled: !!d.features?.search?.embeddings, caller: d.caller || null };
+    return {
+      embeddingsEnabled: !!d.features?.search?.embeddings,
+      caller: d.caller || null,
+      historyEnabled: !!d.features?.history?.effective,
+    };
   } catch {
-    return { embeddingsEnabled: false, caller: null };
+    return { embeddingsEnabled: false, caller: null, historyEnabled: false };
   }
 }
 
@@ -41,18 +46,13 @@ const smVersion = document.getElementById('smVersion');
 // Built with textContent throughout — no innerHTML for server-provided values
 // like the vault path.
 function smSection(title, node) {
-  const wrap = document.createElement('div');
-  const h = document.createElement('div');
-  h.className = 'sm-section-title';
-  h.textContent = title;
-  wrap.appendChild(h);
-  wrap.appendChild(node);
+  const wrap = el('div');
+  wrap.append(note(title), node);
   return wrap;
 }
 
 function smRows(pairs) {
-  const dl = document.createElement('dl');
-  dl.className = 'sm-rows';
+  const dl = el('dl', 'sm-rows');
   for (const [label, value] of pairs) {
     const dt = document.createElement('dt'); dt.textContent = label;
     const dd = document.createElement('dd'); dd.textContent = value;
@@ -67,18 +67,13 @@ function smRows(pairs) {
 // 560px panel while Vault and Server sat their values next to the label — two
 // alignment systems in one panel, and the reason it read as unbalanced.
 function smFeature(label, state, note) {
-  const row = document.createElement('div');
-  row.className = 'sm-feat';
-  const name = document.createElement('span');
-  name.className = 'sm-feat-name';
-  const dot = document.createElement('span');
-  dot.className = `sm-dot ${state}`;
+  const row = el('div', 'sm-feat');
+  const name = el('span', 'sm-feat-name');
+  const dot = el('span', `sm-dot ${state}`);
   const text = document.createElement('span');
   text.textContent = label;
   name.append(dot, text);
-  const hint = document.createElement('span');
-  hint.className = 'sm-feat-note';
-  hint.textContent = note;
+  const hint = el('span', 'sm-feat-note', note);
   row.append(name, hint);
   return row;
 }
@@ -100,7 +95,15 @@ function fmtBackfill(b) {
  * re-trigger a catch-up on demand. */
 function renderEmbeddings(e) {
   const wrap = document.createElement('div');
-  wrap.appendChild(smRows([
+  // Off (the default everywhere), ten rows of "—" said nothing the one line
+  // below doesn't. Coverage stays when there is any: turned off at runtime,
+  // what was already embedded is still there for when it comes back.
+  if (!e.enabled) {
+    wrap.appendChild(smRows([
+      ['Status', 'Off — search matches words only'],
+      ...(e.chunks_total ? [['Coverage', `${e.posts_embedded} / ${e.posts_total} posts`]] : []),
+    ]));
+  } else wrap.appendChild(smRows([
     ['Model', e.model || '—'],
     ['Dimension', e.dimension != null ? `${e.dimension}d` : '—'],
     ['Model size', e.model_size_mb != null ? `${e.model_size_mb} MB` : '—'],
@@ -113,8 +116,7 @@ function renderEmbeddings(e) {
     ['Backfill', fmtBackfill(e.backfill)],
   ]));
 
-  const err = document.createElement('div');
-  err.className = 'sm-error';
+  const err = el('div', 'sm-error');
   err.style.display = 'none';
 
   // Both actions re-fetch and re-render the whole panel on success rather than
@@ -145,9 +147,7 @@ function renderEmbeddings(e) {
     }
   };
 
-  const toggleBtn = document.createElement('button');
-  toggleBtn.className = 'btn-edit';
-  toggleBtn.textContent = e.enabled ? 'Turn off' : 'Turn on';
+  const toggleBtn = el('button', 'btn-edit', e.enabled ? 'Turn off' : 'Turn on');
   toggleBtn.title = e.enabled
     ? 'Pause semantic search until re-enabled or restarted'
     : 'Resume — a restart is not needed';
@@ -156,18 +156,16 @@ function renderEmbeddings(e) {
     body: JSON.stringify({ enabled: !e.enabled }),
   }));
 
-  const backfillBtn = document.createElement('button');
-  backfillBtn.className = 'btn-edit';
-  backfillBtn.textContent = e.backfill.running ? 'Running…' : 'Re-run backfill';
+  const backfillBtn = el('button', 'btn-edit', e.backfill.running ? 'Running…' : 'Re-run backfill');
   backfillBtn.disabled = !e.available || e.backfill.running;
   backfillBtn.title = e.available
     ? 'Re-embed anything the content-addressed cache does not already cover'
     : 'Enable semantic search first';
   backfillBtn.onclick = () => runAction(backfillBtn, () => apiFetch('/embeddings/backfill', { method: 'POST' }));
 
-  const controls = document.createElement('div');
-  controls.className = 'sm-embed-controls';
-  controls.append(toggleBtn, backfillBtn);
+  const controls = el('div', 'sm-embed-controls');
+  controls.append(toggleBtn);
+  if (e.enabled) controls.append(backfillBtn);   // it can only ever be disabled while off
   wrap.append(controls, err);
 
   return smSection('Semantic search', wrap);
@@ -178,8 +176,7 @@ function renderEmbeddings(e) {
  * section says so rather than offering a button that cannot help. */
 function renderRecovery(historyWorks) {
   const wrap = document.createElement('div');
-  const line = document.createElement('div');
-  line.className = 'sm-recovery-line';
+  const line = el('div', 'sm-recovery-line');
   wrap.appendChild(line);
 
   if (!historyWorks) {
@@ -188,8 +185,7 @@ function renderRecovery(historyWorks) {
   }
 
   line.textContent = 'Checking…';
-  const btn = document.createElement('button');
-  btn.className = 'btn-edit';
+  const btn = el('button', 'btn-edit');
   btn.id = 'smBrowseDeleted';
   btn.textContent = 'Browse deleted →';
   btn.disabled = true;
@@ -226,8 +222,7 @@ function renderLintSummary() {
   wrap.appendChild(line);
 
   line.textContent = 'Checking…';
-  const btn = document.createElement('button');
-  btn.className = 'btn-edit';
+  const btn = el('button', 'btn-edit');
   btn.id = 'smBrowseLint';
   btn.textContent = 'Browse issues →';
   btn.disabled = true;
@@ -272,14 +267,14 @@ function showDeleted() {
 function renderAccess(caller) {
   if (!caller) return null;
   if (caller.mode === 'full') {
-    return smSection('Access', smRows([['Access', 'Full access']]));
+    return smSection('Access', smRows([['This session', 'Full access']]));
   }
   if (caller.mode === 'read') {
-    return smSection('Access', smRows([['Access', 'Read-only']]));
+    return smSection('Access', smRows([['This session', 'Read-only']]));
   }
   const tags = caller.tags && caller.tags.length ? caller.tags.join(', ') : '(none — every write will be denied)';
   return smSection('Access', smRows([
-    ['Access', 'Write — restricted to tags'],
+    ['This session', 'Write — restricted to tags'],
     ['Allowed tags', tags],
   ]));
 }
@@ -288,8 +283,7 @@ function renderStatus(d) {
   smVersion.textContent = d.version;
   smBody.innerHTML = '';
 
-  const health = document.createElement('div');
-  health.className = 'sm-rows sm-health';
+  const health = el('div', 'sm-rows sm-health');
   const h = d.features.history;
   health.appendChild(smFeature(
     'Vault history',
@@ -344,43 +338,23 @@ function renderStatus(d) {
 
 async function openStatusModal() {
   statusModal.classList.add('open');
-  document.body.style.overflow = 'hidden';
   smVersion.textContent = '';
-  smBody.innerHTML = '';
-  const loading = document.createElement('div');
-  loading.className = 'sm-section-title';
-  loading.textContent = 'loading…';
-  smBody.appendChild(loading);
+  smBody.replaceChildren(note('loading…'));
   try {
     renderStatus(await apiFetch('/status'));
   } catch (err) {
-    smBody.innerHTML = '';
-    const e = document.createElement('div');
-    e.className = 'sm-error';
-    e.textContent = `Could not load status: ${err.message}`;
-    smBody.appendChild(e);
+    smBody.replaceChildren(note(`Could not load status: ${err.message}`, 'sm-error'));
   }
 }
 
 export function closeStatusModal() {
   statusModal.classList.remove('open');
-  document.body.style.overflow = '';
   smBody.innerHTML = '';
 }
 
-// Exposed so main.js's single Escape handler can keep giving this panel priority
-// over the post modal, exactly as it did when both lived in one scope.
 export function isStatusOpen() {
   return statusModal.classList.contains('open');
 }
 
 statusBtn.onclick = openStatusModal;
-document.getElementById('smClose').onclick = closeStatusModal;
-const smBackdrop = document.getElementById('smBackdrop');
-smBackdrop.onclick = closeStatusModal;
-attachSheetDismiss({
-  inner: statusModal.querySelector('.sm-inner'),
-  handle: statusModal.querySelector('.sm-head'),
-  backdrop: smBackdrop,
-  onDismiss: closeStatusModal,
-});
+wireModal(statusModal, { close: closeStatusModal });

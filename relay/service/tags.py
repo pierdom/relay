@@ -46,11 +46,16 @@ async def list_tags(db: aiosqlite.Connection) -> TagListResponse:
     for row in rows:
         for t in tags_from_sentinel(row["tags"]):
             counter[t] += 1
-    async with db.execute("SELECT tag FROM tag_config") as cur:
+    config: dict[str, tuple[int | None, str | None]] = {}
+    async with db.execute("SELECT tag, ttl_hours, expires_at FROM tag_config") as cur:
         for row in await cur.fetchall():
+            config[row["tag"]] = (row["ttl_hours"] or None, row["expires_at"])
             if row["tag"] not in counter:
                 counter[row["tag"]] = 0
-    return TagListResponse(tags=[TagCount(tag=t, count=c) for t, c in counter.most_common()])
+    return TagListResponse(tags=[
+        TagCount(tag=t, count=c, ttl_hours=config.get(t, (None, None))[0], expires_at=config.get(t, (None, None))[1])
+        for t, c in counter.most_common()
+    ])
 
 
 async def rename_tag(

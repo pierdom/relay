@@ -488,6 +488,10 @@ class TagRename(BaseModel):
 class TagCount(BaseModel):
     tag: str
     count: int
+    # The tag's own expiry config, when it has one (absent otherwise) — so a
+    # client editing it can show what is set now rather than an empty form.
+    ttl_hours: int | None = None
+    expires_at: str | None = None
 
 
 class TagListResponse(BaseModel):

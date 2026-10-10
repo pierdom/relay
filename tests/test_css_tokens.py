@@ -252,7 +252,7 @@ def test_decorative_chips_stay_legible():
 # ── Text roles the floors above never covered ────────────────────────────────
 # `--body`/`--text`/`--on-accent` and the chips were tested; the colours most of
 # the UI's *small* text is painted in were not. Timestamps, meta and placeholders
-# are `--muted`; links and tag pills are `--accent` (the pill on `--tag-bg`); the
+# are `--muted` (tag pills too, since B-12); links are `--accent`, and accent chips sit on `--tag-bg`; the
 # Delete button and errors are `--red`; the live label and Restore are `--green`;
 # a hovered primary button is `--on-accent` on `--accent-dim`. The v1.16.2 audit
 # found Relay Dark's own muted text at 2.51:1 and six themes' hovered buttons

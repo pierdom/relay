@@ -29,7 +29,7 @@ relay exposes the full feed API as **26 MCP tools** so Claude (or any MCP-capabl
 | `trigger_embedding_backfill` | Re-run the embedding backfill without a restart (`force` wipes the cache first); errors if embeddings aren't enabled or a backfill is already running |
 | `set_embeddings_enabled` | Turn semantic/hybrid search on or off at runtime, without a restart. In-memory only — see [Notes for agents](#notes-for-agents) |
 | `list_folders` | First-level vault folders with post counts — the names `list_posts`/`list_attachments` accept as `folder` |
-| `list_tags` | List all tags with post counts |
+| `list_tags` | List all tags with post counts and each tag's expiry config (`ttl_hours`/`expires_at`, null when unset) |
 | `set_tag_config` | Set per-tag expiry (`ttl_hours` or `expires_at`); pass neither to remove it |
 | `rename_tag` | Rename a tag across every post that carries it, in one atomic pass |
 | `lint_vault` | Check the vault against the rules in #0 (relay #198, N-5): missing/zero tags, stale Inbox placement, broken links/attachment embeds, missing/drifted H1, stale hub/plan, zero backlinks, unused tag config, zero embedding chunks, #0's stated post count. Link/heading scanning ignores code spans/fences. Read-only |

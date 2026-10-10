@@ -8,12 +8,14 @@
  *
  * Self-contained like status.js/deleted.js: owns no DOM of its own (the
  * caller supplies the container to render into) and needs nothing from
- * main.js beyond apiFetch/apiSend.
+ * main.js.
  */
 
 import { ICON_CLIP } from './icons.js';
+import { idForTitle, postExists } from './links.js';
+import { showToast } from './toast.js';
 import { apiFetch, apiSend, getCallerScope, tagsAllowedByScope } from './api.js';
-import { CODE_SPAN_RE, escHtml, fmtBytes, toDatetimeLocal, toUtcIso } from './util.js';
+import { CODE_SPAN_RE, escHtml, fmtBytes, parseTags, toDatetimeLocal, toUtcIso } from './util.js';
 
 // ── Attachment upload (drag/drop, paste, file picker) ──────────────────────
 
@@ -31,6 +33,7 @@ function insertAtCursor(ta, text) {
   ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
   ta.selectionStart = ta.selectionEnd = s + text.length;
   ta.focus();
+  ta.dispatchEvent(new Event('input'));   // a scripted change fires no input of its own (highlighter, gates)
 }
 
 // At/above this size, skip base64 (which inflates the JSON body ~33% and buffers
@@ -42,9 +45,7 @@ async function postAttachment(name, file, extra) {
   if (file.size >= PRESIGNED_MIN_BYTES) {
     const slot = await apiFetch('/attachments/uploads', { method: 'POST' });
     // Relative, same-origin path so the session cookie authenticates the PUT.
-    const put = await apiSend(`/attachments/uploads/${encodeURIComponent(slot.upload_id)}`,
-                              { method: 'PUT', body: file });
-    if (!put.ok) throw new Error(`upload ${put.status} ${put.statusText}`);
+    await apiSend(`/attachments/uploads/${encodeURIComponent(slot.upload_id)}`, { method: 'PUT', body: file });
     return apiFetch('/attachments', { method: 'POST',
       body: JSON.stringify({ upload_id: slot.upload_id, filename: name, ...extra }) });
   }
@@ -104,9 +105,9 @@ export async function confirmDeleteAttachment(name) {
   try {
     const r = await apiFetch(`/attachments/${encodeURIComponent(name)}`, { method: 'DELETE' });
     if (r.referenced_by?.length)
-      alert(`Deleted. Still referenced by ${r.referenced_by.map(i => '#' + i).join(', ')} — those embeds are now broken.`);
+      showToast(`Deleted "${name}". Still embedded by ${r.referenced_by.map(i => '#' + i).join(', ')} — those embeds are now broken.`, { error: true });
     return true;
-  } catch (e) { alert(`Delete failed: ${e.message}`); return false; }
+  } catch (e) { showToast(`Couldn’t delete "${name}": ${e.message}`, { error: true }); return false; }
 }
 
 // ── Broken-link highlighting ────────────────────────────────────────────────
@@ -116,10 +117,7 @@ export async function confirmDeleteAttachment(name) {
 // red background behind exactly the [[wikilink]]/#id spans that don't
 // resolve (its own text is transparent, so characters are only ever drawn
 // once, by the textarea on top) — see the CSS for the layering. Checked
-// against /links (cached — see loadLinkIndex below); a link resolving or
-// breaking *while* the form is open is rare enough that "current as of the
-// last fetch" is an acceptable lag, the same tradeoff every other read in
-// this app makes.
+// against the shared link index (./links.js), current as of its last refresh.
 //
 // "Broken" here means the same thing GET /lint's broken_link rule means —
 // relay.links.WIKILINK_RE/IDREF_RE's definition (fenced/inline code excluded,
@@ -142,30 +140,7 @@ export async function confirmDeleteAttachment(name) {
 const WIKILINK_RE = /(?<!!)\[\[([^\]|#\n]+?)(?:#[^\]|\n]+)?(?:\|[^\]\n]+)?\]\]/g;
 const IDREF_RE = /(?<![\w#])#(\d{1,5})\b/g;
 
-// Cached across calls: browsing the lint pane opens a fresh buildEditForm per
-// finding clicked, and re-fetching the same /links index for every single one
-// of them (nothing about it changes just from looking at a post) would be a
-// GET per click on a panel whose whole point is a fast browse-and-fix loop.
-// Invalidated after any successful save below, since a title change can
-// change what other posts' [[wikilinks]] resolve to.
-let linkIndexCache = null;
-
-async function loadLinkIndex() {
-  if (linkIndexCache) return linkIndexCache;
-  try {
-    const d = await apiFetch('/links');
-    linkIndexCache = {
-      titles: new Set(d.items.map(i => i.title.trim().toLowerCase())),
-      ids: new Set(d.items.map(i => i.id)),
-    };
-    return linkIndexCache;
-  } catch {
-    return { titles: new Set(), ids: new Set() };
-  }
-}
-
-/** Every [[wikilink]]/#id span in `text`, each marked broken or not against
- * `linkIndex`. Both regexes run independently (matching relay.links'
+/** Every [[wikilink]]/#id span in `text`, each marked broken or not. Both regexes run independently (matching relay.links'
  * extract_links, which does the same over the very same content), so a
  * wikilink target shaped like a bare number could in principle also match
  * the id-ref pattern inside its own brackets — sorted by start and any span
@@ -174,7 +149,7 @@ async function loadLinkIndex() {
  * A match starting inside a fenced/inline code span is dropped outright: a
  * post documenting relay's own link syntax must not paint its own examples
  * as broken (relay #198 N-5 follow-up). */
-function findLinkSpans(text, linkIndex) {
+function findLinkSpans(text) {
   const codeSpans = [...text.matchAll(CODE_SPAN_RE)].map(m => [m.index, m.index + m[0].length]);
   const inCode = (pos) => codeSpans.some(([start, end]) => pos >= start && pos < end);
 
@@ -183,12 +158,12 @@ function findLinkSpans(text, linkIndex) {
   WIKILINK_RE.lastIndex = 0;
   while ((m = WIKILINK_RE.exec(text))) {
     if (inCode(m.index)) continue;
-    raw.push({ start: m.index, end: m.index + m[0].length, broken: !linkIndex.titles.has(m[1].trim().toLowerCase()) });
+    raw.push({ start: m.index, end: m.index + m[0].length, broken: idForTitle(m[1]) === undefined });
   }
   IDREF_RE.lastIndex = 0;
   while ((m = IDREF_RE.exec(text))) {
     if (inCode(m.index)) continue;
-    raw.push({ start: m.index, end: m.index + m[0].length, broken: !linkIndex.ids.has(Number(m[1])) });
+    raw.push({ start: m.index, end: m.index + m[0].length, broken: !postExists(m[1]) });
   }
   raw.sort((a, b) => a.start - b.start);
   const spans = [];
@@ -199,10 +174,10 @@ function findLinkSpans(text, linkIndex) {
   return spans;
 }
 
-function renderBackdrop(backdrop, text, linkIndex) {
+function renderBackdrop(backdrop, text) {
   let out = '';
   let pos = 0;
-  for (const span of findLinkSpans(text, linkIndex)) {
+  for (const span of findLinkSpans(text)) {
     out += escHtml(text.slice(pos, span.start));
     const chunk = escHtml(text.slice(span.start, span.end));
     out += span.broken ? `<span class="ef-broken-link">${chunk}</span>` : chunk;
@@ -217,14 +192,12 @@ function syncBackdropScroll(contentField, backdrop) {
   backdrop.scrollLeft = contentField.scrollLeft;
 }
 
-/** Wires a content textarea to its highlight backdrop: fetches the link
- * index once, repaints on every keystroke, and keeps the backdrop's scroll
- * glued to the textarea's own (it is not independently scrollable). */
+/** Wires a content textarea to its highlight backdrop: repaints on every
+ * keystroke and keeps the backdrop's scroll glued to the textarea's own (it
+ * is not independently scrollable). */
 function wireBrokenLinkHighlight(contentField, backdrop) {
-  let linkIndex = { titles: new Set(), ids: new Set() };
-  const repaint = () => renderBackdrop(backdrop, contentField.value, linkIndex);
+  const repaint = () => renderBackdrop(backdrop, contentField.value);
   repaint();
-  loadLinkIndex().then(idx => { linkIndex = idx; repaint(); });
   contentField.addEventListener('input', repaint);
   contentField.addEventListener('scroll', () => syncBackdropScroll(contentField, backdrop));
 }
@@ -256,7 +229,7 @@ export function scrollToMatch(container, text) {
 }
 
 // Edit-form list of the post-folder's attachments, each with a delete (×) button.
-export async function renderEditAttachments(el, postId) {
+async function renderEditAttachments(el, postId) {
   const box = el.querySelector('.ef-attachments');
   if (!box) return;
   let d;
@@ -322,6 +295,7 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
   const expiresField = container.querySelector('.ef-expires');
   const gateMsg = container.querySelector('.ef-gate-msg');
   const saveBtn = container.querySelector('.btn-save');
+  let baseEtag = post.etag || null;
   // Every field the form can actually change, not just content — the lint
   // pane's whole reason to exist is fixing a missing/zero-tags finding by
   // editing *only* Tags, and a content-only check would treat that as
@@ -356,7 +330,7 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
   // Tags field live, same ALL-of semantics the server enforces
   // (tagsAllowedByScope mirrors identity.Actor.can_write_tags exactly, so
   // this can only be equally or more conservative, never more permissive).
-  // The existing alert() 403 fallback below stays as defense-in-depth for
+  // The save's own error message below stays as defense-in-depth for
   // whatever this doesn't catch (e.g. scope changed server-side mid-session).
   function applyScopeGate() {
     const scope = getCallerScope();
@@ -366,7 +340,7 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
       saveBtn.disabled = true;
       return;
     }
-    const tags = tagsField.value.split(',').map(s => s.trim()).filter(Boolean);
+    const tags = parseTags(tagsField.value);
     if (tagsAllowedByScope(tags, scope)) {
       gateMsg.textContent = '';
       saveBtn.disabled = false;
@@ -384,22 +358,33 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
   });
   saveBtn.addEventListener('click', async () => {
     const newTitle = titleField.value.trim();
-    if (!newTitle) { alert('Title is required'); return; }
+    if (!newTitle) { gateMsg.textContent = 'Add a title — it becomes the file name.'; titleField.focus(); return; }
     const body = {
       title:      newTitle,
       content:    contentField.value,
-      tags:       tagsField.value.split(',').map(s => s.trim()).filter(Boolean),
+      tags:       parseTags(tagsField.value),
       source:     sourceField.value.trim() || null,
       expires_at: toUtcIso(expiresField.value) || null,
     };
+    // The etag this form was opened against: a save over a post that changed
+    // meanwhile (an Obsidian edit, an agent) is refused instead of silently
+    // writing this form's stale copy of every field over it.
+    if (baseEtag) body.if_match = baseEtag;
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
       const updated = await apiFetch(`/posts/${post.id}`, { method: 'PATCH', body: JSON.stringify(body) });
-      linkIndexCache = null;   // a title change can change what other posts' [[wikilinks]] resolve to
       onSave?.(updated);
     } catch (e) {
-      alert(`Save failed: ${e.message}`);
       saveBtn.disabled = false; saveBtn.textContent = 'Save';
+      if (e.status === 409) {
+        // Rebase onto the version that won, so a second Save is a deliberate
+        // overwrite of *that* version rather than another refusal.
+        baseEtag = e.detail?.current?.etag || null;
+        gateMsg.textContent = 'This post changed somewhere else since you opened it. '
+          + 'Save again to overwrite that version with yours, or Cancel to keep it.';
+        return;
+      }
+      gateMsg.textContent = `Save failed: ${e.message}`;
     }
   });
 

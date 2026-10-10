@@ -147,6 +147,17 @@ The strongest practice for a useful vault: one post per topic, updated in place.
 
 Notes without a domain tag land in `Inbox/`. As soon as the note gets its first domain tag, relay moves it (and its attachments) to the matching folder automatically.
 
+### In the browser
+
+| | |
+|---|---|
+| Write | **+ New Post** (Tags start from the active tag filter). The sidebar's **+** starts a post carrying a new tag — a tag exists while a post carries it |
+| Find | Pick a tag or folder, then search: the chip beside the search box shows the filter the search runs inside; click it to search everything |
+| Edit | Saving over a post changed elsewhere (Obsidian, an agent) is refused with a note; Save again to overwrite deliberately |
+| Delete | Deletes offer **Undo** while vault history is on; with it off they ask first |
+| Expire | A tag's clock button sets a TTL or a date for its posts; tags that expire their posts keep the clock visible |
+| Keyboard | `j`/`k` move through the feed, `Enter` opens, `e` edit, `h` history, `Esc` back, `?` all shortcuts |
+
 ### Cross-links and attachments
 
 | Content | Use |

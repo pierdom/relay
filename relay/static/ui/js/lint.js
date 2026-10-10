@@ -18,7 +18,8 @@
  */
 
 import { apiFetch } from './api.js';
-import { attachSheetDismiss } from './sheet.js';
+import { wireModal } from './dialog.js';
+import { el, note, placeholder, setPane } from './dom.js';
 import { buildEditForm, scrollToMatch } from './edit-form.js';
 
 const lintModal = document.getElementById('lintModal');
@@ -60,10 +61,6 @@ export function initLint({ openPost, onSaved }) {
   onPostSaved = onSaved;
 }
 
-export function isLintOpen() {
-  return lintModal.classList.contains('open');
-}
-
 /** True unless the pane's editor has unsaved changes the user declines to
  * throw away. Guards every way the pane's content can change out from under
  * an in-progress edit: picking another finding, switching filters, and
@@ -72,11 +69,9 @@ function confirmDiscardCurrentEdit() {
   return !currentEditHandle?.isDirty() || confirm('Discard your changes to this post?');
 }
 
-/** Pure close — no confirmation. Used as attachSheetDismiss's onDismiss,
- * which already gates on confirmDiscardCurrentEdit via canDismiss below. */
-export function closeLintModal() {
+/** Pure close — no confirmation (wireModal asks first on user dismissals). */
+function closeLintModal() {
   lintModal.classList.remove('open');
-  document.body.style.overflow = '';
   lmBody.innerHTML = '';
   currentEditHandle = null;
   // report/filter/selected deliberately survive a close — reopenLintModal
@@ -86,8 +81,7 @@ export function closeLintModal() {
 }
 
 /** Close, asking first if the pane's editor was touched. Returns whether it
- * actually closed, so a caller (main.js's "Open post" wiring) can bail out
- * of whatever it meant to do next if the user declined. */
+ * actually closed, so "Open post" can bail out if the user declined. */
 export function tryCloseLintModal() {
   if (!confirmDiscardCurrentEdit()) return false;
   closeLintModal();
@@ -104,39 +98,14 @@ export function issueCount(r) {
   return r ? r.items.length : 0;
 }
 
-function note(text, className = 'sm-section-title') {
-  const el = document.createElement('div');
-  el.className = className;
-  el.textContent = text;
-  return el;
-}
-
-function placeholder(text) {
-  const el = document.createElement('div');
-  el.className = 'hm-placeholder';
-  el.textContent = text;
-  return el;
-}
-
-/** Swap only what is inside the preview pane, so its box never changes size —
- * same reasoning as post-history.js's setPane. */
-function setPane(pane, ...nodes) {
-  pane.innerHTML = '';
-  pane.append(...nodes);
-}
-
 /* The panes are built once and only their contents change afterward — a
  * fixed-height shell, same as the history modal's buildLayout. */
 function buildLayout() {
   lmBody.innerHTML = '';
-  const filters = document.createElement('div');
-  filters.className = 'lm-filters';
-  const layout = document.createElement('div');
-  layout.className = 'lm-layout';
-  const list = document.createElement('div');
-  list.className = 'lm-list';
-  const pane = document.createElement('div');
-  pane.className = 'lm-pane';
+  const filters = el('div', 'lm-filters');
+  const layout = el('div', 'lm-layout');
+  const list = el('div', 'lm-list');
+  const pane = el('div', 'lm-pane');
   layout.append(list, pane);
   lmBody.append(filters, layout);
   return { filters, list, pane };
@@ -151,8 +120,7 @@ function renderFilters(panes) {
   const counts = {};
   for (const i of report.items) counts[i.rule] = (counts[i.rule] || 0) + 1;
 
-  const bar = document.createElement('div');
-  bar.className = 'lm-chips';
+  const bar = el('div', 'lm-chips');
   const chip = (key, label, count) => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -178,12 +146,9 @@ function findingRow(item, panes) {
   row.className = 'hm-rev lm-finding';
   if (item.post_id != null) row.dataset.postId = String(item.post_id);
 
-  const head = document.createElement('span');
-  head.className = 'lm-finding-head';
-  const dot = document.createElement('span');
-  dot.className = `sm-dot ${item.severity === 'error' ? 'bad' : 'warn'}`;
-  const rule = document.createElement('span');
-  rule.className = 'hm-msg';
+  const head = el('span', 'lm-finding-head');
+  const dot = el('span', `sm-dot ${item.severity === 'error' ? 'bad' : 'warn'}`);
+  const rule = el('span', 'hm-msg');
   // occurrences > 1: the same broken target mentioned several times in one
   // post is one finding, not one per mention (relay #198 N-5 follow-up) —
   // the count still needs to be visible somewhere, or "fixed the one ref"
@@ -191,9 +156,7 @@ function findingRow(item, panes) {
   rule.textContent = (RULE_LABELS[item.rule] || item.rule) + (item.occurrences > 1 ? ` (×${item.occurrences})` : '');
   head.append(dot, rule);
 
-  const sub = document.createElement('span');
-  sub.className = 'hm-meta';
-  sub.textContent = item.post_id != null ? `#${item.post_id} ${item.title || ''}`.trim() : 'vault-wide';
+  const sub = el('span', 'hm-meta', item.post_id != null ? `#${item.post_id} ${item.title || ''}`.trim() : 'vault-wide');
 
   row.append(head, sub);
   row.addEventListener('click', () => {
@@ -205,6 +168,9 @@ function findingRow(item, panes) {
 
 function renderList(panes) {
   const { list, pane } = panes;
+  // A fix can clear the last finding of the filtered rule; its chip then goes
+  // away, and a filter nobody can see or unset would leave an empty list.
+  if (filter && !report.items.some(i => i.rule === filter)) filter = null;
   renderFilters(panes);
   list.innerHTML = '';
 
@@ -237,19 +203,12 @@ function renderList(panes) {
 /** Detail box for the finding itself — kept visible above the editor so the
  * reason you opened this pane never scrolls out of sight. */
 function findingDetail(item) {
-  const box = document.createElement('div');
-  box.className = `lint-card lint-${item.severity}`;
-  const head = document.createElement('div');
-  head.className = 'del-head';
-  const dot = document.createElement('span');
-  dot.className = `sm-dot ${item.severity === 'error' ? 'bad' : 'warn'}`;
-  const rule = document.createElement('span');
-  rule.className = 'lint-rule';
-  rule.textContent = RULE_LABELS[item.rule] || item.rule;
+  const box = el('div', `lint-card lint-${item.severity}`);
+  const head = el('div', 'del-head');
+  const dot = el('span', `sm-dot ${item.severity === 'error' ? 'bad' : 'warn'}`);
+  const rule = el('span', 'lint-rule', RULE_LABELS[item.rule] || item.rule);
   head.append(dot, rule);
-  const detail = document.createElement('div');
-  detail.className = 'lint-detail';
-  detail.textContent = item.detail;
+  const detail = el('div', 'lint-detail', item.detail);
   box.append(head, detail);
   return box;
 }
@@ -279,8 +238,7 @@ async function selectFinding(item, row, panes) {
     open.textContent = 'Open post →';
     open.addEventListener('click', () => onOpenPost(post.id));
 
-    const editorWrap = document.createElement('div');
-    editorWrap.className = 'lm-editor';
+    const editorWrap = el('div', 'lm-editor');
     setPane(pane, findingDetail(item), open, editorWrap);
     currentEditHandle = buildEditForm(editorWrap, post, {
       // The pane opens on every row click, not on a deliberate "start
@@ -325,7 +283,6 @@ async function handleSaved(item, updated, panes) {
 
 function showModal() {
   lintModal.classList.add('open');
-  document.body.style.overflow = 'hidden';
 }
 
 /** Entry point from the status panel's "Browse issues" button — always a
@@ -363,13 +320,4 @@ export function reopenLintModal() {
   renderList(panes);
 }
 
-document.getElementById('lmClose').onclick = tryCloseLintModal;
-const lmBackdrop = document.getElementById('lmBackdrop');
-lmBackdrop.onclick = tryCloseLintModal;
-attachSheetDismiss({
-  inner: lintModal.querySelector('.sm-inner'),
-  handle: lintModal.querySelector('.sm-head'),
-  backdrop: lmBackdrop,
-  canDismiss: confirmDiscardCurrentEdit,
-  onDismiss: closeLintModal,
-});
+wireModal(lintModal, { close: closeLintModal, confirmDiscard: confirmDiscardCurrentEdit });
