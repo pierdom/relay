@@ -11,6 +11,7 @@
  * main.js.
  */
 
+import { enhanceEditor } from './editor.js';
 import { ICON_CLIP } from './icons.js';
 import { idForTitle, postExists } from './links.js';
 import { showToast } from './toast.js';
@@ -33,7 +34,7 @@ function insertAtCursor(ta, text) {
   ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
   ta.selectionStart = ta.selectionEnd = s + text.length;
   ta.focus();
-  ta.dispatchEvent(new Event('input'));   // a scripted change fires no input of its own (highlighter, gates)
+  ta.dispatchEvent(new Event('input', { bubbles: true }));   // a scripted change fires no input of its own (highlighter, gates, draft)
 }
 
 // At/above this size, skip base64 (which inflates the JSON body ~33% and buffers
@@ -274,6 +275,7 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
         <div class="attach-row">
           <input type="file" class="ef-file" multiple style="display:none">
           <button type="button" class="btn-attach ef-attach">${ICON_CLIP}Attach</button>
+          <button type="button" class="btn-attach ef-preview-btn">Preview</button>
           <span class="attach-status ef-attach-status"></span>
         </div>
         <div class="ef-attachments"></div>
@@ -315,6 +317,7 @@ export function buildEditForm(container, post, { onSave, onCancel, focus = true 
     sourceField.value !== initial.source ||
     expiresField.value !== initial.expires;
   wireBrokenLinkHighlight(contentField, container.querySelector('.ef-content-backdrop'));
+  enhanceEditor({ content: contentField, tags: tagsField, previewBtn: container.querySelector('.ef-preview-btn') });
 
   wireAttachments(
     contentField, container.querySelector('.ef-file'),

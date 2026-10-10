@@ -57,8 +57,9 @@ _available: bool | None = None
 # dash, an arrow, an accent or «» parsed to a path that does not exist, its blob
 # read failed, and the post reported *no history at all* — and could not be
 # restored. Titles are filenames here, so that was most of a real vault.
+_IDENTITY_NAME = "relay"
 _IDENTITY = (
-    "-c", "user.name=relay",
+    "-c", f"user.name={_IDENTITY_NAME}",
     "-c", "user.email=relay@localhost",
     "-c", "core.quotePath=false",
 )
@@ -230,12 +231,10 @@ def reset_state_for_tests() -> None:
 # Record/field separators: a subject line can contain anything printable, so the
 # parser keys on control characters rather than a punctuation convention.
 _RS, _FS = "\x1e", "\x1f"
-_LOG_FORMAT = f"{_RS}%H{_FS}%aI{_FS}%s"
-# `_commits_sync` only, not the shared `_LOG_FORMAT` above: three other log
-# readers (`Revision`, `Deletion`, the pickaxe lookup) parse with `_parse_log`
-# and don't need author — only `changes.py`'s changelog does (relay #198,
-# B-7). `%an`/`%ae` are the git *author* (see `_commit_sync`'s `--author`),
-# not `%cn`/`%ce` (the pinned `relay` committer).
+# `%an`/`%ae` are the git *author* (see `_commit_sync`'s `--author`), not
+# `%cn`/`%ce` (the pinned `relay` committer). A revision carries the name only;
+# the changelog below also keeps the email.
+_LOG_FORMAT = f"{_RS}%H{_FS}%aI{_FS}%an{_FS}%s"
 _COMMITS_LOG_FORMAT = f"{_RS}%H{_FS}%aI{_FS}%an{_FS}%ae{_FS}%s"
 
 
@@ -247,27 +246,36 @@ class Revision:
     when: str
     message: str
     path: str
+    author: str | None = None   # see `actor_name`
 
     @property
     def short_sha(self) -> str:
         return self.sha[:7]
 
 
+def actor_name(author_name: str) -> str | None:
+    """Who made a write, or ``None`` for relay's own pinned identity — a commit
+    with no explicit ``--author`` (TTL sweep, external-edit batch) had no
+    specific actor (relay #198, B-7)."""
+    return None if author_name == _IDENTITY_NAME else author_name
+
+
 def _parse_log(out: str) -> list[Revision]:
     """Parse `git log --name-only` output into (commit, path) pairs."""
     revisions: list[Revision] = []
-    sha = when = message = ""
+    sha = when = author = message = ""
     for line in out.split("\n"):
         if line.startswith(_RS):
+            # A header that doesn't parse (a separator inside an author name)
+            # drops that commit's paths rather than filing them under the last.
             parts = line[1:].split(_FS)
-            if len(parts) == 3:
-                sha, when, message = parts
+            sha, when, author, message = parts if len(parts) == 4 else ("", "", "", "")
             continue
         path = line.strip()
         # --name-only prints one line per path touched; the pathspec filter means
         # only the post's own file appears, so the first is the one we want.
         if path and sha and not any(r.sha == sha for r in revisions):
-            revisions.append(Revision(sha=sha, when=when, message=message, path=path))
+            revisions.append(Revision(sha=sha, when=when, message=message, path=path, author=actor_name(author)))
     return revisions
 
 
@@ -420,8 +428,7 @@ def _parse_log_paths(out: str) -> list[tuple[str, str, str, list[str]]]:
             if sha:
                 out_rows.append((sha, when, message, paths))
             parts = line[1:].split(_FS)
-            if len(parts) == 3:
-                sha, when, message = parts
+            sha, when, _author, message = parts if len(parts) == 4 else ("", "", "", "")
             paths = []
             continue
         path = line.strip()
@@ -452,7 +459,7 @@ class CommitPaths:
     # name) when the commit carried no explicit `--author`, i.e. no specific
     # actor made this write (TTL sweep, external-edit batch). `changes._ingest`
     # is what turns that "relay" sentinel into a `NULL` `changes.author`.
-    author_name: str = "relay"
+    author_name: str = _IDENTITY_NAME
     author_email: str = "relay@localhost"
 
 
@@ -469,8 +476,7 @@ def _parse_commits(out: str) -> list[CommitPaths]:
             if sha:
                 out_rows.append(CommitPaths(sha, when, message, changes, author_name, author_email))
             parts = line[1:].split(_FS)
-            if len(parts) == 5:
-                sha, when, author_name, author_email, message = parts
+            sha, when, author_name, author_email, message = parts if len(parts) == 5 else ("",) * 5
             changes = []
             continue
         row = line.strip()

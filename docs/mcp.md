@@ -108,7 +108,7 @@ deleted can be brought back without leaving the tool call.
 
 ```
 list_deleted_posts()           → [{id, title, sha, when, reason, path}, …] newest first
-get_post_history(id=54)        → [{sha, short_sha, when, message, path}, …] newest first
+get_post_history(id=54)        → [{sha, short_sha, when, message, path, author}, …] newest first
 restore_post(id=54, sha="a8dcc37")
 ```
 

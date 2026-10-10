@@ -59,7 +59,7 @@
          between it and Disconnect. "+ New Post" next to a one-click session
          kill is a misfire waiting to happen — pinned by
          test_header_controls_are_one_visual_set. -->
-    <button class="btn-new-post" id="newPostBtn">+ New Post</button>
+    <button class="btn-new-post" id="newPostBtn">+<span class="np-label"> New Post</span></button>
     <div class="theme-picker">
       <!-- A palette, not a sun/moon: this stopped being a two-state toggle when it
            became a menu, and a glyph that flips between ☀ and ☾ promises the wrong
@@ -200,6 +200,7 @@
           <div class="attach-row">
             <input type="file" id="cpFile" multiple style="display:none">
             <button type="button" class="btn-attach" id="cpAttach"><svg class="icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 7.4l-5.1 5.1a3 3 0 0 1-4.3-4.3l5.3-5.3a2 2 0 0 1 2.8 2.8l-5.1 5.1a1 1 0 0 1-1.4-1.4L10 4.6"/></svg>Attach</button>
+            <button type="button" class="btn-attach" id="cpPreview">Preview</button>
             <span class="attach-status" id="cpAttachStatus"></span>
           </div>
         </div>
@@ -276,6 +277,7 @@
     </div>
     <div class="pm-meta" id="pmMeta"></div>
     <div class="pm-body-wrap">
+      <nav class="pm-outline" id="pmOutline" aria-label="Outline" hidden></nav>
       <div class="pm-body" id="pmBody"></div>
       <div class="pm-body-fade" id="pmBodyFade"></div>
     </div>
@@ -309,8 +311,26 @@
       </div>
       <div class="kb-group">
         <div class="kb-group-label">Global</div>
+        <div class="kb-row"><span><kbd>Ctrl</kbd> <kbd>K</kbd></span><span>Go to a post</span></div>
+        <div class="kb-row"><span><kbd>/</kbd></span><span>Search</span></div>
+        <div class="kb-row"><span><kbd>n</kbd></span><span>New post</span></div>
         <div class="kb-row"><span><kbd>?</kbd></span><span>This panel</span></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="status-modal" id="switcherModal">
+  <div class="pm-backdrop" id="swBackdrop"></div>
+  <div class="sm-inner sw-inner">
+    <div class="sm-head">
+      <span class="sm-name">Go to post</span>
+      <button class="sm-close" id="swClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="sm-body">
+      <input type="text" id="swInput" placeholder="Title or #id" autocomplete="off" spellcheck="false"
+             aria-label="Post title or id" role="combobox" aria-expanded="true" aria-controls="swList" aria-autocomplete="list">
+      <ul class="sw-list" id="swList" role="listbox" aria-label="Posts"></ul>
     </div>
   </div>
 </div>

@@ -10,7 +10,8 @@
  */
 
 import { apiFetch } from './api.js';
-import { fmtBytes, fmtUptime } from './util.js';
+import { postExists } from './links.js';
+import { fmtBytes, fmtUptime, relativeTime } from './util.js';
 import { wireModal } from './dialog.js';
 import { el, note } from './dom.js';
 import { fetchDeleted, recoverableCount, renderDeleted } from './deleted.js';
@@ -73,7 +74,7 @@ function smFeature(label, state, note) {
   const text = document.createElement('span');
   text.textContent = label;
   name.append(dot, text);
-  const hint = el('span', 'sm-feat-note', note);
+  const hint = el('div', 'sm-feat-note', note);   // a div: it can hold the semantic-search switch
   row.append(name, hint);
   return row;
 }
@@ -86,56 +87,33 @@ function fmtBackfill(b) {
   return 'never run';
 }
 
-/* The health block above only ever answers on/off. Every production question
- * this session's embedding work actually hit — which model, is the backfill
- * still going, how much of the vault is covered — needed a shell or a log
- * tail before /status grew the `embeddings` object (relay #253, v1.2.1) to
- * answer them directly. This section is that object, plus the two controls
- * (v1.3.0) that used to mean editing .env and restarting: pause/resume, and
- * re-trigger a catch-up on demand. */
-function renderEmbeddings(e) {
-  const wrap = document.createElement('div');
-  // Off (the default everywhere), ten rows of "—" said nothing the one line
-  // below doesn't. Coverage stays when there is any: turned off at runtime,
-  // what was already embedded is still there for when it comes back.
-  if (!e.enabled) {
-    wrap.appendChild(smRows([
-      ['Status', 'Off — search matches words only'],
-      ...(e.chunks_total ? [['Coverage', `${e.posts_embedded} / ${e.posts_total} posts`]] : []),
-    ]));
-  } else wrap.appendChild(smRows([
-    ['Model', e.model || '—'],
-    ['Dimension', e.dimension != null ? `${e.dimension}d` : '—'],
-    ['Model size', e.model_size_mb != null ? `${e.model_size_mb} MB` : '—'],
-    ['Backend', e.backend_loaded ? 'loaded (resident)' : 'unloaded'],
-    ['Idle unload', e.idle_unload_seconds > 0 ? `${e.idle_unload_seconds}s` : 'never'],
-    ['Threads', String(e.threads)],
-    ['Coverage', `${e.posts_embedded} / ${e.posts_total} posts (${e.posts_missing} missing)`],
-    ['Chunks', String(e.chunks_total)],
-    ['Cache entries', String(e.cache_entries)],
-    ['Backfill', fmtBackfill(e.backfill)],
-  ]));
-
+/* Semantic search is one row of Health while it is off (with the switch to turn
+ * it on) and a section of its own once on. Every production question the
+ * embedding work hit — which model, is the backfill still going, how much of the
+ * vault is covered — needed a shell before /status grew the `embeddings` object
+ * (relay #253) to answer them; the section is that object. The controls are the
+ * pause/resume and catch-up that used to mean editing .env and restarting. */
+function embeddingControls(e) {
+  const controls = el('div', 'sm-embed-controls');
   const err = el('div', 'sm-error');
-  err.style.display = 'none';
+  err.hidden = true;
 
   // Both actions re-fetch and re-render the whole panel on success rather than
-  // patching this section alone — the health dot above and the Vault section's
-  // post count can move too (an enable auto-triggers a backfill; the toggle
-  // itself flips search.embeddings). The action and the refresh are caught
-  // separately: fn() failing means nothing happened, so show the real error
-  // and let the button be clicked again. refresh() failing means the action
-  // *did* happen but this copy of the panel doesn't know it yet — re-enabling
-  // the button there would invite a second, opposite-direction click against
-  // state the user can no longer see, so it stays disabled and says so.
+  // patching this section alone — the health dot and the Vault section's post
+  // count can move too (an enable auto-triggers a backfill). The action and the
+  // refresh are caught separately: fn() failing means nothing happened, so show
+  // the real error and let the button be clicked again. refresh() failing means
+  // the action *did* happen but this copy of the panel doesn't know it yet —
+  // re-enabling the button there would invite a second, opposite-direction
+  // click against state the user can no longer see, so it stays disabled.
   const runAction = async (btn, fn) => {
-    err.style.display = 'none';
+    err.hidden = true;
     btn.disabled = true;
     try {
       await fn();
     } catch (ex) {
       err.textContent = ex.message;
-      err.style.display = '';
+      err.hidden = false;
       btn.disabled = false;
       return;
     }
@@ -143,7 +121,7 @@ function renderEmbeddings(e) {
       renderStatus(await apiFetch('/status'));
     } catch {
       err.textContent = 'Done, but the panel could not refresh — close and reopen it to see the latest state.';
-      err.style.display = '';
+      err.hidden = false;
     }
   };
 
@@ -155,20 +133,67 @@ function renderEmbeddings(e) {
     method: 'PATCH',
     body: JSON.stringify({ enabled: !e.enabled }),
   }));
-
-  const backfillBtn = el('button', 'btn-edit', e.backfill.running ? 'Running…' : 'Re-run backfill');
-  backfillBtn.disabled = !e.available || e.backfill.running;
-  backfillBtn.title = e.available
-    ? 'Re-embed anything the content-addressed cache does not already cover'
-    : 'Enable semantic search first';
-  backfillBtn.onclick = () => runAction(backfillBtn, () => apiFetch('/embeddings/backfill', { method: 'POST' }));
-
-  const controls = el('div', 'sm-embed-controls');
   controls.append(toggleBtn);
-  if (e.enabled) controls.append(backfillBtn);   // it can only ever be disabled while off
-  wrap.append(controls, err);
 
+  if (e.enabled) {   // a backfill can only ever be disabled while off
+    const backfillBtn = el('button', 'btn-edit', e.backfill.running ? 'Running…' : 'Re-run backfill');
+    backfillBtn.disabled = !e.available || e.backfill.running;
+    backfillBtn.title = e.available
+      ? 'Re-embed anything the content-addressed cache does not already cover'
+      : 'Enable semantic search first';
+    backfillBtn.onclick = () => runAction(backfillBtn, () => apiFetch('/embeddings/backfill', { method: 'POST' }));
+    controls.append(backfillBtn);
+  }
+  const wrap = document.createElement('div');
+  wrap.append(controls, err);
+  return wrap;
+}
+
+function renderEmbeddings(e) {
+  const wrap = document.createElement('div');
+  wrap.append(smRows([
+    ['Model', e.model || '—'],
+    ['Dimension', e.dimension != null ? `${e.dimension}d` : '—'],
+    ['Model size', e.model_size_mb != null ? `${e.model_size_mb} MB` : '—'],
+    ['Backend', e.backend_loaded ? 'loaded (resident)' : 'unloaded'],
+    ['Idle unload', e.idle_unload_seconds > 0 ? `${e.idle_unload_seconds}s` : 'never'],
+    ['Threads', String(e.threads)],
+    ['Coverage', `${e.posts_embedded} / ${e.posts_total} posts (${e.posts_missing} missing)`],
+    ['Chunks', String(e.chunks_total)],
+    ['Cache entries', String(e.cache_entries)],
+    ['Backfill', fmtBackfill(e.backfill)],
+  ]), embeddingControls(e));
   return smSection('Semantic search', wrap);
+}
+
+/* Who changed what, newest first — `/changes`, the changelog over vault
+ * history, so it is shown only while history works. A post still in the
+ * vault opens from here; a deleted one is named but not a link. */
+const ACTIONS = {
+  create: 'created', update: 'edited', edit: 'edited', append: 'appended to',
+  delete: 'deleted', restore: 'restored', tag_rename: 'retagged',
+  external_edit: 'edited outside relay', external_delete: 'deleted outside relay', expiry: 'expired',
+};
+
+function renderActivity() {
+  const list = el('ul', 'sm-activity');
+  list.append(el('li', 'sm-act-note', 'Loading…'));
+  apiFetch('/changes?limit=12').then(({ items }) => {
+    if (!items.length) { list.replaceChildren(el('li', 'sm-act-note', 'Nothing changed yet.')); return; }
+    list.replaceChildren(...items.map(c => {
+      const row = el('li', 'sm-act');
+      const title = el(postExists(c.id) ? 'button' : 'span', 'sm-act-title', c.title);
+      if (title.tagName === 'BUTTON') {
+        title.type = 'button';
+        title.onclick = () => openPost(c.id);
+      }
+      const who = c.author ? ` by ${c.author}` : '';
+      const verb = Object.hasOwn(ACTIONS, c.action) ? ACTIONS[c.action] : c.action;
+      row.append(title, el('span', 'sm-act-meta', `${verb}${who} · ${relativeTime(c.when)}`));
+      return row;
+    }));
+  }).catch(() => list.replaceChildren(el('li', 'sm-error', 'Could not read recent changes.')));
+  return smSection('Recent activity', list);
 }
 
 /* Recovery lives here because this is the panel that already answers "does
@@ -295,11 +320,15 @@ function renderStatus(d) {
     d.features.search.fts5 ? 'ok' : 'warn',           // degraded but still functional
     d.features.search.fts5 ? 'FTS5' : 'substring fallback',
   ));
-  health.appendChild(smFeature(
+  const e = d.embeddings;
+  const semantic = smFeature(
     'Semantic search',
-    d.features.search.embeddings ? 'ok' : 'off',      // off by default everywhere — not a fault or a degradation
-    d.features.search.embeddings ? 'enabled' : 'disabled (proof of concept)',
-  ));
+    e.available ? 'ok' : e.enabled ? 'warn' : 'off',   // off by default everywhere — not a fault or a degradation
+    e.available ? 'on — details below' : e.enabled ? 'unavailable — sqlite-vec is not loaded'
+      : 'off — search matches words only',
+  );
+  if (!e.enabled) semantic.querySelector('.sm-feat-note').append(embeddingControls(e));
+  health.appendChild(semantic);
   health.appendChild(smFeature(
     'External edits',
     d.features.watcher.running ? 'ok' : 'warn',
@@ -308,7 +337,7 @@ function renderStatus(d) {
   smBody.appendChild(smSection('Health', health));
   const access = renderAccess(d.caller);
   if (access) smBody.appendChild(access);
-  smBody.appendChild(renderEmbeddings(d.embeddings));
+  if (e.enabled) smBody.appendChild(renderEmbeddings(e));
 
   const v = d.vault;
   smBody.appendChild(smSection('Vault', smRows([
@@ -328,6 +357,7 @@ function renderStatus(d) {
   ])));
 
   smBody.appendChild(renderLintSummary());
+  if (h.effective) smBody.appendChild(renderActivity());
 
   // Last, and deliberately so. Health/Vault/Server are what you open this panel
   // *for*; recovery is the one section that acts rather than reports, and it is
@@ -336,7 +366,12 @@ function renderStatus(d) {
   smBody.appendChild(renderRecovery(h.effective));
 }
 
-async function openStatusModal() {
+let openPost = () => {};
+
+/** main.js supplies how the activity list opens a post. */
+export function initStatus(hooks) { openPost = hooks.openPost; }
+
+export async function openStatusModal() {
   statusModal.classList.add('open');
   smVersion.textContent = '';
   smBody.replaceChildren(note('loading…'));

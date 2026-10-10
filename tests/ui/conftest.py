@@ -49,6 +49,7 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 API_KEY = "ui-smoke-key"
+AGENT_KEY = "ui-agent-key"   # a second, named writer: posts carry `updated_by: agent`
 
 
 def _free_port() -> int:
@@ -86,6 +87,7 @@ def relay_server(tmp_path_factory) -> str:
     env = {
         **os.environ,
         "API_KEY": API_KEY,
+        "RELAY_API_KEYS": f"agent:{AGENT_KEY}",
         "RELAY_VAULT_PATH": str(vault),
         "SECURE_COOKIES": "false",   # plain http in tests; the cookie must still be set
         "RELAY_HISTORY_ENABLED": "true",   # the post-history panel needs real revisions
