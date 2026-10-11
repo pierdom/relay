@@ -17,15 +17,16 @@ pytestmark = pytest.mark.ui
 _FONT = "(sel) => getComputedStyle(document.querySelector(sel)).fontFamily"
 
 
-def test_people_read_in_the_sans_and_the_interface_stays_mono(page, relay_server):
-    post = _api(relay_server, "POST", "/posts", {
-        "title": _unique("Faces"), "content": "Prose with `code` in it.\n\n```\nblock\n```", "tags": ["homelab"]})
-    page.reload()
-    card = f'.post[data-id="{post["id"]}"]'
-    page.locator(card).wait_for()
-    for sel in (f"{card} .post-title", f"{card} .post-body p"):
+def test_prose_reads_in_the_sans_and_everything_else_stays_mono(page, relay_server):
+    body = ("## Part\n\nProse with `code` in it.\n\n- an item\n\n| id | note |\n|---|---|\n"
+            "| 1 | a sentence long enough to count as prose in its column |\n\n"
+            "| job | keep |\n|---|---|\n| vms | 7d |")
+    post = _api(relay_server, "POST", "/posts", {"title": _unique("Faces"), "content": body, "tags": ["homelab"]})
+    _open_post(page, relay_server, post["id"])
+    for sel in ("#pmBody .post-body p", "#pmBody .post-body li", "#pmBody .post-body table.prose-table td"):
         assert "IBM Plex Sans" in page.evaluate(_FONT, sel), sel
-    for sel in (f"{card} .post-body code", f"{card} .post-id-pill", ".tag-name", "#searchInput"):
+    for sel in ("#pmTitle", "#pmBody .post-body h2", "#pmBody .post-body table:not(.prose-table) td",
+                "#pmBody .post-body code", ".post-id-pill", ".tag-name", "#searchInput"):
         assert "IBM Plex Mono" in page.evaluate(_FONT, sel), sel
 
 

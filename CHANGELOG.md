@@ -9,11 +9,12 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 The visual direction from the web UI review (relay #198, B-13).
 
 ### Changed
-- **A reading face**: titles and post text are set in IBM Plex Sans, on a 15/18/22 scale, in a column of about 75 characters; IBM Plex Mono stays for the interface, metadata and code. The post view is sized to that column instead of 1320px
+- **A reading face for prose**: paragraphs, list items and quotes are set in IBM Plex Sans, on a 15/18/22 scale, in a column of about 75 characters; IBM Plex Mono stays for everything else — the interface, titles, headings, tables and code. The post view is sized to that column instead of 1320px
 - **Sentence case** throughout: the 24 places that shouted in tracked-out capitals (buttons, tabs, section titles, badges) now don't; only file extensions stay upper-case
 - **Card previews end on whole lines** — the opening block, a paragraph cut at three lines with an ellipsis, a list at three items — instead of a pixel cut faded out; list cards keep a readable line length on wide screens
 - **Each writer has a mark**: a small swatch in one of the theme's accents, the same on cards, in History and in Recent activity
 - The master document's badge is the card's label rather than a second box inside it
+- **Ayu Dark** borders are a step stronger (its gutter grey over the card background); `ui.line` all but vanished against the cards
 - The theme gallery (docs/themes.md) is regenerated
 
 ---

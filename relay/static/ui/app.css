@@ -86,10 +86,11 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   font-size: 13px;
 }
 
-/* Two faces, two jobs: the mono runs the interface — chrome, metadata, ids,
-   code, the editor — and the sans carries what people read, titles and post
-   text. Same family, so they sit together; different enough to tell which is
-   which at a glance. On `html`, not `:root`: they are not per-theme tokens. */
+/* Two faces, two jobs: the mono is relay's voice — chrome, metadata, titles,
+   headings, tables, code, the editor — and the sans carries only running
+   prose (paragraphs, list items, quotes), where line after line of mono tires
+   the eye. Same family, so they sit together. On `html`, not `:root`: they
+   are not per-theme tokens. */
 html {
   --font-ui:   'IBM Plex Mono', monospace;
   --font-read: 'IBM Plex Sans', system-ui, sans-serif;
@@ -934,7 +935,7 @@ html {
   color-scheme: dark;
   --bg:          #0b0e14;   /* common.bg */
   --surface:     #0d1017;   /* editor.bg */
-  --border:      #1b1f29;   /* ui.line */
+  --border:      #2a2e36;   /* gutter grey #6c7380 at 30% over editor.bg — ui.line (#1b1f29) all but vanished */
   --text:        #bfbdb6;   /* editor.fg */
   --muted:       #6c7380;   /* gutter.active — see block note */
   --accent:      #e6b450;   /* common.accent */
@@ -1430,8 +1431,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .feed .post-body { font-size: 14px; line-height: 1.55; }
 .feed:not(.grid) .post-body { max-width: 80ch; }   /* a wide list card still reads at line length */
 .feed .post-body > :first-child { margin-top: 0; }
-.feed .post-body h1, .feed .post-body h2 { font-size: 15px; }
-.feed .post-body h3 { font-size: 14px; }
+.feed .post-body :is(h1, h2, h3) { font-size: 13px; }   /* under the card's 14px title, never over it */
 .feed .post:not(.master-doc) .post-body > :not(:first-child):not(:is(h1, h2, h3, h4, h5, h6):first-child + *) { display: none; }
 .feed .post:not(.master-doc) .post-body > :is(p, blockquote) {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
@@ -1468,7 +1468,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .feed:not(.grid) .t-doc-updated::before { content: "· "; }
 
 .post-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-.post-title  { font-family: var(--font-read); font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.post-title  { font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 a.post-title { text-decoration: none; }
 /* List mode: the title sizes to its text and the tags wrap under it once they
    no longer fit beside it — five tags used to shrink a title to "A very long
@@ -1496,13 +1496,14 @@ a.post-title { text-decoration: none; }
 }
 
 /* The reading scale: 15 body, 18 section, 22 title (13 is the interface's own
-   size). Code keeps the interface face — it is something you copy, not read. */
+   size). Headings, tables and code keep the interface face — they are
+   structure and data, scanned and copied rather than read line after line. */
 .post-body { font-family: var(--font-read); color: var(--body); line-height: 1.65; font-size: 15px; overflow-wrap: anywhere; }
 .post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 1.4em 0 0.4em; font-weight: 600; line-height: 1.3; }
 .post-body h1 { font-size: 22px; }
 .post-body h2 { font-size: 18px; }
 .post-body h3 { font-size: 15px; color: var(--body-strong); }
-.post-body :is(code, pre, kbd) { font-family: var(--font-ui); }
+.post-body :is(h1, h2, h3, h4, h5, h6, table, code, pre, kbd) { font-family: var(--font-ui); }
 .post-body hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 .post-body p         { margin: 6px 0; }
 /* 2.2em holds a two-digit marker ("10.") inside the box — 18px clipped "1." to
@@ -1574,6 +1575,7 @@ a.post-title { text-decoration: none; }
    wraps at spaces and hyphens like prose — `anywhere` split `fleet-health.sh`
    into four one-syllable pills. */
 .post-body td a { overflow-wrap: anywhere; }
+.post-body table.prose-table { font-family: var(--font-read); }   /* see render.js floorProseColumns */
 .post-body th        { background: var(--bg); color: var(--text); font-weight: 600; }
 .post-body tr:nth-child(even) td { background: var(--wash-raise); }
 .table-scroll {
@@ -2405,7 +2407,7 @@ button.sm-act-title:hover { color: var(--accent); }
   display: flex; align-items: flex-start; gap: 12px;
   padding: 18px 20px 0; flex-shrink: 0;
 }
-.pm-title { flex: 1; min-width: 0; font-family: var(--font-read); font-size: 22px; font-weight: 600; color: var(--text); line-height: 1.3; overflow-wrap: anywhere; }
+.pm-title { flex: 1; min-width: 0; font-size: 22px; font-weight: 600; color: var(--text); line-height: 1.3; overflow-wrap: anywhere; }
 .pm-back {
   display: none; background: none; border: none;
   color: var(--muted); cursor: pointer; font-family: inherit;
@@ -2523,7 +2525,7 @@ button.sm-act-title:hover { color: var(--accent); }
   box-shadow: var(--shadow-modal);
   animation: modalIn 0.12s ease backwards;
 }
-.lp-title { font-family: var(--font-read); font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
+.lp-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
 .lp-tags  { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 .lp-tag   { font-size: 10px; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
 .lp-body  { font-family: var(--font-read); font-size: 12px; color: var(--muted); line-height: 1.5; }
