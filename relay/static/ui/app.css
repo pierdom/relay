@@ -2075,14 +2075,19 @@ a.post-title { text-decoration: none; }
 .new-posts-pill .np-arrow { font-weight: 700; }
 
 /* ── Load more / states ──────────────────────────────── */
-.load-more { text-align: center; padding: 14px 20px; }
-.load-more button {
-  background: none; border: 1px solid var(--border); color: var(--muted);
-  padding: 7px 20px; border-radius: 4px; cursor: pointer;
-  font-family: inherit; font-size: 12px;
-  transition: border-color 0.15s, color 0.15s;
+/* The end of the feed (main.js feedEnd): a status line inside the scrolling
+   list, never a bar pinned under it. min-height keeps it a target the
+   observer can see while it has nothing to say. */
+.feed-end {
+  min-height: 1px; flex-shrink: 0; text-align: center;
+  font-size: 11px; color: var(--muted); padding: 6px 0 12px;
 }
-.load-more button:hover { border-color: var(--accent); color: var(--accent); }
+.feed-end:empty { padding: 0; }
+.feed.grid > .feed-end { grid-column: 1 / -1; }
+.feed-end-retry {
+  background: none; border: none; padding: 0 2px; cursor: pointer;
+  font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px;
+}
 
 .empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -2182,7 +2187,7 @@ a.post-title { text-decoration: none; }
   .search-bar input { min-width: 72px; }
   .search-bar .search-label { display: none !important; }
   .sort-select, .mode-select {
-    padding: 4px 16px 4px 5px; max-width: 62px;
+    padding: 4px 20px 4px 6px; max-width: 66px;   /* 20px: the label used to touch its arrow */
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .sort-dir { min-width: 24px; padding: 5px 5px; }
@@ -2192,7 +2197,6 @@ a.post-title { text-decoration: none; }
   /* Feed — full width, tighter spacing */
   .feed { padding: 12px; gap: 8px; }
   .post { padding: 12px; }
-  .load-more { padding: 10px 12px; }
   /* Per-card Edit/Delete are hazardous in a touch scroll feed — drive
      edits/deletes from the post detail view (tap a card to open it). */
   .post-actions { display: none; }

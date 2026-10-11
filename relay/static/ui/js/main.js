@@ -31,14 +31,11 @@ let sidebarMode = 'tags';   // 'tags' | 'tree' | 'files'
 let attachCache = [];       // last-fetched attachment list (for the gallery)
 let attachFolder = null;    // active gallery folder filter (null = all)
 let searchDebounce = null;
-let loadingMore = false;   // guards the infinite-scroll auto-load
 let es = null;
 let sseErrorTimer = null;
 
 const feed         = document.getElementById('feed');
 const tagList      = document.getElementById('tagList');
-const loadMoreWrap = document.getElementById('loadMore');
-const loadMoreBtn  = document.getElementById('loadMoreBtn');
 const liveDot      = document.getElementById('liveDot');
 const liveLabel    = document.getElementById('liveLabel');
 const a11yAnnouncer = document.getElementById('a11yAnnouncer');
@@ -190,7 +187,6 @@ async function signOut(reason = '') {
   closeSidebar();
   feed.innerHTML = '';
   tagList.innerHTML = '';
-  loadMoreWrap.style.display = 'none';
   query.search = null; searchInput.value = ''; searchBar.classList.remove('active');
   query.tag = query.folder = query.author = null;   // the next session starts unfiltered
   syncSearchScope();
@@ -211,7 +207,6 @@ async function init() {
   feed.innerHTML = '';
   attachFolder = null;
   showSidebarMode('tags');   // a reconnect may come from the Tree or Files tab
-  loadMoreWrap.style.display = 'none';
   // Not carried across sessions: a stale 'semantic' would 503 the first
   // search on a relay with embeddings off.
   query.mode = 'keyword';
@@ -624,8 +619,6 @@ function showSidebarMode(mode) {
     document.getElementById(id).style.display = mode === name ? '' : 'none';
   }
   applyNewPostVisibility();
-  if (replacing) loadMoreWrap.style.display = 'none';
-  else if (query.offset < query.total) loadMoreWrap.style.display = 'block';
 }
 
 function setSidebarMode(mode) {
@@ -700,7 +693,6 @@ function setFilter({ tag = null, folder = null, author = null }) {
   if (tagChanged) connectSSE();   // the stream is filtered by tag server-side
   syncSearchScope();
   feed.innerHTML = '';
-  loadMoreWrap.style.display = 'none';
 }
 
 /** Posts whose current version this identity wrote — from a card's author chip. */
@@ -988,9 +980,12 @@ async function selectTag(tag) {
 // the same offset and appended the same page twice.
 let loadSeq = 0;
 
+/** Load a page: the first one (`replace`) or the next. Resolves false only
+ *  when this request failed — a request a newer one superseded is no failure. */
 async function loadPosts(replace = false) {
-  if (!authed) return;
+  if (!authed) return true;
   const seq = ++loadSeq;
+  if (replace) pageFailed = false;
   try {
     const params = new URLSearchParams({ limit: LIMIT, offset: query.offset });
     params.set('sort', prefs.sortField);
@@ -1034,23 +1029,70 @@ async function loadPosts(replace = false) {
         feed.appendChild(el);
       });
     }
-    loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
+    if (feed.querySelector('.post')) feed.appendChild(feedEnd);
+    renderFeedEnd();
+    if (replace) requestAnimationFrame(fillFeed);
+    return true;
   } catch (e) {
-    if (replace && seq === loadSeq) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${escHtml(e.message)}</p></div>`;
+    if (seq !== loadSeq) return true;
+    if (replace) feed.innerHTML = `<div class="auth-prompt"><p>Could not load posts.</p><p>${escHtml(e.message)}</p></div>`;
+    return false;
   }
 }
 
-loadMoreBtn.addEventListener('click', () => loadPosts(false));
+/* ── The feed's end ───────────────────────────────────────────
+   One element after the last card, scrolling with them. It loads the next
+   page as it nears view — and keeps loading while it stays in view, so a
+   first page too short to scroll (a tall screen, a grid of one-liners) still
+   fills it. It says "Loading…" meanwhile, offers Retry when a page fails, and
+   "All N posts" once the feed is complete. It replaced a "Load more" bar
+   pinned under the feed, which cost a phone 51px on every screen. */
+const feedEnd = document.createElement('div');
+feedEnd.className = 'feed-end';
+const NEAR_PX = 300;
+let pageLoading = false;
+let pageFailed = false;
 
-/* Infinite scroll: auto-load the next page as the feed bottom nears view.
-   The Load more button stays as a fallback (short feeds that never scroll). */
-feed.addEventListener('scroll', () => {
-  if (loadingMore || query.offset >= query.total) return;
-  if (feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 300) {
-    loadingMore = true;
-    loadPosts(false).finally(() => { loadingMore = false; });
+function renderFeedEnd() {
+  const shown = feed.querySelectorAll('.post').length;
+  if (pageFailed) {
+    feedEnd.replaceChildren('Couldn’t load more posts. ');
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'feed-end-retry';
+    retry.textContent = 'Retry';
+    retry.addEventListener('click', () => { pageFailed = false; loadNextPage(); });
+    feedEnd.appendChild(retry);
+  } else if (pageLoading) {
+    feedEnd.textContent = 'Loading…';
+  } else if (query.offset >= query.total && shown) {
+    const noun = query.search ? 'matching post' : 'post';
+    feedEnd.textContent = shown === 1 ? `The only ${noun}` : `All ${shown} ${noun}s`;
+  } else {
+    feedEnd.textContent = '';
   }
-});
+}
+
+async function loadNextPage() {
+  if (pageLoading || pageFailed || query.offset >= query.total) return;
+  pageLoading = true;
+  renderFeedEnd();
+  const ok = await loadPosts(false);
+  pageLoading = false;
+  pageFailed = !ok;
+  renderFeedEnd();
+  if (ok) requestAnimationFrame(fillFeed);
+}
+
+/** Load on while the end is within reach — the observer only reports a change,
+ *  and an end that is still in view after a page landed has not changed. */
+function fillFeed() {
+  if (!feedEnd.isConnected || !feed.offsetParent) return;
+  if (feedEnd.getBoundingClientRect().top < feed.getBoundingClientRect().bottom + NEAR_PX) loadNextPage();
+}
+
+new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) loadNextPage(); },
+  { root: feed, rootMargin: `0px 0px ${NEAR_PX}px 0px` }).observe(feedEnd);
 
 /** Swap a card for a fresh render of `post`, keeping what its place in the
  *  feed gave it (the pinned master document stays pinned). */
@@ -1239,6 +1281,7 @@ function connectSSE() {
       el.classList.add('new');
       const pinnedEl = feed.querySelector('.post.pinned');
       if (pinnedEl) pinnedEl.after(el); else feed.prepend(el);  // keep master on top
+      if (!feedEnd.isConnected) feed.appendChild(feedEnd);     // the feed was empty until now
       query.total++;
       query.offset++;   // the server's list shifted too; the next page starts one later
       announce(`New post: ${post.title}`);
@@ -1250,6 +1293,7 @@ function connectSSE() {
       bumpNewPostsPill();
       announce(`New post: ${post.title}`);
     }
+    renderFeedEnd();
     scheduleRefresh();
   });
 
@@ -1261,6 +1305,7 @@ function connectSSE() {
     query.total = Math.max(0, query.total - 1);
     query.offset = Math.max(0, query.offset - 1);   // or the next page skips a post
     if (_modalPost && _modalPost.id === id) closePostModal();
+    renderFeedEnd();
     scheduleRefresh();
   });
 
@@ -1512,7 +1557,7 @@ async function deletePost(post) {
   }
   const card = feed.querySelector(`[data-id="${post.id}"]`);
   if (card) { card.remove(); query.total--; query.offset = Math.max(0, query.offset - 1); }
-  loadMoreWrap.style.display = query.offset < query.total ? 'block' : 'none';
+  renderFeedEnd();
   refreshSidebarCounts();
   showToast(`Deleted “${name}”.`, historyOn ? { action: { label: 'Undo', onClick: () => undoDelete(post) } } : {});
   return true;

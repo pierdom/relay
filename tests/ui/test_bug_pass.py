@@ -140,7 +140,7 @@ def test_load_more_after_a_live_post_shows_no_duplicate(page, relay_server):
     title = _unique("Live paging")
     _api_post(relay_server, {"title": title, "content": "x", "tags": [tag]})
     page.locator(".post", has_text=title).wait_for(timeout=10_000)
-    page.locator("#loadMoreBtn").click()
+    page.evaluate("document.getElementById('feed').scrollTop = 1e9")   # the next page loads at the end
     page.wait_for_function("() => document.querySelectorAll('#feed .post').length >= 23", timeout=10_000)
     ids = page.eval_on_selector_all("#feed .post", "els => els.map(e => e.dataset.id)")
     assert len(ids) == len(set(ids)) == 23
