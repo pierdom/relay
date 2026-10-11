@@ -16,12 +16,13 @@ import { initDeleted } from './deleted.js';
 import { initLint, reopenLintModal, tryCloseLintModal } from './lint.js';
 import { buildEditForm, confirmDeleteAttachment, wireAttachments } from './edit-form.js';
 import { enhanceEditor } from './editor.js';
+import { authorMark } from './dom.js';
 import { refreshLinks } from './links.js';
 import { extractMedia, IMAGE_EXT_RE, renderBody, stripTitleHeading, wrapTables } from './render.js';
 import { initSwitcher, openSwitcher } from './switcher.js';
 import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
-import { ICON_CLOCK, ICON_FOLDER, ICON_IMAGE, ICON_PENCIL, ICON_TRASH } from './icons.js';
+import { ICON_CHEVRON, ICON_CLOCK, ICON_FOLDER, ICON_IMAGE, ICON_PENCIL, ICON_STAR, ICON_TRASH } from './icons.js';
 import { cleanTag, escHtml, fmtBytes, parseTags, relativeTime, sourceParts, toDatetimeLocal, toUtcIso } from './util.js';
 
 const LIMIT = 20;
@@ -252,7 +253,7 @@ async function openPostFromUrl() {
 const postName = (post) => post.title || `#${post.id}`;
 // Who wrote the current version (a key name or an OIDC email); a click filters by them.
 const authorChip = (post) => !post.updated_by ? ''
-  : `<button type="button" class="post-author" title="Show posts by ${escHtml(post.updated_by)}">by ${escHtml(post.updated_by)}</button>`;
+  : `<button type="button" class="post-author" title="Show posts by ${escHtml(post.updated_by)}">${authorMark(post.updated_by).outerHTML}by ${escHtml(post.updated_by)}</button>`;
 const tagPills = (tags) => tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
 
 async function openPostById(id, { onError, origin, pushHistory = true } = {}) {
@@ -405,14 +406,26 @@ cpPublish.addEventListener('click', async () => {
   };
   cpPublish.disabled = true; cpPublish.textContent = 'Publishing…';
   try {
-    await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
+    const created = await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
     dropDraft();
     closeCompose();
     refreshSidebarCounts();
     await refreshLinks();
+    offerSimilar(created);
   } catch (e) { cpGateMsg.textContent = `Publish failed: ${e.message}`; }
   finally { cpPublish.textContent = 'Publish'; cpPublish.disabled = false; applyComposeScopeGate(); }
 });
+
+/* The server's advisory duplicate guard (`similar`, closest first, empty
+   without semantic search): #0 asks for one post per topic, so say so while
+   the new post can still be folded into the old one. */
+function offerSimilar(post) {
+  const [match] = post.similar || [];
+  if (!match) return;
+  showToast(`Published. It reads like #${match.id} “${match.title}” — one post per topic?`, {
+    action: { label: `Open #${match.id}`, onClick: () => openPostById(match.id) },
+  });
+}
 
 function closeCompose() {
   composePanel.classList.remove('open');
@@ -1069,7 +1082,7 @@ function renderPost(post) {
     ? `<span class="post-expires">expires ${relativeTime(post.expires_at)}</span>`
     : '';
   const masterBadge = post.id === 0
-    ? `<button type="button" class="master-badge" aria-expanded="false">✦ master document<span class="accordion-chevron" aria-hidden="true">▾</span></button>`
+    ? `<button type="button" class="master-badge" aria-expanded="false">${ICON_STAR}Master document<span class="accordion-chevron" aria-hidden="true">${ICON_CHEVRON}</span></button>`
     : '';
   // A real link (the /id/<id> deep link), so a card is reachable by Tab and
   // opens in a new tab on Ctrl/Cmd-click; a plain click opens the modal as the
@@ -1276,7 +1289,7 @@ function announce(msg) {
 
 function setDot(state) {
   liveDot.className = 'live-dot' + (state ? ' ' + state : '');
-  liveLabel.textContent = state === 'connected' ? 'live' : state === 'error' ? 'error' : 'offline';
+  liveLabel.textContent = state === 'connected' ? 'Live' : state === 'error' ? 'Error' : 'Offline';
 }
 
 /* ── Post modal ───────────────────────────────────────────── */
@@ -1308,7 +1321,7 @@ function syncBackButton() {
       return;
     }
     pmBack.style.display = '';
-    pmBack.textContent = '← back';
+    pmBack.textContent = '← Back';
     pmInner.classList.remove('has-back');
     return;
   }
@@ -1348,7 +1361,7 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
   const pmExpiresHtml = post.expires_at
     ? `<div class="pm-time">expires ${relativeTime(post.expires_at)}</div>`
     : '';
-  const pmMasterBadge = post.id === 0 ? `<div class="master-badge" style="margin-bottom:8px">✦ master document</div>` : '';
+  const pmMasterBadge = post.id === 0 ? `<div class="master-badge" style="margin-bottom:8px">${ICON_STAR}Master document</div>` : '';
   const pmIdPill = `<span class="post-id-pill" style="margin-right:6px">#${post.id}</span>`;
   const pmTime = `<div class="pm-time">${pmIdPill}${timeLabel}${authorChip(post)}</div>`;
   pmMeta.innerHTML = (tagsHtml || srcHtml)
@@ -1366,11 +1379,11 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
   pmBody.querySelectorAll('.post-body pre').forEach(pre => {
     const btn = document.createElement('button');
     btn.className = 'code-copy';
-    btn.textContent = 'copy';
+    btn.textContent = 'Copy';
     btn.addEventListener('click', async () => {
       const ok = await copyText(pre.querySelector('code')?.textContent ?? pre.textContent);
-      btn.classList.toggle('copied', ok); btn.textContent = ok ? 'copied' : 'copy failed';
-      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'copy'; }, 1500);
+      btn.classList.toggle('copied', ok); btn.textContent = ok ? 'Copied' : 'Copy failed';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1500);
     });
     pre.appendChild(btn);
   });

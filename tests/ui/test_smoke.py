@@ -187,7 +187,7 @@ def test_view_toggle_persists_across_a_reload(page):
 def test_sse_prepends_a_post_created_elsewhere(page, relay_server):
     """The live feed is the piece most likely to break silently in a refactor."""
     page.locator(".feed .post").first.wait_for(timeout=10_000)
-    page.wait_for_function("() => document.getElementById('liveLabel').textContent === 'live'",
+    page.wait_for_function("() => document.getElementById('liveLabel').textContent === 'Live'",
                            timeout=15_000)
     _api_post(relay_server, {"title": "Pushed Live", "content": "arrived over SSE", "tags": ["homelab"]})
     page.get_by_text("Pushed Live").first.wait_for(timeout=15_000)

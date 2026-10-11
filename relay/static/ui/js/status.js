@@ -13,7 +13,7 @@ import { apiFetch } from './api.js';
 import { postExists } from './links.js';
 import { fmtBytes, fmtUptime, relativeTime } from './util.js';
 import { wireModal } from './dialog.js';
-import { el, note } from './dom.js';
+import { authorMark, el, note } from './dom.js';
 import { fetchDeleted, recoverableCount, renderDeleted } from './deleted.js';
 import { fetchLint, issueCount, openLintModal } from './lint.js';
 
@@ -189,7 +189,9 @@ function renderActivity() {
       }
       const who = c.author ? ` by ${c.author}` : '';
       const verb = Object.hasOwn(ACTIONS, c.action) ? ACTIONS[c.action] : c.action;
-      row.append(title, el('span', 'sm-act-meta', `${verb}${who} · ${relativeTime(c.when)}`));
+      const meta = el('span', 'sm-act-meta', `${verb}${who} · ${relativeTime(c.when)}`);
+      if (c.author) meta.prepend(authorMark(c.author));
+      row.append(title, meta);
       return row;
     }));
   }).catch(() => list.replaceChildren(el('li', 'sm-error', 'Could not read recent changes.')));

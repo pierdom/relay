@@ -15,9 +15,11 @@ from pathlib import Path
 UI = Path(__file__).parent.parent / "relay" / "static"
 
 # Emoji/pictographs, and the supplemental-arrows block ⤺ came from — both
-# outside what the UI's monospace font covers. Plain arrows (← → ↑ ↓), ✦, ▾
-# and ✓ are in it and stay allowed.
-FORBIDDEN = re.compile("[\U0001F000-\U0001FFFF⤀-⥿️]")
+# outside what the UI's monospace font covers. Plain arrows (← → ↑ ↓) and ✓
+# are in it and stay allowed. ✦ and ▾ are in the font too, but they were the
+# master document's icons — a ▾ at badge size read as a dot — and icons are
+# drawn (icons.js ICON_STAR, ICON_CHEVRON).
+FORBIDDEN = re.compile("[\U0001F000-\U0001FFFF⤀-⥿️✦▾]")
 
 COMMENT = {
     ".js": re.compile(r"/\*.*?\*/|(?<![:'\"`])//[^\n]*", re.S),

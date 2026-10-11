@@ -4,6 +4,31 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.21.0] — 2026-10-11
+
+The visual direction from the web UI review (relay #198, B-13).
+
+### Changed
+- **A reading face for prose**: paragraphs, list items and quotes are set in IBM Plex Sans, on a 15/18/22 scale, in a column of about 75 characters; IBM Plex Mono stays for everything else — the interface, titles, headings, tables and code. The post view is sized to that column instead of 1320px
+- **Sentence case** throughout: the 24 places that shouted in tracked-out capitals (buttons, tabs, section titles, badges) now don't; only file extensions stay upper-case
+- **Card previews end on whole lines** — the opening block, a paragraph cut at three lines with an ellipsis, a list at three items — instead of a pixel cut faded out; list cards keep a readable line length on wide screens
+- **Each writer has a mark**: a small swatch in one of the theme's accents, the same on cards, in History and in Recent activity
+- The master document's badge is the card's label rather than a second box inside it
+- **Ayu Dark** borders are a step stronger (its gutter grey over the card background); `ui.line` all but vanished against the cards
+- The master document's star and chevron are drawn icons (the typed `▾` read as a dot at badge size)
+- The terminal UI's Ayu Dark palette gets the same stronger border
+- The theme gallery (docs/themes.md) is regenerated, and `scripts/theme_gallery.py` now also generates the README's browser screenshot
+
+### Added
+- **Similar posts after Publish**: when a new post reads like one already in the vault (semantic search on), the confirmation offers to open it — the server's advisory `similar` list, which the UI used to drop
+
+### Fixed
+- MCP `get_post_history`'s description lists the `author` field added in 1.20.0
+- The secondary accents (`--accent-2`, `--accent-3`), now carrying identity in small text, are held to the 4.5:1 contrast floor in every theme by test
+- Docs: the reference `docker-compose.yml` pin moves to `1.21`
+
+---
+
 ## [1.20.0] — 2026-10-10
 
 The web UI review (relay #198, B-13): what the API already knew about a post — who wrote it, what changed, what reads alike — is now in the browser, along with writing aids and a quick switcher.

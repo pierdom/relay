@@ -49,7 +49,9 @@ export function wrapTables(root) {
 /* Once a table overflows, automatic layout shrinks *every* column to its
    longest word — on a phone a paragraph column ended up 98px wide beside short
    ones. A column whose longest cell reads as prose keeps a floor instead, and
-   the table scrolls rather than crushing it. Short columns are left tight. */
+   the table scrolls rather than crushing it. Short columns are left tight.
+   A table with a prose column reads as prose, so it is set in the reading
+   face (`.prose-table`); a table of short values stays mono, as data. */
 const PROSE_CHARS = 30;
 function floorProseColumns(table) {
   const longest = [];
@@ -60,6 +62,7 @@ function floorProseColumns(table) {
       longest[i] = Math.max(longest[i] || 0, cell.textContent.trim().length - code);
     });
   }
+  table.classList.toggle('prose-table', longest.some(n => n >= PROSE_CHARS));
   for (const row of table.rows) {
     [...row.cells].forEach((cell, i) => { if (longest[i] >= PROSE_CHARS) cell.style.minWidth = '10em'; });
   }

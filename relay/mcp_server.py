@@ -851,8 +851,9 @@ async def append_post(id: int, content: str, if_match: str | None = None) -> dic
     description=(
         "List a post's revision history from the vault's git history, newest first. "
         "Works for a deleted post too (exists=false), which is the case most worth "
-        "recovering. Each item has sha, short_sha, when, message, and path — pass a sha "
-        "to restore_post. Returns an error if vault history is disabled."
+        "recovering. Each item has sha, short_sha, when, message, path, and author (who "
+        "made that write; null for relay's own, such as a TTL sweep or an external edit) "
+        "— pass a sha to restore_post. Returns an error if vault history is disabled."
     )
 )
 async def get_post_history(id: int, limit: int = 20) -> dict:

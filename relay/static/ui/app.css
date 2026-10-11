@@ -82,8 +82,18 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.35);
   --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.6);
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.6);
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-ui);
   font-size: 13px;
+}
+
+/* Two faces, two jobs: the mono is relay's voice — chrome, metadata, titles,
+   headings, tables, code, the editor — and the sans carries only running
+   prose (paragraphs, list items, quotes), where line after line of mono tires
+   the eye. Same family, so they sit together. On `html`, not `:root`: they
+   are not per-theme tokens. */
+html {
+  --font-ui:   'IBM Plex Mono', monospace;
+  --font-read: 'IBM Plex Sans', system-ui, sans-serif;
 }
 
 :root[data-theme="light"], [data-theme="light"] {
@@ -925,7 +935,7 @@ a:focus-visible      { outline: 2px solid var(--accent); outline-offset: 2px; bo
   color-scheme: dark;
   --bg:          #0b0e14;   /* common.bg */
   --surface:     #0d1017;   /* editor.bg */
-  --border:      #1b1f29;   /* ui.line */
+  --border:      #2a2e36;   /* gutter grey #6c7380 at 30% over editor.bg — ui.line (#1b1f29) all but vanished */
   --text:        #bfbdb6;   /* editor.fg */
   --muted:       #6c7380;   /* gutter.active — see block note */
   --accent:      #e6b450;   /* common.accent */
@@ -1002,8 +1012,7 @@ header {
 }
 .brand-mark { height: 20px; width: auto; display: block; flex-shrink: 0; }
 .brand-name {
-  font-size: 11px; font-weight: 600; color: var(--accent);
-  letter-spacing: 0.3em; text-transform: uppercase;
+  font-size: 13px; font-weight: 600; color: var(--accent);
 }
 .brand-sep { color: var(--border); font-weight: 300; font-size: 18px; line-height: 1; }
 
@@ -1015,8 +1024,7 @@ header {
 .live-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .live-dot.error     { background: var(--red); }
 .live-label {
-  font-size: 10px; color: var(--muted); letter-spacing: 0.1em;
-  text-transform: uppercase; transition: color 0.3s;
+  font-size: 11px; color: var(--muted); transition: color 0.3s;
 }
 .live-dot.connected ~ .live-label { color: var(--green); }
 .live-dot.error     ~ .live-label { color: var(--red); }
@@ -1078,7 +1086,7 @@ header {
 /* Family group label above each cluster of related themes in the picker. */
 .theme-group-label {
   padding: 6px 9px 2px;
-  font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  font-size: 11px; font-weight: 600;
   color: var(--muted); pointer-events: none;
 }
 /* The swatch carries its own `data-theme`, so the theme's token block paints it
@@ -1156,8 +1164,7 @@ header {
 .btn-connect {
   background: var(--accent); border: none; color: var(--on-accent);
   padding: 5px 12px; border-radius: 4px; cursor: pointer;
-  font-family: inherit; font-size: 11px; font-weight: 600;
-  letter-spacing: 0.1em; text-transform: uppercase;
+  font-family: inherit; font-size: 12px; font-weight: 600;
   transition: background 0.15s;
 }
 .btn-connect:hover { background: var(--accent-dim); }
@@ -1178,8 +1185,7 @@ header {
   height: 28px; display: inline-flex; align-items: center; gap: 0.5em; flex-shrink: 0;
   background: var(--accent); border: none; color: var(--on-accent);
   padding: 0 12px; border-radius: 4px; cursor: pointer;
-  font-family: inherit; font-size: 11px; font-weight: 600;
-  letter-spacing: 0.1em; text-transform: uppercase;
+  font-family: inherit; font-size: 12px; font-weight: 600;
   transition: background 0.15s;
 }
 .btn-new-post:hover { background: var(--accent-dim); }
@@ -1204,8 +1210,7 @@ body:not(.signed-out) .login-view { display: none; }
 .btn-login-primary {
   width: 100%; background: var(--accent); border: none; color: var(--on-accent);
   padding: 12px 16px; border-radius: 6px; cursor: pointer;
-  font-family: inherit; font-size: 13px; font-weight: 700;
-  letter-spacing: 0.08em; text-transform: uppercase; transition: background 0.15s;
+  font-family: inherit; font-size: 13px; font-weight: 600; transition: background 0.15s;
 }
 .btn-login-primary:hover { background: var(--accent-dim); }
 .login-card .key-wrap { flex-direction: column; gap: 10px; width: 100%; }
@@ -1233,8 +1238,7 @@ aside.collapsed {
 aside.collapsed > * { min-width: 220px; }
 .sidebar-header {
   padding: 14px 16px 10px;
-  font-size: 9px; font-weight: 600; color: var(--muted);
-  text-transform: uppercase; letter-spacing: 0.18em;
+  font-size: 11px; font-weight: 600; color: var(--muted);
   display: flex; align-items: center; justify-content: space-between;
 }
 /* Three tabs and the `+` button fit a 220px sidebar with room. A fourth did
@@ -1244,7 +1248,7 @@ aside.collapsed > * { min-width: 220px; }
 .sidebar-tabs { display: flex; gap: 3px; min-width: 0; }
 .sb-tab {
   background: none; border: none; color: var(--muted); cursor: pointer;
-  font: inherit; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  font: inherit; font-size: 11px; font-weight: 500;
   padding: 3px 8px; border-radius: 4px; white-space: nowrap;
 }
 .sb-tab.active { color: var(--accent); background: var(--tag-active); }
@@ -1419,11 +1423,25 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .feed.grid .post-media img { width: 100%; height: 100px; }
 .post-media-count { font-size: 10px; color: var(--muted); }
 
-/* Denser previews in feed cards: tighter leading + no leading margin fit
-   ~a full extra line inside the same clamped height. The modal (.pm-body)
-   keeps the airy 1.72 for comfortable reading. */
-.feed .post-body { line-height: 1.55; }
+/* A card previews its opening and ends on a whole line: the first block (plus
+   the one after it when it opens on a heading), a paragraph cut at three lines
+   with an ellipsis, a list at three items, code at four lines, a table at two
+   rows. It used to clip at a pixel height and fade the cut line out, which
+   only drew the eye to the cut. The master document, opened, shows in full. */
+.feed .post-body { font-size: 14px; line-height: 1.55; }
+.feed:not(.grid) .post-body { max-width: 80ch; }   /* a wide list card still reads at line length */
 .feed .post-body > :first-child { margin-top: 0; }
+.feed .post-body :is(h1, h2, h3) { font-size: 13px; }   /* under the card's 14px title, never over it */
+.feed .post:not(.master-doc) .post-body > :not(:first-child):not(:is(h1, h2, h3, h4, h5, h6):first-child + *) { display: none; }
+.feed .post:not(.master-doc) .post-body > :is(p, blockquote) {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+}
+.feed.grid .post:not(.master-doc) .post-body > :is(p, blockquote) { -webkit-line-clamp: 7; }
+.feed .post:not(.master-doc) .post-body :is(ul, ol) > li:nth-child(n+4) { display: none; }
+.feed.grid .post:not(.master-doc) .post-body :is(ul, ol) > li:nth-child(n+4) { display: list-item; }
+.feed.grid .post:not(.master-doc) .post-body :is(ul, ol) > li:nth-child(n+7) { display: none; }
+.feed .post:not(.master-doc) .post-body pre { max-height: calc(4lh + 20px); overflow: hidden; }
+.feed .post:not(.master-doc) .post-body tr:nth-child(n+3) { display: none; }
 
 /* Narrow grid tiles: stack the header (title on its own line, tags below) so
    tags don't crush the title into a hard ellipsis, and let long titles wrap
@@ -1450,7 +1468,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .feed:not(.grid) .t-doc-updated::before { content: "· "; }
 
 .post-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-.post-title  { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.post-title  { font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 a.post-title { text-decoration: none; }
 /* List mode: the title sizes to its text and the tags wrap under it once they
    no longer fit beside it — five tags used to shrink a title to "A very long
@@ -1477,11 +1495,15 @@ a.post-title { text-decoration: none; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.post-body { color: var(--body); line-height: 1.72; font-size: 13px; overflow-wrap: anywhere; }
-.post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 16px 0 6px; font-weight: 700; }
-.post-body h1 { font-size: 16px; }
-.post-body h2 { font-size: 14px; }
-.post-body h3 { font-size: 13px; color: var(--body-strong); }
+/* The reading scale: 15 body, 18 section, 22 title (13 is the interface's own
+   size). Headings, tables and code keep the interface face — they are
+   structure and data, scanned and copied rather than read line after line. */
+.post-body { font-family: var(--font-read); color: var(--body); line-height: 1.65; font-size: 15px; overflow-wrap: anywhere; }
+.post-body h1, .post-body h2, .post-body h3 { color: var(--text); margin: 1.4em 0 0.4em; font-weight: 600; line-height: 1.3; }
+.post-body h1 { font-size: 22px; }
+.post-body h2 { font-size: 18px; }
+.post-body h3 { font-size: 15px; color: var(--body-strong); }
+.post-body :is(h1, h2, h3, h4, h5, h6, table, code, pre, kbd) { font-family: var(--font-ui); }
 .post-body hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 .post-body p         { margin: 6px 0; }
 /* 2.2em holds a two-digit marker ("10.") inside the box — 18px clipped "1." to
@@ -1508,18 +1530,18 @@ a.post-title { text-decoration: none; }
 }
 .post-body a.attachment-link.broken { color: var(--muted); border-bottom-color: var(--muted); }
 .pm-backlinks { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
-.pm-backlinks h4 { color: var(--accent-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
+.pm-backlinks h4 { color: var(--text); font-family: var(--font-ui); font-size: 12px; font-weight: 600; margin: 0 0 8px; }
 .pm-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .pm-backlinks a { color: var(--accent); cursor: pointer; font-size: 12px; }
 .pm-backlinks .bl-id { color: var(--muted); margin-right: 6px; }
-.post-body code      { background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 11px; border: 1px solid var(--border); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.post-body code      { background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; border: 1px solid var(--border); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .post-body pre       { position: relative; background: var(--bg); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; border: 1px solid var(--border); }
-.post-body pre code  { background: none; padding: 0; border: none; font-size: 11px; }
+.post-body pre code  { background: none; padding: 0; border: none; font-size: 12px; }
 .code-copy {
   position: absolute; top: 6px; right: 6px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 3px;
   color: var(--muted); font-family: inherit; font-size: 10px; font-weight: 600;
-  letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 7px;
+  padding: 2px 7px;
   cursor: pointer; opacity: 0; transition: opacity 0.15s, color 0.15s, border-color 0.15s;
   line-height: 1.6;
 }
@@ -1553,6 +1575,7 @@ a.post-title { text-decoration: none; }
    wraps at spaces and hyphens like prose — `anywhere` split `fleet-health.sh`
    into four one-syllable pills. */
 .post-body td a { overflow-wrap: anywhere; }
+.post-body table.prose-table { font-family: var(--font-read); }   /* see render.js floorProseColumns */
 .post-body th        { background: var(--bg); color: var(--text); font-weight: 600; }
 .post-body tr:nth-child(even) td { background: var(--wash-raise); }
 .table-scroll {
@@ -1583,6 +1606,12 @@ a.post-title { text-decoration: none; }
   text-decoration: underline dotted; text-underline-offset: 2px;
 }
 .post-author:hover { color: var(--accent); }
+.author-mark {
+  display: inline-block; width: 7px; height: 7px; border-radius: 2px;
+  margin-right: 5px; vertical-align: 0.05em; background: var(--accent);
+}
+.author-mark[data-hue="1"] { background: var(--accent-2); }
+.author-mark[data-hue="2"] { background: var(--accent-3); }
 .pm-time .post-author { max-width: none; }
 .post-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; }
 .post:hover .post-actions { opacity: 1; }
@@ -1680,8 +1709,7 @@ a.post-title { text-decoration: none; }
 .btn-save {
   background: var(--accent); border: none; color: var(--on-accent);
   padding: 5px 14px; border-radius: 3px; cursor: pointer;
-  font-family: inherit; font-size: 11px; font-weight: 600;
-  letter-spacing: 0.1em; text-transform: uppercase;
+  font-family: inherit; font-size: 12px; font-weight: 600;
   transition: background 0.15s;
 }
 .btn-save:hover    { background: var(--accent-dim); }
@@ -1714,7 +1742,7 @@ a.post-title { text-decoration: none; }
 .ef-gate-msg { font-size: 12px; color: var(--muted); }
 .ef-gate-msg:not(:empty) { color: var(--red); margin-top: 2px; }
 .ef-attachments { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
-.ef-attach-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-3); margin-bottom: 2px; }
+.ef-attach-head { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 2px; }
 .ef-attach-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .ef-attach-name { color: var(--text); overflow-wrap: anywhere; }
 .ef-attach-size { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
@@ -1755,7 +1783,7 @@ a.post-title { text-decoration: none; }
 .attachments-view::-webkit-scrollbar { width: 4px; }
 .attachments-view::-webkit-scrollbar-track { background: transparent; }
 .attachments-view::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.att-folder-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent-3); margin: 18px 2px 8px; }
+.att-folder-head { font-size: 12px; font-weight: 600; color: var(--text); margin: 18px 2px 8px; }
 .att-folder-head:first-child { margin-top: 4px; }
 .att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
 .att-card { position: relative; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 4%, transparent); }
@@ -1795,7 +1823,7 @@ a.post-title { text-decoration: none; }
 .del-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 .del-filter {
   background: none; cursor: pointer; font: inherit; font-size: 10px;
-  letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px;
+  padding: 3px 8px;
   border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
   transition: color 0.15s, border-color 0.15s;
 }
@@ -1812,7 +1840,7 @@ a.post-title { text-decoration: none; }
    is routine, a delete is deliberate, and an editor removing the file is the
    case this view exists for. */
 .del-reason {
-  font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  font-size: 11px;
   padding: 1px 7px; border-radius: 3px; flex-shrink: 0;
   color: var(--accent-3); background: color-mix(in srgb, var(--accent-3) 10%, transparent);
 }
@@ -1883,7 +1911,7 @@ a.post-title { text-decoration: none; }
 .lm-chips, .del-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 .lm-filter, .del-filter {
   background: none; cursor: pointer; font: inherit; font-size: 10px;
-  letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px;
+  padding: 3px 8px;
   border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
   transition: color 0.15s, border-color 0.15s;
 }
@@ -1997,8 +2025,7 @@ a.post-title { text-decoration: none; }
 .search-bar.active input { border-color: var(--accent); padding-right: 26px; }
 .search-bar.active .search-clear { display: block; }
 .search-label {
-  font-size: 10px; color: var(--accent); letter-spacing: 0.08em;
-  text-transform: uppercase; flex-shrink: 0; display: none;
+  font-size: 11px; color: var(--accent); flex-shrink: 0; display: none;
 }
 .search-bar.active .search-label { display: block; }
 
@@ -2052,7 +2079,7 @@ a.post-title { text-decoration: none; }
 .load-more button {
   background: none; border: 1px solid var(--border); color: var(--muted);
   padding: 7px 20px; border-radius: 4px; cursor: pointer;
-  font-family: inherit; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  font-family: inherit; font-size: 12px;
   transition: border-color 0.15s, color 0.15s;
 }
 .load-more button:hover { border-color: var(--accent); color: var(--accent); }
@@ -2210,13 +2237,15 @@ a.post-title { text-decoration: none; }
 }
 .master-badge {
   display: inline-flex; align-items: center; gap: 5px; font-family: inherit;
-  font-size: 9px; font-weight: 600; color: var(--accent);
+  font-size: 11px; font-weight: 600; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  padding: 2px 8px; border-radius: 3px; letter-spacing: 0.14em;
-  text-transform: uppercase; margin-bottom: 10px;
+  padding: 2px 8px; border-radius: 3px; margin-bottom: 10px;
 }
+/* Inside its card the badge is the card's own label: the card already carries
+   the accent frame, so a second box around the words only doubled it. */
+.post.master-doc .master-badge { background: none; border: none; padding: 0; cursor: pointer; }
 .accordion-chevron {
-  display: inline-block; margin-left: 2px; font-size: 8px;
+  display: inline-flex; margin-left: 2px;
   transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
 }
 .post.master-doc.accordion.collapsed .accordion-chevron { transform: rotate(-90deg); }
@@ -2227,8 +2256,6 @@ a.post-title { text-decoration: none; }
 .post.master-doc.accordion.collapsed { padding-block: 10px; }
 .post.master-doc.accordion.collapsed > :not(.master-badge) { display: none; }
 .post.master-doc.accordion.collapsed .master-badge { margin-bottom: 0; }
-.post.master-doc.accordion:not(.collapsed) .post-body-wrap { max-height: none; }
-.post.master-doc.accordion .post-body-wrap::after { display: none; }
 
 /* ── Post footer left group ──────────────────────────── */
 .post-footer-left { display: flex; align-items: center; gap: 8px; }
@@ -2289,21 +2316,7 @@ a.post-title { text-decoration: none; }
 
 /* ── Card truncation ─────────────────────────────────── */
 .post { cursor: pointer; }
-.post-body-wrap { position: relative; max-height: 72px; overflow: hidden; }
-.post-body-wrap::after {
-  content: ''; position: absolute; bottom: 0; left: 0; right: 0;
-  height: 24px;
-  background: linear-gradient(transparent, var(--surface));
-  pointer-events: none;
-}
-/* The pinned master doc is a reference, not a read — keep its preview short. */
-.post.pinned .post-body-wrap { max-height: 44px; }
-/* Tighter previews on mobile so more posts fit per screen. Must follow the
-   base rules above (equal specificity → later source wins). */
-@media (max-width: 768px) {
-  .post-body-wrap { max-height: 60px; }
-  .post.pinned .post-body-wrap { max-height: 40px; }
-}
+.post-body-wrap { overflow: hidden; }
 
 /* ── Post modal ──────────────────────────────────────── */
 /* Status / about modal. Reuses .pm-backdrop and the modalIn keyframes; its own
@@ -2332,8 +2345,7 @@ a.post-title { text-decoration: none; }
   --sm-label: 150px;
 }
 .sm-section-title {
-  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--accent-3); margin-bottom: 8px;
+  font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 8px;
 }
 /* The value column may wrap — a long vault path must not widen the panel (same
    min-width:0 lesson as the grid tiles). */
@@ -2382,7 +2394,7 @@ button.sm-act-title:hover { color: var(--accent); }
 .pm-inner {
   position: relative; z-index: 1;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; width: 94%; max-width: 1320px; max-height: 92vh;
+  border-radius: 8px; width: 94%; max-width: calc(var(--measure) + 440px); max-height: 92vh;
   display: flex; flex-direction: column; overflow: hidden;
   box-shadow: var(--shadow-modal);
   animation: modalIn 0.18s ease backwards;
@@ -2395,21 +2407,17 @@ button.sm-act-title:hover { color: var(--accent); }
   display: flex; align-items: flex-start; gap: 12px;
   padding: 18px 20px 0; flex-shrink: 0;
 }
-.pm-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.4; overflow-wrap: anywhere; }
+.pm-title { flex: 1; min-width: 0; font-size: 22px; font-weight: 600; color: var(--text); line-height: 1.3; overflow-wrap: anywhere; }
 .pm-back {
   display: none; background: none; border: none;
   color: var(--muted); cursor: pointer; font-family: inherit;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  font-size: 12px; font-weight: 500;
   padding: 0; flex-shrink: 0; transition: color 0.15s;
 }
 .pm-back:hover { color: var(--accent); }
-/* When navigating between notes: drop the ALL-CAPS shout, let the title show naturally.
-   On desktop we also flip the header to a column so the breadcrumb has its own row. */
+/* When navigating between notes the breadcrumb names the previous one; on
+   desktop the header flips to a column so it has its own row. */
 .pm-inner.has-back .pm-back {
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 12px;
-  font-weight: 500;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2468,8 +2476,12 @@ button.sm-act-title:hover { color: var(--accent); }
    ⚠️ **The measure is `rem`, never `ch`.** `ch` resolves against each element's
    *own* font and size, so blocks set differently (headings, code) got different
    widths, and once the column was centred each landed on a different left edge. `rem` resolves against the root size whatever the element is
-   set in. 64rem is 832px at the root's 13px, about 104 monospace characters. */
-.pm-inner { --measure: 64rem; }
+   set in. 40rem is 520px at the root's 13px: about 75 characters of prose in
+   the 15px reading face, the comfortable line. */
+/* The panel (`.pm-inner`'s max-width) is this column plus a ~200px gutter each
+   side — room for the outline — not the 1320px it was for a 104-character
+   mono measure. */
+.pm-inner, .lm-inner { --measure: 40rem; }
 .pm-body .post-body > * { max-width: var(--measure); margin-inline: auto; }
 /* Backlinks belong to the post, so they sit in its reading column too. */
 .pm-body .pm-backlinks { max-width: var(--measure); margin-inline: auto; }
@@ -2516,7 +2528,7 @@ button.sm-act-title:hover { color: var(--accent); }
 .lp-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
 .lp-tags  { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 .lp-tag   { font-size: 10px; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
-.lp-body  { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.lp-body  { font-family: var(--font-read); font-size: 12px; color: var(--muted); line-height: 1.5; }
 
 /* ── Quick switcher (js/switcher.js) ─────────────────────────── */
 /* Near the top, like any command palette: the list grows downward from where
@@ -2538,10 +2550,10 @@ button.sm-act-title:hover { color: var(--accent); }
 
 /* ── Post outline (main.js renderOutline) ──────────────────── */
 /* In the gutter left of the reading column, which only exists on a wide
-   screen: the panel is 94% of the viewport up to 1320px and the column is
-   --measure, so at 1280px the gutter is ~165px — the narrowest it is useful. */
+   screen: the panel is 94% of the viewport up to --measure + 440px (960px),
+   so by 1180px the gutter is its full ~200px. */
 .pm-outline { display: none; }
-@media (min-width: 1280px) {
+@media (min-width: 1180px) {
   .pm-outline:not([hidden]) {
     display: flex; flex-direction: column; gap: 2px;
     position: absolute; z-index: 2; top: 16px; left: 20px; bottom: 16px; overflow-y: auto;
@@ -2561,7 +2573,7 @@ button.sm-act-title:hover { color: var(--accent); }
 .kb-inner { max-width: 360px; }
 .kb-inner .sm-body { gap: 20px; }
 .kb-group { display: flex; flex-direction: column; gap: 7px; }
-.kb-group-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-bottom: 2px; border-bottom: 1px solid var(--border); }
+.kb-group-label { font-size: 12px; font-weight: 600; color: var(--text); padding-bottom: 2px; border-bottom: 1px solid var(--border); }
 .kb-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 13px; color: var(--body); }
 .kb-row > span:first-child { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 kbd {
@@ -2625,7 +2637,7 @@ kbd {
   }
   /* No pinned close button here — back is the dismissal — so the title needs no
      room reserved for it, and the column cap is a no-op at this width anyway. */
-  .pm-title { font-size: 18px; font-weight: 700; line-height: 1.3; padding-right: 0; }
+  .pm-title { font-size: 18px; line-height: 1.3; padding-right: 0; }
   .pm-close { display: none; }
   .pm-meta { padding-left: 16px; padding-right: 16px; }
   .pm-body { padding-left: 16px; padding-right: 16px; }
@@ -2649,13 +2661,14 @@ kbd {
    see the comment there. Must stay after `.sm-inner`'s base rule (above) to
    win the cascade: equal specificity, so source order decides, and a copy of
    this placed earlier in the file renders at 560px regardless of what it says.
-   Matches `.pm-inner`'s width exactly (94%/1320px), not a cap of its own —
+   Matches `.pm-inner`'s width exactly (94% up to the measure + 440px, the
+   shared rule below), not a cap of its own —
    an uncapped, full-width first version made the post modal visibly shrink
    every time "Open post" led there, and shrink back on the way "← Vault
    lint" returns. Same width, no resize, whichever direction you go. */
 .lm-inner {
   width: 94%;
-  max-width: 1320px;
+  max-width: calc(var(--measure) + 440px);
   height: min(92vh, 1000px);
 }
 
@@ -2684,7 +2697,7 @@ kbd {
 .hm-meta { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .hm-badge {
   color: var(--accent); border: 1px solid var(--accent-dim); border-radius: 3px;
-  padding: 0 4px; font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 0 4px; font-size: 10px;
   flex-shrink: 0;
 }
 .hm-rev:hover { border-color: var(--border); background: var(--accent-glow); }
@@ -2883,7 +2896,7 @@ kbd {
    neighbours to match: size to content with the list view's clamp. */
 @media (max-width: 560px) {
   .feed.grid > .post:not(.pinned) { height: auto; grid-template-rows: none; }
-  .feed.grid > .post:not(.pinned) .post-body-wrap { height: auto; max-height: 60px; }
+  .feed.grid > .post:not(.pinned) .post-body-wrap { height: auto; }
 }
 
 /* Phones: the search field takes its own row, so its placeholder reads in

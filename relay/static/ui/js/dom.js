@@ -12,6 +12,17 @@ export function el(tag, className = '', text = '') {
   return node;
 }
 
+/** A writer's mark: a small swatch in one of the theme's three accents,
+ *  picked from the name, so the same writer reads the same everywhere —
+ *  cards, History, the activity list. Decorative: the name is always beside it. */
+export function authorMark(name) {
+  const hue = [...name].reduce((h, c) => (h * 31 + c.codePointAt(0)) >>> 0, 7) % 3;
+  const mark = el('span', 'author-mark');
+  mark.dataset.hue = String(hue);
+  mark.setAttribute('aria-hidden', 'true');
+  return mark;
+}
+
 /** A one-line status message in a panel (loading…, errors, empty states). */
 export const note = (text, className = 'sm-section-title') => el('div', className, text);
 
