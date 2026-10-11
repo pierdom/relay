@@ -151,9 +151,7 @@ curl -X POST http://localhost:8000/tags/digest/config \
 
 TTL precedence: per-post `expires_at` > per-tag config > global `DEFAULT_TTL_HOURS`. For multi-tag posts, the shortest TTL wins.
 
-`keep_last: N` keeps the newest N posts carrying the tag, by creation time, and expires the rest at the next cleanup sweep (`CLEANUP_INTERVAL_MINUTES`). It combines with a TTL, and a post under several tags' rules goes when any of them says so. Like a tag TTL it skips #0 and posts with their own `expires_at`, which neither count toward N nor go. Retention deletions are recorded as `expiry`, so they stay restorable from `/posts/deleted?include_expiry=true` while vault history is on.
-
-The body **replaces** the tag's whole config: send every field you want to keep (`GET /tags` returns each tag's current `ttl_hours`, `expires_at` and `keep_last`).
+`keep_last: N` keeps the tag's newest N posts (by creation) and expires the rest at the next sweep. Like a tag TTL it skips #0 and posts with their own `expires_at`; deletions are recorded as `expiry` (restorable while history is on). The body **replaces** the whole config — send every field you want to keep (`GET /tags` shows the current one).
 
 `expires_at` (on posts and tag configs) must be an ISO 8601 datetime; offsets and date-only values are accepted and normalised to `YYYY-MM-DDTHH:MM:SSZ` (UTC). Anything else is a 422 — the sweep compares timestamps lexically, so a relative value like `"1 week"` used to sort *before* every real date and delete the post at the next run. A non-ISO value hand-written into front-matter is skipped with a warning.
 

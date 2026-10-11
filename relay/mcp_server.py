@@ -1199,13 +1199,10 @@ async def list_tags() -> dict:
 
 @_tool(
     description=(
-        "Set expiry and retention for a tag. ttl_hours expires each post that long after "
-        "its creation; expires_at is an absolute cutoff; keep_last keeps only the newest N "
-        "posts carrying the tag (by creation) and expires the older ones — for digests and "
-        "other dated snapshots. Any combination works, and a post goes when any rule says "
-        "so. Only affects posts without their own expires_at. This replaces the tag's whole "
-        "configuration (pass every field you want to keep; read list_tags first); pass none "
-        "to remove it. Expired posts stay recoverable while vault history is on."
+        "Set expiry and retention for a tag: ttl_hours (after each post's creation), "
+        "expires_at (absolute cutoff), keep_last (keep only the newest N posts), any "
+        "combination. Only affects posts without their own expires_at. Replaces the whole "
+        "config, so pass every field to keep (list_tags shows it); pass none to remove it."
     ),
     tags={"write"},
 )

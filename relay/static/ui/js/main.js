@@ -895,11 +895,20 @@ function startTagConfig(el, tagName) {
   // on a busy tag would otherwise expire most of it at the next sweep.
   const note = form.querySelector('.tc-note');
   const count = el._count || 0;
+  // Whole numbers only: a number input accepts "1e3" and "2.5", which
+  // parseInt read as 1 and 2 — "keep 1" on a typo.
+  const wholeOrNull = (input) => {
+    const raw = input.value.trim();
+    if (!raw) return undefined;
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  };
   const syncNote = () => {
-    const keep = parseInt(keepInput.value, 10);
-    const over = keep > 0 ? count - keep : 0;
-    note.textContent = over > 0
-      ? `The oldest ${over} of its ${count} posts will expire at the next cleanup (restorable while history is on).`
+    const keep = wholeOrNull(keepInput);
+    const over = keep ? count - keep : 0;
+    note.textContent = keep === null ? 'Keep only a whole number of posts, 1 or more.'
+      : over > 0 ? `Up to ${over} of its ${count} posts, the oldest, will expire at the next cleanup`
+        + ' (restorable while history is on).'
       : '';
   };
   keepInput.addEventListener('input', syncNote);
@@ -910,17 +919,22 @@ function startTagConfig(el, tagName) {
   let committed = false;
   async function commit() {
     if (committed) return; committed = true;
-    const ttlVal = ttlInput.value.trim();
+    const ttl = wholeOrNull(ttlInput);
     const expiresVal = expiresInput.value;
-    const keepVal = keepInput.value.trim();
+    const keep = wholeOrNull(keepInput);
+    if (ttl === null || keep === null) {
+      note.textContent = 'Hours and posts must be whole numbers, 1 or more.';
+      committed = false;
+      return;
+    }
     // All cleared on a tag that had a rule means remove it; on one that had
     // none it means nothing was asked for.
-    if (!ttlVal && !expiresVal && !keepVal) { if (current) { await save({}); } else { committed = false; cancel(); } return; }
+    if (!ttl && !expiresVal && !keep) { if (current) { await save({}); } else { committed = false; cancel(); } return; }
     // The whole config is replaced, so every field shown goes back.
     const body = {};
-    if (ttlVal) body.ttl_hours = parseInt(ttlVal, 10);
+    if (ttl) body.ttl_hours = ttl;
     if (expiresVal) body.expires_at = toUtcIso(expiresVal);
-    if (keepVal) body.keep_last = parseInt(keepVal, 10);
+    if (keep) body.keep_last = keep;
     await save(body);
   }
 

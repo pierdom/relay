@@ -371,10 +371,14 @@ async def test_keep_last_round_trips_through_tags_yml_and_replaces_the_config(cl
 async def test_a_malformed_keep_last_in_tags_yml_is_skipped_not_fatal(client, caplog):
     from pathlib import Path
 
-    Path(settings.tags_config_path).write_text("digest:\n  keep_last: seven\nnews:\n  keep_last: 3\n", encoding="utf-8")
+    # `yes` is YAML for True, and int(True) == 1: a loose parse kept one post.
+    Path(settings.tags_config_path).write_text(
+        "digest:\n  keep_last: seven\nbool:\n  keep_last: yes\nfrac:\n  ttl_hours: 2.9\n"
+        "news:\n  keep_last: 3\nquoted:\n  keep_last: '4'\n", encoding="utf-8")
     await database.init_db()   # must not raise
     tags = {t["tag"]: t for t in (await client.get("/tags", headers=AUTH)).json()["tags"]}
-    assert "digest" not in tags and tags["news"]["keep_last"] == 3
+    assert not {"digest", "bool", "frac"} & set(tags)
+    assert (tags["news"]["keep_last"], tags["quoted"]["keep_last"]) == (3, 4)
     assert "keep_last must be whole numbers" in caplog.text
 
 

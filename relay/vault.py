@@ -842,15 +842,30 @@ async def _load_tag_config(db: aiosqlite.Connection) -> None:
         tag = re.sub(r"[^a-z0-9_-]", "", str(tag).strip().lower())
         if not tag:
             continue
-        try:
-            ttl_hours, keep_last = int(cfg.get("ttl_hours") or 0), int(cfg.get("keep_last") or 0)
-        except (TypeError, ValueError):
+        ttl_hours, keep_last = _count_field(cfg.get("ttl_hours")), _count_field(cfg.get("keep_last"))
+        if ttl_hours is None or keep_last is None:
             logger.warning("Ignoring tags.yml entry for %r — ttl_hours/keep_last must be whole numbers", tag)
             continue
         await db.execute(
             "INSERT OR REPLACE INTO tag_config (tag, ttl_hours, expires_at, keep_last) VALUES (?, ?, ?, ?)",
-            (tag, max(ttl_hours, 0), cfg.get("expires_at"), max(keep_last, 0)),
+            (tag, ttl_hours, cfg.get("expires_at"), keep_last),
         )
+
+
+def _count_field(value: object) -> int | None:
+    """A tags.yml count (0 when absent), or None when it isn't a whole number.
+
+    Strict on purpose: YAML reads `yes` as True and int(True) is 1, so a loose
+    int() turned `keep_last: yes` into "keep one post" — and 2.9 into 2."""
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value)
+    return None
 
 
 async def write_tag_config(db: aiosqlite.Connection) -> None:

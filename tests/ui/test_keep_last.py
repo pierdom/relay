@@ -24,9 +24,14 @@ def test_the_tag_form_sets_keep_last_and_says_what_it_will_expire(page, relay_se
     form = page.locator(".tag-config-form")
     keep = form.locator(".tc-keep")
     keep.fill("3")
-    assert form.locator(".tc-note").inner_text().startswith("The oldest 2 of its 5 posts will expire")
+    assert form.locator(".tc-note").inner_text().startswith("Up to 2 of its 5 posts, the oldest, will expire")
     keep.fill("9")
     assert form.locator(".tc-note").is_hidden()   # nothing over the limit, nothing to warn about
+    # parseInt read "2.5" as 2 (and "1e3" as 1); a fraction is refused, not rounded.
+    keep.fill("2.5")
+    form.locator(".tc-save").click()
+    assert form.locator(".tc-note").inner_text() == "Hours and posts must be whole numbers, 1 or more."
+    assert form.is_visible()   # not saved
     keep.fill("3")
     form.locator(".tc-save").click()
     page.wait_for_function(
