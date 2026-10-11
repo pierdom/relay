@@ -39,18 +39,15 @@ def test_the_post_view_reads_on_a_scale_at_line_length(page, relay_server):
         return { title: px('#pmTitle'), h2: px('#pmBody .post-body h2'), body: px('#pmBody .post-body p') };
     }""")
     assert sizes == {"title": 22, "h2": 18, "body": 15}, sizes
-    # 60–85 characters of prose a line: the column's width over the average
-    # width of an English sentence's characters in the face as rendered.
-    chars = page.evaluate("""() => {
+    # About 75 characters of prose a line. Measured in ems of the body text,
+    # not glyphs: CI's browser may not fetch the web font, and a fallback face's
+    # glyph widths say nothing about the layout. Plex Sans averages ~0.47em a
+    # character, so 32–38em is 68–80 characters.
+    ems = page.evaluate("""() => {
         const p = document.querySelector('#pmBody .post-body p');
-        const sample = 'The quick brown fox jumps over the lazy dog, then naps. ';
-        const probe = Object.assign(document.createElement('span'), { textContent: sample });
-        p.appendChild(probe);
-        const perChar = probe.getBoundingClientRect().width / sample.length;
-        probe.remove();
-        return p.getBoundingClientRect().width / perChar;
+        return p.getBoundingClientRect().width / parseFloat(getComputedStyle(p).fontSize);
     }""")
-    assert 60 <= chars <= 85, chars
+    assert 32 <= ems <= 38, ems
 
 
 def test_card_previews_end_on_whole_lines(page, relay_server):
