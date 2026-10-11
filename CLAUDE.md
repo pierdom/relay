@@ -53,7 +53,7 @@ All endpoints need `Authorization: Bearer <key>` (or the browser session cookie)
 | GET/POST | /posts/{id}/history[/{sha}] · /restore | Revisions, one revision's body (short sha ok), restore (recreates a deleted post, keeps its id). 503 when history is off |
 | GET | /changes | Vault changelog `{seq,id,title,action,when,sha,author}`; `since` = seq or ISO time; `?author=` |
 | GET | /lint · /links · /folders · /tags · /status · /metrics | Lint report, (id,title) index, folder counts, tag counts (+ each tag's `ttl_hours`/`expires_at`), diagnostics, Prometheus |
-| POST/PATCH | /tags/{tag}/config · /tags/{tag} | Per-tag TTL / rename across all posts |
+| POST/PATCH | /tags/{tag}/config · /tags/{tag} | Per-tag TTL and `keep_last` retention (body replaces the whole config) / rename across all posts |
 | POST/GET, PUT, GET/DELETE | /attachments, /attachments/uploads[/{id}], /attachments/{path} | Upload (base64 `data`, `source_url`, or presigned `upload_id`), slot mint/fill, serve/delete |
 | GET | /events | SSE; `?tag=` filter; `Last-Event-ID` is a `changes.seq` and replays every change since |
 | PATCH/POST | /embeddings · /embeddings/backfill | Toggle semantic search at runtime (in-memory) / re-run the backfill (`force=true` wipes the cache) |
@@ -128,7 +128,7 @@ Single-page app on REST + SSE: ES modules, no build step, `marked` and `DOMPurif
 ## Tags · master doc · TTL
 
 - **Master document (`id=0`)**: `Master Document.md` at the vault root, seeded at startup, undeletable, TTL-exempt; it holds the taxonomy and house rules agents read first.
-- **TTL** is off by default. Precedence: per-post `expires_at` > per-tag (`<vault>/.relay/tags.yml`) > `DEFAULT_TTL_HOURS`; shortest wins across tags. `expires_at` is normalised to `YYYY-MM-DDTHH:MM:SSZ` because the sweep compares it lexically (`"1 week"` once sorted below every date and got swept); the sweep only considers values in that shape.
+- **TTL** is off by default. Precedence: per-post `expires_at` > per-tag (`<vault>/.relay/tags.yml`) > `DEFAULT_TTL_HOURS`; shortest wins across tags. `expires_at` is normalised to `YYYY-MM-DDTHH:MM:SSZ` because the sweep compares it lexically (`"1 week"` once sorted below every date and got swept); the sweep only considers values in that shape. **`keep_last: N`** keeps a tag's newest N posts in the same sweep; its deletions commit under the `ttl expiry` prefix, which `history._classify` and `changes` read as expiry — keep it. Tag config is replaced whole, so client forms open pre-filled and send every field.
 - **Search** is SQLite FTS5 (porter, bm25, title/tags weighted), falling back to `LIKE`.
 - **The watcher re-stamps a duplicate**: an external file carrying an id already indexed at another *existing* path gets a fresh id; a rename (old path gone) is not a duplicate.
 - **Cross-links**: `[[Title]]`/`[[Title|alias]]` (case-insensitive; renames rewrite inbound links vault-wide and stream the rewritten posts) and `#NNN` (stable across renames). Stored verbatim, resolved at display; code spans/blocks are skipped.

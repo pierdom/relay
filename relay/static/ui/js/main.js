@@ -561,27 +561,33 @@ function markActiveRow(el, active) {
   if (btn) { if (active) btn.setAttribute('aria-current', 'true'); else btn.removeAttribute('aria-current'); }
 }
 
-/** "48h after posting", "at <date>", both, or '' — a tag's expiry config. */
+/** A tag's expiry and retention in a sentence — "Posts expire 48h after
+ *  posting; only the newest 7 are kept" — or '' when it has none. */
 function expirySummary(cfg) {
   if (!cfg) return '';
-  const parts = [];
-  if (cfg.ttl_hours) parts.push(`${cfg.ttl_hours}h after posting`);
-  if (cfg.expires_at) parts.push(`at ${new Date(cfg.expires_at).toLocaleString()}`);
-  return parts.join(', ');
+  const when = [];
+  if (cfg.ttl_hours) when.push(`${cfg.ttl_hours}h after posting`);
+  if (cfg.expires_at) when.push(`at ${new Date(cfg.expires_at).toLocaleString()}`);
+  const parts = when.length ? [`posts expire ${when.join(', ')}`] : [];
+  if (cfg.keep_last) parts.push(`only the newest ${cfg.keep_last} are kept`);
+  const text = parts.join('; ');
+  return text && text[0].toUpperCase() + text.slice(1);
 }
 
 function makeTagItem(label, value, count, cfg = null) {
-  const expiry = cfg && (cfg.ttl_hours || cfg.expires_at) ? { ttl_hours: cfg.ttl_hours, expires_at: cfg.expires_at } : null;
+  const expiry = cfg && (cfg.ttl_hours || cfg.expires_at || cfg.keep_last)
+    ? { ttl_hours: cfg.ttl_hours, expires_at: cfg.expires_at, keep_last: cfg.keep_last } : null;
   // A tag that expires its posts keeps its clock visible (.has-expiry).
   const summary = escHtml(expirySummary(expiry));
   const controls = value === null ? '' :
     `<button class="tag-rename" title="Rename tag" aria-label="Rename tag">${ICON_PENCIL}</button>`
-    + `<button class="tag-config-btn${summary ? ' has-expiry' : ''}" title="${summary ? `Posts expire ${summary}` : 'Expiry settings'}"`
-    + ` aria-label="Expiry settings${summary ? ` (posts expire ${summary})` : ''}">${ICON_CLOCK}</button>`;
+    + `<button class="tag-config-btn${summary ? ' has-expiry' : ''}" title="${summary || 'Expiry settings'}"`
+    + ` aria-label="Expiry settings${summary ? ` (${summary})` : ''}">${ICON_CLOCK}</button>`;
   const row = sidebarRow({
     labelHtml: escHtml(label), count, controls, active: query.tag === value, onClick: () => selectTag(value),
   });
   row._expiry = expiry;
+  row._count = count;
   row.dataset.tag = value ?? '';   // by value: a tag may well be called "all"
   if (value !== null) wireTagControls(row, value);
   return row;
@@ -866,6 +872,8 @@ function startTagConfig(el, tagName) {
     <div class="tc-label"></div>
     <input type="number" class="tc-ttl" placeholder="Hours after posting" min="1" aria-label="Expire posts this many hours after posting">
     <input type="datetime-local" class="tc-expires" aria-label="Expire all posts at">
+    <input type="number" class="tc-keep" placeholder="Keep only the newest N" min="1" aria-label="Keep only this many of the newest posts">
+    <div class="tc-note" aria-live="polite"></div>
     <div class="tc-actions">
       <button type="button" class="tc-save">Save</button>
       <button type="button" class="tc-cancel">Cancel</button>
@@ -875,26 +883,58 @@ function startTagConfig(el, tagName) {
   // What is set now — the form used to open empty whatever the tag carried.
   if (current?.ttl_hours) form.querySelector('.tc-ttl').value = current.ttl_hours;
   if (current?.expires_at) form.querySelector('.tc-expires').value = toDatetimeLocal(current.expires_at);
+  if (current?.keep_last) form.querySelector('.tc-keep').value = current.keep_last;
   el.innerHTML = '';
   el.classList.add('tag-editing');
   el.appendChild(form);
 
   const ttlInput = form.querySelector('.tc-ttl');
   const expiresInput = form.querySelector('.tc-expires');
+  const keepInput = form.querySelector('.tc-keep');
+  // Say what a retention limit will do before it is saved: one typo'd digit
+  // on a busy tag would otherwise expire most of it at the next sweep.
+  const note = form.querySelector('.tc-note');
+  const count = el._count || 0;
+  // Whole numbers only: a number input accepts "1e3" and "2.5", which
+  // parseInt read as 1 and 2 — "keep 1" on a typo.
+  const wholeOrNull = (input) => {
+    const raw = input.value.trim();
+    if (!raw) return undefined;
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  };
+  const syncNote = () => {
+    const keep = wholeOrNull(keepInput);
+    const over = keep ? count - keep : 0;
+    note.textContent = keep === null ? 'Keep only a whole number of posts, 1 or more.'
+      : over > 0 ? `Up to ${over} of its ${count} posts, the oldest, will expire at the next cleanup`
+        + ' (restorable while history is on).'
+      : '';
+  };
+  keepInput.addEventListener('input', syncNote);
+  syncNote();
   ttlInput.focus();
   openTagEditor = { el, kind: 'config', cancel: () => cancel() };
 
   let committed = false;
   async function commit() {
     if (committed) return; committed = true;
-    const ttlVal = ttlInput.value.trim();
+    const ttl = wholeOrNull(ttlInput);
     const expiresVal = expiresInput.value;
-    // Both cleared on a tag that had an expiry means remove it; on one that
-    // had none it means nothing was asked for.
-    if (!ttlVal && !expiresVal) { if (current) { await save({}); } else { committed = false; cancel(); } return; }
+    const keep = wholeOrNull(keepInput);
+    if (ttl === null || keep === null) {
+      note.textContent = 'Hours and posts must be whole numbers, 1 or more.';
+      committed = false;
+      return;
+    }
+    // All cleared on a tag that had a rule means remove it; on one that had
+    // none it means nothing was asked for.
+    if (!ttl && !expiresVal && !keep) { if (current) { await save({}); } else { committed = false; cancel(); } return; }
+    // The whole config is replaced, so every field shown goes back.
     const body = {};
-    if (ttlVal) body.ttl_hours = parseInt(ttlVal, 10);
+    if (ttl) body.ttl_hours = ttl;
     if (expiresVal) body.expires_at = toUtcIso(expiresVal);
+    if (keep) body.keep_last = keep;
     await save(body);
   }
 

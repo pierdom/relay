@@ -492,6 +492,7 @@ class TagCount(BaseModel):
     # client editing it can show what is set now rather than an empty form.
     ttl_hours: int | None = None
     expires_at: str | None = None
+    keep_last: int | None = None
 
 
 class TagListResponse(BaseModel):
@@ -710,6 +711,10 @@ class PostRestore(BaseModel):
 class TagConfigCreate(BaseModel):
     ttl_hours: int | None = Field(default=None, gt=0)
     expires_at: str | None = None
+    keep_last: int | None = Field(
+        default=None, gt=0,
+        description="Keep only the newest N posts carrying this tag (by creation); the sweep expires the rest",
+    )
 
     @field_validator("expires_at")
     @classmethod
@@ -721,6 +726,7 @@ class TagConfigResponse(BaseModel):
     tag: str
     ttl_hours: int | None
     expires_at: str | None = None
+    keep_last: int | None = None
 
 
 class LintFinding(BaseModel):

@@ -105,3 +105,16 @@ async def test_init_db_is_idempotent_across_repeated_startups(pre_b7_vault):
     second time either (a duplicate ALTER TABLE, a duplicate CREATE INDEX)."""
     await database.init_db()
     await database.init_db()
+
+
+@pytest.mark.asyncio
+async def test_init_db_adds_keep_last_to_an_existing_tag_config(pre_b7_vault):
+    """relay #198, B-2: `tag_config` gains `keep_last`. The pre-B-7 schema
+    above predates it, so this is the upgrade an existing install runs."""
+    await database.init_db()
+    conn = sqlite3.connect(str(pre_b7_vault))
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(tag_config)")}
+    finally:
+        conn.close()
+    assert "keep_last" in columns

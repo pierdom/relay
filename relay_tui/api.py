@@ -40,6 +40,19 @@ class Post:
 class Tag:
     name: str
     count: int
+    # The tag's expiry/retention config (relay #198, B-2), so the config
+    # modal opens on what is set: saving replaces the whole config.
+    ttl_hours: int | None = None
+    expires_at: str | None = None
+    keep_last: int | None = None
+
+
+def _tags(data: dict) -> list[Tag]:
+    return [
+        Tag(name=t["tag"], count=t["count"], ttl_hours=t.get("ttl_hours"),
+            expires_at=t.get("expires_at"), keep_last=t.get("keep_last"))
+        for t in data.get("tags", [])
+    ]
 
 
 @dataclass
@@ -237,7 +250,7 @@ def list_tags() -> list[Tag]:
     )
     resp.raise_for_status()
     data = resp.json()
-    return [Tag(name=item["tag"], count=item["count"]) for item in data.get("tags", [])]
+    return _tags(data)
 
 
 def list_folders() -> list[tuple[str, int]]:
@@ -283,19 +296,23 @@ def rename_tag(old: str, new: str) -> list[Tag]:
         timeout=10,
     )
     resp.raise_for_status()
-    return [Tag(name=t["tag"], count=t["count"]) for t in resp.json().get("tags", [])]
+    return _tags(resp.json())
 
 
 def set_tag_config(
     tag: str,
     ttl_hours: int | None = None,
     expires_at: str | None = None,
+    keep_last: int | None = None,
 ) -> None:
+    """Replace the tag's whole config; all None removes it."""
     body: dict[str, object] = {}
     if ttl_hours is not None:
         body["ttl_hours"] = ttl_hours
     if expires_at is not None:
         body["expires_at"] = expires_at
+    if keep_last is not None:
+        body["keep_last"] = keep_last
     resp = requests.post(
         f"{_base()}/tags/{tag}/config",
         headers=_headers(),

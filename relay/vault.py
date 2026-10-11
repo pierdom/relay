@@ -842,17 +842,37 @@ async def _load_tag_config(db: aiosqlite.Connection) -> None:
         tag = re.sub(r"[^a-z0-9_-]", "", str(tag).strip().lower())
         if not tag:
             continue
+        ttl_hours, keep_last = _count_field(cfg.get("ttl_hours")), _count_field(cfg.get("keep_last"))
+        if ttl_hours is None or keep_last is None:
+            logger.warning("Ignoring tags.yml entry for %r — ttl_hours/keep_last must be whole numbers", tag)
+            continue
         await db.execute(
-            "INSERT OR REPLACE INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)",
-            (tag, int(cfg.get("ttl_hours") or 0), cfg.get("expires_at")),
+            "INSERT OR REPLACE INTO tag_config (tag, ttl_hours, expires_at, keep_last) VALUES (?, ?, ?, ?)",
+            (tag, ttl_hours, cfg.get("expires_at"), keep_last),
         )
+
+
+def _count_field(value: object) -> int | None:
+    """A tags.yml count (0 when absent), or None when it isn't a whole number.
+
+    Strict on purpose: YAML reads `yes` as True and int(True) is 1, so a loose
+    int() turned `keep_last: yes` into "keep one post" — and 2.9 into 2."""
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value)
+    return None
 
 
 async def write_tag_config(db: aiosqlite.Connection) -> None:
     """Dump the index's tag_config back out to .relay/tags.yml (canonical)."""
     import yaml
 
-    async with db.execute("SELECT tag, ttl_hours, expires_at FROM tag_config ORDER BY tag") as cur:
+    async with db.execute("SELECT tag, ttl_hours, expires_at, keep_last FROM tag_config ORDER BY tag") as cur:
         rows = await cur.fetchall()
     data: dict = {}
     for row in rows:
@@ -861,6 +881,8 @@ async def write_tag_config(db: aiosqlite.Connection) -> None:
             entry["ttl_hours"] = row["ttl_hours"]
         if row["expires_at"]:
             entry["expires_at"] = row["expires_at"]
+        if row["keep_last"]:
+            entry["keep_last"] = row["keep_last"]
         data[row["tag"]] = entry
     Path(settings.relay_dir).mkdir(parents=True, exist_ok=True)
     text = yaml.safe_dump(data, sort_keys=True, allow_unicode=True, default_flow_style=False)

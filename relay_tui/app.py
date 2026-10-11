@@ -626,7 +626,7 @@ class RelayTuiApp(App):
         def _on_result(result: dict | None) -> None:
             if result:
                 self._do_set_tag_config(tag_name, result)
-        self.push_screen(TagConfigModal(tag_name), callback=_on_result)
+        self.push_screen(TagConfigModal(tag_name, event.current), callback=_on_result)
 
     def on_tag_panel_rename_tag(self, event: TagPanel.RenameTag) -> None:
         old_name = event.tag_name
@@ -658,6 +658,7 @@ class RelayTuiApp(App):
                 tag,
                 ttl_hours=result.get("ttl_hours"),
                 expires_at=result.get("expires_at"),
+                keep_last=result.get("keep_last"),
             )
             self.call_from_thread(self.notify, f"Config saved for [{tag}]", severity="information", timeout=3)
         except Exception as e:

@@ -354,7 +354,7 @@ async def run(db: aiosqlite.Connection) -> LintReport:
         if tag not in live_tags:
             findings.append(_finding(
                 "empty_tag_config", "warning",
-                f"tags.yml has an expiry rule for '{tag}' but no post carries it.",
+                f"tags.yml has an expiry or retention rule for '{tag}' but no post carries it.",
             ))
 
     if master_row is not None:

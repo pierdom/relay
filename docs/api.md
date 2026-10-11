@@ -41,7 +41,7 @@ All endpoints require `Authorization: Bearer <API_KEY>`. Browser-UI requests may
 | GET | `/attachments/{path}` | Serve a vault attachment (a bare name or a vault-relative path — never a `.md` post, a dotfile, or anything under a dot-directory) |
 | DELETE | `/attachments/{path}` | Delete an attachment (same resolution rule); reports posts still referencing it |
 | GET | `/tags` | List tags with post counts, plus each tag's own expiry config (`ttl_hours`, `expires_at`; `null` when unset) |
-| POST | `/tags/{tag}/config` | Set per-tag TTL (`ttl_hours` and/or `expires_at`); an empty body `{}` removes the tag's config |
+| POST | `/tags/{tag}/config` | Set per-tag expiry and retention (`ttl_hours`, `expires_at`, `keep_last`, any combination); the body replaces the whole config, and an empty body `{}` removes it |
 | PATCH | `/tags/{tag}` | Rename a tag across all posts |
 | GET | `/events` | SSE stream (`?tag=` filter). `Last-Event-ID` (a `seq` from a prior frame's `id:`) replays every change since — including an edit or delete to a post that already existed, not just a new one |
 | POST/GET | `/mcp` | Streamable HTTP MCP endpoint (see [mcp.md](mcp.md)) |
@@ -134,16 +134,24 @@ Edits to older posts are sent without an SSE `id:` so they don't rewind a client
 
 ## Tags
 
-### Per-tag TTL
+### Per-tag TTL and retention
 
 ```bash
 curl -X POST http://localhost:8000/tags/news/config \
   -H "Authorization: Bearer <key>" \
   -H "Content-Type: application/json" \
   -d '{"ttl_hours": 24}'
+
+# Keep only the 7 newest digests (by creation); the sweep expires older ones
+curl -X POST http://localhost:8000/tags/digest/config \
+  -H "Authorization: Bearer <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"keep_last": 7}'
 ```
 
 TTL precedence: per-post `expires_at` > per-tag config > global `DEFAULT_TTL_HOURS`. For multi-tag posts, the shortest TTL wins.
+
+`keep_last: N` keeps the tag's newest N posts (by creation) and expires the rest at the next sweep. Like a tag TTL it skips #0 and posts with their own `expires_at`; deletions are recorded as `expiry` (restorable while history is on). The body **replaces** the whole config — send every field you want to keep (`GET /tags` shows the current one).
 
 `expires_at` (on posts and tag configs) must be an ISO 8601 datetime; offsets and date-only values are accepted and normalised to `YYYY-MM-DDTHH:MM:SSZ` (UTC). Anything else is a 422 — the sweep compares timestamps lexically, so a relative value like `"1 week"` used to sort *before* every real date and delete the post at the next run. A non-ISO value hand-written into front-matter is skipped with a warning.
 

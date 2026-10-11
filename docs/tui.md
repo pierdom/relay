@@ -17,7 +17,7 @@ Requires a running relay instance. Set `RELAY_BASE_URL` and `API_KEY` (or put th
 | `/` | Search (title / content / source) |
 | `a` | Attachment browser (open externally / delete) |
 | `t` | Toggle TOPICS: Tags ⇄ Tree (folder) |
-| `c` / `R` | Tag expiry / rename (from TOPICS panel) |
+| `c` / `R` | Tag expiry and retention (TTL, date, keep-newest-N) / rename (from TOPICS panel) |
 | `s` / `o` | Sort field (updated ⇄ created) / order (desc ⇄ asc) |
 | `r` / `Tab` | Refresh feed / switch panel |
 | `q` | Quit |

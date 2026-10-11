@@ -46,16 +46,17 @@ async def list_tags(db: aiosqlite.Connection) -> TagListResponse:
     for row in rows:
         for t in tags_from_sentinel(row["tags"]):
             counter[t] += 1
-    config: dict[str, tuple[int | None, str | None]] = {}
-    async with db.execute("SELECT tag, ttl_hours, expires_at FROM tag_config") as cur:
+    config: dict[str, dict] = {}
+    async with db.execute("SELECT tag, ttl_hours, expires_at, keep_last FROM tag_config") as cur:
         for row in await cur.fetchall():
-            config[row["tag"]] = (row["ttl_hours"] or None, row["expires_at"])
+            config[row["tag"]] = {
+                "ttl_hours": row["ttl_hours"] or None,
+                "expires_at": row["expires_at"],
+                "keep_last": row["keep_last"] or None,
+            }
             if row["tag"] not in counter:
                 counter[row["tag"]] = 0
-    return TagListResponse(tags=[
-        TagCount(tag=t, count=c, ttl_hours=config.get(t, (None, None))[0], expires_at=config.get(t, (None, None))[1])
-        for t, c in counter.most_common()
-    ])
+    return TagListResponse(tags=[TagCount(tag=t, count=c, **config.get(t, {})) for t, c in counter.most_common()])
 
 
 async def rename_tag(
@@ -123,10 +124,13 @@ async def rename_tag(
 async def set_tag_config(
     db: aiosqlite.Connection, tag: str, body: TagConfigCreate, *, actor: Actor | None = None
 ) -> TagConfigResponse:
-    """Set a tag's expiry — or, with neither ``ttl_hours`` nor ``expires_at``,
-    **remove** it. A config could be created but never deleted: clearing both
-    fields left a ``ttl_hours=0`` row that kept the tag in ``list_tags`` at
-    count 0 forever (AUDIT.md G-03).
+    """Set a tag's expiry and retention — or, with none of ``ttl_hours``,
+    ``expires_at`` and ``keep_last``, **remove** it. A config could be created
+    but never deleted: clearing both fields left a ``ttl_hours=0`` row that
+    kept the tag in ``list_tags`` at count 0 forever (AUDIT.md G-03).
+
+    The body replaces the whole config: a field left out is cleared, so a
+    client must send what it shows (every form opens pre-filled).
 
     ``actor`` (relay #198, B-8) is used purely for the full-access scope
     check below — this function has no commit/git-author concept of its own
@@ -135,15 +139,16 @@ async def set_tag_config(
     tag = clean_tag(tag)
     if not tag:
         raise InvalidTag
-    if body.ttl_hours is None and body.expires_at is None:
+    if body.ttl_hours is None and body.expires_at is None and body.keep_last is None:
         await db.execute("DELETE FROM tag_config WHERE tag = ?", (tag,))
     else:
         await db.execute(
-            "INSERT INTO tag_config (tag, ttl_hours, expires_at) VALUES (?, ?, ?)"
-            " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours, expires_at = excluded.expires_at",
-            (tag, body.ttl_hours or 0, body.expires_at),
+            "INSERT INTO tag_config (tag, ttl_hours, expires_at, keep_last) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(tag) DO UPDATE SET ttl_hours = excluded.ttl_hours,"
+            " expires_at = excluded.expires_at, keep_last = excluded.keep_last",
+            (tag, body.ttl_hours or 0, body.expires_at, body.keep_last or 0),
         )
     await vault.write_tag_config(db)
     await db.commit()
-    return TagConfigResponse(tag=tag, ttl_hours=body.ttl_hours, expires_at=body.expires_at)
+    return TagConfigResponse(tag=tag, ttl_hours=body.ttl_hours, expires_at=body.expires_at, keep_last=body.keep_last)
 

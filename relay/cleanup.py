@@ -70,9 +70,9 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
     via self-delete suppression — which is why this path has to emit the events
     itself).
     """
-    async with db.execute("SELECT tag, ttl_hours, expires_at FROM tag_config") as cur:
+    async with db.execute("SELECT tag, ttl_hours, expires_at, keep_last FROM tag_config") as cur:
         tag_configs = {
-            row["tag"]: {"ttl_hours": row["ttl_hours"], "expires_at": row["expires_at"]}
+            row["tag"]: {"ttl_hours": row["ttl_hours"], "expires_at": row["expires_at"], "keep_last": row["keep_last"]}
             for row in await cur.fetchall()
         }
 
@@ -125,6 +125,23 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
                 [_tag_pattern(tag), f"-{cfg['ttl_hours']} hours"],
             )
 
+    # Per-tag retention (relay #198, B-2): keep the newest `keep_last` posts
+    # carrying the tag, by creation, and expire the rest. Same exemptions as a
+    # tag TTL — #0, and posts with their own expires_at, which neither count
+    # toward N nor go; their own date governs them. A post under several rules
+    # goes when any of them says so, as with TTLs.
+    retained_out: set[int] = set()
+    for tag, cfg in tag_configs.items():
+        if cfg["keep_last"]:
+            retained_out |= await _ids_where(
+                db,
+                f"id != 0 AND expires_at IS NULL AND {_TAG_LIKE} "
+                "ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET ?",
+                [_tag_pattern(tag), cfg["keep_last"]],
+            )
+    by_retention = len(retained_out - to_delete)
+    to_delete |= retained_out
+
     if not to_delete:
         return 0
 
@@ -145,7 +162,10 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
         # written, not-yet-committed file could get swept into this commit, and
         # `changes._ingest` would then attribute a "ttl expiry" action to that
         # other writer's post too.
-        await history.commit(f"ttl expiry: {len(expired)} post(s)")
+        # The "ttl expiry" prefix is what history._classify and changes read as
+        # a routine expiry — retention deletions are that too.
+        detail = f" ({by_retention} over a keep_last)" if by_retention else ""
+        await history.commit(f"ttl expiry: {len(expired)} post(s){detail}")
     # Tell live clients. The file unlink is self-delete-suppressed, so the watcher
     # won't emit for these — without this a TTL'd post lingers in every connected
     # UI/TUI until the next reload. Deletes stream without an SSE `id:`, so they

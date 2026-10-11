@@ -4,6 +4,18 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.22.0] — 2026-10-11
+
+### Added
+- **Keep only the newest N posts per tag** (`keep_last`, relay #198 B-2): set it from a tag's clock button, the TUI's `c`, `POST /tags/{tag}/config` or MCP `set_tag_config`; the cleanup sweep expires older posts (restorable while history is on). The web form says how many posts a limit will expire before you save
+
+### Fixed
+- The TUI tag dialog opened empty, so saving one rule cleared the others; it now opens on the current config
+- A `tags.yml` count of `yes` or `2.9` loaded as 1 or 2; non-whole numbers are now skipped with a warning
+- Docs: reference `docker-compose.yml` pin moves to `1.22`
+
+---
+
 ## [1.21.1] — 2026-10-11
 
 ### Changed
