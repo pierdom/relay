@@ -43,9 +43,9 @@ def test_cards_and_the_post_view_name_the_writer(page, relay_server):
     page.reload()
     _filter_tag(page, tag)
     card = page.locator(f'.post[data-id="{post["id"]}"]')
-    assert card.locator(".post-author").inner_text() == "by agent"
+    assert card.locator(".post-author").inner_text() == "by claude-code"
     _open_post(page, relay_server, post["id"])
-    assert page.locator("#pmMeta .post-author").inner_text() == "by agent"
+    assert page.locator("#pmMeta .post-author").inner_text() == "by claude-code"
 
 
 def test_the_author_chip_filters_the_feed_by_writer(page, relay_server):
@@ -55,11 +55,11 @@ def test_the_author_chip_filters_the_feed_by_writer(page, relay_server):
     page.reload()
     _filter_tag(page, tag)
     page.locator(f'.post[data-id="{mine["id"]}"]').wait_for()
-    with page.expect_response(lambda r: "author=agent" in r.url):
+    with page.expect_response(lambda r: "author=claude-code" in r.url):
         page.locator(f'.post[data-id="{theirs["id"]}"] .post-author').click()
-    assert page.locator("#searchScope").inner_text() == "by agent ×"
+    assert page.locator("#searchScope").inner_text() == "by claude-code ×"
     authors = page.locator("#feed .post .post-author").all_inner_texts()
-    assert authors and set(authors) == {"by agent"}, authors
+    assert authors and set(authors) == {"by claude-code"}, authors
     assert page.locator(f'.post[data-id="{mine["id"]}"]').count() == 0
     # The chip clears it, like any other filter.
     page.locator("#searchScope").click()
@@ -72,7 +72,7 @@ def test_history_names_who_made_each_revision(page, relay_server):
     _open_post(page, relay_server, post["id"])
     page.locator("#pmHistory").click()
     page.locator("#hmBody .hm-rev").nth(1).wait_for()
-    assert page.locator("#hmBody .hm-author").all_inner_texts() == ["by apikey", "by agent"]
+    assert page.locator("#hmBody .hm-author").all_inner_texts() == ["by apikey", "by claude-code"]
 
 
 def test_a_filter_does_not_outlive_the_session(page, relay_server):
@@ -99,7 +99,7 @@ def test_status_lists_recent_changes_and_opens_them(page, relay_server):
     page.locator("#statusBtn").click()
     row = page.locator(".sm-act", has_text=title).first
     row.wait_for(timeout=10_000)
-    assert "created by agent" in row.locator(".sm-act-meta").inner_text()
+    assert "created by claude-code" in row.locator(".sm-act-meta").inner_text()
     row.locator("button.sm-act-title").click()
     page.locator("#postModal.open").wait_for()
     assert page.locator("#pmTitle").inner_text() == title

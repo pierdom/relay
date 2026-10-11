@@ -316,3 +316,12 @@ def test_small_text_roles_clear_aa():
     stale = {key for key in TEXT_ROLE_EXCEPTIONS if key[0] not in themes}
     assert not stale, f"exceptions for themes that no longer exist: {sorted(stale)}"
     assert not failures, "small text below AA:\n  " + "\n  ".join(failures)
+
+
+def test_nothing_is_set_in_capitals_but_file_extensions():
+    """The interface spoke in tracked-out capitals in 24 places; sentence case
+    reads faster and leaves capitals for data that is upper-case — a file's
+    extension on its gallery tile."""
+    css = CSS.read_text(encoding="utf-8")
+    rules = re.findall(r"([^{}]+)\{[^}]*text-transform:\s*uppercase", css)
+    assert [r.strip().splitlines()[-1].strip() for r in rules] == [".att-thumb .att-ext"], rules

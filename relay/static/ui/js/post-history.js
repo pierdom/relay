@@ -14,7 +14,7 @@
 
 import { apiFetch } from './api.js';
 import { wireModal } from './dialog.js';
-import { el, note, placeholder, setPane } from './dom.js';
+import { authorMark, el, note, placeholder, setPane } from './dom.js';
 
 const historyModal = document.getElementById('historyModal');
 const hmTitle = document.getElementById('hmTitle');
@@ -80,9 +80,13 @@ function renderRevisions(data, panes) {
     const sha = el('span', 'hm-sha', rev.short_sha);
     const when = el('span', 'hm-when', rev.when.replace('T', ' ').slice(0, 16));
     meta.append(sha, when);
-    if (rev.author) meta.appendChild(el('span', 'hm-author', `by ${rev.author}`));
+    if (rev.author) {
+      const by = el('span', 'hm-author', `by ${rev.author}`);
+      by.prepend(authorMark(rev.author));
+      meta.appendChild(by);
+    }
     if (i === 0 && data.exists) {
-      const badge = el('span', 'hm-badge', 'current');
+      const badge = el('span', 'hm-badge', 'Current');
       meta.appendChild(badge);
     }
 
