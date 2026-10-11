@@ -20,4 +20,8 @@ export const ICON_HISTORY = svg('<path d="M2.6 8a5.4 5.4 0 1 0 1.6-3.8"/><path d
 export const ICON_TRASH = svg('<path d="M2.6 4.4h10.8"/><path d="M6.2 4.4V2.8h3.6v1.6"/><path d="M3.9 4.4l.7 8.8h6.8l.7-8.8"/>');
 export const ICON_CLIP = svg('<path d="M13 7.4l-5.1 5.1a3 3 0 0 1-4.3-4.3l5.3-5.3a2 2 0 0 1 2.8 2.8l-5.1 5.1a1 1 0 0 1-1.4-1.4L10 4.6"/>');
 export const ICON_IMAGE = svg('<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="5.8" cy="6.4" r="1.1"/><path d="M14 11l-3.6-3.6L4 13"/>');
+/* The master document's mark: a four-point star, drawn so it stays the
+ * badge's colour and weight in every theme. */
+export const ICON_STAR = svg('<path d="M8 1.8l1.5 4.7L14.2 8l-4.7 1.5L8 14.2l-1.5-4.7L1.8 8l4.7-1.5z"/>');
+export const ICON_CHEVRON = svg('<path d="M4.5 6.2L8 9.8l3.5-3.6"/>');
 export const ICON_EYE = svg('<path d="M1.5 8S3.9 3.5 8 3.5 14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>');

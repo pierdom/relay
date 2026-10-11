@@ -4,7 +4,8 @@
 
 # ── Core ──────────────────────────────────────────────────────────────────────
 primary = "#e6b450"   # common.accent  — accent, interactive elements, borders
-border  = "#1b1f29"   # ui.line        — widget borders, badges, panel separators
+border  = "#282c34"   # gutter grey #6c7380 at 30% over common.bg — widget borders, badges,
+                      # panel separators (ui.line #1b1f29 all but vanished; same step as the web theme)
 bg      = "#0b0e14"   # common.bg      — screen, header, footer background
 
 # ── Semantic colours ───────────────────────────────────────────────────────────

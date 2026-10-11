@@ -2245,7 +2245,7 @@ a.post-title { text-decoration: none; }
    the accent frame, so a second box around the words only doubled it. */
 .post.master-doc .master-badge { background: none; border: none; padding: 0; cursor: pointer; }
 .accordion-chevron {
-  display: inline-block; margin-left: 2px; font-size: 10px;
+  display: inline-flex; margin-left: 2px;
   transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
 }
 .post.master-doc.accordion.collapsed .accordion-chevron { transform: rotate(-90deg); }

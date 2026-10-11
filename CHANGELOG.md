@@ -15,7 +15,16 @@ The visual direction from the web UI review (relay #198, B-13).
 - **Each writer has a mark**: a small swatch in one of the theme's accents, the same on cards, in History and in Recent activity
 - The master document's badge is the card's label rather than a second box inside it
 - **Ayu Dark** borders are a step stronger (its gutter grey over the card background); `ui.line` all but vanished against the cards
-- The theme gallery (docs/themes.md) is regenerated
+- The master document's star and chevron are drawn icons (the typed `▾` read as a dot at badge size)
+- The terminal UI's Ayu Dark palette gets the same stronger border
+- The theme gallery (docs/themes.md) is regenerated, and `scripts/theme_gallery.py` now also generates the README's browser screenshot
+
+### Added
+- **Similar posts after Publish**: when a new post reads like one already in the vault (semantic search on), the confirmation offers to open it — the server's advisory `similar` list, which the UI used to drop
+
+### Fixed
+- MCP `get_post_history`'s description lists the `author` field added in 1.20.0
+- The secondary accents (`--accent-2`, `--accent-3`), now carrying identity in small text, are held to the 4.5:1 contrast floor in every theme by test
 
 ---
 

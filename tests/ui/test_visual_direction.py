@@ -111,4 +111,5 @@ def test_the_master_badge_is_the_cards_label_not_a_box_in_it(page):
     badge = page.locator(".post.master-doc .master-badge")
     badge.wait_for()
     assert badge.evaluate("b => getComputedStyle(b).borderTopStyle") == "none"
-    assert badge.inner_text().startswith("✦ Master document")
+    assert badge.inner_text().strip() == "Master document"
+    assert badge.locator("svg").count() == 2   # the star and the chevron, drawn

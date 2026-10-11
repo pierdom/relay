@@ -154,6 +154,43 @@ def test_related_posts_are_not_asked_for_without_semantic_search(page, relay_ser
     assert not asked
 
 
+# ── 3. Similar posts after Publish ───────────────────────────────────────────
+
+
+def test_publishing_something_similar_offers_the_existing_post(page, relay_server):
+    """`similar` is empty without embeddings, so the server's answer is filled in
+    the page — what is under test is that the UI reads it and offers it."""
+    older = _new(relay_server, "Older twin")
+
+    def with_similar(route):
+        if route.request.method != "POST":
+            return route.fallback()
+        body = route.fetch().json()
+        body["similar"] = [{"id": older["id"], "title": older["title"], "score": 0.91}]
+        route.fulfill(json=body)
+
+    page.route("**/posts", with_similar)
+    _compose(page)
+    page.locator("#cpTitle").fill(_unique("Newer twin"))
+    page.locator("#cpContent").fill("x")
+    page.locator("#cpPublish").click()
+    toast = page.locator(".toast:not([hidden])")
+    toast.wait_for()
+    assert f"#{older['id']}" in toast.inner_text()
+    toast.get_by_role("button", name=f"Open #{older['id']}").click()
+    page.wait_for_function("t => document.getElementById('pmTitle').textContent === t", arg=older["title"])
+
+
+def test_publishing_something_new_offers_nothing(page):
+    _compose(page)
+    page.locator("#cpTitle").fill(_unique("Unique"))
+    page.locator("#cpContent").fill("x")
+    page.locator("#cpPublish").click()
+    page.locator("#composePanel.open").wait_for(state="detached")
+    page.wait_for_timeout(300)
+    assert page.locator(".toast:not([hidden])").count() == 0
+
+
 # ── 5. Quick switcher and shortcuts ──────────────────────────────────────────
 
 

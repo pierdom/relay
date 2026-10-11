@@ -22,7 +22,7 @@ import { extractMedia, IMAGE_EXT_RE, renderBody, stripTitleHeading, wrapTables }
 import { initSwitcher, openSwitcher } from './switcher.js';
 import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
-import { ICON_CLOCK, ICON_FOLDER, ICON_IMAGE, ICON_PENCIL, ICON_TRASH } from './icons.js';
+import { ICON_CHEVRON, ICON_CLOCK, ICON_FOLDER, ICON_IMAGE, ICON_PENCIL, ICON_STAR, ICON_TRASH } from './icons.js';
 import { cleanTag, escHtml, fmtBytes, parseTags, relativeTime, sourceParts, toDatetimeLocal, toUtcIso } from './util.js';
 
 const LIMIT = 20;
@@ -406,14 +406,26 @@ cpPublish.addEventListener('click', async () => {
   };
   cpPublish.disabled = true; cpPublish.textContent = 'Publishing…';
   try {
-    await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
+    const created = await apiFetch('/posts', { method: 'POST', body: JSON.stringify(body) });
     dropDraft();
     closeCompose();
     refreshSidebarCounts();
     await refreshLinks();
+    offerSimilar(created);
   } catch (e) { cpGateMsg.textContent = `Publish failed: ${e.message}`; }
   finally { cpPublish.textContent = 'Publish'; cpPublish.disabled = false; applyComposeScopeGate(); }
 });
+
+/* The server's advisory duplicate guard (`similar`, closest first, empty
+   without semantic search): #0 asks for one post per topic, so say so while
+   the new post can still be folded into the old one. */
+function offerSimilar(post) {
+  const [match] = post.similar || [];
+  if (!match) return;
+  showToast(`Published. It reads like #${match.id} “${match.title}” — one post per topic?`, {
+    action: { label: `Open #${match.id}`, onClick: () => openPostById(match.id) },
+  });
+}
 
 function closeCompose() {
   composePanel.classList.remove('open');
@@ -1070,7 +1082,7 @@ function renderPost(post) {
     ? `<span class="post-expires">expires ${relativeTime(post.expires_at)}</span>`
     : '';
   const masterBadge = post.id === 0
-    ? `<button type="button" class="master-badge" aria-expanded="false">✦ Master document<span class="accordion-chevron" aria-hidden="true">▾</span></button>`
+    ? `<button type="button" class="master-badge" aria-expanded="false">${ICON_STAR}Master document<span class="accordion-chevron" aria-hidden="true">${ICON_CHEVRON}</span></button>`
     : '';
   // A real link (the /id/<id> deep link), so a card is reachable by Tab and
   // opens in a new tab on Ctrl/Cmd-click; a plain click opens the modal as the
@@ -1349,7 +1361,7 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
   const pmExpiresHtml = post.expires_at
     ? `<div class="pm-time">expires ${relativeTime(post.expires_at)}</div>`
     : '';
-  const pmMasterBadge = post.id === 0 ? `<div class="master-badge" style="margin-bottom:8px">✦ Master document</div>` : '';
+  const pmMasterBadge = post.id === 0 ? `<div class="master-badge" style="margin-bottom:8px">${ICON_STAR}Master document</div>` : '';
   const pmIdPill = `<span class="post-id-pill" style="margin-right:6px">#${post.id}</span>`;
   const pmTime = `<div class="pm-time">${pmIdPill}${timeLabel}${authorChip(post)}</div>`;
   pmMeta.innerHTML = (tagsHtml || srcHtml)

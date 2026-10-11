@@ -9,7 +9,9 @@ Run against a relay serving a *copy* of sample_vault/ — never your real vault:
 
 Each theme is selected through the real picker (so the brand mark and anything
 else theme.js paints is right), then the feed is captured at 1200x720 into
-docs/screenshots/themes/<id>.png. The page groups themes exactly as the picker
+docs/screenshots/themes/<id>.png. The README's browser screenshot,
+docs/screenshots/ui.png, is captured too: Relay Dark at 2x, sized to match the
+terminal screenshot beside it. The page groups themes exactly as the picker
 does: Relay first, then the named families, then the rest alphabetically.
 """
 from __future__ import annotations
@@ -23,6 +25,8 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parent.parent
 THEME_JS = ROOT / "relay" / "static" / "ui" / "js" / "theme.js"
 SHOTS = ROOT / "docs" / "screenshots" / "themes"
+HERO = ROOT / "docs" / "screenshots" / "ui.png"
+HERO_VIEWPORT = {"width": 1034, "height": 822}   # x2 = 2068x1644, tui.png's height
 PAGE = ROOT / "docs" / "themes.md"
 PALETTES = ROOT / "relay_tui" / "palettes"
 TUI_NAMES = {"dark": "default", "solarized-dark": "solarized"}   # web id -> TUI palette where they differ
@@ -67,7 +71,21 @@ def capture(base: str, key: str, themes: list[dict]) -> None:
             page.mouse.move(5, 700)   # no hover state in the shot
             page.wait_for_timeout(500)
             page.screenshot(path=str(SHOTS / f"{theme['id']}.png"))
+        hero(browser, base, key)
         browser.close()
+
+
+def hero(browser, base: str, key: str) -> None:
+    """The README's browser screenshot: the default theme, sharp on a 2x display."""
+    page = browser.new_page(viewport=HERO_VIEWPORT, device_scale_factor=2)
+    page.goto(base)
+    page.evaluate("localStorage.setItem('relay-theme', 'dark')")
+    page.fill("#apiKeyInput", key)
+    page.click("#connectBtn")
+    page.wait_for_selector("a.post-title")
+    page.mouse.move(5, HERO_VIEWPORT["height"] - 5)
+    page.wait_for_timeout(500)
+    page.screenshot(path=str(HERO))
 
 
 def cell(theme: dict) -> str:

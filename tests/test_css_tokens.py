@@ -266,6 +266,12 @@ TEXT_ROLES = [
     ("--red", "--surface"),
     ("--green", "--surface"),
     ("--on-accent", "--accent-dim"),
+    # The secondary accents are small text too: the `#id` pill and a post's
+    # `via` source (--accent-2), and a writer's mark sits beside its name in
+    # either. Measured at 4.5:1 or better in every theme when B-13 made them
+    # carry identity; pinned so a new theme can't quietly drop below.
+    ("--accent-2", "--surface"),
+    ("--accent-3", "--surface"),
 ]
 
 # Where a faithful palette has no member that reaches the floor for a role —
