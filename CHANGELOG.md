@@ -4,7 +4,7 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
-## [Unreleased]
+## [1.21.0] — 2026-10-11
 
 The visual direction from the web UI review (relay #198, B-13).
 
@@ -25,6 +25,7 @@ The visual direction from the web UI review (relay #198, B-13).
 ### Fixed
 - MCP `get_post_history`'s description lists the `author` field added in 1.20.0
 - The secondary accents (`--accent-2`, `--accent-3`), now carrying identity in small text, are held to the 4.5:1 contrast floor in every theme by test
+- Docs: the reference `docker-compose.yml` pin moves to `1.21`
 
 ---
 
