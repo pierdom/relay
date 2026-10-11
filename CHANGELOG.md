@@ -4,6 +4,18 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.21.1] — 2026-10-11
+
+### Changed
+- **No more "Load more" bar.** It sat under the scrolling list the whole time — 51px of a phone screen — while scrolling already loaded the next page. The feed now ends in a status line that scrolls with it: "Loading…" while a page arrives, "All N posts" (or "All N matching posts" for a search) once everything is shown
+- Sort menu on phones: the label no longer touches its arrow; the end of the feed has room to breathe
+
+### Fixed
+- A first page too short to scroll (a tall screen, a grid of one-line notes) could only be continued with the button; the feed now keeps loading until the screen is full
+- A page that failed to load left the feed silently stuck; it now says so and offers **Retry**
+
+---
+
 ## [1.21.0] — 2026-10-11
 
 The visual direction from the web UI review (relay #198, B-13).
