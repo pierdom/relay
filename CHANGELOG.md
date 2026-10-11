@@ -4,6 +4,16 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Keep only the newest N posts per tag** (relay #198, B-2). `keep_last` in a tag's config — set from the web UI's clock button, the TUI's `c`, `POST /tags/{tag}/config` or MCP `set_tag_config` — keeps the newest N posts carrying the tag (by creation) and the cleanup sweep expires the rest. Pruning digests used to be a manual chore. It combines with a TTL, skips #0 and posts with their own expiry, and its deletions are recorded as expiry, so they stay restorable while vault history is on. The web form says how many posts a limit will expire before you save
+
+### Fixed
+- The TUI's tag-config dialog opened empty, so saving a TTL cleared an expiry date set elsewhere; it now opens on the tag's current config, and clearing every field removes it
+
+---
+
 ## [1.21.1] — 2026-10-11
 
 ### Changed

@@ -748,7 +748,10 @@ class RenameTagModal(ModalScreen[str | None]):
 
 
 class TagConfigModal(ModalScreen[dict | None]):
-    """Dialog for setting per-tag TTL or expiry."""
+    """Dialog for a tag's TTL, expiry date and keep-last retention.
+
+    Opens on the tag's current config: saving replaces all of it, so a field
+    the form did not show would be cleared. Clearing every field removes it."""
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
@@ -782,9 +785,10 @@ class TagConfigModal(ModalScreen[dict | None]):
     }}
     """
 
-    def __init__(self, tag: str) -> None:
+    def __init__(self, tag: str, current: api.Tag | None = None) -> None:
         super().__init__()
         self._tag = tag
+        self._current = current
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -793,8 +797,13 @@ class TagConfigModal(ModalScreen[dict | None]):
                 markup=True,
                 classes="config-label",
             )
-            yield Input(placeholder="TTL hours (integer, optional)", id="ttl-input")
-            yield Input(placeholder="Expires at (ISO, optional)", id="expires-input")
+            cur = self._current
+            yield Input(str(cur.ttl_hours) if cur and cur.ttl_hours else "",
+                        placeholder="TTL hours (integer, optional)", id="ttl-input")
+            yield Input(cur.expires_at if cur and cur.expires_at else "",
+                        placeholder="Expires at (ISO, optional)", id="expires-input")
+            yield Input(str(cur.keep_last) if cur and cur.keep_last else "",
+                        placeholder="Keep only the newest N posts (optional)", id="keep-input")
             with Horizontal(classes="config-actions"):
                 yield Button("Cancel", id="cancel-btn", variant="default")
                 yield Button("Save", id="save-btn", variant="primary")
@@ -808,24 +817,23 @@ class TagConfigModal(ModalScreen[dict | None]):
         elif event.button.id == "save-btn":
             ttl_raw = self.query_one("#ttl-input", Input).value.strip()
             expires_raw = self.query_one("#expires-input", Input).value.strip()
-            if not ttl_raw and not expires_raw:
-                self.app.notify("Enter TTL hours or an expiry datetime", severity="warning")
+            keep_raw = self.query_one("#keep-input", Input).value.strip()
+            cur = self._current
+            had_config = bool(cur and (cur.ttl_hours or cur.expires_at or cur.keep_last))
+            if not ttl_raw and not expires_raw and not keep_raw and not had_config:
+                self.app.notify("Enter a TTL, an expiry datetime or a keep-last count", severity="warning")
                 return
-            ttl_hours: int | None = None
-            if ttl_raw:
+            numbers: dict[str, int | None] = {}
+            for key, raw, label in (("ttl_hours", ttl_raw, "TTL"), ("keep_last", keep_raw, "Keep-last")):
                 try:
-                    ttl_hours = int(ttl_raw)
-                    if ttl_hours <= 0:
+                    numbers[key] = value = int(raw) if raw else None
+                    if value is not None and value <= 0:
                         raise ValueError
                 except ValueError:
-                    self.app.notify("TTL must be a positive integer", severity="warning")
+                    self.app.notify(f"{label} must be a positive integer", severity="warning")
                     return
-            self.dismiss(
-                {
-                    "ttl_hours": ttl_hours,
-                    "expires_at": expires_raw or None,
-                }
-            )
+            # All empty on a tag that had a config removes it.
+            self.dismiss({**numbers, "expires_at": expires_raw or None})
 
 
 # ── SearchModal ───────────────────────────────────────────────────────────────

@@ -157,7 +157,7 @@ Notes without a domain tag land in `Inbox/`. As soon as the note gets its first 
 | Who | Each post names who wrote its current version (a named API key or a login); click it to list that writer's posts. History names the writer of each revision, and the status panel's **Recent activity** lists the latest changes |
 | Edit | Saving over a post changed elsewhere (Obsidian, an agent) is refused with a note; Save again to overwrite deliberately |
 | Delete | Deletes offer **Undo** while vault history is on; with it off they ask first |
-| Expire | A tag's clock button sets a TTL or a date for its posts; tags that expire their posts keep the clock visible |
+| Expire | A tag's clock button sets a TTL, a date, or **keep only the newest N** (for digests and other dated snapshots) — the form says how many posts that will expire before you save; tags with a rule keep the clock visible |
 | Keyboard | `j`/`k` move through the feed, `Enter` opens, `e` edit, `h` history, `Esc` back, `/` search, `n` new post, `Ctrl/Cmd-K` go to a post, `?` all shortcuts |
 
 ### Cross-links and attachments

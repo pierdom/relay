@@ -1199,9 +1199,13 @@ async def list_tags() -> dict:
 
 @_tool(
     description=(
-        "Set expiry configuration for a tag. Provide ttl_hours (relative to each post's "
-        "creation), expires_at (absolute cutoff), or both. Only affects posts without their "
-        "own expires_at. Provide neither to remove the tag's expiry configuration."
+        "Set expiry and retention for a tag. ttl_hours expires each post that long after "
+        "its creation; expires_at is an absolute cutoff; keep_last keeps only the newest N "
+        "posts carrying the tag (by creation) and expires the older ones — for digests and "
+        "other dated snapshots. Any combination works, and a post goes when any rule says "
+        "so. Only affects posts without their own expires_at. This replaces the tag's whole "
+        "configuration (pass every field you want to keep; read list_tags first); pass none "
+        "to remove it. Expired posts stay recoverable while vault history is on."
     ),
     tags={"write"},
 )
@@ -1209,8 +1213,9 @@ async def set_tag_config(
     tag: str,
     ttl_hours: int | None = None,
     expires_at: str | None = None,
+    keep_last: int | None = None,
 ) -> dict:
-    body = TagConfigCreate(ttl_hours=ttl_hours, expires_at=expires_at)
+    body = TagConfigCreate(ttl_hours=ttl_hours, expires_at=expires_at, keep_last=keep_last)
     async with _db() as db:
         result = await service.set_tag_config(db, tag, body, actor=_current_actor())
     return result.model_dump()

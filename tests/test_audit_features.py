@@ -82,13 +82,14 @@ async def test_mcp_list_folders_matches_rest(client):
 async def test_tag_config_with_neither_field_removes_it(client, vault_dir):
     r = await client.post("/tags/digest/config", json={"ttl_hours": 24}, headers=AUTH)
     assert r.status_code == 200
-    assert {"tag": "digest", "count": 0, "ttl_hours": 24, "expires_at": None} in (
+    assert {"tag": "digest", "count": 0, "ttl_hours": 24, "expires_at": None, "keep_last": None} in (
         await client.get("/tags", headers=AUTH)
     ).json()["tags"]
     assert "digest" in yaml.safe_load((vault_dir / ".relay" / "tags.yml").read_text(encoding="utf-8"))
 
     r = await client.post("/tags/digest/config", json={}, headers=AUTH)
-    assert r.status_code == 200 and r.json() == {"tag": "digest", "ttl_hours": None, "expires_at": None}
+    assert r.status_code == 200
+    assert r.json() == {"tag": "digest", "ttl_hours": None, "expires_at": None, "keep_last": None}
     assert all(t["tag"] != "digest" for t in (await client.get("/tags", headers=AUTH)).json()["tags"])
     assert not yaml.safe_load((vault_dir / ".relay" / "tags.yml").read_text(encoding="utf-8"))
 
@@ -110,6 +111,7 @@ async def test_tag_list_carries_each_tags_expiry_config(client):
 @pytest.mark.asyncio
 async def test_mcp_set_tag_config_clears_too(client):
     await mcp_set_tag_config(tag="news", ttl_hours=1)
-    assert {"tag": "news", "count": 0, "ttl_hours": 1, "expires_at": None} in (await mcp_list_tags())["tags"]
+    news = {"tag": "news", "count": 0, "ttl_hours": 1, "expires_at": None, "keep_last": None}
+    assert news in (await mcp_list_tags())["tags"]
     await mcp_set_tag_config(tag="news")
     assert all(t["tag"] != "news" for t in (await mcp_list_tags())["tags"])

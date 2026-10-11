@@ -45,7 +45,8 @@ CREATE INDEX IF NOT EXISTS idx_posts_tags ON posts (tags);
 CREATE TABLE IF NOT EXISTS tag_config (
     tag        TEXT PRIMARY KEY,
     ttl_hours  INTEGER NOT NULL DEFAULT 0,
-    expires_at TEXT
+    expires_at TEXT,
+    keep_last  INTEGER NOT NULL DEFAULT 0
 );
 -- A materialized index over git history (relay.changes, relay #198 N-4),
 -- not a second source of truth: caught up from history.commits() at every
@@ -138,6 +139,12 @@ async def init_db() -> None:
         # updated_by (relay #198, B-7), same upgrade-in-place pattern as properties above.
         try:
             await db.execute("ALTER TABLE posts ADD COLUMN updated_by TEXT")
+        except aiosqlite.OperationalError:
+            pass
+        # keep_last (relay #198, B-2), same pattern — and like those, never give
+        # it an index inside `_SCHEMA` (see the note below).
+        try:
+            await db.execute("ALTER TABLE tag_config ADD COLUMN keep_last INTEGER NOT NULL DEFAULT 0")
         except aiosqlite.OperationalError:
             pass
         # Deliberately *not* in `_SCHEMA` above: that executescript runs before

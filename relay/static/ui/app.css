@@ -2302,6 +2302,9 @@ a.post-title { text-decoration: none; }
   width: 100%; min-width: 0; max-width: 100%;
   outline: none; font-family: inherit;
 }
+/* What a keep-last limit will expire, said before Save (main.js startTagConfig). */
+.tc-note { font-size: 11px; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
+.tc-note:empty { display: none; }
 .tc-actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .tc-actions .tc-remove { flex-basis: 100%; }
 .tc-actions .tc-remove:hover { color: var(--red); border-color: var(--red); }

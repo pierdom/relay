@@ -783,3 +783,30 @@ async def test_concurrent_create_and_update_do_not_misattribute_commits(client, 
         f"post A's own creation must never be recorded as anything else, got {a_rows[0]['action']!r}"
     )
     assert any(r["action"] == "update" for r in b_rows), f"post B's update must still be recorded, got {b_rows}"
+
+
+@pytest.mark.asyncio
+async def test_keep_last_deletions_read_as_routine_expiry(client):
+    """relay #198, B-2: a retention sweep is an expiry like a TTL one — the
+    recovery list files it under `expiry` (hidden by default) and the
+    changelog says `expiry`, not a delete someone made."""
+    from relay import cleanup
+
+    old = await _create(client, "Old digest", tags=("digest",))
+    await _create(client, "New digest", tags=("digest",))
+    await client.post("/tags/digest/config", json={"keep_last": 1}, headers=AUTH)
+    db = await _db()
+    try:
+        await db.execute("UPDATE posts SET created_at = '2020-01-01T00:00:00Z' WHERE id = ?", (old["id"],))
+        await db.commit()
+        assert await cleanup._delete_expired(db) == 1
+    finally:
+        await db.close()
+    assert "ttl expiry: 1 post(s) (1 over a keep_last)" in git("log", "-1", "--format=%s")
+    deleted = (await client.get("/posts/deleted", params={"include_expiry": "true"}, headers=AUTH)).json()["items"]
+    assert [(d["id"], d["reason"]) for d in deleted if d["id"] == old["id"]] == [(old["id"], "expiry")]
+    hidden = (await client.get("/posts/deleted", headers=AUTH)).json()["items"]
+    assert old["id"] not in {d["id"] for d in hidden}
+    changed = (await client.get("/changes", headers=AUTH)).json()["items"]
+    actions = [c["action"] for c in changed if c["id"] == old["id"]]
+    assert actions[0] == "expiry"

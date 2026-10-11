@@ -30,6 +30,7 @@ class TagPanel(Widget):
     """Sidebar that toggles between a Tags view and a folder Tree view."""
 
     _mode = "tags"  # "tags" | "tree"
+    _tags: dict[str, api.Tag] = {}
 
     class TagSelected(Message):
         def __init__(self, tag: str | None) -> None:
@@ -45,9 +46,10 @@ class TagPanel(Widget):
         """Request to switch the sidebar between tags and tree."""
 
     class ConfigureTag(Message):
-        def __init__(self, tag_name: str) -> None:
+        def __init__(self, tag_name: str, current: api.Tag | None) -> None:
             super().__init__()
             self.tag_name = tag_name
+            self.current = current  # its config now, to open the modal on
 
     class RenameTag(Message):
         def __init__(self, tag_name: str) -> None:
@@ -74,6 +76,7 @@ class TagPanel(Widget):
 
     def set_tags(self, tags: list[api.Tag], active: str | None = None) -> None:
         self._mode = "tags"
+        self._tags = {t.name: t for t in tags}
         self.query_one(Label).update("TOPICS · [dim]tags[/]")
         self._fill([("", sum(t.count for t in tags))] + [(t.name, t.count) for t in tags], active)
 
@@ -115,7 +118,7 @@ class TagPanel(Widget):
             return
         highlighted = self.query_one("#tag-listview", ListView).highlighted_child
         if isinstance(highlighted, TagItem) and highlighted.tag_name:
-            self.post_message(self.ConfigureTag(highlighted.tag_name))
+            self.post_message(self.ConfigureTag(highlighted.tag_name, self._tags.get(highlighted.tag_name)))
 
     def action_rename_tag(self) -> None:
         if self._mode != "tags":
