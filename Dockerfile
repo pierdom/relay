@@ -2,7 +2,7 @@
 # so a rebuild is reproducible and a compromised or yanked tag can't change what
 # ships. uv is its own stage rather than a bare `COPY --from=` so dependabot can
 # see it too.
-FROM ghcr.io/astral-sh/uv:0.12.18@sha256:3adc3706091ce7c2fe595e669628caedd6d951551b92b258b7e7dbe06d9440bc AS uv
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
 FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 
 # git backs the vault history (a commit per write, see relay/history.py). Without
