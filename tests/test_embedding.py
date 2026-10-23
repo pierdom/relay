@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
@@ -273,3 +277,24 @@ def test_is_loaded_true_when_a_backend_is_resident():
         assert embedding.is_loaded() is True
     finally:
         _reset_module_state()
+
+
+# ── transparent huge pages (relay #198 B-14) ─────────────────────────────────
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="prctl is Linux-only")
+def test_importing_the_app_opts_out_of_transparent_huge_pages(tmp_path):
+    """B-14 (#378): on a THP `always` host the unloaded model's memory stayed
+    charged to the container. The opt-out must happen at app import, before
+    anything can load the model. A subprocess, so the flag never lands on the
+    test runner itself; cwd/env keep it off the live .env vault."""
+    probe = (
+        "import ctypes, relay.main\n"
+        "print(ctypes.CDLL('libc.so.6').prctl(42, 0, 0, 0, 0))\n"  # 42 = PR_GET_THP_DISABLE
+    )
+    env = {**os.environ, "RELAY_VAULT_PATH": str(tmp_path / "vault"), "API_KEY": "test"}
+    out = subprocess.run(
+        [sys.executable, "-c", probe], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip().splitlines()[-1] == "1"

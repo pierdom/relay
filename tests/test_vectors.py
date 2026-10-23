@@ -211,6 +211,47 @@ async def test_unchanged_update_is_a_cache_hit(db, backend):
 
 
 @pytest.mark.asyncio
+async def test_cached_write_never_loads_the_model(db, backend, monkeypatch):
+    """relay #198 B-14 (#378): every write used to call get_backend() just to
+    read model_id for hashing — loading the ~570MB model even when every chunk
+    was a cache hit. Counting embed calls (above) can't see that; count loads."""
+    loads = 0
+
+    def counting_get_backend():
+        nonlocal loads
+        loads += 1
+        return backend
+
+    monkeypatch.setattr(embedding, "get_backend", counting_get_backend)
+    post = await service.create_post(db, PostCreate(
+        title="Post B", content=f"## Section\n{LONG_SECTION}", tags=["dev"],
+    ))
+    loads = 0
+    await service.update_post(db, post.id, PostUpdate(content=f"## Section\n{LONG_SECTION}", tags=["dev", "reference"]))
+    assert loads == 0
+
+
+@pytest.mark.asyncio
+async def test_creating_a_digest_never_loads_the_model(db, backend, monkeypatch):
+    """B-14: digest-type posts are never embedded (O-4), but create_post's
+    advisory `similar` lookup still embedded the whole post as a query —
+    loading the model for every scheduled digest and briefing."""
+    loads = 0
+
+    def counting_get_backend():  # counted, not raised: find_similar_posts swallows errors
+        nonlocal loads
+        loads += 1
+        return backend
+
+    monkeypatch.setattr(embedding, "get_backend", counting_get_backend)
+    created = await service.create_post(db, PostCreate(
+        title="Digest 2026-10-23", content=f"## News\n{LONG_SECTION}", tags=["news", "digest"],
+    ))
+    assert loads == 0
+    assert created.similar == []
+
+
+@pytest.mark.asyncio
 async def test_edit_reembeds_only_the_changed_chunk(db, backend):
     content = f"## First\n{LONG_SECTION}\n\n## Second\n{LONG_SECTION} original"
     post = await service.create_post(db, PostCreate(title="Post A", content=content, tags=["dev"]))
@@ -622,7 +663,7 @@ async def test_sync_post_chunks_does_not_block_the_event_loop(db, backend, monke
     (v1.1.3) — the backend loaded once on the first write after startup and
     stayed resident; idle-unload means a cold reload can now happen on any
     write, not just the first one ever. Regression test for
-    _backend_model_id/_embed_documents being run via asyncio.to_thread."""
+    _embed_documents being run via asyncio.to_thread."""
 
     class SlowBackend(FakeBackend):
         def embed_documents(self, texts):

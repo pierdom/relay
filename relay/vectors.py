@@ -20,6 +20,7 @@ import sqlite_vec
 from . import chunking, embedding, folders
 from .config import settings
 from .embedding import EMBEDDING_DIM
+from .models import tags_from_sentinel
 
 logger = logging.getLogger(__name__)
 
@@ -173,15 +174,6 @@ def _normalize(vec: list[float]) -> list[float]:
     return [x / norm for x in vec] if norm else vec
 
 
-def _backend_model_id() -> str:
-    """Sync helper run off the event loop via asyncio.to_thread (see
-    sync_post_chunks) — ensures the backend is loaded (constructing it is the
-    ~570MB/several-second cold path, see semantic_search's _embed_query) and
-    returns its model_id, needed up front for hashing before we know which
-    chunks are actually missing from the cache."""
-    return embedding.get_backend().model_id
-
-
 def _embed_documents(texts: list[str]) -> list[list[float]]:
     """Sync helper run off the event loop via asyncio.to_thread (see
     sync_post_chunks)."""
@@ -212,7 +204,7 @@ async def _sync_post_chunks(
     rows (edited/removed sections) are deleted.
 
     Called inline from the write path (index_upsert/insert), not backgrounded
-    like vault.backfill_embeddings — so the two model calls below go through
+    like vault.backfill_embeddings — so the model call below goes through
     asyncio.to_thread, same as semantic_search's _embed_query. Before
     idle-unload (relay #253, v1.1.3) this rarely mattered: the backend loaded
     once on the first write after startup and stayed resident. With
@@ -226,7 +218,7 @@ async def _sync_post_chunks(
     if not (database.VEC_ENABLED and settings.embedding_enabled):
         return
 
-    if any(t in folders.DISPOSABLE_TAGS for t in tags):
+    if folders.is_disposable(tags):
         # relay #198, O-4: months of near-identical digests/briefings pollute
         # similarity ranking far more than they'd ever usefully match against.
         # Drop any chunks embedded before the post carried this tag (a retag
@@ -236,7 +228,13 @@ async def _sync_post_chunks(
         return
 
     chunks = chunking.chunk_post(title, content)
-    model_id = await asyncio.to_thread(_backend_model_id)
+    # The configured model, not get_backend().model_id: the two are the same
+    # string (init_vec keys embedding_state on it too), but asking the backend
+    # loaded the whole model (~570MB) on every write just to hash — even when
+    # every chunk was already cached and nothing got embedded (relay #198 B-14,
+    # #378: nearly every load on bespin was a write). The model now loads only
+    # below, when a chunk is actually missing.
+    model_id = settings.embedding_model
     hashed = [(c, _hash(model_id, c.body)) for c in chunks]
 
     new_hashes = {h for _, h in hashed}
@@ -374,7 +372,7 @@ async def unembedded_post_ids(db: aiosqlite.Connection, *, limit: int = 50) -> l
         rows = await cur.fetchall()
     result = []
     for row in rows:
-        if any(t in folders.DISPOSABLE_TAGS for t in row["tags"].split(",") if t):
+        if folders.is_disposable(tags_from_sentinel(row["tags"])):
             continue
         result.append(row["id"])
         if len(result) >= limit:
@@ -392,7 +390,7 @@ async def excluded_post_count(db: aiosqlite.Connection) -> int:
         return 0
     async with db.execute("SELECT tags FROM posts") as cur:
         rows = await cur.fetchall()
-    return sum(1 for row in rows if any(t in folders.DISPOSABLE_TAGS for t in row["tags"].split(",") if t))
+    return sum(1 for row in rows if folders.is_disposable(tags_from_sentinel(row["tags"])))
 
 
 async def current_schema_dim(db: aiosqlite.Connection) -> int:

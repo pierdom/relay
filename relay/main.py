@@ -41,6 +41,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+# Before anything can load the embedding model — see the function's docstring.
+embedding.disable_transparent_huge_pages()
+
 
 async def _embedding_idle_unload_loop() -> None:
     """Poll embedding.unload_if_idle() every 60s for the life of the process.

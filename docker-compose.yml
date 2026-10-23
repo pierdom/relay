@@ -33,3 +33,7 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+    # A real PID 1 (tini) to reap orphaned grandchildren (likely git's detached
+    # helpers): without it they reparent to uvicorn, which never waits on them,
+    # and bespin had 57 zombies after ten days (relay #198 B-14).
+    init: true

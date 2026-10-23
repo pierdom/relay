@@ -68,7 +68,6 @@ def resolve_size_mb(model_id: str) -> float:
 
 
 class EmbeddingBackend(Protocol):
-    model_id: str
     dim: int
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
@@ -126,7 +125,6 @@ class FakeBackend:
     plumbing test fast and offline (relay #253's CI strategy). ``dim`` matches
     the real backend so both write into the same fixed vec0 schema."""
 
-    model_id = "fake-v1"
     dim = EMBEDDING_DIM
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -235,6 +233,38 @@ def force_unload() -> bool:
     return True
 
 
+def _libc() -> ctypes.CDLL:
+    """glibc, for the two memory calls Python doesn't expose. Raises on a
+    platform without it (musl, macOS); both callers treat that as best-effort."""
+    return ctypes.CDLL("libc.so.6")
+
+
+_PR_SET_THP_DISABLE = 41
+
+
+def disable_transparent_huge_pages() -> bool:
+    """Opt this process out of transparent huge pages. Returns whether the
+    kernel accepted it. Called once at app import (main.py), before the model
+    can load; the flag is inherited by threads and children.
+
+    relay #198 B-14: on bespin (THP ``enabled=always``, khugepaged
+    ``max_ptes_none=511``) relay's unloaded floor ratcheted from ~183MB to
+    ~850MB of cgroup anon over a week, while RSS dropped normally at each
+    unload. #378's evidence points at huge pages: ``malloc_trim`` returns 4KB
+    sub-ranges, a partly freed 2MB page stays charged to the container, and
+    khugepaged later collapses those ranges back with no faults by the
+    process. Strongly supported there but not reproduced locally (hosts on
+    ``madvise`` never showed it); opting out removes the mechanism either way.
+
+    Best-effort, like malloc_trim: a non-Linux box or a kernel without the
+    prctl just keeps the default."""
+    try:
+        return _libc().prctl(_PR_SET_THP_DISABLE, 1, 0, 0, 0) == 0
+    except Exception:
+        logger.debug("PR_SET_THP_DISABLE unavailable on this platform", exc_info=True)
+        return False
+
+
 def _do_unload() -> None:
     """The actual reclaim, shared by ``unload_if_idle`` and ``force_unload``
     — only the trigger condition differs between them."""
@@ -242,6 +272,6 @@ def _do_unload() -> None:
     _backend = None
     gc.collect()
     try:
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
+        _libc().malloc_trim(0)
     except Exception:
         logger.debug("malloc_trim unavailable on this platform — unloaded anyway", exc_info=True)
