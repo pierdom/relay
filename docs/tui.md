@@ -32,7 +32,7 @@ A read-only key blocks `n`/`e`/`d` locally with a toast (`This key is read-only`
 
 ## Palettes
 
-Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`relay`) matches the browser UI's Relay Dark theme.
+Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`default`) matches the browser UI's Relay Dark theme.
 
 | Name | Description |
 |------|-------------|

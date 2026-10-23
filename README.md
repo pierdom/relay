@@ -52,7 +52,7 @@ Measured on a real 21-query set against a real vault: keyword hits recall@5 0.54
                     (watchdog picks edits up and re-indexes)
 ```
 
-Files are the source of truth. The SQLite index is disposable and rebuilt at startup. Every write is committed to a local git history inside the vault on the server; posts can be restored — from the UI, the TUI, or the MCP tools — even after deletion.
+Files are the source of truth; the SQLite index is disposable and rebuilt at startup. Restores work from the UI, the TUI or MCP.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ docker compose up -d
 docker compose pull && docker compose up -d   # update
 ```
 
-Service on `http://localhost:8000`. Interactive docs at `/docs`. See [docs/setup.md](docs/setup.md) for configuration, OIDC login, and MCP OAuth.
+Serves `http://localhost:8000`, API docs at `/docs`. Configuration, OIDC and MCP OAuth: [docs/setup.md](docs/setup.md).
 
 ## Sample vault
 
@@ -153,7 +153,7 @@ Both run on every push and pull request via [`tests.yml`](.github/workflows/test
 
 ## Technologies
 
-- **Python 3.13** + **FastAPI** + **aiosqlite** (FTS5 search) + **PyYAML**
+- **Python ≥ 3.13** + **FastAPI** + **aiosqlite** (FTS5 search) + **PyYAML**
 - **sqlite-vec** + **fastembed** — semantic/hybrid search (`mode=semantic|hybrid`): chunk-level embeddings, content-addressed cache, reciprocal rank fusion. Opt-in, off by default. See [Why relay](#why-relay)
 - **Markdown vault** — files are source of truth; SQLite index is disposable
 - **git** — a commit per write; any post is recoverable even after deletion
