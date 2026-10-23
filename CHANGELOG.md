@@ -7,7 +7,7 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 ## [1.22.1] — 2026-10-23
 
 ### Fixed
-- **The memory floor after the embedding model unloads no longer creeps up** (relay #198 B-14). On a host with transparent huge pages set to `always`, the kernel rebuilt freed model memory into huge pages still charged to relay, and the unloaded floor rose from ~200MB to ~850MB over a week. relay now opts its own process out of huge pages at startup
+- **The memory floor after the embedding model unloads should no longer creep up** (relay #198 B-14). On a host with transparent huge pages set to `always`, the kernel rebuilt freed model memory into huge pages still charged to relay, and the unloaded floor rose from ~200MB to ~850MB over a week. relay now opts its own process out of huge pages at startup
 - Writes no longer load the ~570MB embedding model when every chunk is already embedded, and digest-type posts (`digest`, `news`, `briefing`, …) no longer load it at all for the advisory `similar` check
 - Reference `docker-compose.yml` sets `init: true`, so orphaned child processes are reaped instead of piling up as zombies
 - Docs: `api.md` described SSE reconnect as new-posts-only and semantic search as incompatible with tag/folder filters (both long fixed), and missed `/posts/{id}/related`; `mcp.md` said 26 tools (27); `tui.md` named the wrong default palette; a dead link to the stdio bridge. Setup, API, MCP and auth docs are about a third shorter, and a test now catches links to headings that no longer exist
