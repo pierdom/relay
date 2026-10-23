@@ -250,11 +250,12 @@ def disable_transparent_huge_pages() -> bool:
     relay #198 B-14: on bespin (THP ``enabled=always``, khugepaged
     ``max_ptes_none=511``) relay's unloaded floor ratcheted from ~183MB to
     ~850MB of cgroup anon over a week, while RSS dropped normally at each
-    unload. #378's evidence points at huge pages: ``malloc_trim`` returns 4KB
-    sub-ranges, a partly freed 2MB page stays charged to the container, and
-    khugepaged later collapses those ranges back with no faults by the
-    process. Strongly supported there but not reproduced locally (hosts on
-    ``madvise`` never showed it); opting out removes the mechanism either way.
+    unload. The cause is huge pages: ``malloc_trim`` returns 4KB sub-ranges,
+    a partly freed 2MB page stays charged to the container, and khugepaged
+    later collapses those ranges back with no faults by the process —
+    confirmed on bespin (#378: +298MB of collapses against +295MB RSS in the
+    hour after an unload, with no model load). Hosts on ``madvise`` (most
+    desktops) never show it.
 
     Best-effort, like malloc_trim: a non-Linux box or a kernel without the
     prctl just keeps the default."""
