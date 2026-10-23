@@ -11,6 +11,8 @@ that domain folder. Moves only ever go *out of* Inbox, never between real folder
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 # Domain tags, in priority order: the *first* of these found in a post's tag
 # list decides its folder. Keep in sync with the taxonomy in master doc #0.
 DOMAINS = [
@@ -42,6 +44,12 @@ INBOX = "Inbox"
 # (vectors.py excludes them from embedding entirely) — one constant, one
 # judgment call, reused by both.
 DISPOSABLE_TAGS = {"digest", "news", "daily-digest", "news-digest", "briefing", "financial-analyst"}
+
+
+def is_disposable(tags: Iterable[str]) -> bool:
+    """Whether a post carrying ``tags`` is a disposable snapshot (any one of
+    ``DISPOSABLE_TAGS``): never embedded, never offered as ``similar``."""
+    return not DISPOSABLE_TAGS.isdisjoint(tags)
 
 
 def folder_of(relpath: str, *, default: str = "") -> str:

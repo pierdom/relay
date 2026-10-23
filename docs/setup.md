@@ -2,32 +2,17 @@
 
 ## Which setup do you need?
 
-The right path depends on where and how you plan to connect to relay.
+**Local (one machine)** — Claude Code, Claude Desktop, or the browser/TUI on the same computer. The static API key is all you need.
+→ [Install locally](#installation--local), connect via the [stdio MCP proxy](mcp.md#connect-via-the-stdio-bridge).
 
-**Local use (single machine)**
-You want to use relay on your own computer — via Claude Code CLI, Claude Desktop, or the browser/TUI on the same machine. The static API key is all you need; OIDC and OAuth are not required.
+**Remote (phone, Claude.ai, shared access)** — a server with a public HTTPS URL, an OIDC provider so remote clients can sign in, and `MCP_OAUTH_ENABLED=true` for Claude.ai's OAuth flow.
+→ [Deploy with Docker](#installation--docker), then [OIDC](#oidc-login-for-the-browser-ui-and-mcp) and [MCP OAuth](#oauth-21-for-remote-mcp-clients).
 
-→ [Install locally](#installation--local) and connect via the [stdio MCP proxy](mcp.md#connect-via-stdio-proxy-legacy).
+**Prerequisites:** Python ≥ 3.13 + [uv](https://docs.astral.sh/uv/) (local), or Docker + Docker Compose.
 
-**Remote use (mobile, Claude.ai, shared access)**
-You want to connect from Claude on your phone, Claude.ai in a browser, or share relay with others. This requires a server or VPS with a public HTTPS URL, an OIDC identity provider so remote clients can authenticate, and `MCP_OAUTH_ENABLED=true` so Claude.ai can connect via its OAuth flow.
+## Single process only
 
-→ [Deploy with Docker](#installation--docker), then set up [OIDC](#oidc-login-for-the-browser-ui-and-mcp) and [MCP OAuth](#oauth-21-for-remote-mcp-clients).
-
----
-
-## Prerequisites
-
-- **Python 3.13** + [uv](https://docs.astral.sh/uv/) — local path
-- **Docker** + **Docker Compose** — container path
-
-## Deployment constraint: single worker
-
-**relay must run as a single process.** Two things break above one worker: the in-memory upload-slot registry (a `PUT` and its finalise must reach the same process) and the id allocator (which relies on an in-process lock rather than an immediate database transaction). Running multiple workers silently corrupts upload slots and can produce duplicate post ids.
-
-relay refuses to start if `WEB_CONCURRENCY` is greater than 1. If you need to handle more load, put a reverse proxy (nginx, Caddy, Traefik) in front of a single relay process rather than scaling workers.
-
-The `--workers` flag for uvicorn and gunicorn is not supported. The Docker Compose file in this repo uses a single worker by default.
+relay must run as **one worker**: upload slots live in memory (a `PUT` and its finalise must reach the same process) and the id allocator relies on an in-process lock. More workers silently corrupt uploads and can duplicate post ids. relay refuses to start with `WEB_CONCURRENCY` > 1, and uvicorn/gunicorn `--workers` is unsupported. For more load, put a reverse proxy in front of the one process.
 
 ---
 
@@ -38,24 +23,22 @@ cp .env.example .env        # set API_KEY at minimum
 uv run python -m uvicorn relay.main:app --reload
 ```
 
-Service on `http://localhost:8000`. Interactive API docs at `/docs`.
+Serves `http://localhost:8000`, interactive API docs at `/docs`.
 
 ## Installation — Docker
 
 ```bash
 docker compose up -d
-
-# Update to latest:
-docker compose pull && docker compose up -d
+docker compose pull && docker compose up -d     # update
 ```
 
-`GET /health` (no auth) is probed every 30 s by the Docker healthcheck — `docker ps` shows `healthy` when ready. Set `RELAY_BASE_URL` to your public URL (e.g. `https://relay.example.com`) before starting.
+Set `RELAY_BASE_URL` to your public URL first. The healthcheck probes `GET /health` (no auth) every 30 s; `docker ps` shows `healthy` when ready. The reference `docker-compose.yml` also runs relay read-only with no capabilities, and sets `init: true` so a real init reaps orphaned child processes (without it they pile up as zombies under uvicorn) — keep it if you write your own compose file.
 
 ---
 
 ## Configuration reference
 
-Copy `.env.example` to `.env`. Only `API_KEY` is required; everything else has a working default.
+Copy `.env.example` to `.env`. Only `API_KEY` is required:
 
 ```bash
 echo "API_KEY=$(openssl rand -hex 32)" >> .env
@@ -64,111 +47,88 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | **required** | Bearer token for all endpoints |
-| `RELAY_API_KEYS` | `""` | Named bearer keys (`name:key,name:key,...`) alongside `API_KEY`, each attributed separately — git commit author, `changes.author`, a post's `updated_by`. See [docs/auth.md](auth.md) |
-| `RELAY_API_KEY_SCOPES` | `""` | Restrict a `RELAY_API_KEYS` entry to read-only or to specific vault tags (`name:read` / `name:write:tag1+tag2` / `name:full`). A name with no entry is full access — see [docs/auth.md](auth.md) |
-| `RELAY_VAULT_PATH` | `/data/vault` | Markdown vault directory; SQLite index lives in `<vault>/.relay/` |
-| `RELAY_BASE_URL` | `http://localhost:8000` | Public URL of this relay instance (used by the stdio proxy and OAuth redirects) |
-| `DEFAULT_TTL_HOURS` | `0` | Global post expiry window; `0` disables expiry (per-tag TTLs still apply) |
-| `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are removed |
-| `RELAY_WATCH_ENABLED` | `true` | Live-reindex + SSE on edits made outside relay (e.g. in Obsidian) |
-| `RELAY_HISTORY_ENABLED` | `true` | Commit the vault to git after every write, so a clobbered or deleted post can be restored. No-ops with a warning if the `git` binary is missing — check `features.history.effective` in `/status` |
-| `RELAY_EMBEDDING_ENABLED` | `false` | Semantic/hybrid search (relay #253, proof of concept). See [Semantic search](#semantic-search-optional-proof-of-concept) below before enabling in production |
-| `EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | fastembed model id. No `RELAY_` prefix (unlike most vars here) |
-| `EMBEDDING_THREADS` | `1` | onnxruntime's intra-op thread pool. Kept low deliberately — embedding here is sequential (one post's chunks at a time), so extra threads buy nothing but memory. Raise it if a deployment has spare CPU and wants faster embedding |
-| `EMBEDDING_IDLE_UNLOAD_SECONDS` | `300` | Unload the embedding model after this much idle time, freeing ~500MB+ of RSS back to the OS (reload costs a few seconds on the next search/write). `0` disables — keep the model resident forever |
-| `SECURE_COOKIES` | `true` | `Secure` flag on the session cookie; set `false` for plain HTTP |
-| `ATTACHMENT_MAX_MB` | `25` | Max upload size; larger uploads → 413 (all transports) |
-| `ATTACHMENT_UPLOAD_TTL_SECONDS` | `3600` | Presigned upload slot lifetime before it's purged |
+| `RELAY_API_KEYS` | `""` | Named keys (`name:key,…`), each attributed separately (commit author, `changes.author`, `updated_by`) — [auth.md](auth.md) |
+| `RELAY_API_KEY_SCOPES` | `""` | Restrict a named key: `name:read`, `name:write:tag1+tag2`, `name:full`. No entry = full access — [auth.md](auth.md) |
+| `RELAY_VAULT_PATH` | `/data/vault` | The vault; relay's index and state live in `<vault>/.relay/` |
+| `RELAY_BASE_URL` | `http://localhost:8000` | Public URL (stdio proxy, OAuth redirects) |
+| `DEFAULT_TTL_HOURS` | `0` | Global expiry; `0` = off (per-tag rules still apply) |
+| `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are swept |
+| `RELAY_WATCH_ENABLED` | `true` | Reindex + SSE for edits made outside relay (Obsidian, nvim) |
+| `RELAY_HISTORY_ENABLED` | `true` | Commit every write to git so posts can be restored. Needs the `git` binary — check `features.history.effective` in `/status` |
+| `RELAY_EMBEDDING_ENABLED` | `false` | Semantic/hybrid search — read [Semantic search](#semantic-search-optional) first |
+| `EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | fastembed model id (no `RELAY_` prefix) |
+| `EMBEDDING_THREADS` | `1` | onnxruntime threads. Embedding is sequential, so more threads mostly cost memory |
+| `EMBEDDING_IDLE_UNLOAD_SECONDS` | `300` | Unload the model after this much idle time; `0` keeps it resident |
+| `SECURE_COOKIES` | `true` | `Secure` session cookie; `false` for plain HTTP |
+| `ATTACHMENT_MAX_MB` | `25` | Upload limit, all transports (413 above it) |
+| `ATTACHMENT_UPLOAD_TTL_SECONDS` | `3600` | Presigned upload slot lifetime |
 | `ATTACHMENT_FETCH_TIMEOUT_SECONDS` | `20` | Timeout for a server-side `source_url` fetch |
-| `OIDC_ISSUER` | `""` | OIDC provider base URL. Set with the client credentials below to enable Login with OIDC; blank = API-key-paste login |
-| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | `""` | Confidential OIDC client credentials |
-| `SESSION_SECRET` | `""` | Signs the session cookie; falls back to `API_KEY` if unset. Set it (`openssl rand -hex 32`) when OIDC is on so one secret does not serve two roles — relay warns at startup otherwise |
-| `SESSION_MAX_AGE_HOURS` | `720` | Session-cookie lifetime (default 30 days) |
-| `OIDC_ALLOWED_SUBS` | `""` | Comma-separated OIDC `sub` allowlist (immutable user IDs — preferred over email) |
-| `OIDC_ALLOWED_EMAILS` | `""` | Comma-separated email allowlist; matches **verified** emails only. Both empty = any authenticated IdP user |
-| `MCP_OAUTH_ENABLED` | `false` | Turn `/mcp` into an OAuth 2.1 AS+RS for remote clients via Dynamic Client Registration; the static `API_KEY` still works |
+| `OIDC_ISSUER` | `""` | OIDC provider URL; with the client credentials below, enables Login with OIDC (blank = paste-a-key login) |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | `""` | Confidential client credentials |
+| `SESSION_SECRET` | `""` | Signs the session cookie (falls back to `API_KEY`, with a startup warning when OIDC is on). `openssl rand -hex 32` |
+| `SESSION_MAX_AGE_HOURS` | `720` | Session lifetime (30 days) |
+| `OIDC_ALLOWED_SUBS` | `""` | `sub` allowlist — immutable ids, preferred over email |
+| `OIDC_ALLOWED_EMAILS` | `""` | Verified-email allowlist. Both empty = any user your IdP authenticates |
+| `MCP_OAUTH_ENABLED` | `false` | OAuth 2.1 + Dynamic Client Registration on `/mcp`; `API_KEY` keeps working |
 | `MCP_REQUIRED_SCOPES` | `relay` | Scope required on `/mcp` |
-| `MCP_ALLOWED_REDIRECT_HOSTS` | `claude.ai,claude.com,chatgpt.com,*.mistral.ai` | DCR redirect-URI host allowlist, https only; blank = any https. Each entry is an exact host or a `*.`-prefixed suffix matching that domain's subdomains only — not its own bare apex, so list both (`mistral.ai,*.mistral.ai`) if you need the apex too. Add other clients as needed |
-| `RELAY_PALETTE` | `default` | TUI colour theme (`default`, `dracula`, `nord`, `gruvbox`, `solarized`, `solarized-light`, `molokai`, `candy`, `earthy`, `pastel`, `tango`, `tokyo-night`, `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `rose-pine`, `one-dark`, `kanagawa`, `github-dark`, `github-light`, `ayu-dark`, `night-owl`) |
-| `RELAY_TRANSPARENT` | `0` | TUI: let the terminal background show through the canvas |
+| `MCP_ALLOWED_REDIRECT_HOSTS` | `claude.ai,claude.com,chatgpt.com,*.mistral.ai` | DCR redirect hosts, https only; blank = any. `*.x` matches subdomains, not the apex — list both if needed |
+| `RELAY_PALETTE` | `default` | TUI palette — names in [tui.md](tui.md) |
+| `RELAY_TRANSPARENT` | `0` | TUI: let the terminal background show through |
 
-**Docker-only**, read by `docker-compose.yml` rather than by relay itself:
+**Docker-only** (read by `docker-compose.yml`, not relay):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RELAY_VAULT_DIR` | `./vault` | Host path bind-mounted to `/data/vault`. Set an absolute path in production |
-| `RELAY_UID` / `RELAY_GID` | `1000` | Run as your host user so files relay writes stay user-owned — matters for Syncthing/Obsidian/backups |
+| `RELAY_VAULT_DIR` | `./vault` | Host path mounted at `/data/vault` — use an absolute path in production |
+| `RELAY_UID` / `RELAY_GID` | `1000` | Run as your host user so vault files stay yours (Syncthing, Obsidian, backups) |
 
 ---
 
-## Semantic search (optional, proof of concept)
+## Semantic search (optional)
 
-`RELAY_EMBEDDING_ENABLED=true` turns on chunk-level embeddings (sqlite-vec + fastembed) and exposes `mode=semantic|hybrid` alongside the default `keyword` mode on `GET /posts`, the `list_posts` MCP tool, and a ranking-mode select in the browser UI's search bar. Off by default everywhere: relay #253's proof of concept, not yet a fully validated default.
+`RELAY_EMBEDDING_ENABLED=true` adds chunk-level embeddings (sqlite-vec + fastembed) and `mode=semantic|hybrid` beside the default `keyword` on `GET /posts`, MCP `list_posts` and the browser search bar.
 
-What to expect when you flip it on:
-
-- **First-run model download.** The configured `EMBEDDING_MODEL` downloads on first use into `<vault>/.relay/models` (plus `.relay/hf-home` for `huggingface_hub`'s own cache). This lives inside the vault dir on purpose, so it rides the same Docker volume and survives container restarts instead of re-downloading every time.
-- **Startup stays fast regardless of vault size.** Embedding every existing post runs as a background task *after* the server is already serving requests, not inline during startup. Watch `GET /status`'s `embeddings.backfill` (`running`/`checked`/`total`) or the logs for `Embedding backfill starting` / periodic `N/M posts checked` (every 15s) / `Embedding backfill complete`. A crash or restart mid-backfill doesn't lose progress: the embedding cache is content-addressed and survives, so the next run resumes rather than starting over.
-- **CPU and memory during the backfill.** Embedding is real local ONNX inference. Expect a CPU-bound burst proportional to how much of the vault is genuinely new (not yet cached), plus ~500-600MB of RSS while the model is loaded (measured locally; onnxruntime session + model weights, not per-call growth). By default it unloads after `EMBEDDING_IDLE_UNLOAD_SECONDS` (300s) of no embedding activity, trading a several-second reload on the next search/write for giving that memory back to the OS. Set it to `0` to keep the model always resident instead. `GET /status`'s `embeddings.backend_loaded` reports whether the model is resident right now.
-- **Verify it actually came up:** check `features.search.embeddings` in `GET /status`, or the "Semantic search" row in the browser UI's status panel. Both report whether embeddings are actually usable, not just configured. For the full picture — which model, its dimension and on-disk size, and coverage (`posts_embedded`/`posts_missing`/`chunks_total`/`cache_entries`) — see `GET /status`'s `embeddings` object.
-- **Changing `EMBEDDING_MODEL` re-embeds the whole vault automatically, no migration step.** If the new model's vector dimension differs from the old one (e.g. moving from the 384-dim default up to `paraphrase-multilingual-mpnet-base-v2` at 768d or `multilingual-e5-large` at 1024d), relay detects it at the next startup, rebuilds the vector schema, and the background backfill re-embeds every post against the new model, same log lines as the first-ever backfill. A same-dimension model swap needs no schema change at all: the embedding cache is keyed on the model id, so it's already a full cache miss either way.
-- **Pause, resume, or re-trigger without a restart:** `PATCH /embeddings` (`{"enabled": true|false}`) toggles the feature at runtime — in-memory only, a restart reverts to whatever `.env` says — and `POST /embeddings/backfill` re-runs the catch-up on demand (`?force=true` wipes the cache first and re-embeds from scratch). Both return the same object as `GET /status`'s `embeddings` field. Enabling only resumes against whichever model the schema on disk was already built for; changing `EMBEDDING_MODEL` to a different dimension still needs a restart, same as above.
+- **Model download.** On first use the model downloads into `<vault>/.relay/models` (plus `.relay/hf-home`), on the vault's volume so it survives restarts.
+- **Startup stays fast.** Existing posts are embedded by a background task after the server is up. Follow it in `/status` → `embeddings.backfill` or the logs (`Embedding backfill starting` · `N/M posts checked` every 15 s · `complete`). The cache is content-addressed, so an interrupted backfill resumes.
+- **Memory.** The loaded model costs ~550 MB. It loads only when something actually needs embedding — a semantic/hybrid search, or a write with new or changed text. Unchanged writes and digest-type posts (`digest`, `news`, `briefing`, …) never load it. After `EMBEDDING_IDLE_UNLOAD_SECONDS` idle it unloads and the memory returns to the OS; the next embed pays a few seconds' reload. `/status` → `embeddings.backend_loaded` says whether it's resident now.
+- **Transparent huge pages.** relay opts its own process out of THP at startup (visible as `THP_enabled: 0` in `/proc/<pid>/status`). On a host with THP set to `always`, huge pages made the idle floor creep up by hundreds of MB over days: the kernel rebuilt freed model memory into huge pages still charged to relay. Nothing to configure; other processes on the host are unaffected.
+- **Verify** with `/status` → `features.search.embeddings` (usable, not just configured) or the status panel's Semantic search row. `/status` → `embeddings` has the model, dimension, size and coverage.
+- **Changing `EMBEDDING_MODEL`** re-embeds the vault automatically. A different dimension rebuilds the vector schema at the next startup; either way the cache is keyed on the model id, so the backfill redoes every post.
+- **At runtime:** `PATCH /embeddings` `{"enabled": bool}` toggles the feature until restart (disabling frees the model at once); `POST /embeddings/backfill` re-runs the catch-up (`?force=true` wipes the cache first). Enabling resumes against the model the on-disk schema was built for — a dimension change still needs a restart.
 
 ---
 
 ## OIDC login for the browser UI and MCP
 
-Required for remote use. relay delegates authentication to any standard OIDC provider.
+Required for remote use; any standard OIDC provider works. For self-hosting, [PocketID](https://github.com/pocket-id/pocket-id) is a small single-container provider (keep it ≥ 2.6.0); Authentik, Keycloak or Authelia work too.
 
-**Recommended for self-hosters: [PocketID](https://github.com/pocket-id/pocket-id).** A minimal, single-binary OIDC provider designed for personal use. No database setup, no admin overhead, runs as a Docker container alongside relay. Other providers (Authentik, Keycloak, Authelia, …) work equally well if you already run one.
-
-**1. Register a confidential client at your IdP.** Set the redirect URI to `<RELAY_BASE_URL>/auth/callback`. Note the client ID and secret.
-
-**2. Add to `.env`:**
-
-```bash
-OIDC_ISSUER=https://your-idp.example.com
-OIDC_CLIENT_ID=relay
-OIDC_CLIENT_SECRET=<secret>
-```
-
-**3. Restrict who can log in** (strongly recommended):
-
-```bash
-# Prefer sub — immutable even if the user changes their email:
-OIDC_ALLOWED_SUBS=abc123,def456
-
-# Or by verified email:
-OIDC_ALLOWED_EMAILS=alice@example.com,bob@example.com
-```
-
-Leaving both empty lets **any** user authenticated by your IdP log in.
-
-**4. Restart relay.** The Login button on `/ui` now shows "Login with OIDC".
+1. **Register a confidential client** with redirect URI `<RELAY_BASE_URL>/auth/callback`.
+2. **Add to `.env`:**
+   ```bash
+   OIDC_ISSUER=https://your-idp.example.com
+   OIDC_CLIENT_ID=relay
+   OIDC_CLIENT_SECRET=<secret>
+   ```
+3. **Restrict who can sign in** — `OIDC_ALLOWED_SUBS=abc123,def456` (preferred: immutable) or `OIDC_ALLOWED_EMAILS=alice@example.com`. Leaving both empty admits **any** user of your IdP.
+4. **Restart.** The login card now offers "Login with OIDC".
 
 ---
 
 ## OAuth 2.1 for remote MCP clients
 
-Lets remote MCP clients (Claude.ai, ChatGPT, etc.) authenticate via OAuth + Dynamic Client Registration instead of a pasted bearer key. Requires OIDC to be configured first.
+Lets Claude.ai, ChatGPT and other remote clients sign in with OAuth + Dynamic Client Registration instead of a pasted key. Needs OIDC first.
 
-**1.** Add `<RELAY_BASE_URL>/mcp/oauth/callback` to your IdP's redirect-URI allowlist.
+1. Add `<RELAY_BASE_URL>/mcp/oauth/callback` to your IdP's redirect URIs.
+2. Set `MCP_OAUTH_ENABLED=true`.
+3. Keep `OIDC_ALLOWED_SUBS` non-empty — an empty allowlist gives any IdP user full MCP access.
+4. Add other clients to `MCP_ALLOWED_REDIRECT_HOSTS` if needed (e.g. `www.perplexity.ai`).
+5. Restart, then in the client's connector dialog give only a name and `<RELAY_BASE_URL>/mcp`.
 
-**2.** Set `MCP_OAUTH_ENABLED=true` in `.env`.
+**Every connection shows a consent screen first** — the client's self-reported name and redirect target, Approve/Deny — so a client can't silently ride an existing IdP session. There is no "remember this app": each attempt asks again.
 
-**3.** Keep `OIDC_ALLOWED_SUBS` non-empty — an empty allowlist gives any IdP user full MCP access.
+> Tokens are opaque, hashed at rest, audience-bound to `/mcp`, and single-use for auth codes and refresh tokens. A replayed, already-rotated refresh token is rejected but does not revoke tokens issued after it — an accepted trade-off (relay #313). Lifetimes follow what your IdP issues (fastmcp's `OIDCProxy` owns them); `mcp_server.py` documents the overrides if you ever need to decouple.
 
-**4.** Add non-default clients to `MCP_ALLOWED_REDIRECT_HOSTS` if needed (e.g. `www.perplexity.ai`).
-
-**5. Restart relay.**
-
-In the client's connector dialog, fill only the **name** and **URL** (`<RELAY_BASE_URL>/mcp`). Dynamic Client Registration self-registers the client. The static `API_KEY` keeps working alongside OAuth.
-
-> Tokens are opaque and hashed at rest, audience-bound to `/mcp`, and single-use on auth codes and refresh tokens (each rotation invalidates the one before it). Replaying an already-rotated refresh token is rejected, but — unlike an earlier version of this feature — doesn't also revoke any newer tokens issued from it; a stolen-and-raced refresh token isn't automatically contained beyond the rotation itself. A deliberate trade-off, not an oversight (relay #313).
->
-> Token lifetimes are no longer relay's own knob (the old `MCP_AUTH_CODE_TTL_SECONDS`/`MCP_ACCESS_TOKEN_TTL_SECONDS`/`MCP_REFRESH_TOKEN_TTL_SECONDS` settings were removed as dead code post-migration — relay #313 cleanup, 2026-09-18): fastmcp's `OIDCProxy` owns them now, mirroring whatever PocketID itself issues (`fastmcp_access_token_expiry_seconds`/`fallback_*_expiry_seconds` exist as constructor overrides in `mcp_server.py` if a deployment ever needs to decouple from the upstream's lifetimes, but relay doesn't set them today).
-
-**Rate-limit the OAuth endpoints at your reverse proxy.** `/register` (Dynamic Client Registration) and `/authorize` are unauthenticated by OAuth spec — anyone on the internet can call them, and relay has no in-process limiter. Measured on the reference deployment: ~280 registrations/second accepted, ~5.6 KB stored per registration, and client registrations carry **no expiry**, so this is a disk-fill vector against the volume that also holds your notes and `history.git`. Nothing about this is new to the fastmcp migration (it is the long-standing S-12 finding), but it is worth closing before exposing relay publicly. In nginx/openresty:
+**Rate-limit `/register` and `/authorize` at your reverse proxy.** OAuth requires them to be unauthenticated, relay has no limiter of its own, and client registrations never expire: on the reference deployment ~280 registrations/s were accepted at ~5.6 KB each — a disk-fill risk for the volume holding your notes and `history.git`. Clients register about once, so a tight limit is invisible in normal use. The proxy is also the only layer that sees the real client IP. nginx:
 
 ```nginx
 limit_req_zone $binary_remote_addr zone=relay_oauth:10m rate=10r/m;
@@ -179,11 +139,4 @@ location ~ ^/(register|authorize)$ {
 }
 ```
 
-A legitimate client registers approximately once, so a limit this tight is invisible in normal use while turning a hours-to-fill-the-disk attack into a years-long one. Put the limit at the proxy rather than in relay: the proxy is the only layer that sees the real client IP.
-
-> **Running nginx-proxy-manager (NPM)?** The snippet above is a single self-contained nginx config file — it doesn't work pasted as one block into NPM's per-host **Advanced → Custom Nginx Configuration** field. `limit_req_zone` is only valid in nginx's `http {}` context; NPM's Advanced field injects into that host's `server {}` block. Pasting the whole snippet there caused NPM to silently drop the entire custom block from the generated config with no visible error — and left the *running* nginx not serving that host at all (confirmed live: relay #313, 2026-09-18 — public TLS handshakes failed with `SSL alert 112 unrecognized name` until the bad block was removed via NPM's UI). Split it across NPM's two injection points instead:
->
-> - `limit_req_zone $binary_remote_addr zone=relay_oauth:10m rate=10r/m;` alone in a file at `/data/nginx/custom/http_top.conf` (NPM includes this inside `http {}` globally, once, for every host — create the file, no UI action needed, then `docker exec <npm-container> nginx -s reload` or restart the container to pick it up).
-> - Just the `location ~ ^/(register|authorize)$ { ... }` block (referencing the zone by name, no `limit_req_zone` line) in the per-host Advanced field — that part *is* valid at `server {}` scope on its own.
-
-**First connection from a new client shows a consent screen.** Before relay hands off to your IdP, it routes an unrecognized client through a consent page — naming the client (self-reported, not verified) and its redirect target, with Approve/Deny. This is expected, not an error: it's a deliberate check against a client silently riding an already-authenticated IdP session (relay #313). Approving forwards you on to your IdP's own login as normal. Unlike a typical "remember this app" prompt, there's no persistent approval to skip on your *next* connection either — every connection attempt shows this screen fresh, tied to that one attempt's own signed browser-binding cookie, not a per-client memory.
+> **nginx-proxy-manager:** don't paste that as one block into a host's *Advanced* field — `limit_req_zone` is only valid in `http {}`, and NPM silently drops the whole block (the host then stopped serving TLS at all). Split it: put the `limit_req_zone` line alone in `/data/nginx/custom/http_top.conf` (included once in `http {}`; reload nginx), and only the `location` block in the host's Advanced field.

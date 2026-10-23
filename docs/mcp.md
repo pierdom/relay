@@ -1,199 +1,107 @@
 # MCP server
 
-relay exposes the full feed API as **26 MCP tools** so Claude (or any MCP-capable agent) can read and write posts directly. Both connection methods ship server `instructions` and expose the master document as the `relay://master-document` resource (`text/markdown`).
+relay exposes its whole API as **27 MCP tools**, so Claude or any MCP agent can read and write posts directly. Both connection methods ship server `instructions` and the master document as the `relay://master-document` resource (`text/markdown`).
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
 | `publish_post` | Publish a post (title, content, tags, source, expires_at) |
-| `update_post` | Partially update a post by ID — only provided fields change; pass `""` for `expires_at` or `source` to clear it. Optional `if_match` (a prior response's `etag`) rejects the write if the post changed since — see [Partial edits and optimistic concurrency](#partial-edits-and-optimistic-concurrency) |
-| `edit_post` | `str_replace`-style partial edit: `old_str` must match exactly once in the post's current content and differ from `new_str`, like a code-agent Edit tool — errors (naming the match count) if it's missing or ambiguous |
-| `append_post` | Append content to a post instead of resending the whole body; a blank line separates it from existing content unless the post is currently empty |
-| `get_post` | Get a post by ID (`id=0` for the master document). Any other front-matter key found in the file (Obsidian Properties, a hand-added custom field) is returned read-only as `properties` — no write API for it |
-| `list_posts` | List posts with tag/folder/search/author/limit/offset/sort/order filters; returns metadata + excerpt by default. `author` filters to posts whose most recent write is attributed to that identity — see [docs/auth.md](auth.md). `mode=keyword\|semantic\|hybrid` ranks `search` (relay #253, proof of concept) and combines with tag/folder — errors if embeddings aren't enabled. A bare id or `#id` as `search` (e.g. `42`) is a lookup, not a ranked search: answers with just that post as `pinned`, ignoring `mode`/`tag`/`folder`/`author`, whether or not embeddings are enabled |
-| `delete_post` | Delete a post by ID |
-| `get_post_history` | List a post's revisions from vault history; works for a deleted post (`exists:false`) |
-| `get_post_revision` | Read a post exactly as it was at one revision — preview before restoring |
-| `restore_post` | Restore a post to a revision sha, recreating it if deleted; the restore is itself recorded |
-| `get_backlinks` | A post's backlinks — posts that link here via `[[Title]]` or `#id` |
-| `get_related` | Posts similar by embedding that this post doesn't already cross-link in either direction — a to-do list of missing `[[wikilinks]]`, not "more like this". Errors if embeddings aren't enabled |
-| `list_deleted_posts` | Posts that are gone but restorable — id, title, restorable sha, and why they went |
-| `list_changes` | The vault changelog, newest first — every create/update/edit/append/delete/restore/tag-rename/external-edit/external-delete/TTL-expiry, with `seq`/`id`/`title`/`action`/`when`/`sha`/`author`. `since` pages forward from a `seq` or filters by ISO timestamp; `author` filters to one identity's writes — see [The vault changelog](#the-vault-changelog) and [docs/auth.md](auth.md). Errors if vault history is disabled |
-| `add_attachment` | Attach a file; bytes via `source_url` (server fetches), `upload_id` (a filled presigned slot), or `data` (base64, tiny files only). With `post_id` appends `![[file]]` to that post. The stdio bridge also accepts `path` (a local file it uploads for you) |
-| `create_upload` | Mint a presigned upload slot (`upload_id` + `upload_url`); PUT the raw bytes there, then finalize with `add_attachment(upload_id=…)` |
-| `get_attachment` | Retrieve an attachment; images return as inline image content |
-| `list_attachments` | List attachments; scope by `post_id` or `folder` |
+| `update_post` | Change only the fields given; `""` clears `expires_at`/`source`. Optional `if_match` — see [Partial edits](#partial-edits-and-optimistic-concurrency) |
+| `edit_post` | `str_replace` edit: `old_str` must match exactly once and differ from `new_str`; otherwise errors with the match count |
+| `append_post` | Append to a post; a blank line separates it from existing content unless the post is empty |
+| `get_post` | A post by id (`id=0` = master document). Other front-matter keys (Obsidian Properties, custom fields) come back read-only as `properties` |
+| `list_posts` | Filter by tag/folder/search/author, page with limit/offset, sort/order; metadata + excerpt by default. `author` = whoever made the post's latest write ([auth.md](auth.md)). `mode=keyword\|semantic\|hybrid` ranks `search` and combines with tag/folder; semantic/hybrid error without embeddings. A bare `42`/`#42` search is an id lookup answered as `pinned`, ignoring every other filter |
+| `delete_post` | Delete a post |
+| `get_post_history` | A post's revisions; works for a deleted post (`exists:false`) |
+| `get_post_revision` | A post exactly as it was at one revision — preview before restoring |
+| `restore_post` | Restore to a revision sha, recreating a deleted post; the restore is itself recorded |
+| `get_backlinks` | Posts linking here via `[[Title]]` or `#id` |
+| `get_related` | Posts close by embedding that aren't cross-linked either way — a to-do list of missing links, not "more like this". Errors without embeddings |
+| `list_deleted_posts` | Deleted but restorable posts: id, title, restorable sha, reason |
+| `list_changes` | The vault changelog — see [below](#the-vault-changelog). Errors if history is off |
+| `add_attachment` | Attach a file from `source_url` (server fetches), `upload_id` (a filled slot) or `data` (base64, tiny files). `post_id` appends `![[file]]` to that post. The stdio bridge also takes `path`, a local file |
+| `create_upload` | Mint a presigned slot (`upload_id` + `upload_url`): PUT the bytes, then `add_attachment(upload_id=…)` |
+| `get_attachment` | Fetch an attachment; images return as image content |
+| `list_attachments` | List attachments, by `post_id` or `folder` |
 | `delete_attachment` | Delete an attachment; reports posts still referencing it |
-| `get_status` | Version, uptime, which vault is served, counts, which features actually work, embedding model/coverage/backfill diagnostics, and (relay #198, B-8) `caller` — your own key's effective scope, so you can tell up front what you're allowed to do instead of finding out from a rejected write |
-| `trigger_embedding_backfill` | Re-run the embedding backfill without a restart (`force` wipes the cache first); errors if embeddings aren't enabled or a backfill is already running |
-| `set_embeddings_enabled` | Turn semantic/hybrid search on or off at runtime, without a restart. In-memory only — see [Notes for agents](#notes-for-agents) |
-| `list_folders` | First-level vault folders with post counts — the names `list_posts`/`list_attachments` accept as `folder` |
-| `list_tags` | List all tags with post counts and each tag's expiry and retention config (`ttl_hours`/`expires_at`/`keep_last`, null when unset) |
-| `set_tag_config` | Set per-tag expiry and retention: `ttl_hours`, `expires_at`, `keep_last` (keep only the newest N posts), any combination. Replaces the whole config; pass none to remove it |
-| `rename_tag` | Rename a tag across every post that carries it, in one atomic pass |
-| `lint_vault` | Check the vault against the rules in #0 (relay #198, N-5): missing/zero tags, stale Inbox placement, broken links/attachment embeds, missing/drifted H1, stale hub/plan, zero backlinks, unused tag config, zero embedding chunks, #0's stated post count. Link/heading scanning ignores code spans/fences. Read-only |
+| `get_status` | Version, uptime, served vault, counts, which features actually work, embedding diagnostics, and `caller` — your key's effective scope |
+| `trigger_embedding_backfill` | Re-run the embedding backfill (`force` wipes the cache); errors without embeddings or while one runs |
+| `set_embeddings_enabled` | Toggle semantic/hybrid search until restart — see [Notes](#notes-for-agents) |
+| `list_folders` | First-level folders with post counts — the values `folder` accepts |
+| `list_tags` | Tags with post counts and each tag's `ttl_hours`/`expires_at`/`keep_last` (null when unset) |
+| `set_tag_config` | Per-tag `ttl_hours`, `expires_at`, `keep_last` (keep the newest N). Replaces the whole config; none removes it |
+| `rename_tag` | Rename a tag across every post, in one pass |
+| `lint_vault` | Check the vault against #0's rules: tags, Inbox placement, broken links/embeds, H1, stale hub/plan, zero backlinks, unused tag config, zero-chunk posts, #0's post count. Ignores code. Read-only |
 
 ## Partial edits and optimistic concurrency
-
-Editing one line of a long post shouldn't mean resending the whole body:
 
 ```
 edit_post(id=54, old_str="## Status: draft", new_str="## Status: published")
 append_post(id=54, content="## New section\nMore text.")
 ```
 
-`edit_post` requires `old_str` to match exactly once in the post's *current*
-content — like this Edit tool's own `str_replace` semantics. Zero matches or more
-than one both come back as `{"error": …}` (the latter naming the match count)
-rather than guessing which occurrence you meant; add more surrounding context to
-disambiguate.
+`edit_post` never guesses: zero matches or several both return `{"error": …}` — add context to `old_str` to disambiguate.
 
-Every post response carries an `etag` — an opaque token that changes whenever any
-mutable field of the post changes (title, content, tags, source, expiry, or an
-Obsidian Property). Pass it back as `if_match` on `update_post`/`edit_post`/
-`append_post` to detect a concurrent change instead of silently overwriting it:
+Every post response carries an `etag` that changes whenever any mutable field does (title, content, tags, source, expiry, a Property). Pass it as `if_match` on `update_post`/`edit_post`/`append_post` to refuse a write if someone else changed the post meanwhile:
 
 ```
 post = get_post(id=54)
-...                                    # something else could edit post #54 here
 update_post(id=54, content="…", if_match=post["etag"])
 → {"error": "post #54 has changed since if_match was captured", "current": {…}}
 ```
 
-A conflict's `current` field is the post's live state, so you can decide whether
-to retry against it or ask a human. Omitting `if_match` is today's exact
-behavior — last write wins, unchanged; but `edit_post`/`append_post` always
-protect their own read-modify-write internally using the etag from their own
-read, whether or not you pass one, since a stale read there could otherwise
-apply a `str_replace` against content someone else already changed.
+`current` is the live post, so you can retry against it or ask a human. Without `if_match`, last write wins — except that `edit_post`/`append_post` always guard their own read-modify-write.
 
 ## The vault changelog
 
-Starting a session by reading the master document and guessing what moved is
-error-prone — `list_changes` is a flat feed of every post-affecting write,
-sourced from the same git history everything else here reads:
+`list_changes` is a flat feed of every post-affecting write, newest first, read from the same git history (no second store):
 
 ```
-list_changes(limit=20)
-→ [{seq, id, title, action, when, sha, author}, …] newest first
+list_changes(limit=20)                       → [{seq, id, title, action, when, sha, author}, …]
+list_changes(since=1042)                     → everything after seq 1042
+list_changes(since="2026-09-14T00:00:00Z")   → everything since then
 ```
 
-`action` is one of `create`, `update`, `edit`, `append`, `delete`, `restore`,
-`tag_rename`, `external_edit` (an Obsidian edit picked up by the watcher),
-`external_delete`, or `expiry` (a TTL sweep). `author` is the identity (a
-named key or OIDC user, see [docs/auth.md](auth.md)) that made the write —
-`null` for one that predates named keys or has no authenticated identity (the
-TTL sweep, an external edit). Pass `author=` to filter to one identity's
-writes.
-
-Page forward with `since` set to the largest `seq` you've already seen, or
-answer "what happened since yesterday" with an ISO 8601 timestamp:
-
-```
-list_changes(since=1042)                        → everything after seq 1042
-list_changes(since="2026-09-14T00:00:00Z")       → everything since that time
-```
-
-This is a read over `history.git`, not a second store — it costs nothing
-extra to keep current, and it's also what closes the gap in SSE reconnect
-replay: `GET /events` used to only replay *new* posts on reconnect (a post id
-has no way to represent "an existing post changed"); it now uses this same
-feed, so an edit or delete made while you were disconnected replays too.
+`action` is `create`, `update`, `edit`, `append`, `delete`, `restore`, `tag_rename`, `external_edit`/`external_delete` (Obsidian, via the watcher) or `expiry`. `author` is the named key or OIDC user ([auth.md](auth.md)), `null` for older writes and for ones without an identity (TTL sweep, external edits); `author=` filters to one. SSE reconnects replay from this feed too, so edits and deletes made while disconnected aren't missed.
 
 ## Recovering a post
 
-Every write to the vault is committed to git, so a post that was overwritten or
-deleted can be brought back without leaving the tool call.
+Every write is committed to git, so an overwritten or deleted post comes back without leaving the tool call:
 
 ```
-list_deleted_posts()           → [{id, title, sha, when, reason, path}, …] newest first
-get_post_history(id=54)        → [{sha, short_sha, when, message, path, author}, …] newest first
+list_deleted_posts()           → [{id, title, sha, when, reason, path}, …]
+get_post_history(id=54)        → [{sha, short_sha, when, message, path, author}, …]
+get_post_revision(id=54, sha="a8dcc37")   # preview
 restore_post(id=54, sha="a8dcc37")
 ```
 
-- **Start with `list_deleted_posts` when you do not know the id.** Everything else
-  here needs one, and after a delete nobody has one. That's the whole reason the
-  tool exists. The `sha` it reports is already a restorable revision, so it can go
-  straight to `restore_post` without a `get_post_history` round trip.
-- **It is not a trash can.** Nothing is moved on delete and there is nothing to
-  purge; this reads the git history that already records every removal. TTL
-  expiries are excluded unless you pass `include_expiry=true`, because a vault
-  with per-tag TTLs sheds routine posts constantly and they would bury the
-  deletion you are looking for.
-
-- **Works for a deleted post.** `get_post_history` answers with `exists: false` and
-  still lists restorable revisions. That's the case most worth recovering, so it
-  is deliberately not a 404.
-- **The delete commit itself is not listed.** Every revision returned is one you
-  can restore *to*, and a file has no content at the commit that removed it.
-  Restore from the newest listed revision to undo a deletion.
-- **A restore keeps the post's id**, so inbound `[[wikilinks]]` and `#id`
-  references resolve again. The restore is itself committed, so it can be undone
-  the same way.
-- **Short shas are accepted.**
-- Posts that predate vault history show a single `vault: initial import`
-  revision, reflecting their state when history was first enabled.
-
-- **Preview before you restore.** `get_post_revision(id, sha)` returns that
-  revision's title, content and tags without changing anything. The history
-  listing is metadata only, so restoring straight off a sha is done blind. And
-  while a restore is itself undoable, "undo it and look" is a poor way to answer
-  "what would this give me back".
+- **No id? Start with `list_deleted_posts`.** Its `sha` is already restorable. It reads history, so nothing moves on delete and there is nothing to purge. TTL expiries are hidden unless `include_expiry=true` — routine expiry would bury the delete you're after.
+- **Deleted posts have history** (`exists: false`), deliberately not a 404. The delete commit itself isn't listed — every listed revision is one you can restore *to*; take the newest to undo a delete.
+- **A restore keeps the id**, so `[[wikilinks]]` and `#id` references resolve again, and it is itself undoable. Short shas work.
+- **Preview first** with `get_post_revision`: the history listing is metadata only.
+- Posts older than history show one `vault: initial import` revision.
 
 ## Notes for agents
 
-- **`get_status` reports what is actually working**, not what is configured:
-  `history.effective` is false when the git binary is missing (so writes are not
-  recoverable), `search.fts5` false means search fell back to substring matching,
-  `search.embeddings` false means `list_posts(mode=...)`'s `semantic`/`hybrid`
-  ranking will error (relay #253, proof of concept, off by default), and
-  `watcher.running` false means edits made directly to the files are not being
-  indexed. It also reports which vault path is being served, which settles "am I
-  talking to the instance I think I am".
-- **Post ids are never reused.** Deleting the newest post does not free its id, so
-  an `#id` reference always means the same post. Ids aren't contiguous.
-- **`get_status`'s `embeddings` field is the full picture, not just the on/off flag.**
-  `search.embeddings` (above) only says whether `mode=semantic|hybrid` is usable;
-  `embeddings.model`/`dimension`/`model_size_mb` say which model, `posts_embedded`/
-  `posts_missing`/`chunks_total` say how much of the vault is actually covered, and
-  `backfill.running` says whether the initial catch-up is still in progress — check
-  it before assuming a `semantic` query's silence on a just-enabled vault means
-  nothing matched, rather than that nothing is embedded yet.
-- **`list_posts` returns metadata + excerpt by default** (`summary=true`); call
-  `get_post` for a full body.
-- **`set_embeddings_enabled` is in-memory only.** It flips `settings.embedding_enabled`
-  for the life of the process — a restart reverts to whatever `.env` says. Enabling
-  only resumes against whichever model the vector schema was already built for
-  (`get_status`'s `embeddings.model`/`dimension`); it errors with a dimension
-  mismatch rather than attempting a live schema rebuild if `EMBEDDING_MODEL` was
-  changed without a restart in between. Enabling auto-triggers a backfill;
-  disabling frees the embedding model's memory immediately rather than waiting
-  for the idle timeout.
-- **`trigger_embedding_backfill` errors 409 (`"already running"`) if one is in
-  flight** — including the one `set_embeddings_enabled(true)` just kicked off.
-  Check `get_status`'s `embeddings.backfill.running` before retrying rather than
-  polling blind.
-- **A key's scope (see [docs/auth.md](auth.md)) can make a normally-available
-  tool fail.** A read-only key never sees a write tool in its own `tools/list`
-  at all; a tag-restricted key sees every tool but gets back
-  `{"error": "This API key's scope does not permit this write"}` from one
-  touching a post/attachment outside its allowed tags. Neither is a bug to
-  retry around — it means this key genuinely isn't allowed to make this
-  particular write.
+- **`get_status` reports what works, not what's configured.** `history.effective` false = git missing, writes not recoverable · `search.fts5` false = substring search · `search.embeddings` false = semantic/hybrid will error · `watcher.running` false = direct file edits aren't indexed. It also names the served vault — "am I talking to the instance I think I am".
+- **Its `embeddings` block is the full picture**: model, dimension, size, coverage (`posts_embedded`/`posts_missing`/`chunks_total`), and `backfill.running` — check that before reading a silent semantic query on a fresh vault as "nothing matched".
+- **Ids are never reused** and aren't contiguous; an `#id` always means the same post.
+- **`list_posts` returns excerpts** (`summary=true`); `get_post` for the body.
+- **`set_embeddings_enabled` lasts until restart.** Enabling resumes against the model the vector schema was built for (errors on a dimension mismatch rather than rebuilding live) and starts a backfill; disabling frees the model's memory at once.
+- **`trigger_embedding_backfill` returns 409 while one runs** — including the one enabling just started. Check `embeddings.backfill.running` instead of retrying blind.
+- **Scope errors are final.** A read-only key doesn't even see write tools; a tag-restricted key gets `"This API key's scope does not permit this write"` for posts outside its tags ([auth.md](auth.md)). Don't retry.
 
 ---
 
 ## Connect via Streamable HTTP (recommended)
 
-The MCP endpoint is at `/mcp`, on the same port as the REST API. No local checkout needed.
+`/mcp`, on the REST port. No checkout needed.
 
 ```bash
 claude mcp add --transport http relay https://your-relay-host/mcp \
   --header "Authorization: Bearer <your-api-key>"
 ```
-
-Or in a `streamable-http` client config:
 
 ```json
 {
@@ -209,9 +117,7 @@ Or in a `streamable-http` client config:
 
 ## Connect via the stdio bridge
 
-For clients that don't support remote MCP, `relay-mcp` runs locally and bridges stdio to the relay's `/mcp` endpoint over Streamable HTTP — same tools, same results, plus a local `path` option on `add_attachment`. Requires a checkout of this repo and `uv`.
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+For clients without remote MCP: `relay-mcp` bridges stdio to `/mcp` — same tools and results, plus a local `path` on `add_attachment`. Needs a checkout and `uv`. In `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -228,12 +134,10 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Run `git pull` and restart the client to pick up updates.
+Update with `git pull` and a client restart.
 
 ---
 
 ## OAuth login (optional)
 
-With `MCP_OAUTH_ENABLED=true`, relay acts as its own OAuth 2.1 Authorization Server (fastmcp's `OIDCProxy`, relay #313, brokering to your OIDC provider). Remote clients authenticate via OAuth + Dynamic Client Registration instead of a pasted bearer key: in the connector dialog, fill only the **name** and **URL** and leave the OAuth fields blank. The static `API_KEY` keeps working alongside OAuth. A client relay hasn't seen before is routed through a consent page first — see [docs/setup.md](setup.md#oauth-21-for-remote-mcp-clients) for what to expect.
-
-Setup: [docs/setup.md: OAuth 2.1 for remote MCP clients](setup.md#oauth-21-for-remote-mcp-clients).
+With `MCP_OAUTH_ENABLED=true` relay is its own OAuth 2.1 authorization server (fastmcp's `OIDCProxy`, brokering to your OIDC provider). In a client's connector dialog give only a name and URL; leave the OAuth fields blank. `API_KEY` keeps working. Setup and the consent screen: [setup.md](setup.md#oauth-21-for-remote-mcp-clients).

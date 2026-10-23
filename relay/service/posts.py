@@ -141,8 +141,14 @@ async def create_post(
     # Advisory duplicate-guard (relay #198, N-7): computed after the write and
     # its SSE publish, not inside write_lock — this is a read-only enrichment
     # that must never slow down or fail the create it rides along with (see
-    # vectors.find_similar_posts's own never-raises guarantee).
-    similar = await _similar_posts(db, exclude_post_id=post.id, title=post.title, content=post.content)
+    # vectors.find_similar_posts's own never-raises guarantee). Skipped for
+    # digest-type posts: they are never embedded (O-4), and the lookup alone
+    # loaded the ~570MB model for every scheduled digest and briefing (B-14).
+    similar = (
+        []
+        if folders.is_disposable(post.tags)
+        else await _similar_posts(db, exclude_post_id=post.id, title=post.title, content=post.content)
+    )
     return PostCreateResponse(**post.model_dump(), similar=similar)
 
 

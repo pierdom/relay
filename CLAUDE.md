@@ -79,7 +79,7 @@ Every write path commits to `history.git` (`core.quotePath=false` pinned — tes
 
 ## Lint (`relay/lint.py`)
 
-Machine-checks #0's written rules: tag axes, stale Inbox, H1 missing/mismatched, broken links / links to deleted posts / broken embeds / wikilinks to filenames (one finding per distinct target, `occurrences` + `match`), stale hub/plan posts, zero backlinks (digest-type tags exempt), empty tag configs, zero-chunk posts, #0's stated post count. #0 is exempt from everything but the link checks. Link and H1 scanning ignore code (`markdown_scan`: `strip_code` for links, `strip_fences` for H1 location); bare `#N` below 10 or above the id high-water mark is never a link. A rule needing a disabled feature is skipped and named in `skipped_rules`, never a 503.
+Machine-checks #0's written rules: tag axes, stale Inbox, H1 missing/mismatched, broken links / links to deleted posts / broken embeds / wikilinks to filenames (one finding per distinct target, `occurrences` + `match`), stale hub/plan posts, zero backlinks (digest-type tags exempt), empty tag configs, zero-chunk posts, #0's stated post count. #0 is exempt from everything but the link checks. Link and H1 scanning ignore code (`markdown_scan`: `strip_code` for links, `strip_fences` for H1 location); bare `#N` below 10 or above the id high-water mark is never a link. A rule needing a disabled feature is skipped and named in `skipped_rules`, never a 503. One helper per rule group (`_tag_findings`, `_h1_finding`, `_link_findings`, …); `run` only gathers the index and orchestrates — add a rule as a helper, not a branch in `run`.
 
 ## Authentication and scopes
 
@@ -99,9 +99,9 @@ Machine-checks #0's written rules: tag axes, stale Inbox, H1 missing/mismatched,
 
 - H2/H3-aware chunking; embeddings cached by `(model_id, chunk_body)` hash, so unchanged content is never re-embedded and a model change needs no migration. The vector table's dimension comes from `EMBEDDING_MODEL` via fastembed's registry and is rebuilt at startup on a mismatch.
 - **Startup never embeds inline** — the backfill is a background task (`vault.spawn_backfill`). Inline bulk embedding once blocked `/health` for minutes on every restart.
-- **Every call that touches `embedding.get_backend()` goes through `asyncio.to_thread`** — the model is idle-unloaded after `EMBEDDING_IDLE_UNLOAD_SECONDS` (it costs ~570MB RSS; `malloc_trim` returns it), so any call may pay a cold reload.
+- **Every call that touches `embedding.get_backend()` goes through `asyncio.to_thread`** — the model is idle-unloaded after `EMBEDDING_IDLE_UNLOAD_SECONDS` (it costs ~570MB RSS; `malloc_trim` returns it), so any call may pay a cold reload. **Only a real embed may load it**: chunk hashes key on `settings.embedding_model`, never `get_backend().model_id`, and digest-type creates skip the `similar` lookup. `main.py` opts the process out of transparent huge pages (`embedding.disable_transparent_huge_pages`) — on a THP `always` host khugepaged rebuilt freed model memory and the unloaded floor ratcheted to ~850MB (B-14, confirmed in #378).
 - `vectors.sync_post_chunks` never raises and never commits — embeddings are derived data. Mode semantic/hybrid with embeddings *off* is a 503; a backend failure *at query time* answers keyword-ranked with `search_timing.degraded=true`.
-- Digest-type posts (`folders.DISPOSABLE_TAGS`) are never embedded. `find_similar_posts` (the advisory `similar` field) never raises; `/related` does 503 when disabled. `/status`'s `embeddings` block is the diagnostic surface.
+- Digest-type posts (`folders.is_disposable`, over `DISPOSABLE_TAGS`) are never embedded. `find_similar_posts` (the advisory `similar` field) never raises; `/related` does 503 when disabled. `/status`'s `embeddings` block is the diagnostic surface.
 
 ## Browser UI (`relay/static`)
 
