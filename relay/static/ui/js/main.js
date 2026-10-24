@@ -1039,7 +1039,7 @@ async function loadPosts(replace = false) {
     // plain rather than carrying an inert param.
     if (query.search && query.mode !== 'keyword') params.set('mode', query.mode);
     const data = await apiFetch(`/posts?${params}`);
-    if (seq !== loadSeq) return;
+    if (seq !== loadSeq) return true;
     query.total = data.total;
     query.offset += data.items.length;
 

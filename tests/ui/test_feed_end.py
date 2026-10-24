@@ -99,6 +99,36 @@ def test_a_failed_page_says_so_and_retries(page, long_tag):
     page.wait_for_function("n => document.querySelectorAll('#feed .post').length === n", arg=PAGES)
 
 
+def test_a_page_overtaken_by_a_new_filter_is_not_a_failure(page, long_tag, relay_server):
+    """A next-page request still in flight when the filter changed came back
+    stale and read as a failed page: the new feed stopped at 20 with Retry (it
+    flaked the tall-screen test above whenever a tag was clicked mid-fill)."""
+    other = _tag()
+    for i in range(PAGES):
+        _api(relay_server, "POST", "/posts", {"title": f"Other {other} {i:02d}", "content": "x", "tags": [other]})
+    page.reload()
+    held = []
+
+    def hold(route):
+        if f"tag={long_tag}" in route.request.url and "offset=20" in route.request.url:
+            held.append(route)
+            return None
+        return route.fallback()
+
+    page.route("**/posts?*", hold)
+    _filter_tag(page, long_tag)
+    page.locator("#feed .post").nth(19).wait_for()
+    page.evaluate("document.getElementById('feed').scrollTop = 1e9")
+    page.wait_for_function("() => document.querySelector('#feed .feed-end').textContent === 'Loading…'")
+    _filter_tag(page, other)
+    page.wait_for_function(f"() => document.querySelector('#feed .post-title')?.textContent.includes('{other}')")
+    held[0].continue_()   # the stale page lands after the new feed painted
+    page.wait_for_timeout(300)
+    assert page.locator("#feed .feed-end-retry").count() == 0
+    _scroll_to_the_end(page, PAGES)
+    page.wait_for_function("n => document.querySelectorAll('#feed .post').length === n", arg=PAGES)
+
+
 def test_the_end_line_follows_live_changes_and_single_posts(page, relay_server):
     tag = _tag()
     one = _api(relay_server, "POST", "/posts", {"title": _unique("Lonely"), "content": "x", "tags": [tag]})
