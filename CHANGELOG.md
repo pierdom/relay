@@ -4,6 +4,15 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.22.2] — 2026-10-24
+
+### Fixed
+- On a phone, the search-mode menu (shown once semantic search is on) cropped its label to "Hy…"; it now shows "Keyword", "Semantic" or "Hybrid" in full, like the sort menu beside it
+- Changing the tag, folder or search while the next page was still loading could leave the new feed stuck on its first page behind a "Couldn’t load more posts" Retry
+- Docs: `stability.md` listed 26 MCP tools and missed `get_related` and five REST routes (`/posts/{id}/related`, `/embeddings`, `/embeddings/backfill`, `/health`, `/id/{id}`); `recovery.md` dropped its v0.2.0-era caveats and now names the `external delete` commit and `keep_last` expiries; `usage.md` points agents at `append_post`/`edit_post` and `if_match`, and at tag-restricted keys to keep them off #0
+
+---
+
 ## [1.22.1] — 2026-10-23
 
 ### Fixed
