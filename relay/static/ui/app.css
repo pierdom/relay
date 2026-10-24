@@ -2907,10 +2907,11 @@ kbd {
 }
 
 /* Phones: the search field takes its own row, so its placeholder reads in
-   full and the sort menu says "Updated" instead of "Up…"; filter chip, sort
-   and view controls share the row below, view toggle pinned right. */
+   full and the menus say "Updated"/"Semantic" instead of "Up…"/"Hy…"; filter
+   chip, mode, sort and view controls share the row below, view toggle pinned
+   right. */
 @media (max-width: 560px) {
   .search-bar .search-field { flex: 1 1 100%; }
-  .search-bar .sort-select { max-width: none; }
+  .search-bar :is(.sort-select, .mode-select) { max-width: none; }
   .search-bar .view-toggle { margin-left: auto; }
 }

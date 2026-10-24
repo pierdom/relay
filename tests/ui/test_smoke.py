@@ -915,3 +915,26 @@ def test_the_sidebar_is_thumb_sized_on_a_phone(mobile_page):
         }"""
     )
     assert not small, f"sidebar controls below the 44px touch floor: {small}"
+
+
+def test_the_phone_menus_show_their_whole_label(mobile_page):
+    """On a phone the search field takes its own row, so neither menu needs the
+    66px ellipsis cap any more — it once cut "Hybrid" to "Hy…"."""
+    page = mobile_page
+    page.locator(".feed .post").first.wait_for(timeout=10_000)
+    page.evaluate("""() => {
+        const m = document.getElementById('modeSelect');
+        m.style.display = '';
+        m.value = 'semantic';   // the longest option
+    }""")
+    for sel in ("#modeSelect", "#sortField"):
+        # A <select>'s scrollWidth never reports a clipped label: measure the
+        # selected option's text against the box between its paddings.
+        room, text = page.locator(sel).evaluate("""el => {
+            const cs = getComputedStyle(el);
+            const ctx = document.createElement('canvas').getContext('2d');
+            ctx.font = `${cs.fontSize} ${cs.fontFamily}`;
+            const room = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+            return [room, ctx.measureText(el.selectedOptions[0].text).width];
+        }""")
+        assert text <= room, f"{sel} label is cropped ({text:.0f}px of text in {room:.0f}px)"
