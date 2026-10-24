@@ -68,8 +68,8 @@ Everything below assumes those two variables are exported.
 
 > **History is per-host.** Commits are only made where relay runs, and `.relay/`
 > is not synced, so the repository exists on the server and *not* on any laptop
-> the vault syncs to. It also only covers writes made **since v0.2.0 was
-> deployed** — there is no history for anything before that.
+> the vault syncs to. It covers writes since history was first enabled; anything
+> older is one `vault: initial import` commit.
 
 ---
 
@@ -91,10 +91,10 @@ Commit messages tell you which path made the change:
 | Message | Came from |
 |---|---|
 | `post <id> create\|update\|edit\|append\|delete\|restore: <title>` | the REST API or an MCP tool (an attachment embedded into a post is an `append`) |
-| `external edit: <file>` / `external change: N edited, M removed` | Obsidian, nvim, anything editing files directly |
+| `external edit\|delete: <file>` / `external change: N edited, M removed` | Obsidian, nvim, anything editing files directly |
 | `attachment add\|delete: <name>` | an upload or an attachment delete |
 | `tag rename: a -> b (N post(s))` | a tag rename |
-| `ttl expiry: N post(s)` | the cleanup loop |
+| `ttl expiry: N post(s)` | the cleanup loop (TTL or a tag's `keep_last`) |
 | `vault: initial import` | the first run after history was enabled |
 
 To find *when* a note was damaged, read its log and diff the suspect commit
@@ -136,12 +136,6 @@ The note keeps its **original id**, because the id lives in the file's
 front-matter and the watcher indexes by it. Links and `#id` references to it
 resolve again.
 
-> **Fixed after v0.2.0** (PR #45). On v0.2.0 exactly, restoring a *deleted* note
-> whose bytes are unchanged is silently ignored by the watcher: the file returns
-> to disk but never re-enters the index. Overwrites are unaffected. If you are on
-> v0.2.0 and see a restored file that the API still 404s, either touch it
-> (`printf '\n' >> "<file>"`) or restart relay to force a rebuild from files.
-
 ### A post and the attachments deleted with it
 
 `delete_post` removes the attachments that post embedded, and both land in the
@@ -171,8 +165,8 @@ edit. Or restore just the affected files with `git checkout <sha>~1 -- <paths>`.
 ### Posts removed by TTL expiry
 
 Look for `ttl expiry: N post(s)` and restore from the commit before it. Then fix
-the TTL that caused it (`expires_at` on the post, or the tag's config) or it will
-expire again on the next cleanup pass.
+the rule that caused it (`expires_at` on the post, or the tag's TTL/`keep_last`)
+or it will expire again on the next cleanup pass.
 
 ---
 
