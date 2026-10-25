@@ -4,6 +4,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.22.3] — 2026-10-25
+
+### Changed
+- Dependencies: fastembed 0.8.1, httpx2 2.13.1, sse-starlette 3.5.0, fastmcp ≥ 4.0.10 (already locked), ruff 0.16.9; the Docker image builds with uv 0.13.5 and CI uses setup-uv 10.3.0
+
+---
+
 ## [1.22.2] — 2026-10-24
 
 ### Fixed
