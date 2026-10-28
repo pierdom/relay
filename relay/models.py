@@ -219,6 +219,32 @@ _WIKILINK_RE = re.compile(r"\[\[(?:[^\]|]*\|)?([^\]]*)\]\]")
 # this vault is full of snake_case identifiers (RELAY_VAULT_PATH, tag names) that
 # an excerpt shouldn't mangle; literal `_emphasis_` surviving is the lesser evil.
 _MD_SYNTAX_RE = re.compile(r"[`*>#~]")
+_WHITESPACE_RE = re.compile(r"\s+")
+
+# make_excerpt scans a growing head of the body, not all of it: the regexes
+# below cost ~1.3ms per post on bespin's CPU, which made a 20-row summary page
+# slower than the same page with full bodies. A head is accepted once its plain
+# text clears ``limit`` by ``_EXCERPT_SLACK`` — enough that a link or embed cut
+# in half at the head's end can't reach the characters actually kept.
+_EXCERPT_HEAD = 2048
+_EXCERPT_SLACK = 200
+
+
+def _plain_text(markdown: str) -> str:
+    """Markdown with fences already removed → one line of plain text."""
+    text = _IMAGE_EMBED_RE.sub(" ", markdown)
+    text = _IMAGE_MD_RE.sub(" ", text)
+    text = _LINK_MD_RE.sub(r"\1", text)
+    text = _WIKILINK_RE.sub(r"\1", text)
+    text = _MD_SYNTAX_RE.sub("", text)
+    text = text.replace("|", " ")
+    return _WHITESPACE_RE.sub(" ", text).strip()
+
+
+def _truncate(text: str, limit: int) -> str:
+    if len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0].rstrip() + "…"
+    return text
 
 
 def make_excerpt(content: str, limit: int = 240) -> str:
@@ -228,19 +254,28 @@ def make_excerpt(content: str, limit: int = 240) -> str:
     fenced code, Obsidian/Markdown embeds and links, inline emphasis/heading
     markers and table pipes, then collapses whitespace and truncates to ~``limit``
     characters on a word boundary. Never returns markdown syntax to render.
+
+    Only as much of the body as the excerpt needs is scanned (``_EXCERPT_HEAD``,
+    growing ×4): a head ends on a whole line, and a fence opened in the head but
+    closed after it is dropped from its opener on, exactly as the full scan
+    would. A body whose head never yields enough text falls through to the full
+    scan, so a code-first post still gets the prose after its code.
     """
     text = _FRONTMATTER_RE.sub("", content or "")
-    text = FENCE_RE.sub(" ", text)
-    text = _IMAGE_EMBED_RE.sub(" ", text)
-    text = _IMAGE_MD_RE.sub(" ", text)
-    text = _LINK_MD_RE.sub(r"\1", text)
-    text = _WIKILINK_RE.sub(r"\1", text)
-    text = _MD_SYNTAX_RE.sub("", text)
-    text = text.replace("|", " ")
-    text = re.sub(r"\s+", " ", text).strip()
-    if len(text) > limit:
-        text = text[:limit].rsplit(" ", 1)[0].rstrip() + "…"
-    return text
+    size = _EXCERPT_HEAD
+    while size < len(text):
+        cut = text.rfind("\n", 0, size)
+        if cut <= 0:
+            cut = size
+        head = FENCE_RE.sub(" ", text[:cut])
+        opener = head.find("```")
+        if opener != -1 and text.find("```", cut) != -1:
+            head = head[:opener]
+        plain = _plain_text(head)
+        if len(plain) > limit + _EXCERPT_SLACK:
+            return _truncate(plain, limit)
+        size *= 4
+    return _truncate(_plain_text(FENCE_RE.sub(" ", text)), limit)
 
 
 class PostSummary(BaseModel):

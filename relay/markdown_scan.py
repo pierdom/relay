@@ -24,7 +24,7 @@ _CODE_RE = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
 
 
 def _blank(m: re.Match[str]) -> str:
-    return "".join(c if c == "\n" else " " for c in m.group(0))
+    return "\n".join(" " * len(line) for line in m.group(0).split("\n"))
 
 
 def strip_fences(content: str) -> str:

@@ -160,3 +160,25 @@ async def test_a_post_deleted_long_after_it_was_created_still_restores(client):
     # disagree, and this pins that they don't.
     prev = await client.get(f"/posts/{pid}/history/{entry['sha']}", headers=HEADERS)
     assert prev.status_code == 200, prev.text
+
+
+@pytest.mark.asyncio
+async def test_deletions_after_a_cached_scan_are_still_found(client):
+    """The scan is cached per HEAD and extended with only the new commits — a
+    deletion after the first listing must appear, newest first, and a post
+    deleted, restored and deleted again must list once, at its latest delete."""
+    first = await _make(client, "First Gone")
+    second = await _make(client, "Second Gone")
+    await client.delete(f"/posts/{first}", headers=HEADERS)
+    assert [d.post_id for d in await history.deletions()] == [first]
+
+    await client.delete(f"/posts/{second}", headers=HEADERS)
+    assert [d.post_id for d in await history.deletions()] == [second, first]
+
+    sha = next(d.sha for d in await history.deletions() if d.post_id == first)
+    await client.post(f"/posts/{first}/restore", json={"sha": sha}, headers=HEADERS)
+    await client.delete(f"/posts/{first}", headers=HEADERS)
+    found = await history.deletions()
+    assert [d.post_id for d in found] == [first, second]
+    history.reset_state_for_tests()
+    assert await history.deletions() == found, "incremental scan disagrees with a full one"

@@ -742,8 +742,31 @@ async def _link_graph(db: aiosqlite.Connection) -> tuple[list[aiosqlite.Row], di
     return rows, {links.norm_title(r["title"]): r["id"] for r in rows}, {r["id"] for r in rows}
 
 
+def _could_link_to(content: str, idref: str, title: str | None) -> bool:
+    """Cheap necessary condition for ``content`` linking to a post, so a
+    backlinks scan only runs ``links.target_ids`` on candidates: a ``#N`` ref
+    contains ``#N``; a ``[[Title]]`` contains ``[[`` and the title itself. The
+    title test needs an ASCII title — ``str.lower`` is per-character there,
+    while non-ASCII lowering is contextual (a final sigma) — and is skipped
+    otherwise, leaving ``[[`` alone as the filter."""
+    if idref in content:
+        return True
+    if "[[" not in content:
+        return False
+    return title is None or title in content.lower()
+
+
 def _linking_to(post_id: int, rows, title_to_id: dict[str, int], ids: set[int]) -> list[aiosqlite.Row]:
-    return [r for r in rows if r["id"] != post_id and post_id in links.target_ids(r["content"], title_to_id, ids)]
+    idref = f"#{post_id}"
+    title = next((t for t, i in title_to_id.items() if i == post_id), None)
+    if title is not None and not title.isascii():
+        title = None
+    return [
+        r for r in rows
+        if r["id"] != post_id
+        and _could_link_to(r["content"], idref, title)
+        and post_id in links.target_ids(r["content"], title_to_id, ids)
+    ]
 
 
 async def get_backlinks(db: aiosqlite.Connection, post_id: int) -> BacklinksResponse:
