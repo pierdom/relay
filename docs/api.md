@@ -82,7 +82,7 @@ Every single-post response carries an `etag` (JSON field and `ETag` header) that
 | `search` | FTS5 over title/content/source/tags, porter-stemmed, bm25-ranked (title and tags weigh more). A bare `42`/`#42` is an id lookup: that post as `pinned`, `items` empty, every other filter ignored |
 | `mode` | `keyword` (default), `semantic`, `hybrid` — ranks `search`, combines with the filters. 503 without embeddings |
 | `sort` · `order` | `updated` (default) or `created`; `desc` (default) or `asc`. With `search`, only a tiebreak after relevance |
-| `summary` | `true`: metadata + plain-text excerpt (MCP's default) |
+| `summary` | `true`: metadata + plain-text excerpt (MCP's default). With `search`, each item's `match` quotes the passage that hit: the keyword snippet from the body, or for `semantic` the closest section as `Heading: text` (`hybrid` prefers the keyword snippet). `null` when only the title or tags matched |
 | `limit` · `offset` | Paging |
 
 ---

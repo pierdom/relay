@@ -387,7 +387,7 @@ async def test_ranked_search_degrades_to_keyword_when_the_backend_fails(client, 
     async def broken(*args, **kwargs):
         raise RuntimeError("model download failed")
 
-    monkeypatch.setattr(vectors, "semantic_search", broken)
+    monkeypatch.setattr(vectors, "semantic_search_chunks", broken)
     for mode in ("hybrid", "semantic"):
         r = await client.get("/posts", params={"search": "docker", "mode": mode}, headers=AUTH)
         assert r.status_code == 200, r.text

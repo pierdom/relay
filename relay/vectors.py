@@ -437,8 +437,23 @@ async def semantic_search(
     folder: str | None = None,
     author: str | None = None,
 ) -> list[tuple[int, float]]:
-    """(post_id, best_distance) pairs, ascending distance (= descending
-    similarity). Chunk→post aggregation uses **max similarity / min distance**,
+    """``semantic_search_chunks`` without the chunk ids."""
+    results = await semantic_search_chunks(db, query, limit=limit, tag=tag, folder=folder, author=author)
+    return [(pid, distance) for pid, distance, _ in results]
+
+
+async def semantic_search_chunks(
+    db: aiosqlite.Connection,
+    query: str,
+    *,
+    limit: int = 50,
+    tag: str | None = None,
+    folder: str | None = None,
+    author: str | None = None,
+) -> list[tuple[int, float, int]]:
+    """(post_id, best_distance, best_chunk_id) triples, ascending distance (=
+    descending similarity); the chunk id is what a search result quotes as its
+    ``match`` (``matched_chunks``). Chunk→post aggregation uses **max similarity / min distance**,
     not mean — a post is relevant if *any* section is (relay #253).
 
     ``tag``/``folder`` (relay #253 usage report, Issue 4) restrict the result
@@ -483,7 +498,7 @@ async def semantic_search(
 
     async with db.execute(
         f"""
-        SELECT c.post_id, v.distance FROM vec_chunks v
+        SELECT c.post_id, v.distance, c.id FROM vec_chunks v
         JOIN chunks c ON c.id = v.rowid
         {joins}
         WHERE {" AND ".join(conditions)}
@@ -493,11 +508,38 @@ async def semantic_search(
     ) as cur:
         rows = await cur.fetchall()
 
-    best: dict[int, float] = {}
-    for post_id, distance in rows:
-        if post_id not in best or distance < best[post_id]:
-            best[post_id] = distance
-    return sorted(best.items(), key=lambda kv: kv[1])[:limit]
+    best: dict[int, tuple[float, int]] = {}
+    for post_id, distance, chunk_id in rows:
+        if post_id not in best or distance < best[post_id][0]:
+            best[post_id] = (distance, chunk_id)
+    ranked = sorted(best.items(), key=lambda kv: kv[1][0])[:limit]
+    return [(pid, distance, chunk_id) for pid, (distance, chunk_id) in ranked]
+
+
+async def matched_chunks(db: aiosqlite.Connection, chunk_ids: dict[int, int], rows) -> dict[int, tuple[str, str]]:
+    """``post_id → (heading_path, chunk body)`` for each post's best chunk
+    (``chunk_ids``: post_id → chunk id from ``semantic_search_chunks``; ``rows``:
+    the posts' index rows). The index stores only a chunk's hash, not its text,
+    so the post is re-chunked and the chunk found by hash — a post edited since
+    its chunks were synced has no chunk with that hash and simply gets none."""
+    if not chunk_ids:
+        return {}
+    placeholders = ",".join("?" for _ in chunk_ids)
+    async with db.execute(
+        f"SELECT id, post_id, content_hash FROM chunks WHERE id IN ({placeholders})", list(chunk_ids.values())
+    ) as cur:
+        wanted = {r["post_id"]: r["content_hash"] for r in await cur.fetchall()}
+    model_id = settings.embedding_model
+    out: dict[int, tuple[str, str]] = {}
+    for row in rows:
+        content_hash = wanted.get(row["id"])
+        if content_hash is None:
+            continue
+        for chunk in chunking.chunk_post(row["title"], row["content"]):
+            if _hash(model_id, chunk.body) == content_hash:
+                out[row["id"]] = (chunk.heading_path, chunk.body)
+                break
+    return out
 
 
 def similarity_score(distance: float) -> float:

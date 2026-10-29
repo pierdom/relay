@@ -797,13 +797,13 @@ async def test_ranked_pool_covers_offset_plus_limit(db, backend, monkeypatch):
     offset/limit — a pool stuck at a flat default silently dead-ends
     pagination past it, indistinguishable from "no more results"."""
     calls: list[int] = []
-    real_semantic_search = vectors.semantic_search
+    real_semantic_search = vectors.semantic_search_chunks
 
     async def spy(db_, query, *, limit=50, tag=None, folder=None, author=None):
         calls.append(limit)
         return await real_semantic_search(db_, query, limit=limit, tag=tag, folder=folder, author=author)
 
-    monkeypatch.setattr(vectors, "semantic_search", spy)
+    monkeypatch.setattr(vectors, "semantic_search_chunks", spy)
     await service.list_posts(db, search="anything", mode="semantic", limit=10, offset=60)
     assert calls[-1] == 70  # offset + limit, comfortably under the cap
 
@@ -813,13 +813,13 @@ async def test_ranked_pool_size_is_capped(db, backend, monkeypatch):
     """A caller-supplied offset is unvalidated at the MCP layer — the pool must
     not scale unbounded with it (sqlite-vec KNN cost scales with k)."""
     calls: list[int] = []
-    real_semantic_search = vectors.semantic_search
+    real_semantic_search = vectors.semantic_search_chunks
 
     async def spy(db_, query, *, limit=50, tag=None, folder=None, author=None):
         calls.append(limit)
         return await real_semantic_search(db_, query, limit=limit, tag=tag, folder=folder, author=author)
 
-    monkeypatch.setattr(vectors, "semantic_search", spy)
+    monkeypatch.setattr(vectors, "semantic_search_chunks", spy)
     await service.list_posts(db, search="anything", mode="semantic", limit=50, offset=10_000)
     assert calls[-1] == service._RANKED_POOL_CAP
 
@@ -920,3 +920,47 @@ async def test_external_delete_drops_the_posts_chunks(db):
     path.unlink()  # not via relay, so no self-delete suppression
     await watcher._reconcile_delete(db, path)
     assert await _chunk_rows(db, post.id) == []
+
+
+# ── summary `match`: the passage a search hit on ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_semantic_match_quotes_the_closest_section(db, backend):
+    """A semantic hit quotes its best chunk, under its heading — not the
+    post's opening, which is what the excerpt already shows."""
+    content = f"## Opening\n{LONG_SECTION}\n\n## Backups\n{'restic snapshot rotation ' * 30}"
+    post = await service.create_post(db, PostCreate(title="Homelab", content=content, tags=["dev"]))
+    from relay.chunking import chunk_post
+    target = next(c for c in chunk_post("Homelab", content) if c.heading_path == "Backups")
+
+    result = await service.list_posts(db, search=target.embed_text, mode="semantic", summary=True)
+    hit = next(i for i in result.items if i.id == post.id)
+    assert hit.match is not None and hit.match.startswith("Backups: restic snapshot")
+    assert "restic" not in hit.excerpt
+
+
+@pytest.mark.asyncio
+async def test_hybrid_match_prefers_the_keyword_passage(db, backend):
+    content = f"## Opening\n{LONG_SECTION}\n\n## Later\n{LONG_SECTION} the zanzibar clause {LONG_SECTION}"
+    post = await service.create_post(db, PostCreate(title="Contract", content=content, tags=["dev"]))
+
+    result = await service.list_posts(db, search="zanzibar", mode="hybrid", summary=True)
+    hit = next(i for i in result.items if i.id == post.id)
+    assert hit.match is not None and "zanzibar clause" in hit.match
+
+
+@pytest.mark.asyncio
+async def test_semantic_match_is_none_for_a_stale_chunk(db, backend):
+    """The index keeps only chunk hashes; a body edited behind the chunks'
+    back (no re-sync) has no chunk with the stored hash, so no match rather
+    than a wrong one."""
+    content = f"## Only\n{LONG_SECTION} original"
+    post = await service.create_post(db, PostCreate(title="Stale", content=content, tags=["dev"]))
+    await db.execute("UPDATE posts SET content = ? WHERE id = ?", (f"## Only\n{LONG_SECTION} rewritten", post.id))
+    from relay.chunking import chunk_post
+    query = chunk_post("Stale", content)[0].embed_text
+
+    result = await service.list_posts(db, search=query, mode="semantic", summary=True)
+    hit = next(i for i in result.items if i.id == post.id)
+    assert hit.match is None
