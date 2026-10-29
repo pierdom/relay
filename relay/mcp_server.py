@@ -737,7 +737,9 @@ async def publish_post(
     description=(
         "List posts from the relay feed, optionally filtered by tag, folder or search term. "
         "Returns metadata-only summaries (id, title, tags, folder, and a short excerpt) "
-        "by default — call get_post(id) for a full body. Pass summary=false to get full "
+        "by default — call get_post(id) for a full body. With search, each summary's 'match' "
+        "quotes the passage that hit (the keyword snippet, or the closest section for semantic), "
+        "often enough to judge a result without fetching it. Pass summary=false to get full "
         "content inline (heavier). sort is 'updated' (default, last modified — includes "
         "edits made directly in Obsidian) or 'created'; order is 'desc' (default) or 'asc'. "
         "Sort by created + asc to read a topic's posts in the order they were written. "

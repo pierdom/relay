@@ -164,3 +164,36 @@ async def test_mcp_list_posts_defaults_to_summary(client):
     assert not hasattr(item, "content")
     assert item.excerpt == "body of the note"
     assert item.folder == "Dev"
+
+
+# ── summary `match` (keyword) ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_quotes_the_matching_passage(client):
+    body = "An opening paragraph about nothing in particular. " * 20 + (
+        "\n\nThe **firmware** for the [[NAS]] gets pinned to `v2.3` here. " + "Trailing filler words. " * 20
+    )
+    await _create_post(client, title="Storage notes", content=body)
+    data = (await client.get("/posts", params={"search": "firmware", "summary": "true"}, headers=AUTH)).json()
+    item = next(i for i in data["items"] if i["title"] == "Storage notes")
+    assert "firmware for the NAS gets pinned to v2.3" in item["match"]
+    assert "firmware" not in item["excerpt"]
+    assert "\x02" not in item["match"] and "*" not in item["match"]
+
+
+@pytest.mark.asyncio
+async def test_match_is_null_when_only_the_title_hits(client):
+    await _create_post(client, title="Kubernetes migration", content="nothing relevant in the body")
+    data = (await client.get("/posts", params={"search": "kubernetes", "summary": "true"}, headers=AUTH)).json()
+    item = next(i for i in data["items"] if i["title"] == "Kubernetes migration")
+    assert item["match"] is None
+
+
+@pytest.mark.asyncio
+async def test_match_only_on_search_summaries(client):
+    await _create_post(client, title="Plain", content="some body text")
+    listing = (await client.get("/posts", params={"summary": "true"}, headers=AUTH)).json()
+    assert all(i["match"] is None for i in listing["items"])
+    full = (await client.get("/posts", params={"search": "body", "summary": "false"}, headers=AUTH)).json()
+    assert all("match" not in i for i in full["items"])

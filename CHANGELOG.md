@@ -4,6 +4,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.23.0] — 2026-10-29
+
+### Added
+- **Search results quote the passage that matched.** A summary from a search (`list_posts`, MCP's default, or `GET /posts?search=…&summary=true`) now carries `match`: the keyword hit in the body with a little context, or for semantic search the closest section as `Heading: text`; hybrid prefers the keyword passage. The excerpt only ever showed a post's opening, so an agent often had to fetch a post just to see whether it was relevant. `match` is `null` when only the title or tags matched, and absent from full-content listings
+
+---
+
 ## [1.22.4] — 2026-10-29
 
 ### Fixed

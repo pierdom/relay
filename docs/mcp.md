@@ -87,7 +87,7 @@ restore_post(id=54, sha="a8dcc37")
 - **`get_status` reports what works, not what's configured.** `history.effective` false = git missing, writes not recoverable · `search.fts5` false = substring search · `search.embeddings` false = semantic/hybrid will error · `watcher.running` false = direct file edits aren't indexed. It also names the served vault — "am I talking to the instance I think I am".
 - **Its `embeddings` block is the full picture**: model, dimension, size, coverage (`posts_embedded`/`posts_missing`/`chunks_total`), and `backfill.running` — check that before reading a silent semantic query on a fresh vault as "nothing matched".
 - **Ids are never reused** and aren't contiguous; an `#id` always means the same post.
-- **`list_posts` returns excerpts** (`summary=true`); `get_post` for the body.
+- **`list_posts` returns excerpts** (`summary=true`); `get_post` for the body. A search result's `match` is the passage that hit, often enough to answer without a `get_post`.
 - **`set_embeddings_enabled` lasts until restart.** Enabling resumes against the model the vector schema was built for (errors on a dimension mismatch rather than rebuilding live) and starts a backfill; disabling frees the model's memory at once.
 - **`trigger_embedding_backfill` returns 409 while one runs** — including the one enabling just started. Check `embeddings.backfill.running` instead of retrying blind.
 - **Scope errors are final.** A read-only key doesn't even see write tools; a tag-restricted key gets `"This API key's scope does not permit this write"` for posts outside its tags ([auth.md](auth.md)). Don't retry.

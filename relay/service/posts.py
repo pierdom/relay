@@ -21,6 +21,8 @@ from ..errors import (
 )
 from ..identity import Actor
 from ..models import (
+    SNIPPET_CLOSE,
+    SNIPPET_OPEN,
     BacklinksResponse,
     LinkIndexResponse,
     LinkTarget,
@@ -36,6 +38,8 @@ from ..models import (
     SimilarPost,
     decode_properties,
     etag_for_row,
+    match_from_chunk,
+    match_from_snippet,
     tags_from_sentinel,
 )
 from ._common import (
@@ -245,6 +249,27 @@ async def _keyword_ranked_ids(
         return [row[0] for row in await cur.fetchall()]
 
 
+# Body tokens of context around a keyword hit in a summary's ``match``.
+_SNIPPET_TOKENS = 32
+
+
+async def _keyword_matches(db: aiosqlite.Connection, search: str, ids: list[int]) -> dict[int, str]:
+    """``post_id → match`` for the posts in ``ids`` whose body hits ``search``:
+    one FTS5 ``snippet()`` query over just the page, so it costs the same
+    whichever ranker ordered the page."""
+    match = _fts_query(search) if database.FTS_ENABLED else None
+    if not ids or match is None:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    async with db.execute(
+        f"SELECT rowid, snippet(posts_fts, 1, ?, ?, '…', ?) FROM posts_fts "
+        f"WHERE posts_fts MATCH ? AND rowid IN ({placeholders})",
+        [SNIPPET_OPEN, SNIPPET_CLOSE, _SNIPPET_TOKENS, match, *ids],
+    ) as cur:
+        snippets = {row[0]: match_from_snippet(row[1]) for row in await cur.fetchall()}
+    return {pid: text for pid, text in snippets.items() if text}
+
+
 # Both rankers' candidate pool must cover offset+limit or pagination silently
 # dead-ends past whatever the pool happened to hold — but sqlite-vec's KNN
 # cost scales with k, so the pool can't just track an unbounded caller-
@@ -301,7 +326,7 @@ async def _list_posts_ranked(
     t0 = time.monotonic()
     degraded = False
     try:
-        semantic_results = await vectors.semantic_search(
+        chunk_results = await vectors.semantic_search_chunks(
             db, search, limit=pool_size, tag=tag, folder=folder, author=author
         )
     except Exception:
@@ -309,11 +334,12 @@ async def _list_posts_ranked(
         # OOM, corrupt cache). Answer the query keyword-ranked and say so, rather
         # than 500 — "configured off" stays a loud 503 above (AUDIT.md, Q3).
         logger.warning("Semantic search failed at query time — answering keyword-only", exc_info=True)
-        semantic_results = []
+        chunk_results = []
         degraded = True
     embedding_ms = round((time.monotonic() - t0) * 1000, 1)
     search_timing = SearchTiming(cold_start=cold_start, embedding_ms=embedding_ms, degraded=degraded)
 
+    semantic_results = [(pid, distance) for pid, distance, _ in chunk_results]
     semantic_ranked = [pid for pid, _ in semantic_results]
     if degraded:
         ordered_ids = await _keyword_ranked_ids(db, search, limit=pool_size, tag=tag, folder=folder, author=author)
@@ -340,8 +366,17 @@ async def _list_posts_ranked(
     rows = [rows_by_id[pid] for pid in page_ids if pid in rows_by_id]
 
     if summary:
+        # A hybrid hit quotes its keyword passage when the body has one — the
+        # literal terms are the easier thing to judge — else its closest section.
+        keyword = await _keyword_matches(db, search, page_ids) if mode == "hybrid" or degraded else {}
+        best_chunk = {pid: cid for pid, _, cid in chunk_results if pid in rows_by_id and pid not in keyword}
+        sections = await vectors.matched_chunks(db, best_chunk, rows)
+        matches = {
+            pid: keyword.get(pid) or (match_from_chunk(*sections[pid]) if pid in sections else None)
+            for pid in page_ids
+        }
         return PostSummaryListResponse(
-            items=[PostSummary.from_row(r) for r in rows],
+            items=[PostSummary.from_row(r, matches.get(r["id"])) for r in rows],
             total=len(ordered_ids), limit=limit, offset=offset, pinned=None,
             search_timing=search_timing,
         )
@@ -468,8 +503,9 @@ async def list_posts(
         master = await _fetch(db, 0)
 
     if summary:
+        matches = await _keyword_matches(db, search, [r["id"] for r in rows]) if search else {}
         return PostSummaryListResponse(
-            items=[PostSummary.from_row(r) for r in rows],
+            items=[PostSummary.from_row(r, matches.get(r["id"])) for r in rows],
             total=count_row[0],
             limit=limit,
             offset=offset,

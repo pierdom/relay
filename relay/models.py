@@ -278,6 +278,31 @@ def make_excerpt(content: str, limit: int = 240) -> str:
     return _truncate(_plain_text(FENCE_RE.sub(" ", text)), limit)
 
 
+# FTS5 ``snippet()`` brackets each matched term with these; ``match_from_snippet``
+# reads them to tell a body hit from a title/tag-only hit, then drops them.
+SNIPPET_OPEN, SNIPPET_CLOSE = "\x02", "\x03"
+
+
+def match_from_snippet(snippet: str | None) -> str | None:
+    """A keyword hit's ``match``: the FTS5 snippet of the body as plain text,
+    or ``None`` when no term matched the body (FTS5 then returns the body's
+    opening instead — the excerpt already says that)."""
+    if not snippet or SNIPPET_OPEN not in snippet:
+        return None
+    text = snippet.replace(SNIPPET_OPEN, "").replace(SNIPPET_CLOSE, "")
+    return _plain_text(FENCE_RE.sub(" ", text)) or None
+
+
+def match_from_chunk(heading_path: str, body: str, limit: int = 240) -> str | None:
+    """A semantic hit's ``match``: its best chunk, prefixed with the section it
+    sits under."""
+    text = _truncate(_plain_text(FENCE_RE.sub(" ", body)), limit)
+    if not text:
+        return None
+    heading = _plain_text(heading_path)
+    return f"{heading}: {text}" if heading else text
+
+
 class PostSummary(BaseModel):
     """Metadata-only view of a post: everything but the full body, plus a short
     plain-text ``excerpt``. Lets agents dedupe/browse without pulling every body
@@ -300,9 +325,15 @@ class PostSummary(BaseModel):
         default=None, description="See PostResponse.updated_by (relay #198, B-7)"
     )
     etag: str = Field(description="Opaque version token (relay #198, N-1) — pass back as if_match on a write")
+    match: str | None = Field(
+        default=None,
+        description="Search results only: the passage that matched — the keyword hit in the body, or the "
+        "section closest in meaning — so a caller can judge a hit without fetching the post. None when "
+        "only the title or tags matched",
+    )
 
     @classmethod
-    def from_row(cls, row) -> PostSummary:
+    def from_row(cls, row, match: str | None = None) -> PostSummary:
         return cls(
             id=row["id"],
             title=row["title"],
@@ -316,6 +347,7 @@ class PostSummary(BaseModel):
             properties=decode_properties(row["properties"]),
             updated_by=row["updated_by"],
             etag=etag_for_row(row),
+            match=match,
         )
 
 
