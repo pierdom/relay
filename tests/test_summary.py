@@ -85,6 +85,33 @@ def test_excerpt_truncates_on_word_boundary():
     assert "  " not in out  # whitespace collapsed
 
 
+def _full_scan_excerpt(body: str, limit: int = 240) -> str:
+    """make_excerpt's answer if it scanned the whole body (its pre-head behaviour)."""
+    from relay.markdown_scan import FENCE_RE
+    from relay.models import _FRONTMATTER_RE, _plain_text, _truncate
+
+    return _truncate(_plain_text(FENCE_RE.sub(" ", _FRONTMATTER_RE.sub("", body))), limit)
+
+
+PARA = "Some [linked text](https://example.com/a) and a [[Wiki Note|wiki]] in prose. " * 3 + "\n\n"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(PARA * 400, id="long-prose"),
+        pytest.param("```sh\n" + "echo code\n" * 2000 + "```\n\n" + PARA * 50, id="code-first"),
+        pytest.param("intro line\n```\n" + "x = 1\n" * 3000 + "```\n" + PARA * 50, id="fence-crosses-head"),
+        pytest.param("tiny intro\n\n```\nnever closed\n" + PARA * 200, id="unclosed-fence"),
+        pytest.param("#" * 30000, id="no-text-at-all"),
+        pytest.param(("one very long line without newlines " * 2000), id="single-line"),
+        pytest.param("---\nid: 9\n---\n" + PARA * 300, id="frontmatter"),
+    ],
+)
+def test_excerpt_head_scan_matches_full_scan(body):
+    assert make_excerpt(body) == _full_scan_excerpt(body)
+
+
 # ── summary listing (REST) ───────────────────────────────────────────────────
 
 

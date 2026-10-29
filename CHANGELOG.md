@@ -4,6 +4,15 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.22.4] — 2026-10-29
+
+### Fixed
+- **Summary listings and keyword search are about 3× faster.** Excerpts were built by running six regexes over each post's whole body to keep 240 characters, which made a page of summaries slower than the same page with full bodies; only the head of the body is scanned now, with the same result
+- **Backlinks are about 6× faster** (`get_backlinks`, and the link half of `/posts/{id}/related`): posts that cannot link to the target are skipped before their links are parsed, and code spans are blanked without a per-character loop
+- **`lint` and `/posts/deleted` no longer take seconds on every call.** Finding deleted posts ran about three git processes per deletion each time (4–7s on a vault with ~110 deletions); the scan is now cached and extended with only the commits since, the parent sha comes from the same `git log`, and every old revision is read in one `git cat-file --batch`
+
+---
+
 ## [1.22.3] — 2026-10-25
 
 ### Changed

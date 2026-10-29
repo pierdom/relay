@@ -30,6 +30,7 @@ import logging
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -217,9 +218,11 @@ async def commit(message: str, *, author: str | None = None) -> bool:
 
 
 def reset_state_for_tests() -> None:
-    """Forget the cached git probe (tests toggle the setting between cases)."""
+    """Forget the cached git probe (tests toggle the setting between cases)
+    and the deletions scan."""
     global _available
     _available = None
+    _deletions_cache.clear()
 
 
 # ── reading history back out ─────────────────────────────────────────────────
@@ -555,44 +558,108 @@ def _deletions_sync(limit: int) -> list[Deletion]:
     the create commit. What is reported is the last commit that actually touched
     the path before the delete — `log -1 <delete>^ -- <path>`.
     """
-    got = _run("log", "--diff-filter=D", "--format=" + _LOG_FORMAT, "--name-only", "--", "*.md")
-    if got.returncode:
+    head = _run("rev-parse", "--verify", "-q", "HEAD").stdout.strip()
+    if not head:
         return []
+    with _deletions_lock:
+        key = str(_git_dir())
+        cached_head, entries = _deletions_cache.get(key, ("", []))
+        if cached_head != head:
+            if cached_head and _run("merge-base", "--is-ancestor", cached_head, head).returncode == 0:
+                entries = _deleted_entries(f"{cached_head}..{head}") + entries
+            else:
+                entries = _deleted_entries(head)
+            _deletions_cache[key] = (head, entries)
     found: list[Deletion] = []
     seen: set[int] = set()
-    for sha, when, message, paths in _parse_log_paths(got.stdout):
-        reason = _classify(message)
-        parent = _run("rev-parse", f"{sha}^").stdout.strip()
+    for d in entries:
+        if d.post_id in seen:
+            continue
+        seen.add(d.post_id)
+        found.append(d)
+        if len(found) >= limit:
+            break
+    return found
+
+
+# `_deletions_sync`'s scan, per git-dir: (HEAD it covers, every deletion up to
+# it, newest first, not yet deduped by id). History only grows, so a new HEAD
+# scans just the commits since — before this, `lint` and `/posts/deleted` ran
+# ~3 git processes per deleted post on every call (7.5s on bespin).
+# A HEAD that isn't a descendant (history rewritten by hand) rescans from scratch.
+_deletions_cache: dict[str, tuple[str, list[Deletion]]] = {}
+_deletions_lock = threading.Lock()
+_DELETIONS_LOG_FORMAT = f"{_RS}%H{_FS}%P{_FS}%aI{_FS}%s"
+
+
+def _deleted_entries(revisions: str) -> list[Deletion]:
+    """Every post-file deletion in ``revisions``, newest first: one ``log``
+    for the deletes (parents included, no ``rev-parse`` each), one ``log -1``
+    per deleted path for its restorable sha, one ``cat-file --batch`` for all
+    their blobs."""
+    got = _run("log", "--diff-filter=D", "--format=" + _DELETIONS_LOG_FORMAT, "--name-only", revisions, "--", "*.md")
+    if got.returncode:
+        return []
+    pending: list[tuple[str, str, str, str, str]] = []   # restorable, path, when, message, reason
+    for block in got.stdout.split(_RS)[1:]:
+        header, _, names = block.partition("\n")
+        parts = header.split(_FS)
+        if len(parts) != 4:
+            continue
+        _sha, parents, when, message = parts
+        parent = parents.split(" ")[0]
         if not parent:
             continue   # a delete in the initial commit cannot happen, but be safe
-        for path in paths:
+        for path in (p.strip() for p in names.split("\n")):
+            if not path:
+                continue
             # The last commit that *touched* this path before the delete. The
             # parent commit has the same content, but `revisions()` only lists
             # commits that touched the file, so a parent that did not is a sha
             # `restore_post` will refuse.
-            restorable = _run(
-                "log", "-1", "--format=%H", parent, "--", path
-            ).stdout.strip() or parent
-            text = _blob_sync(restorable, path)
-            if text is None:
-                continue
-            try:
-                meta, _ = frontmatter.parse(text)
-            except Exception:   # a half-written revision is simply not a match
-                continue
-            pid = meta.get("id")
-            if not isinstance(pid, int) or pid in seen:
-                continue
-            seen.add(pid)
-            # The title *is* the filename — front-matter deliberately has no
-            # `title` key — so it comes off the path the file occupied.
-            found.append(Deletion(
-                post_id=pid, title=PurePosixPath(path).stem,
-                sha=restorable, when=when, message=message, path=path, reason=reason,
-            ))
-            if len(found) >= limit:
-                return found
-    return found
+            restorable = _run("log", "-1", "--format=%H", parent, "--", path).stdout.strip() or parent
+            pending.append((restorable, path, when, message, _classify(message)))
+    texts = _blobs_sync([(restorable, path) for restorable, path, *_ in pending])
+    entries: list[Deletion] = []
+    for (restorable, path, when, message, reason), text in zip(pending, texts, strict=True):
+        if text is None:
+            continue
+        try:
+            meta, _ = frontmatter.parse(text)
+        except Exception:   # a half-written revision is simply not a match
+            continue
+        pid = meta.get("id")
+        if not isinstance(pid, int):
+            continue
+        # The title *is* the filename — front-matter deliberately has no
+        # `title` key — so it comes off the path the file occupied.
+        entries.append(Deletion(
+            post_id=pid, title=PurePosixPath(path).stem,
+            sha=restorable, when=when, message=message, path=path, reason=reason,
+        ))
+    return entries
+
+
+def _blobs_sync(specs: list[tuple[str, str]]) -> list[str | None]:
+    """``_blob_sync`` for many ``(sha, path)`` pairs in one ``git cat-file --batch``."""
+    if not specs:
+        return []
+    cmd = ["git", f"--git-dir={_git_dir()}", f"--work-tree={settings.vault_path}", *_IDENTITY, "cat-file", "--batch"]
+    stdin = "".join(f"{sha}:{path}\n" for sha, path in specs).encode()
+    out = subprocess.run(cmd, input=stdin, capture_output=True, timeout=_TIMEOUT_SECONDS).stdout
+    texts: list[str | None] = []
+    pos = 0
+    for _ in specs:
+        eol = out.index(b"\n", pos)
+        header = out[pos:eol].split(b" ")
+        pos = eol + 1
+        if len(header) != 3 or header[1] != b"blob":   # "<spec> missing" / "ambiguous"
+            texts.append(None)
+            continue
+        size = int(header[2])
+        texts.append(out[pos:pos + size].decode("utf-8", errors="replace"))
+        pos += size + 1
+    return texts
 
 
 async def deletions(limit: int = 50) -> list[Deletion]:

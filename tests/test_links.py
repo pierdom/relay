@@ -95,6 +95,30 @@ async def test_backlinks_via_wikilink_and_idref(client):
 
 
 @pytest.mark.asyncio
+async def test_backlinks_prefilter_keeps_every_link_form(client):
+    """The cheap pre-check (``_could_link_to``) must never drop a real link:
+    any case, an alias, a heading, padding inside the brackets, a non-ASCII
+    title — and it must not let a bare mention or a code span through."""
+    target = await _create(client, "Target Note")
+    accented = await _create(client, "Café Ωμέγα Notes")
+    linking = [
+        await _create(client, "Upper", content="see [[TARGET NOTE]]"),
+        await _create(client, "Alias", content="see [[target note|the target]]"),
+        await _create(client, "Heading", content="see [[Target Note#Section]]"),
+        await _create(client, "Padded", content="see [[ Target Note ]]"),
+        await _create(client, "Idref", content=f"see #{target['id']}."),
+    ]
+    await _create(client, "Mention", content="Target Note is mentioned but not linked, [[Other]]")
+    await _create(client, "Code", content="`[[Target Note]]` is syntax, not a link")
+    to_accented = await _create(client, "Greek", content="see [[CAFÉ ΩΜΈΓΑ NOTES]]")
+
+    r = await client.get(f"/posts/{target['id']}/backlinks", headers=AUTH)
+    assert {i["id"] for i in r.json()["items"]} == {p["id"] for p in linking}
+    r = await client.get(f"/posts/{accented['id']}/backlinks", headers=AUTH)
+    assert {i["id"] for i in r.json()["items"]} == {to_accented["id"]}
+
+
+@pytest.mark.asyncio
 async def test_backlinks_404_for_missing(client):
     r = await client.get("/posts/9999/backlinks", headers=AUTH)
     assert r.status_code == 404
