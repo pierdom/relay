@@ -7,8 +7,8 @@ dependencies = [
     "fastapi>=0.141.1",
     "uvicorn[standard]>=0.53.0",
     "aiosqlite>=0.22.1",
-    "pydantic-settings>=2.15.0",
-    "sse-starlette>=3.5.0",
+    "pydantic-settings>=2.16.1",
+    "sse-starlette>=3.6.0",
     "mcp>=2.2.0,<3.0.0",
     "textual>=8.2.8",
     "requests>=2.34.2",
@@ -20,10 +20,10 @@ dependencies = [
     "sqlite-vec>=0.1.9",
     "fastembed>=0.8.1",
     "httpx>=0.28.1",
-    "httpx2>=2.13.1",
+    "httpx2>=2.16.0",
     "httpcore>=1.0.9",
     "anyio>=4.15.1",
-    "fastmcp>=4.0.10",
+    "fastmcp>=4.1.4",
     "py-key-value-aio[filetree,wrappers-encryption]>=0.4.6",
 ]
 
@@ -41,7 +41,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-playwright>=0.9.0",
-    "ruff>=0.16.9",
+    "ruff>=0.17.2",
 ]
 
 [tool.pytest.ini_options]
