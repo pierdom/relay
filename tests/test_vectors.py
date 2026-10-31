@@ -578,6 +578,81 @@ async def test_find_similar_posts_respects_threshold(db, backend):
     assert [pid for pid, _ in similar] == [a.id]
 
 
+def _count_queries(monkeypatch, backend) -> list[str]:
+    queries: list[str] = []
+
+    class Counting(type(backend)):
+        def embed_query(self, text):
+            queries.append(text)
+            return super().embed_query(text)
+
+    counting = Counting()
+    monkeypatch.setattr(embedding, "get_backend", lambda: counting)
+    return queries
+
+
+@pytest.mark.asyncio
+async def test_find_similar_posts_queries_an_indexed_post_by_its_stored_vectors(db, backend, monkeypatch):
+    """An indexed post's own chunk vectors are the query — no model call, and a
+    post sharing one of its sections ranks closest."""
+    shared = f"## Shared\n{LONG_SECTION} shared"
+    a = await service.create_post(db, PostCreate(title="Alpha", content=shared, tags=["dev"]))
+    b = await service.create_post(db, PostCreate(title="Beta", content=shared, tags=["dev"]))
+    queries = _count_queries(monkeypatch, backend)
+
+    similar = await vectors.find_similar_posts(db, exclude_post_id=a.id, title="Alpha", content=shared)
+
+    assert queries == []
+    assert similar[0] == (b.id, pytest.approx(0.0, abs=1e-6))
+
+
+@pytest.mark.asyncio
+async def test_find_similar_posts_averages_every_section(db, backend, monkeypatch):
+    """The centroid covers the whole post, not only its opening: a post made of
+    two sections sits between the two posts that each hold one of them."""
+    first, second = f"{LONG_SECTION} first", f"{LONG_SECTION} second"
+    whole = await service.create_post(db, PostCreate(
+        title="Whole", content=f"## One\n{first}\n\n## Two\n{second}", tags=["dev"],
+    ))
+    one = await service.create_post(db, PostCreate(title="One", content=f"## One\n{first}", tags=["dev"]))
+    two = await service.create_post(db, PostCreate(title="Two", content=f"## Two\n{second}", tags=["dev"]))
+
+    similar = dict(await vectors.find_similar_posts(
+        db, exclude_post_id=whole.id, title="Whole", content=f"## One\n{first}\n\n## Two\n{second}", threshold=2.0,
+    ))
+
+    assert {one.id, two.id} <= similar.keys()
+    assert similar[one.id] == pytest.approx(similar[two.id], abs=0.05)
+
+
+@pytest.mark.asyncio
+async def test_find_similar_posts_embeds_the_text_when_stored_chunks_are_stale(db, backend, monkeypatch):
+    a = await service.create_post(db, PostCreate(title="Alpha", content=f"{LONG_SECTION} alpha", tags=["dev"]))
+    queries = _count_queries(monkeypatch, backend)
+
+    await vectors.find_similar_posts(db, exclude_post_id=a.id, title="Alpha", content=f"{LONG_SECTION} edited")
+
+    assert len(queries) == 1
+
+
+@pytest.mark.asyncio
+async def test_related_never_loads_the_model(db, backend, monkeypatch):
+    a = await service.create_post(db, PostCreate(title="Alpha", content=f"## S\n{LONG_SECTION}", tags=["dev"]))
+    await service.create_post(db, PostCreate(title="Beta", content=f"## S\n{LONG_SECTION}", tags=["dev"]))
+    loads = 0
+
+    def counting_get_backend():
+        nonlocal loads
+        loads += 1
+        return backend
+
+    monkeypatch.setattr(embedding, "get_backend", counting_get_backend)
+    related = await service.get_related(db, a.id)
+
+    assert loads == 0
+    assert related.items[0].title == "Beta"
+
+
 # ── watcher: same code path as the API ───────────────────────────────────────
 
 

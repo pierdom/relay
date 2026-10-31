@@ -10,6 +10,7 @@ it costs the existing test suite nothing.
 """
 from __future__ import annotations
 
+import array
 import asyncio
 import hashlib
 import logging
@@ -480,6 +481,22 @@ async def semantic_search_chunks(
     # to_thread hands the whole chain to a worker thread instead.
     query_embedding = await asyncio.to_thread(_embed_query, query)
     query_vec = sqlite_vec.serialize_float32(_normalize(query_embedding))
+    return await _nearest_chunks(db, query_vec, limit=limit, tag=tag, folder=folder, author=author)
+
+
+async def _nearest_chunks(
+    db: aiosqlite.Connection,
+    query_vec: bytes,
+    *,
+    limit: int,
+    tag: str | None = None,
+    folder: str | None = None,
+    author: str | None = None,
+) -> list[tuple[int, float, int]]:
+    """``semantic_search_chunks``'s ranking for an already-serialized unit
+    query vector — the part that needs no model."""
+    from . import database
+
     # Request more chunks than `limit` posts: several top chunks can share a
     # post, so a 1:1 chunk:post k would under-fill the post-level ranking.
     chunk_k = max(limit * 4, 100)
@@ -583,17 +600,52 @@ async def find_similar_posts(
     query-time backend failure, which is also swallowed to empty here: unlike
     ``_list_posts_ranked``'s ranked search, there is no caller who explicitly
     asked for semantic-only results and needs to know it degraded — this is
-    pure advisory enrichment on top of an otherwise-successful write or read."""
+    pure advisory enrichment on top of an otherwise-successful write or read.
+
+    When ``exclude_post_id``'s stored chunks match ``title``/``content`` (the
+    usual case: the write path syncs them inline), the query is the mean of
+    those chunk vectors — no model call, and it covers the whole post, where
+    embedding the text as one query read only what fit in the model's input
+    window. Otherwise (a draft not yet indexed, a failed sync) it falls back
+    to embedding the text."""
     from . import database
 
     if not (database.VEC_ENABLED and settings.embedding_enabled):
         return []
     try:
-        results = await semantic_search(db, f"{title}\n\n{content}", limit=limit + 1)
+        centroid = await _post_centroid(db, exclude_post_id, title, content)
+        if centroid is not None:
+            results = [(pid, d) for pid, d, _ in await _nearest_chunks(db, centroid, limit=limit + 1)]
+        else:
+            results = await semantic_search(db, f"{title}\n\n{content}", limit=limit + 1)
     except Exception:
         logger.warning("Similar-posts lookup failed — continuing without it", exc_info=True)
         return []
     return [(pid, d) for pid, d in results if pid != exclude_post_id and d <= threshold][:limit]
+
+
+async def _post_centroid(db: aiosqlite.Connection, post_id: int, title: str, content: str) -> bytes | None:
+    """The normalized mean of ``post_id``'s stored chunk vectors, serialized for
+    a KNN query — or ``None`` when its stored chunks aren't exactly the ones
+    ``title``/``content`` chunk into (none yet, or a sync that failed after an
+    edit), so a caller never ranks against a stale version of the post."""
+    model_id = settings.embedding_model
+    wanted = [_hash(model_id, c.body) for c in chunking.chunk_post(title, content)]
+    if not wanted:
+        return None
+    async with db.execute(
+        """SELECT c.content_hash, e.embedding FROM chunks c
+           JOIN embeddings_cache e ON e.content_hash = c.content_hash WHERE c.post_id = ?""",
+        (post_id,),
+    ) as cur:
+        stored = {r[0]: r[1] for r in await cur.fetchall()}
+    if set(wanted) != set(stored):
+        return None
+    total = [0.0] * (len(stored[wanted[0]]) // 4)
+    for h in wanted:
+        for i, x in enumerate(array.array("f", stored[h])):
+            total[i] += x
+    return sqlite_vec.serialize_float32(_normalize(total))
 
 
 # Semantic's top-1 L2 distance (unit-normalized vectors, so 0=identical,
