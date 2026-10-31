@@ -773,10 +773,18 @@ async def list_posts(
     return result.model_dump()
 
 
-@_tool(description="Get a single post by its ID. Use id=0 for the master document.")
-async def get_post(id: int) -> dict:
+@_tool(
+    description=(
+        "Get a single post by its ID. Use id=0 for the master document. For a long post, read only the "
+        "part you need: outline=true lists every heading with its section's size (content is then just the "
+        "text before the first heading), and section returns one section — a heading, or a 'Parent > "
+        "Heading' path, such as the heading a search result's match starts with. A section read's content "
+        "is only that section: change it with edit_post, never update_post."
+    )
+)
+async def get_post(id: int, section: str | None = None, outline: bool = False) -> dict:
     async with _db() as db:
-        post = await service.get_post(db, id)
+        post = await service.get_post(db, id, section=section, outline=outline)
     if post is None:
         return {"error": f"Post #{id} not found."}
     return post.model_dump()

@@ -62,6 +62,14 @@ class EditTextNotUnique(ServiceError):
         self.count = count
 
 
+class SectionNotFound(ServiceError):
+    status, message = 422, "No such section in this post"
+
+
+class SectionNotUnique(ServiceError):
+    status, message = 422, "That heading names more than one section; pass its full path"
+
+
 class RevisionNotFound(ServiceError):
     status, message = 404, "No such revision in this post's history"
 

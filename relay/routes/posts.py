@@ -145,9 +145,13 @@ async def list_deleted_posts(
 async def get_post(
     post_id: int,
     response: Response,
+    section: str | None = Query(
+        default=None, max_length=500, description="Return only this section: a heading, or `Parent > Heading`"
+    ),
+    outline: bool = Query(default=False, description="Add every heading with its section's size"),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> PostResponse:
-    post = await service.get_post(db, post_id)
+    post = await service.get_post(db, post_id, section=section, outline=outline)
     if post is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
     _set_etag(response, post)

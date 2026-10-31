@@ -4,6 +4,17 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.24.0] — 2026-10-31
+
+### Added
+- **Read one section of a post.** `get_post` (and `GET /posts/{id}`) takes `section` — a heading, or a `Parent > Heading` path — and returns only that section, subsections included; `outline=true` lists every heading with its size, with `content` narrowed to the text before the first heading. A long post (the largest are 30–80 KB) no longer has to be read whole to answer one question, and a semantic search `match` names the section to ask for. An unknown or ambiguous heading is refused with the list of paths. A section read's `content` is only that section, so the tool description steers changes to `edit_post`
+
+### Fixed
+- **A search `match` that only repeats the excerpt is now `null`.** About a quarter of matches on the production vault were hits in a post's opening — the same text as the excerpt, sent twice. A keyword match counts as a repeat when the excerpt already shows the hit; a semantic one when its section starts at the top of the post
+- **A semantic `match`'s heading keeps its `>` separators** (`Setup > Backups: …`, was `Setup Backups: …`) and a `#` in a heading (`C#`), so it can be passed back as `get_post`'s `section`
+
+---
+
 ## [1.23.1] — 2026-10-31
 
 ### Fixed

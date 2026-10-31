@@ -4,6 +4,7 @@ import datetime as _dt
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -115,6 +116,12 @@ class PostCreate(BaseModel):
         return normalize_expires_at(v)
 
 
+class OutlineEntry(BaseModel):
+    path: str = Field(description="The heading with its parents, as `Parent > Heading` — pass as get_post's section")
+    level: int = Field(description="Heading level, 1–6")
+    chars: int = Field(description="Size of the section in characters, subsections included")
+
+
 class PostResponse(BaseModel):
     id: int
     title: str
@@ -139,6 +146,17 @@ class PostResponse(BaseModel):
     etag: str = Field(
         description="Opaque version token (relay #198, N-1) — pass back as if_match on a write to detect "
         "a concurrent change; changes whenever any mutable field of the post does"
+    )
+    section: str | None = Field(
+        default=None,
+        description="Set when the read asked for one section: its full heading path. content then holds "
+        "only that section, heading line and subsections included — change it with edit_post, never "
+        "update_post, which would replace the whole post with it",
+    )
+    outline: list[OutlineEntry] | None = Field(
+        default=None,
+        description="Set when the read asked for the outline: every heading, with its section's size. "
+        "Without a section, content then holds only the text before the first heading",
     )
 
     @classmethod
@@ -219,6 +237,7 @@ _WIKILINK_RE = re.compile(r"\[\[(?:[^\]|]*\|)?([^\]]*)\]\]")
 # this vault is full of snake_case identifiers (RELAY_VAULT_PATH, tag names) that
 # an excerpt shouldn't mangle; literal `_emphasis_` surviving is the lesser evil.
 _MD_SYNTAX_RE = re.compile(r"[`*>#~]")
+_HEADING_SYNTAX_RE = re.compile(r"[`*~]")
 _WHITESPACE_RE = re.compile(r"\s+")
 
 # make_excerpt scans a growing head of the body, not all of it: the regexes
@@ -230,15 +249,22 @@ _EXCERPT_HEAD = 2048
 _EXCERPT_SLACK = 200
 
 
-def _plain_text(markdown: str) -> str:
+def plain_text(markdown: str, syntax: re.Pattern[str] = _MD_SYNTAX_RE) -> str:
     """Markdown with fences already removed → one line of plain text."""
     text = _IMAGE_EMBED_RE.sub(" ", markdown)
     text = _IMAGE_MD_RE.sub(" ", text)
     text = _LINK_MD_RE.sub(r"\1", text)
     text = _WIKILINK_RE.sub(r"\1", text)
-    text = _MD_SYNTAX_RE.sub("", text)
+    text = syntax.sub("", text)
     text = text.replace("|", " ")
     return _WHITESPACE_RE.sub(" ", text).strip()
+
+
+def plain_heading(heading: str) -> str:
+    """A heading (or ``Parent > Heading`` path) as plain text — ``plain_text``
+    but keeping ``#`` and ``>``, so ``C#`` survives and a path stays a path
+    that ``get_post``'s ``section`` accepts back."""
+    return plain_text(heading, _HEADING_SYNTAX_RE)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -271,11 +297,11 @@ def make_excerpt(content: str, limit: int = 240) -> str:
         opener = head.find("```")
         if opener != -1 and text.find("```", cut) != -1:
             head = head[:opener]
-        plain = _plain_text(head)
+        plain = plain_text(head)
         if len(plain) > limit + _EXCERPT_SLACK:
             return _truncate(plain, limit)
         size *= 4
-    return _truncate(_plain_text(FENCE_RE.sub(" ", text)), limit)
+    return _truncate(plain_text(FENCE_RE.sub(" ", text)), limit)
 
 
 # FTS5 ``snippet()`` brackets each matched term with these; ``match_from_snippet``
@@ -283,24 +309,60 @@ def make_excerpt(content: str, limit: int = 240) -> str:
 SNIPPET_OPEN, SNIPPET_CLOSE = "\x02", "\x03"
 
 
-def match_from_snippet(snippet: str | None) -> str | None:
+@dataclass(frozen=True)
+class Match:
+    """A search hit's quoted passage, plus the text that shows whether the
+    excerpt already quotes it: ``evidence`` must open the excerpt when
+    ``anchored`` (the passage starts at the top of the post), else appear in
+    it anywhere."""
+
+    text: str
+    evidence: str
+    anchored: bool
+
+    def repeats(self, excerpt: str) -> bool:
+        head = excerpt.rstrip("…")
+        if self.anchored:
+            return head.startswith(self.evidence)
+        return len(self.evidence) >= _MIN_EVIDENCE and self.evidence in head
+
+
+# Below this, a mid-post snippet's text through its first hit is too short to
+# tell the excerpt's copy of it from a later occurrence.
+_MIN_EVIDENCE = 30
+_CHUNK_EVIDENCE = 60
+
+
+def _snippet_plain(text: str) -> str:
+    return plain_text(FENCE_RE.sub(" ", text.replace(SNIPPET_OPEN, "").replace(SNIPPET_CLOSE, "")))
+
+
+def match_from_snippet(snippet: str | None) -> Match | None:
     """A keyword hit's ``match``: the FTS5 snippet of the body as plain text,
     or ``None`` when no term matched the body (FTS5 then returns the body's
-    opening instead — the excerpt already says that)."""
+    opening instead — the excerpt already says that). Its evidence is the
+    snippet through the end of the first hit: the excerpt shows the hit only
+    if it holds that much."""
     if not snippet or SNIPPET_OPEN not in snippet:
         return None
-    text = snippet.replace(SNIPPET_OPEN, "").replace(SNIPPET_CLOSE, "")
-    return _plain_text(FENCE_RE.sub(" ", text)) or None
-
-
-def match_from_chunk(heading_path: str, body: str, limit: int = 240) -> str | None:
-    """A semantic hit's ``match``: its best chunk, prefixed with the section it
-    sits under."""
-    text = _truncate(_plain_text(FENCE_RE.sub(" ", body)), limit)
+    text = _snippet_plain(snippet)
     if not text:
         return None
-    heading = _plain_text(heading_path)
-    return f"{heading}: {text}" if heading else text
+    through_hit = snippet[: snippet.find(SNIPPET_CLOSE)] if SNIPPET_CLOSE in snippet else snippet
+    mid_post = snippet.startswith("…")
+    return Match(text, _snippet_plain(through_hit.lstrip("…")), anchored=not mid_post)
+
+
+def match_from_chunk(heading_path: str, body: str, limit: int = 240) -> Match | None:
+    """A semantic hit's ``match``: its best chunk, prefixed with the section it
+    sits under. It repeats the excerpt when the chunk starts at the top of the
+    post — an opening section merged forward under the next heading does."""
+    body_text = plain_text(FENCE_RE.sub(" ", body))
+    text = _truncate(body_text, limit)
+    if not text:
+        return None
+    heading = plain_heading(heading_path)
+    return Match(f"{heading}: {text}" if heading else text, body_text[:_CHUNK_EVIDENCE], anchored=True)
 
 
 class PostSummary(BaseModel):
@@ -329,25 +391,26 @@ class PostSummary(BaseModel):
         default=None,
         description="Search results only: the passage that matched — the keyword hit in the body, or the "
         "section closest in meaning — so a caller can judge a hit without fetching the post. None when "
-        "only the title or tags matched",
+        "only the title or tags matched, or when the passage is the excerpt's own text",
     )
 
     @classmethod
-    def from_row(cls, row, match: str | None = None) -> PostSummary:
+    def from_row(cls, row, match: Match | None = None) -> PostSummary:
+        excerpt = make_excerpt(row["content"])
         return cls(
             id=row["id"],
             title=row["title"],
             tags=tags_from_sentinel(row["tags"]),
             source=row["source"],
             folder=folders.folder_of(row["path"]),
-            excerpt=make_excerpt(row["content"]),
+            excerpt=excerpt,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
             properties=decode_properties(row["properties"]),
             updated_by=row["updated_by"],
             etag=etag_for_row(row),
-            match=match,
+            match=None if match is None or match.repeats(excerpt) else match.text,
         )
 
 

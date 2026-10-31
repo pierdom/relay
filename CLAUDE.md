@@ -144,7 +144,7 @@ relay/
 ├── main.py            FastAPI app, lifespan, ServiceError handler, UI shell + CSP
 ├── config.py · auth.py · identity.py · errors.py · models.py · database.py
 ├── vault.py           file layer: posts, attachments, ids, rebuild, tags.yml
-├── frontmatter.py · folders.py · links.py · markdown_scan.py
+├── frontmatter.py · folders.py · links.py · markdown_scan.py · sections.py (get_post section/outline)
 ├── service/           posts · revisions · attachments · tags (+ _common); routes and MCP call this
 ├── routes/            thin REST handlers
 ├── mcp_server.py      in-process MCP server (tools + auth)

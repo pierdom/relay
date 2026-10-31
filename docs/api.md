@@ -12,7 +12,7 @@ Every endpoint needs `Authorization: Bearer <API_KEY>`; the browser UI may use i
 |--------|------|-------------|
 | POST | `/posts` | Publish. The response carries advisory `similar` posts when embeddings are on (never for digest-type posts) |
 | GET | `/posts` | List — see [Listing and search](#listing-and-search). The master doc is pinned on the home feed |
-| GET | `/posts/{id}` | One post |
+| GET | `/posts/{id}` | One post. `?section=Heading` (or `Parent > Heading`) returns only that section in `content`, echoed as `section`; `?outline=true` adds `outline` (every heading's `path`, `level`, `chars`) and, without a section, narrows `content` to the text before the first heading. An unknown or ambiguous section is 422 listing the paths. The `etag` stays the whole post's |
 | PATCH | `/posts/{id}` | Partial update — omitted fields unchanged, `null`/`""` clears `expires_at`/`source`. Optional `if_match` → 409 if the post changed |
 | POST | `/posts/{id}/edit` | `{"old_str", "new_str"}` — `old_str` must match exactly once and differ from `new_str`, else 422 (with the match count) |
 | POST | `/posts/{id}/append` | `{"content"}` appended after a blank line |
@@ -82,7 +82,7 @@ Every single-post response carries an `etag` (JSON field and `ETag` header) that
 | `search` | FTS5 over title/content/source/tags, porter-stemmed, bm25-ranked (title and tags weigh more). A bare `42`/`#42` is an id lookup: that post as `pinned`, `items` empty, every other filter ignored |
 | `mode` | `keyword` (default), `semantic`, `hybrid` — ranks `search`, combines with the filters. 503 without embeddings |
 | `sort` · `order` | `updated` (default) or `created`; `desc` (default) or `asc`. With `search`, only a tiebreak after relevance |
-| `summary` | `true`: metadata + plain-text excerpt (MCP's default). With `search`, each item's `match` quotes the passage that hit: the keyword snippet from the body, or for `semantic` the closest section as `Heading: text` (`hybrid` prefers the keyword snippet). `null` when only the title or tags matched |
+| `summary` | `true`: metadata + plain-text excerpt (MCP's default). With `search`, each item's `match` quotes the passage that hit: the keyword snippet from the body, or for `semantic` the closest section as `Heading: text` (`hybrid` prefers the keyword snippet). `null` when only the title or tags matched, or when the passage is the excerpt's own text |
 | `limit` · `offset` | Paging |
 
 ---
