@@ -4,6 +4,16 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.23.1] — 2026-10-31
+
+### Fixed
+- **`/posts/{id}/related` and the `similar` field on publish are about 45× faster and judge the whole post.** Both embedded the post's title and body as one query: about 240 ms with the model warm, a cold model load on top when it wasn't, and only as much of the post as fits the model's input window (the opening of a long post). The query is now the mean of the post's stored section vectors — no model call (~5 ms), every section counted. On the production vault the Master Document stopped showing up as "related" to unrelated posts. A post whose stored sections don't match its text yet (a failed embedding sync) still falls back to embedding the text
+
+### Changed
+- Dependencies: fastmcp 4.1.4, mcp 2.3.0, httpx2 2.16.0, pydantic-settings 2.16.2, sse-starlette 3.6.0, ruff 0.17.3; the Docker image builds with uv 0.13.6 and CI uses setup-uv 10.3.2
+
+---
+
 ## [1.23.0] — 2026-10-29
 
 ### Added
