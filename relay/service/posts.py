@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from .. import changes, database, embedding, events, folders, history, links, metrics, vault, vectors
+from .. import changes, database, embedding, events, folders, history, links, metrics, sections, vault, vectors
 from ..config import settings
 from ..errors import (
     ConcurrentModification,
@@ -26,6 +26,8 @@ from ..models import (
     BacklinksResponse,
     LinkIndexResponse,
     LinkTarget,
+    Match,
+    OutlineEntry,
     PostCreate,
     PostCreateResponse,
     PostListResponse,
@@ -253,7 +255,7 @@ async def _keyword_ranked_ids(
 _SNIPPET_TOKENS = 32
 
 
-async def _keyword_matches(db: aiosqlite.Connection, search: str, ids: list[int]) -> dict[int, str]:
+async def _keyword_matches(db: aiosqlite.Connection, search: str, ids: list[int]) -> dict[int, Match]:
     """``post_id → match`` for the posts in ``ids`` whose body hits ``search``:
     one FTS5 ``snippet()`` query over just the page, so it costs the same
     whichever ranker ordered the page."""
@@ -267,7 +269,7 @@ async def _keyword_matches(db: aiosqlite.Connection, search: str, ids: list[int]
         [SNIPPET_OPEN, SNIPPET_CLOSE, _SNIPPET_TOKENS, match, *ids],
     ) as cur:
         snippets = {row[0]: match_from_snippet(row[1]) for row in await cur.fetchall()}
-    return {pid: text for pid, text in snippets.items() if text}
+    return {pid: m for pid, m in snippets.items() if m}
 
 
 # Both rankers' candidate pool must cover offset+limit or pagination silently
@@ -370,9 +372,9 @@ async def _list_posts_ranked(
         # literal terms are the easier thing to judge — else its closest section.
         keyword = await _keyword_matches(db, search, page_ids) if mode == "hybrid" or degraded else {}
         best_chunk = {pid: cid for pid, _, cid in chunk_results if pid in rows_by_id and pid not in keyword}
-        sections = await vectors.matched_chunks(db, best_chunk, rows)
+        chunk_text = await vectors.matched_chunks(db, best_chunk, rows)
         matches = {
-            pid: keyword.get(pid) or (match_from_chunk(*sections[pid]) if pid in sections else None)
+            pid: keyword.get(pid) or (match_from_chunk(*chunk_text[pid]) if pid in chunk_text else None)
             for pid in page_ids
         }
         return PostSummaryListResponse(
@@ -521,9 +523,29 @@ async def list_posts(
     )
 
 
-async def get_post(db: aiosqlite.Connection, post_id: int) -> PostResponse | None:
+async def get_post(
+    db: aiosqlite.Connection, post_id: int, *, section: str | None = None, outline: bool = False
+) -> PostResponse | None:
+    """``section`` narrows ``content`` to the section that heading (or heading
+    path) names; ``outline`` adds every heading with its size and, without a
+    section, narrows ``content`` to the text before the first heading. See
+    ``relay.sections``."""
     row = await _fetch(db, post_id)
-    return PostResponse.from_row(row) if row is not None else None
+    if row is None:
+        return None
+    post = PostResponse.from_row(row)
+    if not section and not outline:
+        return post
+    parsed = sections.parse(row["title"], row["content"])
+    update: dict = {}
+    if outline:
+        update["outline"] = [OutlineEntry(path=s.path, level=s.level, chars=s.end - s.start) for s in parsed]
+        update["content"] = sections.intro(row["content"], parsed)
+    if section:
+        found = sections.find(parsed, section)
+        update["section"] = found.path
+        update["content"] = sections.text(row["content"], found)
+    return post.model_copy(update=update)
 
 
 async def update_post(

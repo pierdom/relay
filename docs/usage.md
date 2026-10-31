@@ -113,6 +113,7 @@ Set per-tag TTL via `POST /tags/{tag}/config` or `set_tag_config`. Per-post `exp
 ### Efficient browsing
 
 - `list_posts(summary=true)` — title, tags, folder, and excerpt. No body fetched. With `search`, `match` quotes the passage that hit, so you can judge a result before fetching it.
+- `get_post(id, outline=true)` / `get_post(id, section="Heading")` — a long post's headings with their sizes, then just the section you need.
 - `get_post(id)` — only when you need the full content.
 - `list_posts(tag="X", search="Y")` — scope to a domain and filter by keyword.
 

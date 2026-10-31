@@ -10,7 +10,7 @@ relay exposes its whole API as **27 MCP tools**, so Claude or any MCP agent can 
 | `update_post` | Change only the fields given; `""` clears `expires_at`/`source`. Optional `if_match` — see [Partial edits](#partial-edits-and-optimistic-concurrency) |
 | `edit_post` | `str_replace` edit: `old_str` must match exactly once and differ from `new_str`; otherwise errors with the match count |
 | `append_post` | Append to a post; a blank line separates it from existing content unless the post is empty |
-| `get_post` | A post by id (`id=0` = master document). Other front-matter keys (Obsidian Properties, custom fields) come back read-only as `properties` |
+| `get_post` | A post by id (`id=0` = master document). `outline=true` lists its headings with sizes; `section="Parent > Heading"` returns just that section. Other front-matter keys (Obsidian Properties, custom fields) come back read-only as `properties` |
 | `list_posts` | Filter by tag/folder/search/author, page with limit/offset, sort/order; metadata + excerpt by default. `author` = whoever made the post's latest write ([auth.md](auth.md)). `mode=keyword\|semantic\|hybrid` ranks `search` and combines with tag/folder; semantic/hybrid error without embeddings. A bare `42`/`#42` search is an id lookup answered as `pinned`, ignoring every other filter |
 | `delete_post` | Delete a post |
 | `get_post_history` | A post's revisions; works for a deleted post (`exists:false`) |
@@ -87,7 +87,8 @@ restore_post(id=54, sha="a8dcc37")
 - **`get_status` reports what works, not what's configured.** `history.effective` false = git missing, writes not recoverable · `search.fts5` false = substring search · `search.embeddings` false = semantic/hybrid will error · `watcher.running` false = direct file edits aren't indexed. It also names the served vault — "am I talking to the instance I think I am".
 - **Its `embeddings` block is the full picture**: model, dimension, size, coverage (`posts_embedded`/`posts_missing`/`chunks_total`), and `backfill.running` — check that before reading a silent semantic query on a fresh vault as "nothing matched".
 - **Ids are never reused** and aren't contiguous; an `#id` always means the same post.
-- **`list_posts` returns excerpts** (`summary=true`); `get_post` for the body. A search result's `match` is the passage that hit, often enough to answer without a `get_post`.
+- **`list_posts` returns excerpts** (`summary=true`); `get_post` for the body. A search result's `match` is the passage that hit, often enough to answer without a `get_post`; it's `null` when the excerpt already shows it.
+- **Read long posts by section.** `get_post(id, outline=true)` costs a few hundred bytes; then `get_post(id, section=…)` with a path from the outline, or the heading a semantic `match` starts with (`Heading > Sub: text`). A section's `content` is only that section — change it with `edit_post`, never `update_post`, which would replace the whole post with it.
 - **`set_embeddings_enabled` lasts until restart.** Enabling resumes against the model the vector schema was built for (errors on a dimension mismatch rather than rebuilding live) and starts a backfill; disabling frees the model's memory at once.
 - **`trigger_embedding_backfill` returns 409 while one runs** — including the one enabling just started. Check `embeddings.backfill.running` instead of retrying blind.
 - **Scope errors are final.** A read-only key doesn't even see write tools; a tag-restricted key gets `"This API key's scope does not permit this write"` for posts outside its tags ([auth.md](auth.md)). Don't retry.

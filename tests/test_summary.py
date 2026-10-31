@@ -88,9 +88,9 @@ def test_excerpt_truncates_on_word_boundary():
 def _full_scan_excerpt(body: str, limit: int = 240) -> str:
     """make_excerpt's answer if it scanned the whole body (its pre-head behaviour)."""
     from relay.markdown_scan import FENCE_RE
-    from relay.models import _FRONTMATTER_RE, _plain_text, _truncate
+    from relay.models import _FRONTMATTER_RE, _truncate, plain_text
 
-    return _truncate(_plain_text(FENCE_RE.sub(" ", _FRONTMATTER_RE.sub("", body))), limit)
+    return _truncate(plain_text(FENCE_RE.sub(" ", _FRONTMATTER_RE.sub("", body))), limit)
 
 
 PARA = "Some [linked text](https://example.com/a) and a [[Wiki Note|wiki]] in prose. " * 3 + "\n\n"
