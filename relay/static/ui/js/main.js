@@ -227,7 +227,9 @@ async function init() {
   // and for /status, which says whether it can list related posts.
   const linkIndexReady = refreshLinks();
   Promise.all([linkIndexReady, statusReady]).then(openPostFromUrl);
-  await Promise.all([loadTags(), loadPosts(true), linkIndexReady]);
+  // The feed waits for it too: cards render once, so a feed that answered
+  // first painted every [[link]] on the page as broken, for good.
+  await Promise.all([loadTags(), linkIndexReady.then(() => loadPosts(true))]);
   setDot('connected');
   connectSSE();
 }
@@ -1610,7 +1612,9 @@ async function undoDelete(post) {
   const gone = items.find(d => d.id === post.id);
   if (!gone) throw new Error('it is no longer in the recovery list');
   await apiFetch(`/posts/${post.id}/restore`, { method: 'POST', body: JSON.stringify({ sha: gone.sha }) });
-  resetPaging(); loadPosts(true); refreshSidebarCounts(); refreshLinks();
+  refreshSidebarCounts();
+  await refreshLinks();   // before the feed repaints, or links to the restored post render broken
+  resetPaging(); loadPosts(true);
   showToast(`Restored “${postName(post)}”.`);
 }
 

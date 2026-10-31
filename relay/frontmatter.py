@@ -25,7 +25,15 @@ _FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 # Chars Obsidian forbids in note names (filesystem-illegal + wikilink-breaking),
 # plus control characters — a NUL made every file operation raise.
 _ILLEGAL = re.compile(r'[/\\:*?"<>|\[\]#^\x00-\x1f\x7f]')
-_MAX_STEM = 180  # leave headroom under the 255-byte filesystem limit
+_MAX_STEM = 180
+# Filesystems cap a name at 255 *bytes*: 180 emoji are 720. Room is left for a
+# ` 9999` collision suffix and the extension.
+_MAX_STEM_BYTES = 200
+
+
+def _clip(text: str, max_chars: int, max_bytes: int = _MAX_STEM_BYTES) -> str:
+    """``text`` cut to both limits, never mid-character."""
+    return text[:max_chars].encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
 
 
 def _to_iso(value: object) -> str | None:
@@ -124,8 +132,7 @@ def sanitize_title(title: str) -> str:
     stem = _ILLEGAL.sub(" ", title or "")
     stem = re.sub(r"\s+", " ", stem).strip()
     stem = stem.strip(". ")  # Windows forbids trailing dot/space
-    if len(stem) > _MAX_STEM:
-        stem = stem[:_MAX_STEM].rstrip()
+    stem = _clip(stem, _MAX_STEM).rstrip(". ")
     return stem or "Untitled"
 
 
@@ -135,9 +142,13 @@ def sanitize_attachment_name(name: str) -> str:
     base = Path(name or "").name  # drop any directory component
     base = _ILLEGAL.sub("_", base)
     base = re.sub(r"\s+", " ", base).strip().strip(". ")
-    if len(base) > _MAX_STEM:
+    if len(base) > _MAX_STEM or len(base.encode("utf-8")) > _MAX_STEM_BYTES:
         stem, dot, ext = base.rpartition(".")
-        base = (stem[: _MAX_STEM - len(ext) - 1] + dot + ext) if dot else base[:_MAX_STEM]
+        if dot and len(ext.encode("utf-8")) < 32:
+            room = len(ext) + 1
+            base = _clip(stem, _MAX_STEM - room, _MAX_STEM_BYTES - len(ext.encode("utf-8")) - 1) + dot + ext
+        else:
+            base = _clip(base, _MAX_STEM)
     return base or "attachment"
 
 

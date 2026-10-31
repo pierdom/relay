@@ -414,11 +414,14 @@ async def test_mcp_rejects_oversized_request_bodies(client):
         "method": "tools/call",
         "params": {"name": "update_post", "arguments": {"id": 0, "content": oversized}},
     }
-    resp = await client.post(
-        "/mcp",
-        json=payload,
-        headers={**HEADERS, "Accept": "application/json, text/event-stream"},
-    )
+    # The streamable-HTTP session manager only runs inside the app lifespan;
+    # without it this passed only after another test had run the lifespan.
+    async with app.router.lifespan_context(app):
+        resp = await client.post(
+            "/mcp",
+            json=payload,
+            headers={**HEADERS, "Accept": "application/json, text/event-stream"},
+        )
     assert resp.status_code == 413
 
 

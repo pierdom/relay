@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from relay.frontmatter import (
     parse,
     sanitize_attachment_name,
@@ -296,4 +298,17 @@ def test_sanitizers_drop_control_characters():
     from relay import frontmatter
 
     assert frontmatter.sanitize_title("a\x00b\nc") == "a b c"
-    assert "\x00" not in frontmatter.sanitize_attachment_name("x\x00y.png")
+    assert "\x00" not in sanitize_attachment_name("x\x00y.png")
+
+
+@pytest.mark.parametrize("title", ["🚀" * 100, "長" * 179, "é" * 179])
+def test_a_long_multibyte_title_fits_the_filesystems_255_byte_name_limit(title):
+    stem = sanitize_title(title)
+    assert len(f"{stem} 9999.md".encode()) <= 255
+    assert stem and title.startswith(stem)
+
+
+def test_a_long_multibyte_attachment_name_keeps_its_extension_and_fits():
+    name = sanitize_attachment_name("📷" * 100 + ".jpeg")
+    assert name.endswith(".jpeg")
+    assert len(f"{name[:-5]} 9999.jpeg".encode()) <= 255

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
 from .. import database, service
-from ..auth import require_api_key
+from ..auth import require_api_key, still_authenticated
 from ..events import OVERFLOW, subscribe, unsubscribe
 from ..models import PostResponse
 
@@ -123,6 +123,11 @@ async def stream_events(
                         post = PostResponse(**event["data"])
                         yield {"event": "post", "data": post.model_dump_json(), **frame_id}
                 except TimeoutError:
+                    # Auth ran once, when the stream opened: re-check it here so a
+                    # revoked/rotated key or an expired session stops receiving.
+                    if not still_authenticated(request):
+                        logger.info("SSE client's credentials are no longer valid — closing")
+                        break
                     yield {"event": "keepalive", "data": ""}
         finally:
             unsubscribe(q, tag)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 from urllib.parse import urlsplit
 
 from fastapi import Cookie, HTTPException, Request, Security, status
@@ -23,17 +25,26 @@ def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.session_signing_key, salt=_SALT)
 
 
+def _key_fingerprint(key: str) -> str:
+    """Which value of a key a session was minted from — an HMAC under the
+    signing secret, since the signed cookie is readable, not encrypted."""
+    return hmac.new(settings.session_signing_key.encode(), key.encode(), hashlib.sha256).hexdigest()[:32]
+
+
 def create_session(sub: str = APIKEY_SUB, email: str = "", *, key: bool = False) -> str:
     """Sign an identity-carrying, expiring session token.
 
     The payload holds who the session is for; expiry is enforced at verify time
     via the signed timestamp (``max_age``), not just the browser cookie. ``key``
-    marks a session minted from a pasted API key (``POST /session``), which
-    stays valid only while that key is still configured.
+    marks a session minted from a pasted API key (``POST /session``; the
+    primary key's ``apikey`` subject always is one), which stays valid only
+    while that key name is configured *with the same value* — rotating a
+    leaked key signs out the browsers it was pasted into.
     """
     payload: dict = {"sub": sub, "email": email}
-    if key:
+    if key or sub == APIKEY_SUB:
         payload["key"] = True
+        payload["kf"] = _key_fingerprint(settings.all_api_keys.get(sub, ""))
     return _serializer().dumps(payload)
 
 
@@ -54,11 +65,14 @@ def still_authorized(payload: dict) -> bool:
 
     A pasted-key session is checked against the configured keys instead: the
     OIDC allowlist doesn't apply to it (possession of the key was the
-    credential), and removing or renaming that key revokes it immediately.
+    credential), and removing, renaming or rotating that key revokes it
+    immediately (a session from before fingerprints existed has none and is
+    signed out once).
     """
     sub = payload.get("sub", "")
     if payload.get("key") or sub == APIKEY_SUB:
-        return sub in settings.all_api_keys
+        current = settings.all_api_keys.get(sub)
+        return current is not None and hmac.compare_digest(payload.get("kf", ""), _key_fingerprint(current))
     return not settings.allowed_subs or sub in settings.allowed_subs
 
 
@@ -73,6 +87,17 @@ def verify_session(token: str) -> dict | None:
 
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def still_authenticated(request: Request) -> bool:
+    """Whether the credentials ``request`` opened with are still valid — for a
+    long-lived response (the SSE stream) to notice a key revoked or rotated,
+    or a session expired, after it started."""
+    session = request.cookies.get(SESSION_COOKIE)
+    if session and verify_session(session) is not None:
+        return True
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    return scheme.lower() == "bearer" and resolve_bearer(token.strip()) is not None
 
 
 def is_cross_site(request: Request) -> bool:
