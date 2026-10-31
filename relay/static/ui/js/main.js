@@ -226,6 +226,7 @@ async function init() {
   // for tags or the feed) — otherwise its [[links]] would all show as broken —
   // and for /status, which says whether it can list related posts.
   const linkIndexReady = refreshLinks();
+  firstLinkIndex = linkIndexReady;
   Promise.all([linkIndexReady, statusReady]).then(openPostFromUrl);
   await Promise.all([loadTags(), loadPosts(true), linkIndexReady]);
   setDot('connected');
@@ -1022,6 +1023,12 @@ let loadSeq = 0;
 
 /** Load a page: the first one (`replace`) or the next. Resolves false only
  *  when this request failed — a request a newer one superseded is no failure. */
+// Settles once the sign-in's link index is in. Cards render once, so a feed
+// response that beat it painted every [[link]] on the page as broken, for good:
+// loadPosts fetches straight away (keeping its place in `loadSeq`) but paints
+// only after this.
+let firstLinkIndex = Promise.resolve();
+
 async function loadPosts(replace = false) {
   if (!authed) return true;
   const seq = ++loadSeq;
@@ -1039,6 +1046,7 @@ async function loadPosts(replace = false) {
     // plain rather than carrying an inert param.
     if (query.search && query.mode !== 'keyword') params.set('mode', query.mode);
     const data = await apiFetch(`/posts?${params}`);
+    await firstLinkIndex;
     if (seq !== loadSeq) return true;
     query.total = data.total;
     query.offset += data.items.length;
@@ -1610,7 +1618,9 @@ async function undoDelete(post) {
   const gone = items.find(d => d.id === post.id);
   if (!gone) throw new Error('it is no longer in the recovery list');
   await apiFetch(`/posts/${post.id}/restore`, { method: 'POST', body: JSON.stringify({ sha: gone.sha }) });
-  resetPaging(); loadPosts(true); refreshSidebarCounts(); refreshLinks();
+  refreshSidebarCounts();
+  await refreshLinks();   // before the feed repaints, or links to the restored post render broken
+  resetPaging(); loadPosts(true);
   showToast(`Restored “${postName(post)}”.`);
 }
 

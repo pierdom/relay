@@ -92,6 +92,11 @@ def _seed_attachment(base_url: str) -> None:
 
 
 def _assert_folder_rows(page):
+    # Wait for a drawn folder row rather than a fixed sleep, which flaked on a
+    # slow CI runner (the list renders after its fetch returns).
+    page.wait_for_function(
+        "() => document.querySelector('#tagList .folder-item .folder-ico svg') !== null", timeout=10_000
+    )
     m = page.evaluate(MEASURE)
     rows = m["rows"]
     assert rows, "no folder rows rendered"
@@ -119,7 +124,6 @@ def _assert_folder_rows(page):
 
 def test_the_tree_list_marks_folders_and_aligns_them(page):
     page.locator("#tabTree").click()
-    page.wait_for_timeout(600)
     _assert_folder_rows(page)
 
 
@@ -127,7 +131,6 @@ def test_the_files_list_marks_folders_and_aligns_them(page, relay_server):
     _seed_attachment(relay_server)
     page.reload()
     page.locator("#tabFiles").click()
-    page.wait_for_timeout(800)
     _assert_folder_rows(page)
 
 

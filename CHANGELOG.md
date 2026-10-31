@@ -4,6 +4,24 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.24.1] — 2026-10-31
+
+### Security
+- **Rotating an API key now signs out the browsers it was pasted into.** A pasted-key session stayed valid as long as a key of that *name* existed, so rotating a leaked key's value left every session made from it working. Sessions now carry a fingerprint of the key (an HMAC, never the key) and stop working when the value changes. Sessions made before this release are signed out once
+- **The live event stream re-checks its credentials** at every keepalive (30 s), so a revoked or rotated key, or an expired session, stops receiving changes instead of streaming until it disconnects
+
+### Fixed
+- **A long non-ASCII title no longer fails to save.** Titles were capped at 180 characters, but filenames are capped at 255 *bytes*: 100 emoji crashed the create with "File name too long". Titles and attachment names are now also capped at 200 bytes
+- **Renaming a tag onto one that has its own TTL/retention config** raised after every file was already retagged, leaving files and index out of step with nothing committed. The target tag's config now wins
+- **An external edit that drops a note's `id:` line keeps its id.** Pasting over a whole note in Obsidian gave it a fresh id (breaking every `#id` link to it) and left a second index row on the same file until restart. A hand-changed id no longer leaves the old row behind either
+- **Vault history no longer tracks dot-entries.** `.obsidian/` (including plugin code) was committed and swept into ordinary post commits; with Obsidian's "move to Obsidian trash", a delete was recorded as a move into `.trash/` and the changelog read it as an edit. Every dot-entry is excluded, the ones already tracked are untracked once at startup (files stay on disk), and the changelog and deleted-posts scan skip them
+- **The web UI painted `[[links]]` as broken on some page loads**: the feed and the link index loaded in parallel, and a feed that answered first rendered every link on the page unresolved for good. The feed still loads at once but paints after the link index, and so does the feed after an undo-delete
+- **A huge search is bounded**: neither transport limits `search`, and a pasted document became one full-text query of thousands of terms. It is capped at 64
+- Background loop failures (cleanup, watcher) are logged with their traceback
+- Test reliability: the oversized-MCP-body test no longer depends on another test having run the app lifespan, and browser tests wait for rendered content instead of fixed sleeps
+
+---
+
 ## [1.24.0] — 2026-10-31
 
 ### Added

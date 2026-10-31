@@ -398,3 +398,20 @@ async def test_ranked_search_degrades_to_keyword_when_the_backend_fails(client, 
     monkeypatch.setattr(settings, "embedding_enabled", False)
     r = await client.get("/posts", params={"search": "docker", "mode": "hybrid"}, headers=AUTH)
     assert r.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_tag_onto_one_with_its_own_config_merges_them(client):
+    """tag_config.tag is the primary key: moving old's row onto a name that
+    already had one raised after every file was already retagged — files and
+    index out of step, nothing committed. The target's own config wins."""
+    await client.post("/posts", json={"title": "Merge me", "content": "x", "tags": ["oldtag"]}, headers=AUTH)
+    await client.post("/tags/oldtag/config", json={"ttl_hours": 5}, headers=AUTH)
+    await client.post("/tags/newtag/config", json={"ttl_hours": 9}, headers=AUTH)
+
+    r = await client.patch("/tags/oldtag", json={"new_name": "newtag"}, headers=AUTH)
+
+    assert r.status_code == 200, r.text
+    tags = {t["tag"]: t for t in (await client.get("/tags", headers=AUTH)).json()["tags"]}
+    assert "oldtag" not in tags
+    assert tags["newtag"]["count"] == 1 and tags["newtag"]["ttl_hours"] == 9

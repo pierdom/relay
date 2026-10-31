@@ -162,6 +162,7 @@ async def create_post(
 # so the canonical post for a term surfaces above passing mentions of it.
 _BM25_WEIGHTS = "10.0, 1.0, 2.0, 5.0"
 _FTS_TOKEN_RE = re.compile(r"[^\w]+", re.UNICODE)
+_MAX_FTS_TERMS = 64
 
 
 # Sort keys → SQL column. "updated" falls back to created_at for never-edited
@@ -205,11 +206,16 @@ def _fts_query(search: str) -> str | None:
     and short tokens (single-letter Italian "e", "il", "la"…), prefix-matched,
     are so permissive that AND still "succeeds" against irrelevant giant posts
     that merely contain those letters somewhere, silently returning garbage
-    instead of nothing. OR-with-ranking degrades gracefully instead."""
+    instead of nothing. OR-with-ranking degrades gracefully instead.
+
+    Capped at ``_MAX_FTS_TERMS``: neither transport bounds ``search``, and a
+    pasted document became one MATCH of thousands of OR'd prefix terms."""
     terms: list[str] = []
     for tok in _FTS_TOKEN_RE.split(search):
         if tok and any(c.isalnum() for c in tok):
             terms.append(f'"{tok}"*')
+            if len(terms) == _MAX_FTS_TERMS:
+                break
     return " OR ".join(terms) if terms else None
 
 

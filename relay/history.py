@@ -72,6 +72,15 @@ def _git_dir() -> Path:
     return Path(settings.history_dir)
 
 
+def is_hidden_relpath(path: str) -> bool:
+    """Whether a vault-relative path sits in or is a dot-entry (``.obsidian/…``,
+    ``.trash/Note.md``) — never vault content (``vault.is_hidden_path``), so
+    never history either: Obsidian's trash keeps a deleted note's id, and a
+    delete recorded as ``D Folder/Note.md`` + ``A .trash/Note.md`` read as a
+    rename in the changelog."""
+    return any(part.startswith(".") for part in PurePosixPath(path).parts)
+
+
 def _run(*args: str, timeout: int = _TIMEOUT_SECONDS) -> subprocess.CompletedProcess:
     """Run a git command against the vault work-tree. Never raises on a non-zero
     exit — callers decide what a failure means (an empty commit is rc=1)."""
@@ -146,11 +155,21 @@ def _init_sync() -> bool:
             ["git", f"--git-dir={git_dir}", "config", "core.bare", "false"],
             capture_output=True, text=True, timeout=_TIMEOUT_SECONDS,
         )
-    # In info/exclude, not a .gitignore: keeps relay's bookkeeping out of the vault.
+    # In info/exclude, not a .gitignore: keeps relay's bookkeeping out of the
+    # vault. Every dot-entry, not just .relay/ (see is_hidden_relpath).
     info = git_dir / "info"
     info.mkdir(parents=True, exist_ok=True)
-    (info / "exclude").write_text(".relay/\n", encoding="utf-8")
+    (info / "exclude").write_text(".relay/\n.*\n", encoding="utf-8")
     return True
+
+
+def _untrack_hidden_sync() -> int:
+    """Drop dot-entries an older exclude rule let into the index (the files
+    stay on disk). Returns how many were untracked."""
+    hidden = [p for p in _run("ls-files", "-z").stdout.split("\0") if p and is_hidden_relpath(p)]
+    for i in range(0, len(hidden), 200):
+        _run("rm", "--cached", "--quiet", "--ignore-unmatch", "--", *hidden[i : i + 200])
+    return len(hidden)
 
 
 def _commit_sync(message: str, author: str | None = None) -> bool:
@@ -193,6 +212,8 @@ async def init() -> None:
         try:
             if not await asyncio.to_thread(_init_sync):
                 return
+            if await asyncio.to_thread(_untrack_hidden_sync):
+                await asyncio.to_thread(_commit_sync, "history: stop tracking hidden files")
             if await asyncio.to_thread(_commit_sync, "vault: initial import"):
                 logger.info("Vault history initialised at %s", _git_dir())
         except (OSError, subprocess.SubprocessError) as exc:
@@ -611,7 +632,7 @@ def _deleted_entries(revisions: str) -> list[Deletion]:
         if not parent:
             continue   # a delete in the initial commit cannot happen, but be safe
         for path in (p.strip() for p in names.split("\n")):
-            if not path:
+            if not path or is_hidden_relpath(path):
                 continue
             # The last commit that *touched* this path before the delete. The
             # parent commit has the same content, but `revisions()` only lists

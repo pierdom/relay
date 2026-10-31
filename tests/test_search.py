@@ -364,3 +364,10 @@ async def test_like_fallback_wildcards_are_literal(client, monkeypatch):
     await _create(client, "Plain Post", "nothing special")
     assert await _titles(client, "%") == ["Percent Post"]
     assert await _titles(client, "_") == []
+
+
+def test_a_huge_search_is_capped_to_a_bounded_match():
+    from relay.service.posts import _MAX_FTS_TERMS, _fts_query
+
+    query = _fts_query(" ".join(f"word{i}" for i in range(10_000)))
+    assert query is not None and query.count(" OR ") == _MAX_FTS_TERMS - 1
