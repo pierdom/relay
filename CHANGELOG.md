@@ -4,6 +4,16 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.24.3] — 2026-11-03
+
+### Security
+- **A tag-restricted key can no longer delete any orphaned attachment in the vault.** Embedding a file counts as a write the key may make, so referencing an orphan from its own post made the file "owned" and deletable. A restricted key now deletes only from the folder of a post that embeds the file
+
+### Fixed
+- **Wiping `.relay/` no longer lets deleted posts' ids be reused.** The id high-water mark lives next to the disposable index; when it is missing, startup now recovers it from history's `post <id> …` commits instead of starting from the highest id on disk, which handed the newest deleted id straight to the next post
+
+---
+
 ## [1.24.2] — 2026-11-03
 
 ### Security

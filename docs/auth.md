@@ -45,7 +45,8 @@ RELAY_API_KEY_SCOPES=news-agent:write:news+briefing,readonly-dashboard:read
 
 - **ALL-of, not ANY-of.** Every tag on the post — existing ones on an update, plus any being set — must be allowed. `write:news+briefing` may write `["news"]` or `["news", "briefing"]`, not `["news", "finance"]`: otherwise pairing an allowed tag would smuggle content under one never granted.
 - **Untagged is denied** — an empty set is trivially a subset of anything.
-- **Attachments use their owning post's tags.** One filed by `folder=` alone (no `post_id` or `tags`) has no owning tag and is denied to any non-full key.
+- **Attachments use their owning post's tags.** One filed by `folder=` alone (no `post_id` or `tags`) has no owning tag and is denied to any non-full key. A restricted key deletes an attachment only from the folder of a post that embeds it, so embedding a file elsewhere in the vault doesn't make it the key's to delete.
+- **A rename's side effects are not scoped.** Renaming a post rewrites `[[Old Title]]` links in every post that has them, including posts outside the key's tags (their `updated_by` is left alone). The alternative is leaving those links broken.
 - **Edit and append check scope before matching content**, so a refusal can't reveal what a post contains.
 - **Full access only:** `rename_tag`, `set_tag_config`, and the embeddings toggle/backfill (`PATCH /embeddings`, `POST /embeddings/backfill`) — none has a single owning tag to check.
 
@@ -69,7 +70,7 @@ curl -s -X POST -H "Authorization: Bearer sk-a-long-random-secret" -H 'Content-T
 
 ### Browser sessions keep the key's scope
 
-Pasting a key into the browser login mints a session for that key's identity and scope — the browser is no way around a restriction. The session lives only as long as the key: remove or rename it in `RELAY_API_KEYS` and its sessions stop working on the next request (the OIDC allowlist doesn't apply to them).
+Pasting a key into the browser login mints a session for that key's identity and scope — the browser is no way around a restriction. The session lives only as long as the key: remove it, rename it or change its value in `RELAY_API_KEYS` and its sessions stop working on the next request (the OIDC allowlist doesn't apply to them).
 
 ### How this shows up in the UI and TUI
 

@@ -94,6 +94,27 @@ def _run(*args: str, timeout: int = _TIMEOUT_SECONDS) -> subprocess.CompletedPro
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+_POST_SUBJECT_RE = re.compile(r"^post (\d+) ")
+
+
+def highest_post_id() -> int:
+    """The highest id any ``post <id> …`` commit names, 0 without history.
+
+    What ``.relay/last_id`` is recovered from when it is lost: a deleted post's
+    id survives only here. A note created and deleted outside relay never had
+    such a commit, so this is a floor, not the exact mark.
+    """
+    if not _probe() or not (_git_dir() / "HEAD").exists():
+        return 0
+    got = _run("log", "--format=%s")
+    if got.returncode:
+        return 0
+    return max(
+        (int(m.group(1)) for line in got.stdout.splitlines() if (m := _POST_SUBJECT_RE.match(line))),
+        default=0,
+    )
+
+
 def enabled() -> bool:
     return bool(settings.history_enabled) and _available is not False
 
