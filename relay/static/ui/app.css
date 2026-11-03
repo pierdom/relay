@@ -959,6 +959,40 @@ html {
   --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.62);
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.62);
 }
+/* Ayu Darker — relay's own variant of Ayu Dark, not a reproduction: the canvas
+   and cards a step darker, the gold and function orange more saturated and
+   brighter, the foreground lifted. Text is 12.1:1 (Ayu Dark 10.1), and the
+   muted grey is brightened from Ayu's gutter grey until it clears AA (5.2:1),
+   so unlike Ayu Dark it needs no TEXT_ROLE_EXCEPTIONS entry. Every other hue
+   keeps Ayu's angle and gains saturation. */
+:root[data-theme="ayu-darker"], [data-theme="ayu-darker"] {
+  color-scheme: dark;
+  --bg:          #06080c;
+  --surface:     #080b10;
+  --border:      #2b2f37;   /* --muted at 30% over --surface, as in Ayu Dark */
+  --text:        #cdcbc4;
+  --muted:       #7b8391;
+  --accent:      #f7b336;   /* common.accent, hsl(39 92% 59%) */
+  --accent-dim:  #ffa13d;   /* syntax.func, hsl(31 100% 62%) */
+  --accent-glow: rgba(247, 179, 54, 0.12);
+  --tag-bg:      #0e121a;
+  --tag-active:  #161a23;
+  --green:       #7fe55d;
+  --red:         #f96776;
+  --body:        #cdcbc4;
+  --body-strong: #cdcbc4;
+  --wash-raise:  rgba(205, 203, 196, 0.04);
+  --accent-2:      #d6adff;
+  --accent-3:      #34c0ef;
+  --on-accent:     #06080c;
+  --on-scrim:      #cdcbc4;
+  --border-hover:  #5f6571;
+  --scrim-rgb:     6, 8, 12;
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.50);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.50);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.70);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.70);
+}
 /* Night Owl (sdras/night-owl-vscode-theme). Cards on the editor's deep navy,
    the canvas one step darker at the inactive-tab tone, chips on the input
    background. `#5f7e97` is the theme's own UI grey and its brightest muted

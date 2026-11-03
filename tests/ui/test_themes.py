@@ -170,8 +170,8 @@ def test_the_picker_orders_by_family_group_then_alphabetically(page):
     """Relay Dark and Relay Light lead; named families follow in group order;
     ungrouped singletons trail alphabetically.
 
-    Named families: Relay → ANSI → Catppuccin → GitHub → Gruvbox → Solarized.
-    Singletons (Ayu Dark, Dracula, Everforest Dark, Kanagawa, Molokai, Night Owl,
+    Named families: Relay → ANSI → Ayu → Catppuccin → GitHub → Gruvbox → Solarized.
+    Singletons (Dracula, Everforest Dark, Kanagawa, Molokai, Night Owl,
     Nord, One Dark, Rosé Pine, Tokyo Night) come last.
     Within each group themes are alphabetical.
     """
@@ -186,12 +186,13 @@ def test_the_picker_orders_by_family_group_then_alphabetically(page):
     # Named family blocks appear contiguously and before ungrouped singles.
     families = {
         'ANSI':       ['ANSI Dark', 'ANSI Light'],
+        'Ayu':        ['Ayu Dark', 'Ayu Darker'],
         'Catppuccin': ['Catppuccin Frappé', 'Catppuccin Latte', 'Catppuccin Macchiato', 'Catppuccin Mocha'],
         'GitHub':     ['GitHub Dark', 'GitHub Light'],
         'Gruvbox':    ['Gruvbox', 'Gruvbox Light'],
         'Solarized':  ['Solarized Dark', 'Solarized Light'],
     }
-    singles = sorted(['Ayu Dark', 'Dracula', 'Everforest Dark', 'Kanagawa', 'Molokai', 'Night Owl', 'Nord',
+    singles = sorted(['Dracula', 'Everforest Dark', 'Kanagawa', 'Molokai', 'Night Owl', 'Nord',
                       'One Dark', 'Rosé Pine', 'Tokyo Night'])
 
     for family, members in families.items():

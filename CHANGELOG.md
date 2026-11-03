@@ -4,6 +4,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.25.0] — 2026-11-03
+
+### Added
+- **Ayu Darker theme** (browser and TUI, `RELAY_PALETTE=ayu-darker`): Ayu Dark with a darker canvas, a more saturated and brighter gold and orange, and more contrast overall — text 12.1:1 (Ayu Dark 10.1), and muted text clears WCAG AA, which Ayu Dark's own grey doesn't. Ayu Dark and Ayu Darker now sit together as an "Ayu" group in the picker
+
+---
+
 ## [1.24.4] — 2026-11-03
 
 ### Changed
