@@ -60,6 +60,9 @@ export const cleanTag = (value) => value.trim().toLowerCase().replace(/[^a-z0-9_
 /** A comma-separated Tags field as a list ("a, b,," → ["a", "b"]). */
 export const parseTags = (value) => value.split(',').map(t => t.trim()).filter(Boolean);
 
+/** A post's display name: its title, or `#id` when it has none. */
+export const postName = (post) => post.title || `#${post.id}`;
+
 export function escHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
