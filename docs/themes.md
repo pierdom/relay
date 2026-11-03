@@ -1,6 +1,6 @@
 # Themes
 
-relay ships 24 themes. Pick one from the palette button in the header; the choice is saved per browser. Relay Dark is the default.
+relay ships 25 themes. Pick one from the palette button in the header; the choice is saved per browser. Relay Dark is the default.
 
 Every theme is a block of colour tokens in `relay/static/ui/app.css` plus an entry in `relay/static/ui/js/theme.js`. Reproductions of existing schemes (Catppuccin, Gruvbox, Nord…) use only their palette's own colours. Every theme clears the contrast floors in `tests/test_css_tokens.py`: body text at least 7:1, small text (meta, links, tags, buttons) at WCAG AA. Where a palette has no colour that reaches a floor for some role, the shortfall is recorded there with its measured value.
 
@@ -20,6 +20,12 @@ Regenerate this page and its screenshots with `scripts/theme_gallery.py` (see it
 | | |
 |---|---|
 | <b>ANSI Dark</b> · dark · browser only<br><img src="screenshots/themes/ansi-dark.png" alt="ANSI Dark" width="420"> | <b>ANSI Light</b> · light · browser only<br><img src="screenshots/themes/ansi-light.png" alt="ANSI Light" width="420"> |
+
+## Ayu
+
+| | |
+|---|---|
+| <b>Ayu Dark</b> · dark · TUI: `ayu-dark`<br><img src="screenshots/themes/ayu-dark.png" alt="Ayu Dark" width="420"> | <b>Ayu Darker</b> · dark · TUI: `ayu-darker`<br><img src="screenshots/themes/ayu-darker.png" alt="Ayu Darker" width="420"> |
 
 ## Catppuccin
 
@@ -50,8 +56,8 @@ Regenerate this page and its screenshots with `scripts/theme_gallery.py` (see it
 
 | | |
 |---|---|
-| <b>Ayu Dark</b> · dark · TUI: `ayu-dark`<br><img src="screenshots/themes/ayu-dark.png" alt="Ayu Dark" width="420"> | <b>Dracula</b> · dark · TUI: `dracula`<br><img src="screenshots/themes/dracula.png" alt="Dracula" width="420"> |
-| <b>Everforest Dark</b> · dark · browser only<br><img src="screenshots/themes/everforest-dark.png" alt="Everforest Dark" width="420"> | <b>Kanagawa</b> · dark · TUI: `kanagawa`<br><img src="screenshots/themes/kanagawa.png" alt="Kanagawa" width="420"> |
-| <b>Molokai</b> · dark · TUI: `molokai`<br><img src="screenshots/themes/molokai.png" alt="Molokai" width="420"> | <b>Night Owl</b> · dark · TUI: `night-owl`<br><img src="screenshots/themes/night-owl.png" alt="Night Owl" width="420"> |
-| <b>Nord</b> · dark · TUI: `nord`<br><img src="screenshots/themes/nord.png" alt="Nord" width="420"> | <b>One Dark</b> · dark · TUI: `one-dark`<br><img src="screenshots/themes/one-dark.png" alt="One Dark" width="420"> |
-| <b>Rosé Pine</b> · dark · TUI: `rose-pine`<br><img src="screenshots/themes/rose-pine.png" alt="Rosé Pine" width="420"> | <b>Tokyo Night</b> · dark · TUI: `tokyo-night`<br><img src="screenshots/themes/tokyo-night.png" alt="Tokyo Night" width="420"> |
+| <b>Dracula</b> · dark · TUI: `dracula`<br><img src="screenshots/themes/dracula.png" alt="Dracula" width="420"> | <b>Everforest Dark</b> · dark · browser only<br><img src="screenshots/themes/everforest-dark.png" alt="Everforest Dark" width="420"> |
+| <b>Kanagawa</b> · dark · TUI: `kanagawa`<br><img src="screenshots/themes/kanagawa.png" alt="Kanagawa" width="420"> | <b>Molokai</b> · dark · TUI: `molokai`<br><img src="screenshots/themes/molokai.png" alt="Molokai" width="420"> |
+| <b>Night Owl</b> · dark · TUI: `night-owl`<br><img src="screenshots/themes/night-owl.png" alt="Night Owl" width="420"> | <b>Nord</b> · dark · TUI: `nord`<br><img src="screenshots/themes/nord.png" alt="Nord" width="420"> |
+| <b>One Dark</b> · dark · TUI: `one-dark`<br><img src="screenshots/themes/one-dark.png" alt="One Dark" width="420"> | <b>Rosé Pine</b> · dark · TUI: `rose-pine`<br><img src="screenshots/themes/rose-pine.png" alt="Rosé Pine" width="420"> |
+| <b>Tokyo Night</b> · dark · TUI: `tokyo-night`<br><img src="screenshots/themes/tokyo-night.png" alt="Tokyo Night" width="420"> | |

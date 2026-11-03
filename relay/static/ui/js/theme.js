@@ -25,7 +25,8 @@ const CATALOGUE = [
   { id: 'catppuccin-frappe',   label: 'Catppuccin Frappé',   dark: true,  group: 'catppuccin' },
   { id: 'catppuccin-macchiato',label: 'Catppuccin Macchiato',dark: true,  group: 'catppuccin' },
   { id: 'catppuccin-mocha',    label: 'Catppuccin Mocha',    dark: true,  group: 'catppuccin' },
-  { id: 'ayu-dark',            label: 'Ayu Dark',            dark: true  },
+  { id: 'ayu-dark',            label: 'Ayu Dark',            dark: true,  group: 'ayu' },
+  { id: 'ayu-darker',          label: 'Ayu Darker',          dark: true,  group: 'ayu' },
   { id: 'dracula',             label: 'Dracula',             dark: true  },
   { id: 'github-dark',         label: 'GitHub Dark',         dark: true,  group: 'github' },
   { id: 'github-light',        label: 'GitHub Light',        dark: false, group: 'github' },
@@ -43,8 +44,8 @@ const CATALOGUE = [
   { id: 'tokyo-night',         label: 'Tokyo Night',         dark: true  },
 ];
 
-const GROUP_ORDER = ['relay', 'ansi', 'catppuccin', 'github', 'gruvbox', 'solarized'];
-const GROUP_LABELS = { relay: 'Relay', ansi: 'ANSI', catppuccin: 'Catppuccin', github: 'GitHub', gruvbox: 'Gruvbox', solarized: 'Solarized' };
+const GROUP_ORDER = ['relay', 'ansi', 'ayu', 'catppuccin', 'github', 'gruvbox', 'solarized'];
+const GROUP_LABELS = { relay: 'Relay', ansi: 'ANSI', ayu: 'Ayu', catppuccin: 'Catppuccin', github: 'GitHub', gruvbox: 'Gruvbox', solarized: 'Solarized' };
 
 const THEMES = [
   // Signature themes (Relay Dark then Relay Light) always lead in declaration order.

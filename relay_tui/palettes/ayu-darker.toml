@@ -1,0 +1,16 @@
+# Ayu Darker
+# Matches the "Ayu Darker" theme from the web UI (a darker, more saturated
+# variant of Ayu Dark); see its app.css block.
+# Select with: RELAY_PALETTE=ayu-darker
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#f7b336"   # accent         — accent, interactive elements, borders
+border  = "#292d34"   # muted #7b8391 at 30% over bg — widget borders, badges, panel separators
+bg      = "#06080c"   # bg             — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+# Used for TTL expiry badges (post_panel) and Textual's success/warning/error
+# theme tokens (notifications, buttons).
+perf_great    = "#7fe55d"  # success / far-future expiry
+perf_bad      = "#ffa13d"  # warning / expiry within 3 days
+perf_terrible = "#f96776"  # error / expired / expiry within 24h
