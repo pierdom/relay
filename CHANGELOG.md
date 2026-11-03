@@ -4,6 +4,14 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.24.4] — 2026-11-03
+
+### Changed
+- **MCP tool descriptions no longer carry internal backlog codes** ("relay #198, B-7" and the like), which every agent read on each `tools/list` without being able to use them
+- Maintainability, no behaviour change: the web UI's Files tab, tag editors and wikilink hover preview moved out of `main.js` into their own modules (1778 → 1476 lines), and `mcp_server.py`'s OAuth comments dropped references to modules and migration phases that no longer exist
+
+---
+
 ## [1.24.3] — 2026-11-03
 
 ### Security
