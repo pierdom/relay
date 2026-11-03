@@ -51,7 +51,7 @@ from ._common import (
     _require_write_scope,
     logger,
 )
-from .attachments import _all_referenced_attachments, referenced_attachment_names
+from .attachments import drop_orphaned_embeds, referenced_attachment_names
 
 # ── Posts ─────────────────────────────────────────────────────────────────────
 
@@ -884,22 +884,11 @@ async def delete_post(db: aiosqlite.Connection, post_id: int, *, actor: Actor | 
         vault.delete_file(vault.abspath(row["path"]))
         await vault.index_delete(db, post_id)
         await db.commit()
-        # Orphan cleanup: drop the attachments *this post* referenced that no
-        # remaining post references. Scoped to the deleted post's own embeds on
-        # purpose — a folder's assets/ dir also holds files a human dropped in from
-        # Obsidian but hasn't embedded yet, and sweeping every unreferenced file in
-        # the folder would delete those bystanders. Shared assets (still referenced
-        # elsewhere) stay. Stays under `write_lock` (K-2) along with the commit
-        # below, same reasoning as create_post's comment — otherwise these
-        # deletes could land uncommitted on disk for another writer's commit to
-        # sweep up and misattribute.
-        own = referenced_attachment_names(row["content"])
-        if own:
-            referenced = await _all_referenced_attachments(db)
-            for name, _f, _s in vault.list_attachments(folder):
-                lowered = name.lower()
-                if lowered in own and lowered not in referenced:
-                    vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
+        # Shared assets (still referenced elsewhere) stay. Stays under
+        # `write_lock` (K-2) along with the commit below, same reasoning as
+        # create_post's comment — otherwise these deletes could land uncommitted
+        # on disk for another writer's commit to sweep up and misattribute.
+        await drop_orphaned_embeds(db, [(folder, row["content"])])
         # After the orphan sweep, so the note and the assets it took with it are one
         # commit — restoring the post restores its images in the same revert.
         await history.commit(f"post {post_id} delete: {row['title']}", author=actor.git_author if actor else None)

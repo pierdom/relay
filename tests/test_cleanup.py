@@ -390,3 +390,31 @@ async def test_mcp_set_tag_config_takes_keep_last(client):
     assert result["keep_last"] == 4
     listed = {t["tag"]: t for t in (await mcp_server.list_tags())["tags"]}
     assert listed["digest"]["keep_last"] == 4
+
+
+# ── expiry takes the post's own attachments with it ──────────────────────────
+
+PNG = "iVBORw0KGgo="
+
+
+@pytest.mark.asyncio
+async def test_expiry_removes_the_attachments_only_the_expired_post_embedded(client):
+    post = await _create(client, tags=["homelab"])
+    sharer = await _create(client, tags=["homelab"])
+    for name in ("own.png", "shared.png"):
+        r = await client.post("/attachments", json={"filename": name, "data": PNG, "post_id": post["id"]}, headers=AUTH)
+        assert r.status_code == 201, r.text
+    await client.post(f"/posts/{sharer['id']}/append", json={"content": "![[shared.png]]"}, headers=AUTH)
+    bystander = await client.post("/attachments", json={"filename": "dropped.png", "data": PNG, "folder": "Homelab"},
+                                  headers=AUTH)
+    assert bystander.status_code == 201, bystander.text
+    db = await _db()
+    try:
+        await db.execute("UPDATE posts SET expires_at = ? WHERE id = ?", (_iso(-1), post["id"]))
+        await db.commit()
+        assert await cleanup._delete_expired(db) == 1
+    finally:
+        await db.close()
+    assert (await client.get("/attachments/own.png", headers=AUTH)).status_code == 404
+    assert (await client.get("/attachments/shared.png", headers=AUTH)).status_code == 200   # still embedded
+    assert (await client.get("/attachments/dropped.png", headers=AUTH)).status_code == 200  # never embedded

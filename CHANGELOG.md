@@ -4,6 +4,17 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.24.2] — 2026-11-03
+
+### Security
+- **REST request bodies are capped at 4 MiB** (413 above it), the cap MCP already applied. REST read any body whole into memory, an inline base64 attachment before its own size check ran; `POST /attachments` still takes an inline file up to `ATTACHMENT_MAX_MB`, and the presigned upload streams under that cap as before
+
+### Fixed
+- **A post restored after it expired is no longer swept straight back out.** TTLs and `keep_last` count from `created_at`, which a restore keeps, so the next cleanup pass deleted it again. A restore the next sweep would delete gets its own `expires_at` one TTL from now (the shortest of its tags', else `DEFAULT_TTL_HOURS`, else a week) — a per-post date outranks every tag rule. A revision whose own `expires_at` has passed is restored with a new one the same way
+- **Expiry removes the attachments only the expired post embedded**, as a delete always did; an expired digest's images stayed on disk for good. Attachments other posts still embed, and files never embedded, stay
+
+---
+
 ## [1.24.1] — 2026-10-31
 
 ### Security

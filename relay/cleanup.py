@@ -3,14 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosqlite
 
-from . import changes, database, events, history, ingest, metrics, vault
+from . import changes, database, events, folders, history, ingest, metrics, vault
 from .config import settings
 from .models import ISO_Z_RE, tags_from_sentinel
+from .service.attachments import drop_orphaned_embeds
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +63,9 @@ async def _ids_where(db: aiosqlite.Connection, clause: str, params: list) -> set
         return {row[0] for row in await cur.fetchall()}
 
 
-async def _delete_expired(db: aiosqlite.Connection) -> int:
-    """Collect every expired post id, unlink its file, drop the index rows, then
-    publish an SSE ``delete`` for each.
-
-    Files are canonical, so expiry deletes the file too (the watcher ignores it
-    via self-delete suppression — which is why this path has to emit the events
-    itself).
-    """
+async def expired_ids(db: aiosqlite.Connection) -> tuple[set[int], int]:
+    """Every post id the sweep would delete now, and how many of those only a
+    ``keep_last`` removes."""
     async with db.execute("SELECT tag, ttl_hours, expires_at, keep_last FROM tag_config") as cur:
         tag_configs = {
             row["tag"]: {"ttl_hours": row["ttl_hours"], "expires_at": row["expires_at"], "keep_last": row["keep_last"]}
@@ -140,8 +136,42 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
                 [_tag_pattern(tag), cfg["keep_last"]],
             )
     by_retention = len(retained_out - to_delete)
-    to_delete |= retained_out
+    return to_delete | retained_out, by_retention
 
+
+# How long a restored post lives when a rule with no TTL of its own — a
+# keep_last, a tag's past expires_at — would remove it again at once.
+_RESTORE_GRACE_HOURS = 7 * 24
+
+
+async def restore_expiry(db: aiosqlite.Connection, tags: list[str]) -> str:
+    """The ``expires_at`` for a restored post the next sweep would delete again:
+    one TTL from now (the shortest of its tags', else the default), or a week.
+
+    Retention counts from ``created_at``, which a restore keeps, so without this
+    a post restored after it expired was swept straight back out. A per-post
+    ``expires_at`` outranks every tag rule and ``keep_last``.
+    """
+    hours = None
+    if tags:
+        marks = ",".join("?" * len(tags))
+        async with db.execute(
+            f"SELECT MIN(ttl_hours) FROM tag_config WHERE tag IN ({marks}) AND ttl_hours > 0", tags
+        ) as cur:
+            hours = (await cur.fetchone())[0]
+    hours = hours or settings.default_ttl_hours or _RESTORE_GRACE_HOURS
+    return (datetime.now(UTC) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+async def _delete_expired(db: aiosqlite.Connection) -> int:
+    """Delete every expired post: unlink its file and the attachments only it
+    embedded, drop the index rows, then publish an SSE ``delete`` for each.
+
+    Files are canonical, so expiry deletes the file too (the watcher ignores it
+    via self-delete suppression — which is why this path has to emit the events
+    itself).
+    """
+    to_delete, by_retention = await expired_ids(db)
     if not to_delete:
         return 0
 
@@ -149,14 +179,18 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
     # every other writer takes, so a concurrent rename can't race the unlink.
     async with vault.write_lock:
         async with db.execute(
-            f"SELECT id, path, tags FROM posts WHERE id IN ({','.join('?' * len(to_delete))})",
+            f"SELECT id, path, tags, content FROM posts WHERE id IN ({','.join('?' * len(to_delete))})",
             list(to_delete),
         ) as cur:
-            expired = [(row["id"], row["path"], row["tags"]) for row in await cur.fetchall()]
-        for post_id, rel, _tags in expired:
+            expired = [(row["id"], row["path"], row["tags"], row["content"]) for row in await cur.fetchall()]
+        for post_id, rel, _tags, _content in expired:
             vault.delete_file(vault.abspath(rel))
             await vault.index_delete(db, post_id)
         await db.commit()
+        # As a delete does: an expired post's images went with it only on paper.
+        await drop_orphaned_embeds(
+            db, [(folders.folder_of(rel, default=folders.INBOX), content) for _id, rel, _t, content in expired]
+        )
         # K-2: commit while still holding `write_lock` — releasing it first (as
         # this used to) left a gap where a concurrent writer's own already-
         # written, not-yet-committed file could get swept into this commit, and
@@ -170,7 +204,7 @@ async def _delete_expired(db: aiosqlite.Connection) -> int:
     # won't emit for these — without this a TTL'd post lingers in every connected
     # UI/TUI until the next reload. Deletes stream without an SSE `id:`, so they
     # can't rewind a client's replay cursor.
-    for post_id, _rel, tags in expired:
+    for post_id, _rel, tags, _content in expired:
         await events.publish_delete(post_id, tags_from_sentinel(tags))
     # relay #198, N-4: recorded after the fact, same reasoning as watcher.py's
     # batch commit — the changes-log row(s) don't exist until this commit

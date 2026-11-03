@@ -5,10 +5,11 @@ from pathlib import Path
 
 import aiosqlite
 
-from .. import changes, events, folders, frontmatter, history, vault
+from .. import changes, cleanup, events, folders, frontmatter, history, vault
 from ..errors import HistoryUnavailable, RevisionNotFound
 from ..identity import Actor
 from ..models import (
+    ISO_Z_RE,
     DeletedPost,
     DeletedPostsResponse,
     PostHistoryResponse,
@@ -164,6 +165,9 @@ async def restore_post(
     label = f"post {post_id} restore: {title} (from {match.short_sha})"
 
     if row is not None:
+        if expires_at and ISO_Z_RE.match(expires_at) and expires_at < vault.utcnow_iso():
+            # A revision whose own date has passed would be swept at once.
+            expires_at = await cleanup.restore_expiry(db, tags)
         # Reuse the normal edit path: it handles the rename back to the old title,
         # rewrites inbound [[wikilinks]], mirrors the index and streams SSE.
         return await update_post(
@@ -208,6 +212,19 @@ async def restore_post(
             source=source, created_at=created_at, updated_at=now, expires_at=expires_at,
             properties=properties, updated_by=updated_by,
         )
+        if post_id in (await cleanup.expired_ids(db))[0]:
+            # Restored after it expired: the next sweep would delete it again.
+            expires_at = await cleanup.restore_expiry(db, tags)
+            path = vault.write_file(
+                id=post_id, title=path.stem, content=body, tags=tags, source=source,
+                created_at=created_at, updated_at=now, expires_at=expires_at,
+                old_path=path, properties=properties, updated_by=updated_by,
+            )
+            await vault.index_upsert(
+                db, id=post_id, title=path.stem, path=path, content=body, tags=tags,
+                source=source, created_at=created_at, updated_at=now, expires_at=expires_at,
+                properties=properties, updated_by=updated_by,
+            )
         await db.commit()
         post = PostResponse.from_row(await _fetch(db, post_id))
         # K-2: commit while still holding `write_lock` — see posts.create_post's

@@ -164,9 +164,16 @@ edit. Or restore just the affected files with `git checkout <sha>~1 -- <paths>`.
 
 ### Posts removed by TTL expiry
 
-Look for `ttl expiry: N post(s)` and restore from the commit before it. Then fix
-the rule that caused it (`expires_at` on the post, or the tag's TTL/`keep_last`)
-or it will expire again on the next cleanup pass.
+Look for `ttl expiry: N post(s)` and restore from the commit before it. A post
+restored through relay (UI, REST or MCP) that the next sweep would delete again
+gets its own `expires_at` one TTL from now (a week when only a `keep_last` or a
+tag's past date applied), so it isn't swept straight back out; edit or clear
+that date to keep it longer. A file restored with git directly gets no such
+date, so fix the rule that caused it (`expires_at` on the post, or the tag's
+TTL/`keep_last`) or it will expire again on the next cleanup pass.
+
+An expiry removes the attachments only the expired post embedded, as a delete
+does; they are in the same `ttl expiry` commit if you need them back.
 
 ---
 
