@@ -66,7 +66,7 @@ Non-`.md` files live in `<Folder>/assets/`, embedded as `![[file.png]]`; names a
 
 - **`vault.resolve_attachment` is the security boundary for serving *and* deleting**: it never resolves a `.md` file, a dotfile, or anything under a dot-directory (a path-form `DELETE /attachments/Folder/Note.md` once unlinked posts around every post-level check).
 - **Serving is an inline allowlist by resolved MIME** (`routes/attachments._renders_inline`); everything else downloads (`Content-Disposition: attachment`) so an upload can never run script in the UI's origin. Never go back to a suffix list.
-- A caller-supplied `folder` must pass `folders.is_valid_name`. Exactly one byte transport per upload; `source_url` fetches are SSRF-guarded at connect time (`ingest._GuardedNetworkBackend`) and happen only **after** the scope check. Upload slots are in-memory — **single-worker assumption**.
+- A caller-supplied `folder` must pass `folders.is_valid_name`. Exactly one byte transport per upload; REST bodies are capped by `body_limit` (inline base64 `POST /attachments` gets the attachment cap). `source_url` fetches are SSRF-guarded at connect time (`ingest._GuardedNetworkBackend`) and happen only **after** the scope check. Upload slots are in-memory — **single-worker assumption**.
 - Deleting a post removes only the attachments it embedded that no other post references.
 
 ## History and the changelog
@@ -128,7 +128,7 @@ Single-page app on REST + SSE: ES modules, no build step, `marked` and `DOMPurif
 ## Tags · master doc · TTL
 
 - **Master document (`id=0`)**: `Master Document.md` at the vault root, seeded at startup, undeletable, TTL-exempt; it holds the taxonomy and house rules agents read first.
-- **TTL** is off by default. Precedence: per-post `expires_at` > per-tag (`<vault>/.relay/tags.yml`) > `DEFAULT_TTL_HOURS`; shortest wins across tags. `expires_at` is normalised to `YYYY-MM-DDTHH:MM:SSZ` because the sweep compares it lexically (`"1 week"` once sorted below every date and got swept); the sweep only considers values in that shape. **`keep_last: N`** keeps a tag's newest N posts in the same sweep; its deletions commit under the `ttl expiry` prefix, which `history._classify` and `changes` read as expiry — keep it. Tag config is replaced whole, so client forms open pre-filled and send every field.
+- **TTL** is off by default. Precedence: per-post `expires_at` > per-tag (`<vault>/.relay/tags.yml`) > `DEFAULT_TTL_HOURS`; shortest wins across tags. `expires_at` is normalised to `YYYY-MM-DDTHH:MM:SSZ` because the sweep compares it lexically (`"1 week"` once sorted below every date and got swept); the sweep only considers values in that shape. **`keep_last: N`** keeps a tag's newest N posts in the same sweep; its deletions commit under the `ttl expiry` prefix, which `history._classify` and `changes` read as expiry — keep it. Tag config is replaced whole, so client forms open pre-filled and send every field. Expiry drops the attachments only the expired posts embedded (`service.attachments.drop_orphaned_embeds`, shared with `delete_post`). **A restore that the next sweep would delete again** (`cleanup.expired_ids` — retention counts from `created_at`, which a restore keeps) gets a per-post `expires_at` from `cleanup.restore_expiry`.
 - **Search** is SQLite FTS5 (porter, bm25, title/tags weighted), falling back to `LIKE`.
 - **The watcher re-stamps a duplicate**: an external file carrying an id already indexed at another *existing* path gets a fresh id; a rename (old path gone) is not a duplicate.
 - **Cross-links**: `[[Title]]`/`[[Title|alias]]` (case-insensitive; renames rewrite inbound links vault-wide and stream the rewritten posts) and `#NNN` (stable across renames). Stored verbatim, resolved at display; code spans/blocks are skipped.
@@ -150,7 +150,7 @@ relay/
 ├── mcp_server.py      in-process MCP server (tools + auth)
 ├── history.py · changes.py · lint.py · watcher.py · cleanup.py · events.py · ingest.py
 ├── chunking.py · embedding.py · vectors.py     semantic search
-├── metrics.py · status.py
+├── metrics.py · status.py · body_limit.py (4 MiB REST body cap; MCP and streamed uploads keep their own)
 └── static/            index.html, ui/app.css, ui/js/{main,api,icons,util,dom,links,render,editor,switcher,theme,status,edit-form,lint,post-history,deleted,sheet,dialog,toast,feed-query,view-prefs}.js
 relay_mcp/server.py    stdio bridge (no tool definitions)
 relay_tui/             Textual TUI + palettes/

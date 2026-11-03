@@ -51,6 +51,25 @@ async def _all_referenced_attachments(db: aiosqlite.Connection) -> set[str]:
     return referenced
 
 
+async def drop_orphaned_embeds(db: aiosqlite.Connection, deleted: list[tuple[str, str]]) -> None:
+    """Delete the attachments the just-deleted posts embedded that no remaining
+    post references. ``deleted`` is (folder, content) per post, already gone from
+    the index; the caller holds ``vault.write_lock`` and commits history after.
+
+    Scoped to the deleted posts' own embeds on purpose: a folder's assets/ also
+    holds files a human dropped in from Obsidian but hasn't embedded yet, and
+    sweeping every unreferenced file would delete those bystanders.
+    """
+    own = [(folder, names) for folder, content in deleted if (names := referenced_attachment_names(content))]
+    if not own:
+        return
+    referenced = await _all_referenced_attachments(db)
+    for folder, names in own:
+        for name, _f, _s in vault.list_attachments(folder):
+            lowered = name.lower()
+            if lowered in names and lowered not in referenced:
+                vault.delete_attachment(f"{folder}/{vault.ATTACHMENTS_DIRNAME}/{name}")
+
 
 _DATA_URI_RE = re.compile(r"^data:[^;,]*;base64,", re.IGNORECASE)
 

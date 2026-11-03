@@ -182,3 +182,78 @@ async def test_deletions_after_a_cached_scan_are_still_found(client):
     assert [d.post_id for d in found] == [first, second]
     history.reset_state_for_tests()
     assert await history.deletions() == found, "incremental scan disagrees with a full one"
+
+
+# ── a restored post is not swept straight back out ───────────────────────────
+
+
+async def _sweep() -> int:
+    from relay import cleanup
+
+    async with database.connect() as db:
+        return await cleanup._delete_expired(db)
+
+
+async def _restore_expired(client, pid) -> dict:
+    listed = (await client.get("/posts/deleted?include_expiry=true", headers=HEADERS)).json()["items"]
+    sha = next(d["sha"] for d in listed if d["id"] == pid)
+    r = await client.post(f"/posts/{pid}/restore", json={"sha": sha}, headers=HEADERS)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _hours_ahead(iso: str) -> float:
+    from datetime import UTC, datetime
+
+    return (datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC) - datetime.now(UTC)).total_seconds() / 3600
+
+
+@pytest.mark.asyncio
+async def test_a_post_restored_past_its_keep_last_survives_the_next_sweep(client, monkeypatch):
+    """Retention counts from created_at, which a restore keeps: without its own
+    expires_at the restored post was the oldest again and went at once."""
+    monkeypatch.setattr(settings, "default_ttl_hours", 0)
+    older = await _make(client, "Older Digest", tags=["roundup"])
+    await _make(client, "Newer Digest", tags=["roundup"])
+    await client.post("/tags/roundup/config", json={"keep_last": 1}, headers=HEADERS)
+    assert await _sweep() == 1
+
+    back = await _restore_expired(client, older)
+    assert 167 < _hours_ahead(back["expires_at"]) <= 168   # a week: keep_last has no TTL of its own
+    assert await _sweep() == 0
+    assert (await client.get(f"/posts/{older}", headers=HEADERS)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_post_restored_past_its_tag_date_gets_one_tag_ttl(client):
+    pid = await _make(client, "Dated", tags=["shortlived"])
+    await client.post("/tags/shortlived/config",
+                      json={"ttl_hours": 2, "expires_at": "2020-01-01T00:00:00Z"}, headers=HEADERS)
+    assert await _sweep() == 1
+
+    back = await _restore_expired(client, pid)
+    assert 1.9 < _hours_ahead(back["expires_at"]) <= 2
+    assert await _sweep() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_revision_whose_own_date_passed_is_restored_with_a_new_one(client, monkeypatch):
+    monkeypatch.setattr(settings, "default_ttl_hours", 0)
+    r = await client.post("/posts", json={"title": "Own Date", "content": "v1", "tags": ["homelab"],
+                                          "expires_at": "2020-01-01T00:00:00Z"}, headers=HEADERS)
+    pid = r.json()["id"]
+    first = (await client.get(f"/posts/{pid}/history", headers=HEADERS)).json()["items"][-1]["sha"]
+    await client.patch(f"/posts/{pid}", json={"content": "v2", "expires_at": ""}, headers=HEADERS)
+
+    live = await client.post(f"/posts/{pid}/restore", json={"sha": first}, headers=HEADERS)
+    assert live.status_code == 200, live.text
+    assert _hours_ahead(live.json()["expires_at"]) > 167
+    assert await _sweep() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_restore_no_rule_would_sweep_keeps_no_expiry(client, monkeypatch):
+    monkeypatch.setattr(settings, "default_ttl_hours", 0)
+    pid = await _make(client, "Plain")
+    await client.delete(f"/posts/{pid}", headers=HEADERS)
+    assert (await _restore_expired(client, pid))["expires_at"] is None

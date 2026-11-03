@@ -18,6 +18,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__, changes, embedding, history, metrics, vault, watcher
 from . import status as app_status
+from .body_limit import BodySizeLimitMiddleware
 from .cleanup import cleanup_loop
 from .config import settings
 from .database import connect, init_db
@@ -148,6 +149,8 @@ async def _service_error(_request: Request, exc: ServiceError) -> JSONResponse:
     return JSONResponse({"detail": exc.detail}, status_code=exc.status)
 
 
+# Inside the metrics middleware, so a 413 is counted.
+app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(metrics.MetricsMiddleware)
 
 # Holds transient OAuth state (state/nonce/PKCE verifier) between /auth/login and

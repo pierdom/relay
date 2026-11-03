@@ -6,6 +6,8 @@ Every endpoint needs `Authorization: Bearer <API_KEY>`; the browser UI may use i
 
 **Public, no auth:** `/health`; the UI shell and static files (`/`, `/ui`, `/id/{id}`, `/static/*`, `/assets/*`, `/favicon.ico`); the API schema (`/docs`, `/redoc`, `/openapi.json` — no secrets, the repo is public); the login bootstrap (`/auth/*`, and `POST /session`, which takes the key itself); and with MCP OAuth on, fastmcp's OAuth surface — metadata, `/register`, `/authorize`, `/token`, `/consent`, `/mcp/oauth/callback` (the IdP's return leg, before login by definition; a binding cookie ties it to the browser that saw the consent screen). Anything else, unmatched paths included, answers 401.
 
+**Request bodies are capped at 4 MiB** (413 above it), the same cap MCP applies. `POST /attachments` allows an inline base64 file up to `ATTACHMENT_MAX_MB`; `PUT /attachments/uploads/{id}` streams raw bytes under that cap.
+
 ## Endpoints
 
 | Method | Path | Description |
@@ -120,6 +122,8 @@ curl -X POST http://localhost:8000/tags/digest/config \
 - **The body replaces the whole config** (`{}` removes it) — send every field you mean to keep; `GET /tags` shows the current one.
 - **TTL precedence:** a post's own `expires_at` > per-tag > `DEFAULT_TTL_HOURS`; across tags the shortest wins.
 - **`keep_last: N`** expires all but the tag's N newest posts at the next sweep, skipping #0 and posts with their own `expires_at`. Deletions are recorded as `expiry` and restorable while history is on.
+- **Expiry removes the attachments only the expired post embedded**, as a delete does.
+- **A restored post the next sweep would delete again** (it expired, or its revision's own `expires_at` has passed) is given an `expires_at` one TTL from now — the shortest of its tags' `ttl_hours`, else `DEFAULT_TTL_HOURS`, else a week — so it isn't swept straight back out.
 - **`expires_at`** must be ISO 8601; offsets and dates are normalised to `YYYY-MM-DDTHH:MM:SSZ` UTC, anything else is a 422 (the sweep compares lexically — `"1 week"` once sorted before every date and was swept at once). A non-ISO value hand-written into front-matter is skipped with a warning.
 
 ---
