@@ -19,7 +19,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from . import folders, frontmatter, vectors
+from . import folders, frontmatter, history, vectors
 from .config import settings
 from .models import tags_from_sentinel, tags_to_sentinel
 
@@ -630,6 +630,11 @@ async def rebuild_index(db: aiosqlite.Connection) -> int:
     # Seeded from the persisted high-water mark, not just the files present, so a
     # note stamped during a rebuild can't take the id of a post deleted earlier.
     max_id = read_id_counter()
+    if not id_counter_path().exists() and (recovered := history.highest_post_id()):
+        # The counter went with `.relay/` (the index's folder, easy to wipe):
+        # without this the ids of deleted posts would be handed out again.
+        logger.warning("%s is missing — recovered the id high-water mark %d from history", id_counter_path(), recovered)
+        max_id = recovered
     needs_id: list[tuple[Path, dict, str]] = []
 
     for path in files:

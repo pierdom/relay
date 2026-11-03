@@ -10,7 +10,7 @@ import aiosqlite
 
 from .. import folders, history, ingest, vault
 from ..config import settings
-from ..errors import AttachmentError, AttachmentSourceError, InvalidFolder, PostNotFound
+from ..errors import AttachmentError, AttachmentSourceError, InvalidFolder, PostNotFound, ScopeDenied
 from ..identity import Actor
 from ..models import (
     AttachmentDeleteResponse,
@@ -269,7 +269,7 @@ async def delete_attachment(
         # orphan (zero referencing posts) has no tag to prove ownership
         # against, so a tag-restricted key is denied outright, same as
         # `folder`-only in add_attachment.
-        async with db.execute("SELECT id, tags, content FROM posts") as cur:
+        async with db.execute("SELECT id, tags, content, path FROM posts") as cur:
             rows = await cur.fetchall()
         referenced_by = [r["id"] for r in rows if fname in referenced_attachment_names(r["content"])]
         owning_tags: set[str] = set()
@@ -277,6 +277,15 @@ async def delete_attachment(
             if r["id"] in referenced_by:
                 owning_tags |= set(tags_from_sentinel(r["tags"]))
         _require_write_scope(actor, owning_tags)
+        if actor is not None and actor.scope.mode != "full":
+            # Embedding a file is a write the key may make, so on its own a
+            # reference would let a restricted key adopt — then delete — any
+            # orphan in the vault. It may delete only from the folder of a post
+            # that embeds the file.
+            home = vault.relpath(resolved).split("/", 1)[0]
+            embedders = {folders.folder_of(r["path"], default=folders.INBOX) for r in rows if r["id"] in referenced_by}
+            if home not in embedders:
+                raise ScopeDenied
         removed = vault.delete_attachment(name)
         if removed is None:
             return None

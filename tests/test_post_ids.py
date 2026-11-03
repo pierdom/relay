@@ -8,6 +8,7 @@ restore could resurrect a previous holder's body under the same id.
 from __future__ import annotations
 
 import os
+import shutil
 
 os.environ.setdefault("API_KEY", "test-key")
 
@@ -15,8 +16,9 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from relay import database, vault
+from relay import database, history, vault
 from relay.auth import require_api_key
+from relay.config import settings
 from relay.main import app
 
 AUTH = {"Authorization": "Bearer test-key"}
@@ -106,3 +108,23 @@ async def test_the_counter_file_is_not_mistaken_for_a_post(client):
     titles = {p["title"] for p in r.json()["items"]}
     assert "last_id" not in titles
     assert vault.id_counter_path().parent.name == ".relay"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs a git binary")
+@pytest.mark.asyncio
+async def test_a_lost_counter_is_recovered_from_history(client, monkeypatch):
+    """`.relay/` also holds the disposable index, so it is the folder someone
+    wipes. A deleted post's id then lives only in history — and without it the
+    newest deleted id went straight to the next post."""
+    monkeypatch.setattr(settings, "history_enabled", True)   # conftest turns it off
+    history.reset_state_for_tests()
+    await history.init()
+    kept = await _create(client, "Kept")
+    gone = await _create(client, "Gone")
+    await client.delete(f"/posts/{gone['id']}", headers=AUTH)
+    vault.id_counter_path().unlink()
+
+    await database.init_db()
+    assert vault.read_id_counter() == gone["id"] > kept["id"]
+    assert (await _create(client, "Next"))["id"] > gone["id"]
+    history.reset_state_for_tests()

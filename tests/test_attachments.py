@@ -448,3 +448,25 @@ async def test_delete_post_removes_only_its_own_orphan(client):
     await client.delete(f"/posts/{post['id']}", headers=AUTH)
     assert (await client.get("/attachments/mine.png", headers=AUTH)).status_code == 404
     assert (await client.get("/attachments/diagram.png", headers=AUTH)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_restricted_key_cannot_adopt_and_delete_an_orphan_in_another_folder(client):
+    """Embedding a file is a write a restricted key may make, so a reference
+    alone must not prove ownership: it may delete only from an embedder's folder."""
+    from relay import database, service
+    from relay.config import ApiKeyScope
+    from relay.errors import ScopeDenied
+    from relay.identity import Actor
+
+    mine = await _create(client, "Bot Note", content="x", tags=["homelab"])
+    await client.post("/attachments", json={"filename": "theirs.png", "data": PNG, "folder": "Finance"}, headers=AUTH)
+    await client.post("/attachments", json={"filename": "mine.png", "data": PNG, "post_id": mine["id"]}, headers=AUTH)
+    await client.post(f"/posts/{mine['id']}/append", json={"content": "![[theirs.png]]"}, headers=AUTH)
+    bot = Actor("bot", "bot@relay.local", ApiKeyScope(mode="write", tags=frozenset({"homelab"})))
+
+    async with database.connect() as db:
+        with pytest.raises(ScopeDenied):
+            await service.delete_attachment(db, "theirs.png", actor=bot)
+        assert (await service.delete_attachment(db, "mine.png", actor=bot)) is not None
+    assert (await client.get("/attachments/theirs.png", headers=AUTH)).status_code == 200
