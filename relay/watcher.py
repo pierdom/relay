@@ -77,7 +77,7 @@ class _Handler(FileSystemEventHandler):
 def _log_failure(fut) -> None:
     exc = fut.exception()
     if exc:
-        logger.error("Watcher reconcile failed: %s", exc)
+        logger.error("Watcher reconcile failed", exc_info=exc)
 
 
 async def _reconcile(paths: list[str]) -> None:
@@ -128,6 +128,26 @@ async def _reconcile_file(db: aiosqlite.Connection, path: Path) -> None:
         return
     meta, body = frontmatter.parse(text)
     pid = meta.get("id")
+    # The row this file is already indexed under, if any — `path` isn't unique
+    # in the index, so an upsert under another id would leave that row behind.
+    async with db.execute("SELECT id, created_at, tags FROM posts WHERE path = ?", (vault.relpath(path),)) as cur:
+        here = await cur.fetchone()
+    if pid is None and here is not None:
+        # An edit that dropped the id line (or pasted over the whole
+        # front-matter) is still this post: keep its id so #id links resolve.
+        logger.warning("External edit dropped the id of %s — restoring id %s", path.name, here["id"])
+        pid = here["id"]
+        meta["created_at"] = meta.get("created_at") or here["created_at"]
+        path = vault.write_file(
+            id=pid, title=path.stem, content=body, tags=meta.get("tags") or [],
+            source=meta.get("source"), created_at=meta["created_at"],
+            updated_at=meta.get("updated_at"), expires_at=meta.get("expires_at"), old_path=path,
+            properties=meta.get("properties"), updated_by=meta.get("updated_by"),
+        )
+    elif pid is not None and here is not None and here["id"] != pid:
+        # The id was changed by hand: the row under the old one is stale.
+        await vault.index_delete(db, here["id"])
+        await events.publish_delete(here["id"], tags_from_sentinel(here["tags"]))
     if pid is not None and await _id_taken_elsewhere(db, pid, path):
         # A copy carrying another live note's id (Obsidian "Duplicate note", a
         # backup dropped beside the original). Upserting would repoint the id

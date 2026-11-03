@@ -129,8 +129,8 @@ async def _ingest(db: aiosqlite.Connection, commits: list[history.CommitPaths]) 
         # current name; a bare delete has only the one (D) path anyway.
         resolved: dict[int, tuple[str, str, str]] = {}   # post_id -> (title, tags, status)
         for status, path in commit.changes:
-            if not path.endswith(".md"):
-                continue   # attachments etc. — history.commits() doesn't filter by extension
+            if not path.endswith(".md") or history.is_hidden_relpath(path):
+                continue   # attachments, .trash/ etc. — history.commits() doesn't filter
             hit = await _resolve(status, path, commit.sha)
             if hit is None:
                 continue

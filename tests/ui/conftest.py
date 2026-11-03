@@ -159,6 +159,9 @@ def _logged_in(relay_server, browser, **context_args):
     key_input.fill(API_KEY)
     page.locator("#connectForm button[type=submit], #connectForm button").first.click()
     page.locator("#newPostBtn").wait_for(state="visible", timeout=10_000)
+    # Signed in is not loaded: the feed paints once the link index is in, so a
+    # test measuring cards right after the header appears raced it.
+    page.locator(".feed .post").first.wait_for(timeout=10_000)
     return context, page
 
 

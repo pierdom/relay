@@ -750,3 +750,53 @@ async def test_mcp_get_status_reports_caller_scope(tmp_path, monkeypatch):
         assert result.structured_content["caller"] == {"mode": "write", "tags": ["news"]}
     finally:
         auth_context_var.reset(reset)
+
+
+def test_rotating_a_key_signs_out_the_sessions_minted_from_it(monkeypatch):
+    """A leaked key is rotated by changing its value under the same name; a
+    browser session pasted from the old value must not survive that."""
+    monkeypatch.setattr(settings, "api_keys", "olimar:old-secret-value-123")
+    token = auth.create_session(sub="olimar", key=True)
+    assert auth.verify_session(token) is not None
+    monkeypatch.setattr(settings, "api_keys", "olimar:new-secret-value-456")
+    assert auth.verify_session(token) is None
+
+
+def test_a_key_session_does_not_carry_the_key_itself(monkeypatch):
+    import base64
+    import json
+
+    monkeypatch.setattr(settings, "api_keys", "olimar:old-secret-value-123")
+    token = auth.create_session(sub="olimar", key=True)
+    raw = token.split(".")[0]
+    payload = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    assert "old-secret-value-123" not in json.dumps(payload)
+
+
+def test_a_key_session_from_before_fingerprints_is_signed_out(monkeypatch):
+    token = auth._serializer().dumps({"sub": auth.APIKEY_SUB, "email": ""})
+    assert auth.verify_session(token) is None
+
+
+def _request(headers: dict[str, str]):
+    from starlette.requests import Request
+
+    return Request({"type": "http", "method": "GET", "path": "/events",
+                    "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]})
+
+
+def test_still_authenticated_follows_a_rotated_key(monkeypatch):
+    """The SSE stream re-checks this at every keepalive."""
+    monkeypatch.setattr(settings, "api_keys", "agent:first-secret-value-123")
+    req = _request({"Authorization": "Bearer first-secret-value-123"})
+    assert auth.still_authenticated(req)
+    monkeypatch.setattr(settings, "api_keys", "agent:second-secret-value-456")
+    assert not auth.still_authenticated(req)
+
+
+def test_still_authenticated_follows_an_expired_session(monkeypatch):
+    token = auth.create_session(sub="user-123", email="me@example.com")
+    req = _request({"Cookie": f"relay_session={token}"})
+    assert auth.still_authenticated(req)
+    monkeypatch.setattr(settings, "session_max_age_hours", -1)
+    assert not auth.still_authenticated(req)

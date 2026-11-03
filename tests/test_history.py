@@ -89,6 +89,56 @@ async def test_relay_control_dir_is_never_committed(client):
     assert not (Path(settings.vault_path) / ".gitignore").exists()
 
 
+@pytest.mark.asyncio
+async def test_dot_entries_are_never_committed(client):
+    """Obsidian config, its trash and Syncthing's versions are bookkeeping."""
+    vault = Path(settings.vault_path)
+    (vault / ".obsidian").mkdir()
+    (vault / ".obsidian" / "workspace.json").write_text("{}", encoding="utf-8")
+    (vault / ".trash").mkdir()
+    (vault / ".trash" / "Old.md").write_text("---\nid: 5\n---\nbody", encoding="utf-8")
+    await _create(client, "Anything")
+    assert not [p for p in git("ls-files").splitlines() if history.is_hidden_relpath(p)]
+
+
+@pytest.mark.asyncio
+async def test_dot_entries_an_older_exclude_rule_tracked_are_untracked_at_startup(client):
+    vault = Path(settings.vault_path)
+    (vault / ".obsidian").mkdir()
+    (vault / ".obsidian" / "app.json").write_text("{}", encoding="utf-8")
+    git("add", "-f", ".obsidian/app.json")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "old rule")
+
+    await history.init()
+
+    assert "history: stop tracking hidden files" in log()
+    assert ".obsidian/app.json" not in git("ls-files").splitlines()
+    assert (vault / ".obsidian" / "app.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_a_delete_into_obsidian_trash_reads_as_a_delete(client):
+    """Obsidian's "move to Obsidian trash" turns a delete into a move to
+    .trash/, keeping the id: the changelog must not read it as a rename."""
+    from relay import changes, watcher
+
+    post = await _create(client, "Trashed")
+    vault = Path(settings.vault_path)
+    path = vault / git("ls-files", "*Trashed.md")
+    (vault / ".trash").mkdir()
+    path.rename(vault / ".trash" / "Trashed.md")
+    await watcher._reconcile([str(path)])
+
+    async with database.connect() as db:
+        await changes.sync(db)
+        rows = await (await db.execute(
+            "SELECT action FROM changes WHERE post_id = ? ORDER BY seq DESC LIMIT 1", (post["id"],)
+        )).fetchall()
+    assert rows[0]["action"] == "external_delete"
+    deleted = await history.deletions()
+    assert [d.path for d in deleted if d.post_id == post["id"]] == [path.relative_to(vault).as_posix()]
+
+
 # ── a commit per write ───────────────────────────────────────────────────────
 
 

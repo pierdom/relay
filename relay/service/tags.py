@@ -100,6 +100,13 @@ async def rename_tag(
                 updated_at=row["updated_at"], expires_at=row["expires_at"], properties=row_properties,
                 updated_by=row["updated_by"],
             )
+        # Merging onto a tag with its own config keeps that one: `tag` is the
+        # primary key, so moving old's row onto it would raise — after every
+        # file above was already rewritten.
+        await db.execute(
+            "DELETE FROM tag_config WHERE tag = ? AND EXISTS (SELECT 1 FROM tag_config WHERE tag = ?)",
+            (old, new_name),
+        )
         await db.execute("UPDATE tag_config SET tag = ? WHERE tag = ?", (new_name, old))
         await vault.write_tag_config(db)
         await db.commit()

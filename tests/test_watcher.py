@@ -202,6 +202,47 @@ async def test_relay_own_write_is_still_suppressed(client):
 # ── Syncthing conflict-copy and versioning suppression ───────────────────────
 
 
+async def _rows_at(path) -> list[int]:
+    db = await _db()
+    try:
+        async with db.execute("SELECT id FROM posts WHERE path = ?", (vault.relpath(path),)) as cur:
+            return [r["id"] for r in await cur.fetchall()]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_an_external_edit_that_drops_the_front_matter_keeps_the_id(client):
+    """Pasting over a whole note in Obsidian loses its `id:` line. It is still
+    the same post: a fresh id would break every #id link to it and leave a
+    second index row on the same file."""
+    post = (await client.post("/posts", json={"title": "Kept", "content": "v1", "tags": ["dev"]}, headers=AUTH)).json()
+    path = await _path_of(client, post["id"])
+    path.write_text("pasted over, no front-matter\n", encoding="utf-8")
+    os.utime(path, (path.stat().st_mtime + 60,) * 2)
+
+    await watcher._reconcile([str(path)])
+
+    assert await _rows_at(path) == [post["id"]]
+    assert f"id: {post['id']}" in path.read_text(encoding="utf-8")
+    got = (await client.get(f"/posts/{post['id']}", headers=AUTH)).json()
+    assert got["content"].strip() == "pasted over, no front-matter"
+    assert got["created_at"] == post["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_a_hand_changed_id_leaves_no_stale_row(client):
+    body = {"title": "Renumbered", "content": "x", "tags": ["dev"]}
+    post = (await client.post("/posts", json=body, headers=AUTH)).json()
+    path = await _path_of(client, post["id"])
+    path.write_text(path.read_text(encoding="utf-8").replace(f"id: {post['id']}", "id: 9000"), encoding="utf-8")
+    os.utime(path, (path.stat().st_mtime + 60,) * 2)
+
+    await watcher._reconcile([str(path)])
+
+    assert await _rows_at(path) == [9000]
+
+
 def _make_handler(vault_path) -> _Handler:
     import asyncio
     loop = asyncio.new_event_loop()

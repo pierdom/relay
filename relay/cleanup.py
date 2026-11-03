@@ -195,8 +195,8 @@ async def cleanup_loop() -> None:
                 if count:
                     metrics.cleanup_deletions.inc(count)
                     logger.info("Cleanup deleted %d expired post(s)", count)
-        except Exception as exc:
-            logger.error("Cleanup error: %s", exc)
+        except Exception:
+            logger.exception("Cleanup error")
 
         # Sweep expired presigned upload slots (staged bytes never finalized).
         try:
@@ -204,8 +204,8 @@ async def cleanup_loop() -> None:
             if dropped:
                 metrics.upload_slots_purged.inc(dropped)
                 logger.info("Cleanup purged %d expired upload slot(s)", dropped)
-        except Exception as exc:
-            logger.error("Upload-slot cleanup error: %s", exc)
+        except Exception:
+            logger.exception("Upload-slot cleanup error")
 
         # Sweep expired OAuth records (relay #313). Phase 4 deleted this sweep on
         # the reasoning that the new store "honors the ttl= passed to every .put()
@@ -230,5 +230,5 @@ async def cleanup_loop() -> None:
                 dropped = _sweep_expired_oauth_records()
                 if dropped:
                     logger.info("Cleanup removed %d expired OAuth record(s)", dropped)
-            except Exception as exc:
-                logger.error("OAuth cleanup error: %s", exc)
+            except Exception:
+                logger.exception("OAuth cleanup error")
