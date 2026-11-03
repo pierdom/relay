@@ -14,22 +14,23 @@ import { anyModalOpen, closeAllModals, dismissTopModal, topModal, wireModal } fr
 import { showToast } from './toast.js';
 import { initDeleted } from './deleted.js';
 import { initLint, reopenLintModal, tryCloseLintModal } from './lint.js';
-import { buildEditForm, confirmDeleteAttachment, wireAttachments } from './edit-form.js';
+import { buildEditForm, wireAttachments } from './edit-form.js';
 import { enhanceEditor } from './editor.js';
 import { authorMark } from './dom.js';
 import { refreshLinks } from './links.js';
-import { extractMedia, IMAGE_EXT_RE, renderBody, stripTitleHeading, wrapTables } from './render.js';
+import { extractMedia, renderBody, stripTitleHeading, wrapTables } from './render.js';
 import { initSwitcher, openSwitcher } from './switcher.js';
+import { initGallery, loadAttachments, resetGallery } from './gallery.js';
+import { forgetTagEditor, initTagEditors, startTagConfig, startTagRename } from './tag-editors.js';
+import { hideLinkPreview, initLinkPreview } from './link-preview.js';
 import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
 import { ICON_CHEVRON, ICON_CLOCK, ICON_FOLDER, ICON_IMAGE, ICON_PENCIL, ICON_STAR, ICON_TRASH } from './icons.js';
-import { cleanTag, escHtml, fmtBytes, parseTags, relativeTime, sourceParts, toDatetimeLocal, toUtcIso } from './util.js';
+import { cleanTag, escHtml, parseTags, postName, relativeTime, sourceParts, toUtcIso } from './util.js';
 
 const LIMIT = 20;
 let authed = false;         // true once a session exists (cookie or key)
 let sidebarMode = 'tags';   // 'tags' | 'tree' | 'files'
-let attachCache = [];       // last-fetched attachment list (for the gallery)
-let attachFolder = null;    // active gallery folder filter (null = all)
 let searchDebounce = null;
 let es = null;
 let sseErrorTimer = null;
@@ -56,7 +57,6 @@ const sidebarEl       = document.getElementById('sidebarEl');
 const sidebarOverlay  = document.getElementById('sidebarOverlay');
 const searchBar       = document.getElementById('searchBar');
 const attachmentsView = document.getElementById('attachmentsView');
-const lightbox        = document.getElementById('lightbox');
 const searchInput     = document.getElementById('searchInput');
 const searchClear     = document.getElementById('searchClear');
 const modeSelect      = document.getElementById('modeSelect');
@@ -205,7 +205,7 @@ async function init() {
   syncSearchScope();
   resetPaging();
   feed.innerHTML = '';
-  attachFolder = null;
+  resetGallery();
   showSidebarMode('tags');   // a reconnect may come from the Tree or Files tab
   // Not carried across sessions: a stale 'semantic' would 503 the first
   // search on a relay with embeddings off.
@@ -246,7 +246,6 @@ async function openPostFromUrl() {
   await openPostById(raw, { onError: (e) => showToast(`Couldn’t open post #${raw}: ${e.message}`, { error: true }) });
 }
 
-const postName = (post) => post.title || `#${post.id}`;
 // Who wrote the current version (a key name or an OIDC email); a click filters by them.
 const authorChip = (post) => !post.updated_by ? ''
   : `<button type="button" class="post-author" title="Show posts by ${escHtml(post.updated_by)}">${authorMark(post.updated_by).outerHTML}by ${escHtml(post.updated_by)}</button>`;
@@ -532,7 +531,7 @@ function scheduleRefresh() {
 }
 
 function renderTags(tags, allCount) {
-  openTagEditor = null;   // the DOM these forms lived in is about to be replaced
+  forgetTagEditor();
   tagList.innerHTML = '';
   tagList.appendChild(makeTagItem('all', null, allCount));
   tags.forEach(t => tagList.appendChild(makeTagItem(t.tag, t.tag, t.count, t)));
@@ -716,264 +715,8 @@ async function selectFolder(folder) {
   await loadPosts(true);
 }
 
-/* ── Attachment gallery (Files tab) ─────────────────────────── */
-const attPath = (a) => '/attachments/' + [a.folder, 'assets', a.filename].map(encodeURIComponent).join('/');
-
-async function loadAttachments() {
-  if (!authed) return;
-  try { attachCache = (await apiFetch('/attachments')).items; } catch { attachCache = []; }
-  renderAttachSidebar();
-  renderAttachGallery();
-}
-
-function selectAttachFolder(folder) {
-  attachFolder = folder;
-  renderAttachSidebar();
-  renderAttachGallery();
-  closeSidebar();
-}
-
-function renderAttachSidebar() {
-  const counts = new Map();
-  attachCache.forEach(a => counts.set(a.folder, (counts.get(a.folder) || 0) + 1));
-  const row = (folder, label, count) => sidebarRow({
-    labelHtml: folderLabel(label, folder !== null), count, className: 'tag-item folder-item',
-    active: attachFolder === folder, onClick: () => selectAttachFolder(folder),
-  });
-  tagList.replaceChildren(
-    row(null, 'All files', attachCache.length),
-    ...[...counts.keys()].sort().map(folder => row(folder, folder, counts.get(folder))),
-  );
-}
-
-function renderAttachGallery() {
-  const items = attachFolder === null ? attachCache : attachCache.filter(a => a.folder === attachFolder);
-  if (!items.length) { attachmentsView.innerHTML = '<div class="att-empty">No attachments yet.</div>'; return; }
-  const groups = new Map();
-  items.forEach(a => { if (!groups.has(a.folder)) groups.set(a.folder, []); groups.get(a.folder).push(a); });
-  let html = '';
-  [...groups.keys()].sort().forEach(folder => {
-    html += `<div class="att-folder-head">${escHtml(folder)}/assets</div><div class="att-grid">`;
-    groups.get(folder).forEach(a => {
-      const p = attPath(a);
-      const thumb = IMAGE_EXT_RE.test(a.filename)
-        ? `<div class="att-thumb" data-src="${p}" data-name="${escHtml(a.filename)}"><img src="${p}" alt="${escHtml(a.filename)}" loading="lazy"></div>`
-        : `<a class="att-thumb" href="${p}" target="_blank" rel="noopener noreferrer"><span class="att-ext">${escHtml(a.filename.split('.').pop() || 'file')}</span></a>`;
-      html += `<div class="att-card" data-name="${escHtml(a.filename)}">${thumb}
-        <div class="att-meta"><span class="att-name">${escHtml(a.filename)}</span>
-          <span class="att-sub"><span>${fmtBytes(a.bytes)}</span></span></div>
-        <button class="att-del" title="Delete file from vault">×</button></div>`;
-    });
-    html += '</div>';
-  });
-  attachmentsView.innerHTML = html;
-}
-
-attachmentsView.addEventListener('click', async e => {
-  const thumb = e.target.closest('.att-thumb[data-src]');
-  if (thumb) { openLightbox(thumb.dataset.src, thumb.dataset.name); return; }
-  const del = e.target.closest('.att-del');
-  if (!del) return;
-  const name = del.closest('.att-card').dataset.name;
-  if (await confirmDeleteAttachment(name)) await loadAttachments();
-});
-
-function openLightbox(src, name) {
-  document.getElementById('lightboxImg').src = src;
-  document.getElementById('lightboxCap').textContent = name || '';
-  lightbox.style.display = 'flex';
-}
-function closeLightbox() { lightbox.style.display = 'none'; document.getElementById('lightboxImg').src = ''; }
-lightbox.addEventListener('click', closeLightbox);
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && lightbox.style.display === 'flex') closeLightbox(); });
-
-/* One tag editor (rename or expiry) open at a time: opening another, clicking
-   away or Escape closes the current one; re-clicking its control toggles it. */
-let openTagEditor = null;   // { el, kind, cancel }
-
-function closeTagEditor() {
-  if (!openTagEditor) return;
-  const { cancel } = openTagEditor;
-  openTagEditor = null;
-  cancel();
-}
-
-/** True when this control was already open, meaning the click should just close it. */
-function toggledTagEditor(el, kind) {
-  if (openTagEditor && openTagEditor.el === el && openTagEditor.kind === kind) {
-    closeTagEditor();
-    return true;
-  }
-  closeTagEditor();
-  return false;
-}
-
-// A click anywhere outside the open editor dismisses it. Tag controls are
-// exempt: closing on mousedown shifts the rows below before mouseup, so the
-// click would land on the wrong row; they close the previous editor themselves.
-document.addEventListener('mousedown', e => {
-  if (!openTagEditor) return;
-  if (openTagEditor.el.contains(e.target)) return;
-  if (e.target.closest?.('.tag-config-btn, .tag-rename')) return;
-  closeTagEditor();
-});
-
-function startTagRename(el, oldName) {
-  if (toggledTagEditor(el, 'rename')) return;
-  const nameSpan = el.querySelector('.tag-name');
-  const input = document.createElement('input');
-  input.className = 'tag-rename-input';
-  input.value = oldName;
-  nameSpan.replaceWith(input);
-  input.focus(); input.select();
-  openTagEditor = { el, kind: 'rename', cancel: () => cancelRename() };
-
-  let committed = false;
-  async function commit() {
-    if (committed) return; committed = true;
-    // Normalised as the server stores it, so an active filter follows the rename.
-    const newName = cleanTag(input.value);
-    if (!newName || newName === oldName) { cancelRename(); return; }
-    try {
-      const data = await apiFetch(`/tags/${encodeURIComponent(oldName)}`, {
-        method: 'PATCH', body: JSON.stringify({ new_name: newName }),
-      });
-      renderTags(data.tags, await postCount());
-      if (query.tag === oldName) selectTag(newName);   // feed and live stream follow the rename
-    } catch (e) { showToast(`Couldn’t rename #${oldName}: ${e.message}`, { error: true }); committed = false; cancelRename(); }
-  }
-
-  function cancelRename() {
-    if (committed) return;
-    committed = true;
-    if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
-    const label = document.createElement('button');
-    label.type = 'button'; label.className = 'tag-name'; label.textContent = oldName;
-    if (query.tag === oldName) label.setAttribute('aria-current', 'true');
-    input.replaceWith(label);
-    label.focus();   // focus was on the input that just went away
-  }
-
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') cancelRename();
-  });
-  input.addEventListener('blur', commit);
-}
-
-function startTagConfig(el, tagName) {
-  if (toggledTagEditor(el, 'config')) return;
-  const savedHtml = el.innerHTML;
-  const form = document.createElement('div');
-  form.className = 'tag-config-form';
-  // Explicit Save/Cancel, not just Enter/Escape: the keyboard-only version was
-  // undiscoverable, and unreachable once focus had left the inputs.
-  const current = el._expiry;
-  form.innerHTML = `
-    <div class="tc-label"></div>
-    <input type="number" class="tc-ttl" placeholder="Hours after posting" min="1" aria-label="Expire posts this many hours after posting">
-    <input type="datetime-local" class="tc-expires" aria-label="Expire all posts at">
-    <input type="number" class="tc-keep" placeholder="Keep only the newest N" min="1" aria-label="Keep only this many of the newest posts">
-    <div class="tc-note" aria-live="polite"></div>
-    <div class="tc-actions">
-      <button type="button" class="tc-save">Save</button>
-      <button type="button" class="tc-cancel">Cancel</button>
-      ${current ? '<button type="button" class="tc-remove">Remove expiry</button>' : ''}
-    </div>`;
-  form.querySelector('.tc-label').textContent = current ? `Expiry for #${tagName}` : `Set an expiry for #${tagName}`;
-  // What is set now — the form used to open empty whatever the tag carried.
-  if (current?.ttl_hours) form.querySelector('.tc-ttl').value = current.ttl_hours;
-  if (current?.expires_at) form.querySelector('.tc-expires').value = toDatetimeLocal(current.expires_at);
-  if (current?.keep_last) form.querySelector('.tc-keep').value = current.keep_last;
-  el.innerHTML = '';
-  el.classList.add('tag-editing');
-  el.appendChild(form);
-
-  const ttlInput = form.querySelector('.tc-ttl');
-  const expiresInput = form.querySelector('.tc-expires');
-  const keepInput = form.querySelector('.tc-keep');
-  // Say what a retention limit will do before it is saved: one typo'd digit
-  // on a busy tag would otherwise expire most of it at the next sweep.
-  const note = form.querySelector('.tc-note');
-  const count = el._count || 0;
-  // Whole numbers only: a number input accepts "1e3" and "2.5", which
-  // parseInt read as 1 and 2 — "keep 1" on a typo.
-  const wholeOrNull = (input) => {
-    const raw = input.value.trim();
-    if (!raw) return undefined;
-    const n = Number(raw);
-    return Number.isInteger(n) && n > 0 ? n : null;
-  };
-  const syncNote = () => {
-    const keep = wholeOrNull(keepInput);
-    const over = keep ? count - keep : 0;
-    note.textContent = keep === null ? 'Keep only a whole number of posts, 1 or more.'
-      : over > 0 ? `Up to ${over} of its ${count} posts, the oldest, will expire at the next cleanup`
-        + ' (restorable while history is on).'
-      : '';
-  };
-  keepInput.addEventListener('input', syncNote);
-  syncNote();
-  ttlInput.focus();
-  openTagEditor = { el, kind: 'config', cancel: () => cancel() };
-
-  let committed = false;
-  async function commit() {
-    if (committed) return; committed = true;
-    const ttl = wholeOrNull(ttlInput);
-    const expiresVal = expiresInput.value;
-    const keep = wholeOrNull(keepInput);
-    if (ttl === null || keep === null) {
-      note.textContent = 'Hours and posts must be whole numbers, 1 or more.';
-      committed = false;
-      return;
-    }
-    // All cleared on a tag that had a rule means remove it; on one that had
-    // none it means nothing was asked for.
-    if (!ttl && !expiresVal && !keep) { if (current) { await save({}); } else { committed = false; cancel(); } return; }
-    // The whole config is replaced, so every field shown goes back.
-    const body = {};
-    if (ttl) body.ttl_hours = ttl;
-    if (expiresVal) body.expires_at = toUtcIso(expiresVal);
-    if (keep) body.keep_last = keep;
-    await save(body);
-  }
-
-  // `{}` removes the tag's config server-side (set_tag_config).
-  async function save(body) {
-    try {
-      await apiFetch(`/tags/${encodeURIComponent(tagName)}/config`, {
-        method: 'POST', body: JSON.stringify(body),
-      });
-      if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
-      await loadTags();
-    } catch (e) { showToast(`Couldn’t save expiry for #${tagName}: ${e.message}`, { error: true }); committed = false; cancel(); }
-  }
-
-  function cancel() {
-    if (committed) return;
-    committed = true;
-    if (openTagEditor && openTagEditor.el === el) openTagEditor = null;
-    el.classList.remove('tag-editing');
-    el.innerHTML = savedHtml;
-    wireTagControls(el, tagName);
-  }
-
-  form.querySelector('.tc-save').addEventListener('click', e => { e.stopPropagation(); commit(); });
-  form.querySelector('.tc-cancel').addEventListener('click', e => { e.stopPropagation(); cancel(); });
-  form.querySelector('.tc-remove')?.addEventListener('click', e => {
-    e.stopPropagation();
-    if (committed) return;
-    committed = true;
-    save({});
-  });
-  // The row itself filters the feed on click; a click inside the form must not.
-  form.addEventListener('click', e => e.stopPropagation());
-  form.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
-  });
-}
+initGallery({ isAuthed: () => authed, sidebarRow, folderLabel, closeSidebar });
+initTagEditors({ renderTags, postCount, selectTag, loadTags, wireTagControls });
 
 /* The active filter, shown beside the search box: a search runs inside it,
    and "No posts match" used to say nothing about the tag it had been limited
@@ -1656,52 +1399,7 @@ function clearFeedFocus() {
   _focusedCard = null;
 }
 
-/* ── Wikilink hover preview ───────────────────────────────── */
-let _previewTimer = null;
-let _previewEl    = null;
-
-function hideLinkPreview() {
-  clearTimeout(_previewTimer);
-  _previewTimer = null;
-  if (_previewEl) { _previewEl.remove(); _previewEl = null; }
-}
-
-function showLinkPreview(postId, anchor) {
-  hideLinkPreview();
-  // The body re-renders on navigation; a detached anchor measures as 0,0 and
-  // nothing would ever fire its mouseout, so the preview stuck in the corner.
-  if (!anchor.isConnected) return;
-  const el = document.createElement('div');
-  el.className = 'link-preview';
-  const rect = anchor.getBoundingClientRect();
-  el.style.top  = `${rect.bottom + 8}px`;
-  el.style.left = `${Math.min(rect.left, window.innerWidth - 296)}px`;
-  el.innerHTML = '<div class="lp-body">…</div>';
-  document.body.appendChild(el);
-  _previewEl = el;
-  apiFetch(`/posts/${postId}`).then(post => {
-    if (_previewEl !== el) return;
-    const raw     = stripTitleHeading(post.content, post.title);
-    // [[Target|alias]] reads as its alias, the way the body renders it.
-    const snippet = raw.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/[#*`_[\]]/g, '').trim();
-    const clipped = snippet.length > 150 ? snippet.slice(0, 150) + '…' : snippet;
-    el.innerHTML  =
-      `<div class="lp-title">${escHtml(postName(post))}</div>` +
-      (post.tags.length ? `<div class="lp-tags">${post.tags.map(t => `<span class="lp-tag">${escHtml(t)}</span>`).join('')}</div>` : '') +
-      (clipped ? `<div class="lp-body">${escHtml(clipped)}</div>` : '');
-  }).catch(hideLinkPreview);
-}
-
-pmBody.addEventListener('mouseover', e => {
-  const a = e.target.closest('a.wikilink[data-post-id]');
-  if (!a) return;
-  clearTimeout(_previewTimer);
-  _previewTimer = setTimeout(() => showLinkPreview(Number(a.dataset.postId), a), 350);
-});
-pmBody.addEventListener('mouseout', e => {
-  if (!e.target.closest('a.wikilink[data-post-id]')) return;
-  hideLinkPreview();
-});
+initLinkPreview(pmBody);
 
 document.addEventListener('keydown', e => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable;

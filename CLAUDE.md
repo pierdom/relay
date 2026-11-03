@@ -151,7 +151,7 @@ relay/
 ├── history.py · changes.py · lint.py · watcher.py · cleanup.py · events.py · ingest.py
 ├── chunking.py · embedding.py · vectors.py     semantic search
 ├── metrics.py · status.py · body_limit.py (4 MiB REST body cap; MCP and streamed uploads keep their own)
-└── static/            index.html, ui/app.css, ui/js/{main,api,icons,util,dom,links,render,editor,switcher,theme,status,edit-form,lint,post-history,deleted,sheet,dialog,toast,feed-query,view-prefs}.js
+└── static/            index.html, ui/app.css, ui/js/{main,api,icons,util,dom,links,render,editor,switcher,theme,status,edit-form,lint,post-history,deleted,sheet,dialog,toast,feed-query,view-prefs,gallery,tag-editors,link-preview}.js
 relay_mcp/server.py    stdio bridge (no tool definitions)
 relay_tui/             Textual TUI + palettes/
 scripts/               export_vault.py (pull a live relay into a vault), theme_gallery.py (docs/themes.md)
