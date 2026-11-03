@@ -70,13 +70,9 @@ _oidc_jwks_cache: KeySet | None = None
 
 async def _load_pocketid_jwks() -> KeySet:
     """Fetch and cache PocketID's OIDC discovery metadata + JWKS, for verifying
-    `OIDCProxy`'s upstream id_tokens in `_RelayOIDCProxy` below (relay #313 Phase 2).
+    `OIDCProxy`'s upstream id_tokens in `_RelayOIDCProxy` below.
 
-    A new, independent implementation rather than reusing `mcp_oauth/pocketid.py`'s
-    near-identical logic — that whole module is scheduled for deletion in Phase 4,
-    and importing from code about to be deleted would just create a dependency
-    Phase 4 then has to unwind. Same trust model/caching tradeoff as that module:
-    cached for the process lifetime, not refetched on a `kid` miss — PocketID
+    Cached for the process lifetime, not refetched on a `kid` miss — PocketID
     rotating its signing keys is rare enough that a relay restart to pick up new
     keys is an acceptable cost on this single-user deployment, and not refetching
     avoids letting an attacker force repeated JWKS fetches with bogus `kid`s.
@@ -122,28 +118,21 @@ _refreshing_upstream: ContextVar[bool] = ContextVar("relay_mcp_refreshing_upstre
 
 class _RelayOIDCProxy(OIDCProxy):
     """Enforces relay's own `OIDC_ALLOWED_SUBS`/`OIDC_ALLOWED_EMAILS` allowlist on
-    top of `OIDCProxy` — not a stock feature (relay #313 Phase 2 plan flagged this
-    explicitly). `_extract_upstream_claims` is fastmcp's own documented override
-    point for inspecting the upstream token response; raising here aborts
-    `exchange_authorization_code`/`exchange_refresh_token` before any FastMCP
-    access token is issued (confirmed by reading both call sites: the raise lands
-    before `self.jwt_issuer.issue_access_token(...)` in each), so a real PocketID
-    login by a non-allowlisted human still can't obtain a working `/mcp`
-    credential. Runs on every refresh too, not just initial login — a stronger
-    guarantee than the current hand-rolled `mcp_oauth/broker.py`, which only
-    checks once at login and never revisits the allowlist on refresh.
+    top of `OIDCProxy` — not a stock feature. `_extract_upstream_claims` is
+    fastmcp's own documented override point for inspecting the upstream token
+    response; raising here aborts `exchange_authorization_code`/
+    `exchange_refresh_token` before any FastMCP access token is issued (the raise
+    lands before `self.jwt_issuer.issue_access_token(...)` in each), so a real
+    PocketID login by a non-allowlisted human still can't obtain a working `/mcp`
+    credential. Runs on every refresh too, not just initial login, so removing
+    someone from the allowlist ends their MCP session at its next refresh.
 
     Independently re-verifies the id_token's signature against PocketID's own
-    JWKS rather than trusting `idp_tokens`'s contents unverified — the same rigor
-    `mcp_oauth/pocketid.py` already applies today, reimplemented here rather than
-    imported from it since that whole module is deleted in Phase 4. Deliberately
-    does not check `nonce` (unlike `pocketid.py`'s hand-rolled upstream leg) —
-    `OIDCProxy` owns the upstream `/authorize` request end to end and doesn't
-    expose a way to thread a per-transaction nonce through to this hook;
+    JWKS rather than trusting `idp_tokens`'s contents unverified. Does not check
+    `nonce`: `OIDCProxy` owns the upstream `/authorize` request end to end and
+    doesn't expose a way to thread a per-transaction nonce through to this hook;
     `iss`/`aud`/`exp` are the essential claims for authenticity of a token
-    obtained via a fresh, PKCE-bound, server-to-server code exchange. Flagged
-    here for Phase 5 to scrutinize explicitly, not silently asserted as
-    equivalent."""
+    obtained via a fresh, PKCE-bound, server-to-server code exchange."""
 
     def _get_verification_token(self, upstream_token_set: UpstreamTokenSet) -> str | None:
         """Align the upstream token set's expiry with the id_token's own `exp`.
@@ -207,8 +196,8 @@ class _RelayOIDCProxy(OIDCProxy):
     def _prepare_scopes_for_token_exchange(self, scopes: list[str]) -> list[str]:
         """Never forward the downstream `scope` to PocketID's own `/token`.
 
-        Found live, not read for (relay #313, first production connector test):
-        a real claude.ai connection requests `scope=relay` from `/authorize`
+        Found in the first production connector test: a real claude.ai
+        connection requests `scope=relay` from `/authorize`
         (relay's own MCP scope, since that's what `settings.mcp_scopes` reports
         via `/.well-known/oauth-authorization-server`) — fine for the FastMCP
         token this proxy issues *to* claude.ai, meaningless to PocketID, which
@@ -249,7 +238,7 @@ class _RelayOIDCProxy(OIDCProxy):
         `verify_id_token=True` decoupling upstream identity from relay's own
         authorization.
 
-        Always grants ``"write"`` too (relay #198, B-8): an OIDC login is a
+        Always grants ``"write"`` too: an OIDC login is a
         human web-UI-equivalent identity via ``identity.actor_from_session``,
         which is full-access by contract — only bearer keys (``_StaticBearerAuth``)
         get a per-key restricted scope set."""
@@ -262,10 +251,9 @@ class _RelayOIDCProxy(OIDCProxy):
             raise TokenError("invalid_grant", "PocketID token response had no id_token")
 
         # Everything from here to the allowlist check is converted into a clean
-        # OAuth error rather than allowed to escape (relay #313 Phase 5). It
-        # already failed *closed* — an escaping exception means no token — but it
-        # surfaced as a bare 500 from `/token`, an unauthenticated endpoint: a
-        # stale JWKS after an IdP key rotation, or PocketID being briefly
+        # OAuth error rather than allowed to escape. It would fail *closed* — an
+        # escaping exception means no token — but would surface as a bare 500
+        # from `/token`, an unauthenticated endpoint: a stale JWKS after an IdP key rotation, or PocketID being briefly
         # unreachable, would turn every login attempt into an unhandled-exception
         # log entry instead of a diagnosable `invalid_grant`. `TokenError` is
         # re-raised untouched so the allowlist denial below keeps its own
@@ -354,39 +342,35 @@ class _StaticBearerAuth(TokenVerifier):
     than a hand-rolled ASGI wrapper. With MCP OAuth active this is one of
     `MultiAuth`'s `verifiers` (see `_build_auth` below) — a pure fallback with no
     routes of its own, tried after `_RelayOIDCProxy`. Subclasses `TokenVerifier`
-    specifically (not the bare `AuthProvider` etf-scout-mcp's own reference
-    `_StaticBearerAuth` uses) —
-    fastmcp's docstring for it is explicit that token verifiers "typically don't
-    provide authentication routes by default", which is exactly the property this
-    needs and is more precise than relying on an unstated default. Deliberately not
+    rather than the bare `AuthProvider`: token verifiers "typically don't provide
+    authentication routes by default", which is exactly the property this needs.
+    Deliberately not
     fastmcp's own `DebugTokenVerifier` (`fastmcp.server.auth.providers.debug`) — same
     shape, but its name and docstring ("bypasses standard security checks... only use
     in controlled environments") is the wrong signal to leave sitting in relay's
     actual production auth path. Delegates comparison to `identity.resolve_bearer`
-    (relay #198, B-7) — the same constant-time, multi-key-aware resolver
+    — the same constant-time, multi-key-aware resolver
     `auth.require_api_key` uses — rather than a bare `==`, and its return
     identifies *which* configured key matched, not just whether one did."""
 
     async def verify_token(self, token: str) -> AccessToken | None:
         actor = resolve_bearer(token)
         if actor is not None:
-            # Caught live (relay #313 Phase 2): with MCP OAuth active, MultiAuth
+            # With MCP OAuth active, MultiAuth
             # enforces `required_scopes` against every verifier's result, not just
             # the OAuth server's — `scopes=[]` here made the static-bearer path
             # 403 "insufficient_scope" on every single call, since it could never
             # satisfy `settings.mcp_scopes`. `settings.mcp_scopes` (the base
             # "relay" scope) is always reported so every key can clear that
-            # check; `"write"` (relay #198, B-8) is added only for a key whose
-            # scope isn't read-only — `AuthMiddleware`'s `restrict_tag("write",
-            # scopes=["write"])` (see `_build_auth`) then filters/denies the
-            # 13 write-tagged tools per key, instead of every key reporting the
-            # same uniform scope set as before this feature.
+            # check; `"write"` is added only for a key whose scope isn't
+            # read-only — `AuthMiddleware`'s `restrict_tag("write",
+            # scopes=["write"])` (on `mcp` below) then filters/denies the
+            # write-tagged tools per key.
             #
-            # `subject=actor.name` (relay #198, B-7): which configured key
+            # `subject=actor.name`: which configured key
             # matched — "apikey" for the primary key, or a RELAY_API_KEYS
             # name — read back by `_current_actor()` for git/changes/
-            # updated_by provenance. `client_id` stays the fixed "relay" in
-            # case anything else depends on its current constant value.
+            # updated_by provenance. `client_id` is a fixed "relay".
             scopes = [*settings.mcp_scopes, "write"] if actor.can_write else list(settings.mcp_scopes)
             return AccessToken(token=token, client_id="relay", scopes=scopes, subject=actor.name)
         return None
@@ -411,28 +395,20 @@ def _brand_icons() -> list[Icon]:
 def _oauth_client_storage() -> FernetEncryptionWrapper:
     """Encrypted, JSON-file-backed storage for OAuth state, rooted in the vault.
 
-    Both halves of this were audit findings (relay #313 Phase 5), and both come
-    from the same root cause: **passing `client_storage` at all opts out of what
-    `OIDCProxy` does for you.** Left `None`, fastmcp builds a
-    `FernetEncryptionWrapper(FileTreeStore(...))` under `~/.fastmcp/`; Phase 2
-    passed a bare store to move it onto the vault volume, and silently dropped
-    the encryption with it. `proxy.py` still logs "Stored encrypted upstream
-    tokens" either way, which is how it stayed unnoticed. This function moves the
-    storage *and* keeps everything the default gave us.
+    **Passing `client_storage` at all opts out of what `OIDCProxy` does for
+    you.** Left `None`, fastmcp builds a `FernetEncryptionWrapper(FileTreeStore(...))`
+    under `~/.fastmcp/`; a bare store passed to move it onto the vault volume
+    silently drops the encryption, and `proxy.py` still logs "Stored encrypted
+    upstream tokens" either way. This function moves the storage *and* keeps
+    everything the default gives.
 
     **Encryption.** The proxy persists the *upstream* PocketID access and refresh
     tokens (it re-validates them on every request and refreshes them
-    transparently). Without the wrapper those sit in cleartext on disk —
-    confirmed by reading a stored record during the audit. To be precise about
-    the blast radius, since an earlier draft of this comment overstated it:
-    `.relay/` is *excluded* from Syncthing (see `settings.history_dir`), so these
-    files do **not** replicate to every synced device. What remains is real
-    enough on its own — cleartext, long-lived IdP credentials sitting in the
-    same directory tree as the private notes, inside whatever backs that volume
-    up, readable by anything that can read a file in the vault. The
-    implementation this migration replaced never had this exposure at all: it
-    stored only relay's *own* tokens, hashed, and never persisted an upstream
-    token.
+    transparently). Without the wrapper those sit in cleartext on disk.
+    `.relay/` is excluded from Syncthing, so they don't replicate to synced
+    devices, but they would still be long-lived IdP credentials in the same tree
+    as the private notes, inside whatever backs that volume up, readable by
+    anything that can read a file in the vault.
     Key derivation mirrors fastmcp's own (PBKDF2 over a high-entropy secret with
     a fixed salt), and `raise_on_decryption_error=False` matches its default
     too: rotating `OIDC_CLIENT_SECRET` then reads as a cache miss and clients
@@ -474,25 +450,19 @@ def _oauth_client_storage() -> FernetEncryptionWrapper:
 def _build_auth() -> AuthProvider:
     """Static bearer only when MCP OAuth isn't configured (unchanged fallback);
     `MultiAuth(server=_RelayOIDCProxy(...), verifiers=[_StaticBearerAuth()])` when
-    it is active (relay #313 Phase 2). `server` owns the OAuth routes/metadata and
-    is tried first for token verification; `verifiers` are pure fallbacks with no
-    routes of their own. Mirrors etf-scout-mcp's `_make_auth()` precedence (OIDC >
-    static bearer), composed rather than either/or since relay needs both at
-    once — Claude's remote connector uses OAuth, the stdio bridge and other
-    machine clients use the static key.
+    it is active. `server` owns the OAuth routes/metadata and is tried first for
+    token verification; `verifiers` are pure fallbacks with no routes of their
+    own. Both at once, since Claude's remote connector uses OAuth while the stdio
+    bridge and other machine clients use the static key.
 
     Constructing `_RelayOIDCProxy` makes a real (bounded, ~10s-timeout) network
-    call to PocketID's OIDC discovery endpoint — fastmcp's own documented
-    tradeoff so a slow/unreachable issuer can't hang startup indefinitely, but a
-    behavior change from the old `mcp_oauth/pocketid.py`, which fetched lazily on
-    first request rather than at startup. Worth Phase 5/6 attention, not silently
-    carried over.
+    call to PocketID's OIDC discovery endpoint at startup, so a slow issuer
+    delays startup by at most that long.
 
     `client_storage` is pinned under `<vault>/.relay/mcp_oauth/` rather than
     fastmcp's own default (`~/.fastmcp/oauth-proxy/`, outside the vault volume
-    entirely) so OAuth client registrations and encrypted tokens ride the same
-    Docker volume and durability guarantee `oauth.db` has today — the Phase 2
-    checklist item this closes. `redirect_path` is pinned to the exact path
+    entirely) so OAuth client registrations and encrypted tokens live on the
+    durable vault volume. `redirect_path` is pinned to the exact path
     already registered on PocketID's own client config
     (`<RELAY_BASE_URL>/mcp/oauth/callback`, documented in CLAUDE.md) — fastmcp's
     own default (`/auth/callback`) would collide with relay's *existing* web-UI
@@ -519,8 +489,7 @@ def _build_auth() -> AuthProvider:
         client_storage=_oauth_client_storage(),
         # Load-bearing, and the single most important line in this call — without
         # it, a *completed* OAuth login mints a token that 401s on every
-        # subsequent request (relay #313 Phase 5, caught by running the real flow;
-        # no amount of reading would have shown it).
+        # subsequent request (caught by running the real flow, not by reading).
         #
         # `load_access_token` implements a token *swap*: it verifies relay's own
         # JWT, then re-validates the stored upstream token on every request via
@@ -554,8 +523,8 @@ def _build_auth() -> AuthProvider:
         # enough to stay well inside any plausible IdP token lifetime, large
         # enough to cover a slow upstream round trip.
         token_expiry_threshold_seconds=120,
-        # Both found live against real PocketID, not the mock IdP Phase 5 used —
-        # the mock tolerated a scope/resource it had never heard of; PocketID
+        # Both found live against real PocketID, not a mock IdP — the mock
+        # tolerated a scope/resource it had never heard of; PocketID
         # rejects `/authorize` outright with `invalid_request` naming exactly
         # these two params. `_prepare_scopes_for_token_exchange`/
         # `_prepare_scopes_for_upstream_refresh` above cover the token-exchange
@@ -595,7 +564,7 @@ mcp = FastMCP(
     website_url=settings.relay_base_url.rstrip("/"),
     icons=_brand_icons(),
     auth=_build_auth(),
-    # Coarse read/write gate (relay #198, B-8): every tool below tagged
+    # Coarse read/write gate: every tool below tagged
     # `tags={"write"}` requires a `write` scope on the caller's token —
     # `_StaticBearerAuth.verify_token`/`_RelayOIDCProxy._translate_scopes_from_idp`
     # grant that scope to every key/login except a read-only bearer key. Denied
@@ -636,16 +605,14 @@ def _tool(**kwargs):
 
 
 def _current_actor() -> Actor | None:
-    """The identity behind the in-flight tool call (relay #198, B-7), or
+    """The identity behind the in-flight tool call, or
     ``None`` outside an authenticated request (a direct call in a test).
 
     A token with no derivable identity raises ``ScopeDenied`` rather than
     returning ``None``: every scope check exempts ``actor=None`` (internal and
     test callers), so an unattributable token must never reach one.
 
-    Two paths, confirmed by reading fastmcp's ``AccessToken`` construction
-    directly (not assumed — same standard this file already holds every
-    other `OIDCProxy` subtlety to):
+    Two paths, per fastmcp's ``AccessToken`` construction:
 
     - **Static bearer**: ``subject`` is set by ``_StaticBearerAuth`` below to
       the matched key's configured name (``apikey`` or a `RELAY_API_KEYS`
@@ -674,7 +641,7 @@ def _current_actor() -> Actor | None:
         # that `actor=None` (internal callers) is exempt from.
         logging.getLogger(__name__).error("MCP tool call has an access token but no derivable identity")
         raise ScopeDenied("This token carries no identity")
-    # scope (relay #198, B-8): looked up by `token.subject`, same key
+    # Scope is looked up by `token.subject`, same key
     # `settings.key_scopes` is keyed by. For a static-bearer call that's the
     # matched key's own name (`_StaticBearerAuth.verify_token`'s
     # `subject=actor.name`) — the exact lookup `identity.resolve_bearer`
@@ -706,7 +673,7 @@ async def master_document() -> str:
 @_tool(
     description=(
         "Publish a post to the relay feed. Subscribers receive it in real time. The response's "
-        "'similar' field (relay #198, N-7) is an advisory duplicate-guard: other posts already in "
+        "'similar' field is an advisory duplicate-guard: other posts already in "
         "the vault whose embedding is close enough to be worth a glance before you duplicate work "
         "— always empty if this relay hasn't got embeddings enabled, and never blocks or slows down "
         "the publish itself."
@@ -743,13 +710,13 @@ async def publish_post(
         "content inline (heavier). sort is 'updated' (default, last modified — includes "
         "edits made directly in Obsidian) or 'created'; order is 'desc' (default) or 'asc'. "
         "Sort by created + asc to read a topic's posts in the order they were written. "
-        "mode ranks 'search' (relay #253, proof of concept): 'keyword' (default, FTS5/bm25), "
+        "mode ranks 'search': 'keyword' (default, FTS5/bm25), "
         "'semantic' (embedding similarity), or 'hybrid' (fusion of both), and can be combined "
         "with tag/folder — semantic/hybrid return an error if this relay hasn't got embeddings "
         "enabled. A bare id or '#id' as search (e.g. '42' or '#42') is a lookup, not a ranked "
         "search: it answers with just that post as the response's 'pinned' field (items empty) "
         "and ignores mode/tag/folder entirely — a plain id lookup works the same whether or not "
-        "this relay has embeddings enabled. author (relay #198, B-7) filters to posts whose most "
+        "this relay has embeddings enabled. author filters to posts whose most "
         "recent write is attributed to that identity (a named API key or an OIDC user's email/sub)."
     )
 )
@@ -811,7 +778,7 @@ async def update_post(
 ) -> dict:
     # An omitted argument and an explicit null both arrive as None here, so a
     # None is "leave alone". PostUpdate turns "" into a clear for expires_at and
-    # source — the documented way to unset either from MCP (AUDIT.md B-05).
+    # source — the documented way to unset either from MCP.
     fields = {
         "title": title,
         "content": content,
@@ -892,10 +859,10 @@ async def list_deleted_posts(limit: int = 50, include_expiry: bool = False) -> d
 
 @_tool(
     description=(
-        "The vault changelog (relay #198, N-4): every post-affecting write, newest first — "
+        "The vault changelog: every post-affecting write, newest first — "
         "create, update, edit, append, delete, restore, tag rename, an external Obsidian "
         "edit/delete, or a TTL expiry. Each item has seq, id, title, action, when, sha and "
-        "author (relay #198, B-7: null for a write that predates it, or one with no "
+        "author (null for a write that predates it, or one with no "
         "authenticated identity — the TTL sweep, an external edit). Pass since as a seq "
         "from a prior response to page forward, or an ISO 8601 timestamp to see what moved "
         "after a given time — e.g. 'what did the schedulers publish overnight'. Omit since "
@@ -941,7 +908,7 @@ async def get_backlinks(id: int) -> dict:
 @_tool(
     description=(
         "List posts related to this one by embedding similarity that it does NOT already "
-        "cross-link via [[Title]] or #id, in either direction (relay #198, N-7) — an automatic "
+        "cross-link via [[Title]] or #id, in either direction — an automatic "
         "to-do list of missing wikilinks, not a general 'more like this'. A post already linked "
         "has already had its relationship made explicit and won't show up here. Returns an error "
         "if the post doesn't exist or this relay hasn't got embeddings enabled."
@@ -991,7 +958,7 @@ async def restore_post(id: int, sha: str) -> dict:
         "features are actually working. Use it to confirm you are talking to the vault you think you are, "
         "and to check features that degrade silently — vault history is off when git is missing (writes "
         "would be unrecoverable), search falls back to substring matching without FTS5, and external "
-        "edits are not picked up when the watcher is off. The 'caller' field (relay #198, B-8) reports "
+        "edits are not picked up when the watcher is off. The 'caller' field reports "
         "your own key's effective scope — 'full', 'read' (no writes at all), or 'write' with an allowed "
         "tag list — so you can tell up front what you're allowed to do instead of finding out from a "
         "rejected write."
@@ -1006,7 +973,7 @@ async def get_status() -> dict:
 @_tool(
     description=(
         "Lint the vault: check it against the rules already written down in #0 instead of "
-        "relying on someone reading every post (relay #198, N-5): posts missing a domain and/or type tag, "
+        "relying on someone reading every post: posts missing a domain and/or type tag, "
         "a post with zero tags, notes stuck in Inbox despite carrying a domain tag, broken #NNN "
         "refs and dangling [[wikilinks]] (and specifically links pointing at a deleted post), a "
         "dangling attachment embed (![[file]]) or a plain [[wikilink]] whose target is a filename "
@@ -1228,33 +1195,25 @@ async def set_tag_config(
     return result.model_dump()
 
 
-# Built once at import time (relay #313 Phase 1 spike) rather than per-call: fastmcp's
-# http_app() constructs the Starlette app and its (not-yet-running) session manager
-# together, and main.py's own lifespan needs this *exact* instance's `.lifespan` context
-# manager — mounted sub-apps don't get their lifespan run automatically, so relay drives
-# it from its own lifespan (see main.py). Building a second instance there would give
-# FastAPI a session manager different from the one actually mounted.
+# Built once at import time rather than per-call: fastmcp's http_app() constructs the
+# Starlette app and its (not-yet-running) session manager together, and main.py's
+# lifespan needs this *exact* instance's `.lifespan` — mounted sub-apps don't get their
+# lifespan run automatically. A second instance would give FastAPI a session manager
+# different from the one actually mounted.
 #
-# host_origin_protection=False matches today's explicit disable of the old SDK's
-# DNS-rebinding protection: relay is mounted into FastAPI behind a public reverse proxy,
-# not run standalone, so a real Host header (e.g. relay.geon.im) must not be rejected.
-# fastmcp's own default ("auto") is smarter than the old SDK's — it only enforces on a
-# loopback bind — but False pins relay to the same explicit, audited behavior it has
-# always had rather than an implicit heuristic. Revisit in Phase 5.
+# host_origin_protection=False: relay is mounted into FastAPI behind a public reverse
+# proxy, so a real Host header (relay.geon.im) must not be rejected as DNS rebinding.
+# fastmcp's "auto" only enforces on a loopback bind; False pins the explicit behavior
+# rather than a heuristic.
 #
-# The old SDK's 4 MiB max_request_body_size cap is still very much active — verified
-# live (a ~6 MB /mcp POST body 413s with "Request body too large"). fastmcp's http_app()
-# has no parameter to configure it, but internally still builds the old SDK's
-# TransportSecuritySettings when constructing the session manager and only overrides
-# enable_dns_rebinding_protection on it (see host_origin_protection above), leaving
-# max_request_body_size at the SDK's own DEFAULT_MAX_REQUEST_BODY_SIZE. So this is now
-# an unexposed fastmcp-internal default rather than a relay-configurable setting — worth
-# reconfirming across future fastmcp versions (Phase 5·E), not a Phase 1 gap.
+# Request bodies stay capped at the MCP SDK's 4 MiB DEFAULT_MAX_REQUEST_BODY_SIZE:
+# fastmcp exposes no parameter for it but still builds the SDK's
+# TransportSecuritySettings, overriding only the DNS-rebinding flag.
+# `test_mcp_rejects_oversized_request_bodies` pins it across fastmcp upgrades; REST's
+# own cap (body_limit.py) matches it and leaves /mcp alone.
 #
-# `auth=_build_auth()` above (not a wrapper here) is what actually gates every
-# request — fastmcp's own `http_app()` forwards `self.auth` into the app it builds and
-# wraps it in its own RequireAuthMiddleware, so there is nothing left for this module to
-# do beyond building the app and handing it to main.py to mount directly.
+# `auth=_build_auth()` above is what gates every request: http_app() wraps the app in
+# its own RequireAuthMiddleware from `self.auth`.
 mcp_http_app = mcp.http_app(
     path="/mcp",
     transport="streamable-http",
