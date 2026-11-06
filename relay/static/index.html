@@ -157,8 +157,9 @@
         <button class="vt-btn sort-dir" id="sortDir" title="Sort direction" aria-label="Sort direction">↓</button>
       </div>
       <div class="view-toggle" id="viewToggle">
-        <button class="vt-btn active" id="vtList" title="List view" aria-label="List view">☰</button>
-        <button class="vt-btn" id="vtGrid" title="Grid view" aria-label="Grid view">▦</button>
+        <button class="vt-btn active" id="vtList" title="List view" aria-label="List view"><svg class="icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg></button>
+        <button class="vt-btn" id="vtGrid" title="Grid view" aria-label="Grid view"><svg class="icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2.25" y="2.25" width="4.5" height="4.5" rx="0.75"/><rect x="9.25" y="2.25" width="4.5" height="4.5" rx="0.75"/><rect x="2.25" y="9.25" width="4.5" height="4.5" rx="0.75"/><rect x="9.25" y="9.25" width="4.5" height="4.5" rx="0.75"/></svg></button>
+        <button class="vt-btn" id="vtReader" title="Three-column view" aria-label="Three-column view"><svg class="icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="2.75" width="12" height="10.5" rx="1"/><path d="M5.5 2.75v10.5M8.5 2.75v10.5"/></svg></button>
       </div>
     </div>
 
@@ -171,6 +172,20 @@
 
     <div class="attachments-view" id="attachmentsView" style="display:none"></div>
   </main>
+
+  <!-- Three-column view (js/reader.js): the post modal's panel is moved in here
+       while it is on, so the open note reads in place of a modal. -->
+  <section class="reader-pane empty" id="readerPane" aria-label="Open note">
+    <div class="reader-empty">
+      <svg class="icon" viewBox="0 0 16 16" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 1.75h5.5L12.75 5v9.25H4z"/><path d="M9.25 1.75V5.25h3.5M6.25 8h4M6.25 10.5h4"/></svg>
+      <p>No note selected</p>
+      <p class="reader-empty-hint">Pick one from the list, or press <kbd>j</kbd> / <kbd>k</kbd></p>
+    </div>
+    <div class="reader-edit" id="readerEdit">
+      <div class="sm-head"><span class="sm-name">Edit</span><span class="sm-version" id="reTitle"></span></div>
+      <div class="sm-body" id="reBody"></div>
+    </div>
+  </section>
 
   <div class="lightbox" id="lightbox" style="display:none">
     <div class="lightbox-inner">
