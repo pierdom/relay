@@ -746,6 +746,18 @@ feed.addEventListener('click', e => {
   if (e.target.closest('[data-action="clear-scope"]')) clearScope();
 });
 
+/** The feed's empty state. Also after a delete takes the last card, which used
+ *  to leave a blank column until the next reload. */
+function showEmptyFeed() {
+  feed.innerHTML = `
+    <div class="empty">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+      ${emptyFeedHtml()}
+    </div>`;
+}
+
 /** Empty-feed copy: says what was searched, where, and what to do next. */
 function emptyFeedHtml() {
   const scope = query.tag ? `tagged #${escHtml(query.tag)}` : query.folder ? `in ${escHtml(query.folder)}/`
@@ -811,13 +823,7 @@ async function loadPosts(replace = false) {
     }
 
     if (data.items.length === 0 && query.offset === 0 && !data.pinned) {
-      feed.innerHTML = `
-        <div class="empty">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-          ${emptyFeedHtml()}
-        </div>`;
+      showEmptyFeed();
     } else {
       data.items.forEach((p, i) => {
         // Offsets drift when posts arrive or go while paging; a post already
@@ -1106,6 +1112,7 @@ function connectSSE() {
     card.remove();
     query.total = Math.max(0, query.total - 1);
     query.offset = Math.max(0, query.offset - 1);   // or the next page skips a post
+    if (!feed.querySelector('.post')) showEmptyFeed();
     if (_modalPost && _modalPost.id === id) { closePostModal(); showFirstInPane(); }
     renderFeedEnd();
     scheduleRefresh();
@@ -1361,6 +1368,7 @@ async function deletePost(post) {
   const card = feed.querySelector(`[data-id="${post.id}"]`);
   const next = isDocked() && _modalPost?.id === post.id ? neighbourPost(card) : undefined;
   if (card) { card.remove(); query.total--; query.offset = Math.max(0, query.offset - 1); }
+  if (!feed.querySelector('.post')) showEmptyFeed();
   if (next !== undefined) {
     closePostModal();
     if (next) openFromFeed(next); else showFirstInPane();

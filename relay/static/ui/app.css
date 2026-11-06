@@ -1564,6 +1564,7 @@ a.post-title { text-decoration: none; }
 }
 .post-body a.attachment-link.broken { color: var(--muted); border-bottom-color: var(--muted); }
 .pm-backlinks { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
+.pm-backlinks:empty { display: none; }   /* no mentions: no stray rule under the note */
 .pm-backlinks h4 { color: var(--text); font-family: var(--font-ui); font-size: 12px; font-weight: 600; margin: 0 0 8px; }
 .pm-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .pm-backlinks a { color: var(--accent); cursor: pointer; font-size: 12px; }
@@ -2071,6 +2072,7 @@ a.post-title { text-decoration: none; }
 }
 .vt-btn:first-child { border-radius: 4px 0 0 4px; }
 .vt-btn:last-child  { border-radius: 0 4px 4px 0; border-left: none; }
+.vt-btn .icon { display: block; }
 .vt-btn.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--tag-bg); }
 .vt-btn:hover:not(.active) { color: var(--text); }
 
@@ -2847,9 +2849,13 @@ kbd {
   .reader-pane .pm-title { padding-right: 0; }
   .reader-pane.empty .pm-inner, .reader-pane.editing .pm-inner { display: none; }
   .reader-pane.empty:not(.editing) .reader-empty {
-    display: flex; flex: 1; align-items: center; justify-content: center;
-    font-size: 12px; color: var(--muted);
+    display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    font-size: 12px; color: var(--muted); text-align: center;
   }
+  .reader-empty .icon { margin-bottom: 6px; opacity: 0.7; }
+  .reader-empty p { margin: 0; }
+  .reader-empty-hint { font-size: 11px; }
+  .reader-empty kbd { font-size: 10px; padding: 0 5px; min-width: 18px; }
   .reader-pane.editing .reader-edit { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   /* The editor keeps a readable line, as the edit sheet does. */
   #readerEdit .sm-head, #readerEdit .sm-body { width: 100%; max-width: calc(64rem + 40px); margin-inline: auto; }
@@ -2857,20 +2863,36 @@ kbd {
      the viewport alone says nothing once two columns sit beside it. */
   .reader-pane .pm-outline:not([hidden]) { display: none; }
 
-  /* The list column: compact cards, two lines of preview, no thumbnail and no
-     per-card buttons — the open note carries Edit and Delete. */
+  /* The list column: a dense run of compact cards — title (up to two lines),
+     tags under it, two lines of preview, one line of stamps. No thumbnail, no
+     footer rule and no per-card buttons: the open note carries Edit and Delete. */
   body.view-reader .feed { padding: 10px; gap: 6px; }
   body.view-reader .feed > .post { padding: 10px 12px; }
   body.view-reader .feed .post-media,
   body.view-reader .feed .post-actions { display: none; }
+  body.view-reader .feed .post-header { flex-direction: column; align-items: stretch; gap: 5px; margin-bottom: 6px; }
+  body.view-reader .feed .post-title {
+    font-size: 13px; white-space: normal; text-overflow: clip;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  body.view-reader .feed .post-body { font-size: 13px; line-height: 1.5; }
   body.view-reader .feed .post:not(.master-doc) .post-body > :is(p, blockquote) { -webkit-line-clamp: 2; }
   body.view-reader .feed .post:not(.master-doc) .post-body :is(ul, ol) > li:nth-child(n+3),
   body.view-reader .feed .post:not(.master-doc) .post-body :is(table, .table-scroll, pre) { display: none; }
-  body.view-reader .feed .post-title { font-size: 13px; }
+  body.view-reader .feed .post-footer { margin-top: 8px; padding-top: 0; border-top: 0; }
+  /* The selection is a tint and a bar, never the pinned card's full accent
+     frame — the master document sits at the top of the list wearing that one,
+     and the two read as the same state. In this view the pinned card keeps the
+     quieter master-document frame instead. */
+  body.view-reader .feed .post.pinned { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: none; }
   body.view-reader .feed .post.selected {
-    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
     box-shadow: inset 3px 0 0 var(--accent);
   }
+  /* History · Edit · Delete end on the reading column's right edge, not the
+     far side of a wide pane. */
+  .reader-pane .pm-footer { padding-inline: max(20px, calc((100% - var(--measure)) / 2)); }
   /* The search box gets the column's whole width; its controls wrap under it. */
   body.view-reader:not(.signed-out):not(.sb-replacing) .search-bar { flex-wrap: wrap; row-gap: 6px; padding: 8px 10px; }
   body.view-reader:not(.signed-out):not(.sb-replacing) .search-field { flex: 1 1 100%; }

@@ -9,6 +9,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 ### Added
 - **A three-column view in the web UI**: tags and folders · a narrow list of notes · the open note, read in place instead of in a modal, like a notes app or mail client. Pick it with the third button beside list and grid. The first note of the list opens on its own (and again when you pick another tag or folder); `[[links]]` and `#ids` open in the same column with Back/Forward; Edit happens in the column; `j`/`k` step through the list; deleting the open note shows the next one. Between 769 and 1100px wide, tags and folders move into the ☰ drawer; on a phone the view is the ordinary list
 
+### Changed
+- The list / grid / three-column toggle uses three drawn icons of one weight instead of two text glyphs
+
+### Fixed
+- **Two stray rules under every open note**: an empty "Linked mentions" or "Related" block still drew its divider
+- **Deleting the last note in a filtered list left the column blank**; it now says the list is empty and offers to show all posts
+
 ---
 
 ## [1.25.0] — 2026-11-03

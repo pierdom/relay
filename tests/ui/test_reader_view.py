@@ -118,3 +118,29 @@ def test_a_phone_falls_back_to_the_list_and_the_modal(mobile_page):
     assert not page.locator("#readerPane").is_visible()
     page.locator(".feed .post:not(.master-doc)").first.click()
     page.wait_for_function("() => document.getElementById('postModal').classList.contains('open')")
+
+
+def test_deleting_a_tags_last_note_shows_both_empty_states(page, relay_server):
+    """The list said nothing at all once a delete took its last card, and the
+    pane must not keep showing a note that is gone."""
+    tag = f"rd{uuid.uuid4().hex[:6]}"
+    _api(relay_server, "POST", "/posts", {"title": f"Reader Only {tag}", "content": "alone", "tags": [tag]})
+    page.reload()
+    page.locator(".feed .post").first.wait_for()
+    _reader(page)
+    page.locator(".tag-item", has_text=tag).click()
+    page.wait_for_function("(t) => document.getElementById('pmTitle').textContent === t", arg=f"Reader Only {tag}")
+    page.locator("#pmDelete").click()
+    page.locator(".feed .empty", has_text=f"#{tag}").wait_for()
+    page.locator("#readerPane.empty .reader-empty").wait_for()
+    assert page.locator(".reader-empty").is_visible()
+
+
+def test_the_selection_is_not_dressed_as_the_pinned_master_document(page):
+    """`.post.pinned` is an accent frame with a bar; the selection used the same
+    two and the master document at the top read as selected."""
+    _reader(page)
+    pinned = page.locator(".feed .post.pinned").first
+    selected = page.locator(".feed .post.selected").first
+    look = "e => [getComputedStyle(e).backgroundColor, getComputedStyle(e).boxShadow]"
+    assert pinned.evaluate(look) != selected.evaluate(look)
