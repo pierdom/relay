@@ -2800,20 +2800,20 @@ kbd {
   width: 94%;
   height: min(92vh, 1040px);
 }
-:is(#editModal, #composePanel) .sm-body { flex: 1; min-height: 0; display: flex; }
-:is(#editModal, #composePanel) .edit-form {
+:is(#editModal, #composePanel, #readerEdit) .sm-body { flex: 1; min-height: 0; display: flex; }
+:is(#editModal, #composePanel, #readerEdit) .edit-form {
   display: flex; flex-direction: column; gap: 10px;
   flex: 1; min-height: 0; min-width: 0;
 }
 /* The content field takes whatever is left, so a long note gets the whole panel
    rather than a fixed few rows. */
-:is(#editModal, #composePanel) .edit-form > .ef-content-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-:is(#editModal, #composePanel) .edit-form .ef-content-highlight { flex: 1; min-height: 140px; }
-:is(#editModal, #composePanel) .edit-form textarea.ef-content { resize: none; }
+:is(#editModal, #composePanel, #readerEdit) .edit-form > .ef-content-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+:is(#editModal, #composePanel, #readerEdit) .edit-form .ef-content-highlight { flex: 1; min-height: 140px; }
+:is(#editModal, #composePanel, #readerEdit) .edit-form textarea.ef-content { resize: none; }
 /* Compose's body field has no highlight backdrop, so it fills the column itself. */
 #composePanel .edit-form textarea#cpContent { flex: 1; min-height: 140px; resize: none; }
-:is(#editModal, #composePanel) .edit-form .ef-attachments { max-height: 22vh; overflow-y: auto; }
-:is(#editModal, #composePanel) .edit-actions {
+:is(#editModal, #composePanel, #readerEdit) .edit-form .ef-attachments { max-height: 22vh; overflow-y: auto; }
+:is(#editModal, #composePanel, #readerEdit) .edit-actions {
   margin: 4px -20px -18px; padding: 12px 20px; flex-shrink: 0;
   border-top: 1px solid var(--border); background: var(--surface);
 }
@@ -2821,6 +2821,78 @@ kbd {
   .em-inner { height: 92vh; }
 }
 
+
+/* ── Three-column view (view-prefs 'reader', js/reader.js) ───────────────── */
+/* Sidebar · a narrow note list · the open note. The list column is `main`
+   itself, held to a clamp so the note gets the rest; the note column is the
+   post modal's own panel, docked into `.reader-pane`. A phone never sees any of
+   this: below 769px the view is the plain list and the panel stays a modal. */
+.reader-pane { display: none; --measure: 40rem; }
+.reader-empty, .reader-edit { display: none; }
+@media (min-width: 769px) {
+  body.view-reader:not(.signed-out):not(.sb-replacing) main {
+    flex: 0 0 clamp(280px, 28vw, 380px);
+    border-right: 1px solid var(--border);
+  }
+  body.view-reader:not(.signed-out):not(.sb-replacing) .reader-pane {
+    display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden;
+    background: var(--surface);
+    container: reader / inline-size;
+  }
+  .reader-pane .pm-inner {
+    flex: 1; min-height: 0; width: 100%; max-width: none; max-height: none;
+    border: 0; border-radius: 0; box-shadow: none; animation: none;
+  }
+  .reader-pane .pm-close { display: none; }
+  .reader-pane .pm-title { padding-right: 0; }
+  .reader-pane.empty .pm-inner, .reader-pane.editing .pm-inner { display: none; }
+  .reader-pane.empty:not(.editing) .reader-empty {
+    display: flex; flex: 1; align-items: center; justify-content: center;
+    font-size: 12px; color: var(--muted);
+  }
+  .reader-pane.editing .reader-edit { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  /* The editor keeps a readable line, as the edit sheet does. */
+  #readerEdit .sm-head, #readerEdit .sm-body { width: 100%; max-width: calc(64rem + 40px); margin-inline: auto; }
+  /* The outline needs its gutter, which the pane only has when it is wide —
+     the viewport alone says nothing once two columns sit beside it. */
+  .reader-pane .pm-outline:not([hidden]) { display: none; }
+
+  /* The list column: compact cards, two lines of preview, no thumbnail and no
+     per-card buttons — the open note carries Edit and Delete. */
+  body.view-reader .feed { padding: 10px; gap: 6px; }
+  body.view-reader .feed > .post { padding: 10px 12px; }
+  body.view-reader .feed .post-media,
+  body.view-reader .feed .post-actions { display: none; }
+  body.view-reader .feed .post:not(.master-doc) .post-body > :is(p, blockquote) { -webkit-line-clamp: 2; }
+  body.view-reader .feed .post:not(.master-doc) .post-body :is(ul, ol) > li:nth-child(n+3),
+  body.view-reader .feed .post:not(.master-doc) .post-body :is(table, .table-scroll, pre) { display: none; }
+  body.view-reader .feed .post-title { font-size: 13px; }
+  body.view-reader .feed .post.selected {
+    border-color: var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  /* The search box gets the column's whole width; its controls wrap under it. */
+  body.view-reader:not(.signed-out):not(.sb-replacing) .search-bar { flex-wrap: wrap; row-gap: 6px; padding: 8px 10px; }
+  body.view-reader:not(.signed-out):not(.sb-replacing) .search-field { flex: 1 1 100%; }
+  body.view-reader:not(.signed-out):not(.sb-replacing) .search-label { display: none !important; }
+}
+@container reader (min-width: 900px) {
+  .reader-pane .pm-outline:not([hidden]) { display: flex; }
+}
+/* Mid widths: the list and the note keep the room; tags and folders move into
+   the drawer a phone already uses. */
+@media (min-width: 769px) and (max-width: 1100px) {
+  body.view-reader:not(.signed-out) .menu-btn { display: flex; order: -1; }
+  body.view-reader .collapse-btn { display: none !important; }
+  body.view-reader aside, body.view-reader aside.collapsed {
+    position: fixed; top: 48px; left: 0; bottom: 0; z-index: 50;
+    width: 260px; opacity: 1; pointer-events: auto;
+    transform: translateX(-100%);
+    transition: transform 0.24s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: var(--shadow-drawer);
+  }
+  body.view-reader aside.open { transform: translateX(0); }
+}
 
 /* ── Mobile sheets: geometry, reach, safe areas ──────────────────────────── */
 /* ⚠️ `--sm-label` belongs in *this* block, not the ≤768px one further up: the

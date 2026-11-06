@@ -1,4 +1,4 @@
-/* Feed view preferences: list ⇄ grid layout, sort field and direction.
+/* Feed view preferences: list, grid or three-column layout, sort field and direction.
  *
  * Cohesive enough to own outright — these three values are read by the feed and
  * nothing else, and this module is the only place that touches their
@@ -15,6 +15,7 @@
 const feed        = document.getElementById('feed');
 const vtList      = document.getElementById('vtList');
 const vtGrid      = document.getElementById('vtGrid');
+const vtReader    = document.getElementById('vtReader');
 const sortFieldEl = document.getElementById('sortField');
 const sortDirEl   = document.getElementById('sortDir');
 
@@ -29,16 +30,23 @@ function save(key, value) {
 }
 
 export const prefs = {
-  view:      load('relay-view')  === 'grid'    ? 'grid'    : 'list',
+  view:      ['grid', 'reader'].includes(load('relay-view')) ? load('relay-view') : 'list',
   sortField: load('relay-sort')  === 'created' ? 'created' : 'updated',
   sortOrder: load('relay-order') === 'asc'     ? 'asc'     : 'desc',
 };
 
+let onViewChange = () => {};
+
 function applyViewMode() {
   feed.classList.toggle('grid', prefs.view === 'grid');
+  // The three-column layout is CSS on this class (it falls back to the list on
+  // a phone); docking the note panel is main.js's, through `onViewChange`.
+  document.body.classList.toggle('view-reader', prefs.view === 'reader');
   vtList.classList.toggle('active', prefs.view === 'list');
   vtGrid.classList.toggle('active', prefs.view === 'grid');
+  vtReader.classList.toggle('active', prefs.view === 'reader');
   save('relay-view', prefs.view);
+  onViewChange();
 }
 
 export function applySort() {
@@ -56,11 +64,14 @@ export function isDefaultSort() {
   return prefs.sortField === 'updated' && prefs.sortOrder === 'desc';
 }
 
-/** Wire the toggles. `onSortChange` re-runs the feed query. */
-export function initViewPrefs(onSortChange) {
+/** Wire the toggles. `onSortChange` re-runs the feed query; `viewChanged` runs
+ *  after every layout switch (not the initial one — main.js isn't ready yet). */
+export function initViewPrefs(onSortChange, viewChanged) {
   vtList.addEventListener('click', () => { prefs.view = 'list'; applyViewMode(); });
   vtGrid.addEventListener('click', () => { prefs.view = 'grid'; applyViewMode(); });
+  vtReader.addEventListener('click', () => { prefs.view = 'reader'; applyViewMode(); });
   applyViewMode();
+  onViewChange = viewChanged;
 
   sortFieldEl.addEventListener('change', () => { prefs.sortField = sortFieldEl.value; onSortChange(); });
   sortDirEl.addEventListener('click', () => {

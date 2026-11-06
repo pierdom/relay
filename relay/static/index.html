@@ -159,6 +159,7 @@
       <div class="view-toggle" id="viewToggle">
         <button class="vt-btn active" id="vtList" title="List view" aria-label="List view">☰</button>
         <button class="vt-btn" id="vtGrid" title="Grid view" aria-label="Grid view">▦</button>
+        <button class="vt-btn" id="vtReader" title="Three-column view" aria-label="Three-column view"><svg class="icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1"/><path d="M5.25 2.75v10.5M8.25 2.75v10.5"/></svg></button>
       </div>
     </div>
 
@@ -171,6 +172,16 @@
 
     <div class="attachments-view" id="attachmentsView" style="display:none"></div>
   </main>
+
+  <!-- Three-column view (js/reader.js): the post modal's panel is moved in here
+       while it is on, so the open note reads in place of a modal. -->
+  <section class="reader-pane empty" id="readerPane" aria-label="Open note">
+    <div class="reader-empty">No note selected</div>
+    <div class="reader-edit" id="readerEdit">
+      <div class="sm-head"><span class="sm-name">Edit</span><span class="sm-version" id="reTitle"></span></div>
+      <div class="sm-body" id="reBody"></div>
+    </div>
+  </section>
 
   <div class="lightbox" id="lightbox" style="display:none">
     <div class="lightbox-inner">

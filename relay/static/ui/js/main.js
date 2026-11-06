@@ -25,6 +25,7 @@ import { forgetTagEditor, initTagEditors, startTagConfig, startTagRename } from 
 import { hideLinkPreview, initLinkPreview } from './link-preview.js';
 import { closeThemeMenu, isThemeMenuOpen } from './theme.js';
 import { applySort, initViewPrefs, isDefaultSort, prefs } from './view-prefs.js';
+import { confirmLeaveEditor, dock, isDocked, isEditing, openEditor, READER_MQ, setEmpty, undock, wantsReader } from './reader.js';
 import { ICON_CHEVRON, ICON_CLOCK, ICON_FOLDER, ICON_IMAGE, ICON_PENCIL, ICON_STAR, ICON_TRASH } from './icons.js';
 import { cleanTag, escHtml, parseTags, postName, relativeTime, sourceParts, toUtcIso } from './util.js';
 
@@ -74,7 +75,8 @@ let embeddingsOn = false;
 // View/sort preferences live in ./view-prefs.js; reloading on a sort change is
 // this module's job, so it is passed in.
 function reloadSorted() { resetPaging(); applySort(); loadPosts(true); }
-initViewPrefs(reloadSorted);
+initViewPrefs(reloadSorted, syncReader);
+READER_MQ.addEventListener('change', syncReader);
 
 const newPostsPill  = document.getElementById('newPostsPill');
 const newPostsLabel = document.getElementById('newPostsLabel');
@@ -184,6 +186,8 @@ async function signOut(reason = '') {
   if (es) { es.close(); es = null; }
   if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
   closeAllModals();
+  closePostModal();
+  undock();
   closeSidebar();
   feed.innerHTML = '';
   tagList.innerHTML = '';
@@ -207,6 +211,7 @@ async function init() {
   feed.innerHTML = '';
   resetGallery();
   showSidebarMode('tags');   // a reconnect may come from the Tree or Files tab
+  syncReader();
   // Not carried across sessions: a stale 'semantic' would 503 the first
   // search on a relay with embeddings off.
   query.mode = 'keyword';
@@ -252,6 +257,7 @@ const authorChip = (post) => !post.updated_by ? ''
 const tagPills = (tags) => tags.map(t => `<span class="tag-pill" data-tag="${escHtml(t)}">${escHtml(t)}</span>`).join('');
 
 async function openPostById(id, { onError, origin, pushHistory = true } = {}) {
+  if (!confirmLeaveEditor()) return;
   try { openPostModal(await apiFetch(`/posts/${id}`), { origin, pushHistory }); }
   catch (e) { if (onError) onError(e); }
 }
@@ -617,6 +623,7 @@ function showSidebarMode(mode) {
   document.getElementById('tagNew').style.display = 'none';
 
   const replacing = mode in FEED_REPLACING;
+  document.body.classList.toggle('sb-replacing', replacing);
   feed.style.display = replacing ? 'none' : '';
   // Search, sort and list/grid all drive the post feed; beside the Files grid
   // they were live controls acting on a hidden feed.
@@ -696,6 +703,7 @@ function setFilter({ tag = null, folder = null, author = null }) {
   closeSidebar();
   const tagChanged = query.tag !== tag;
   query.tag = tag; query.folder = folder; query.author = author; resetPaging();
+  paneReselect = true;
   if (tagChanged) connectSSE();   // the stream is filtered by tag server-side
   syncSearchScope();
   feed.innerHTML = '';
@@ -822,7 +830,7 @@ async function loadPosts(replace = false) {
     }
     if (feed.querySelector('.post')) feed.appendChild(feedEnd);
     renderFeedEnd();
-    if (replace) requestAnimationFrame(fillFeed);
+    if (replace) { syncPaneSelection(); requestAnimationFrame(fillFeed); }
     return true;
   } catch (e) {
     if (seq !== loadSeq) return true;
@@ -993,20 +1001,23 @@ function renderPost(post) {
     e.stopPropagation();
     deletePost(post);
   });
-  el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); openEditModal(post); });
+  el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); editPost(post); });
+  el._post = post;
+  if (isDocked() && _modalPost?.id === post.id) el.classList.add('selected');
   if (post.id === 0) {
     // Master doc → one line (its badge) until opened, then the whole note.
     // Clicking the card toggles it; links and buttons inside keep their clicks.
     el.classList.add('accordion', 'collapsed');
     el.addEventListener('click', (e) => {
       if (!e.target.closest('.master-badge') && e.target.closest('a, button, .tag-pill')) return;
+      if (isDocked()) { openFromFeed(post); return; }   // the pane reads it whole
       const open = !el.classList.toggle('collapsed');
       el.querySelector('.master-badge').setAttribute('aria-expanded', String(open));
     });
   } else {
     // A link inside the card (wikilink, external, attachment) is that link,
     // not the card — it used to open the card's post under the target too.
-    el.addEventListener('click', e => { if (!e.target.closest('a:not(.post-title)')) openPostModal(post); });
+    el.addEventListener('click', e => { if (!e.target.closest('a:not(.post-title)')) openFromFeed(post); });
   }
   return el;
 }
@@ -1095,7 +1106,7 @@ function connectSSE() {
     card.remove();
     query.total = Math.max(0, query.total - 1);
     query.offset = Math.max(0, query.offset - 1);   // or the next page skips a post
-    if (_modalPost && _modalPost.id === id) closePostModal();
+    if (_modalPost && _modalPost.id === id) { closePostModal(); showFirstInPane(); }
     renderFeedEnd();
     scheduleRefresh();
   });
@@ -1146,7 +1157,7 @@ let _suppressPopstate = false;
 // onBack }, e.g. the lint pane. Once the followed-links stack is unwound, Back
 // returns there instead of just closing. Survives any depth of link-following.
 let _externalOrigin = null;
-const isPostOpen = () => postModal.classList.contains('open');
+const isPostOpen = () => (isDocked() ? _modalPost !== null : postModal.classList.contains('open'));
 
 function syncBackButton() {
   if (_modalStack.length === 0) {
@@ -1228,7 +1239,7 @@ function openPostModal(post, { pushHistory = true, origin } = {}) {
   renderOutline();
   clearFeedFocus();
 
-  postModal.classList.add('open');
+  if (isDocked()) { setEmpty(false); markSelectedCard(); } else postModal.classList.add('open');
   pmBody.scrollTop = 0;
   requestAnimationFrame(updateModalFade);
   syncBackButton();
@@ -1292,6 +1303,7 @@ function resetPostModal() {
   pmBody.innerHTML = '';
   pmOutline.hidden = true;
   syncBackButton();
+  if (isDocked()) { setEmpty(true); markSelectedCard(); }
 }
 
 function popPostModal() {
@@ -1327,10 +1339,10 @@ pmHistory.addEventListener('click', () => {
 });
 initPostHistory(() => { resetPaging(); loadPosts(true); });
 
-pmEdit.addEventListener('click', () => { if (_modalPost) openEditModal(_modalPost); });
+pmEdit.addEventListener('click', () => { if (_modalPost) editPost(_modalPost); });
 pmDelete.addEventListener('click', async () => {
   const post = _modalPost; if (!post) return;
-  if (await deletePost(post)) closePostModal();
+  if (await deletePost(post) && !isDocked()) closePostModal();   // the pane moves on by itself
 });
 
 /* Delete, then offer Undo — not "Delete this post?" up front. With history on
@@ -1347,7 +1359,12 @@ async function deletePost(post) {
     return false;
   }
   const card = feed.querySelector(`[data-id="${post.id}"]`);
+  const next = isDocked() && _modalPost?.id === post.id ? neighbourPost(card) : undefined;
   if (card) { card.remove(); query.total--; query.offset = Math.max(0, query.offset - 1); }
+  if (next !== undefined) {
+    closePostModal();
+    if (next) openFromFeed(next); else showFirstInPane();
+  }
   renderFeedEnd();
   refreshSidebarCounts();
   showToast(`Deleted “${name}”.`, historyOn ? { action: { label: 'Undo', onClick: () => undoDelete(post) } } : {});
@@ -1365,6 +1382,92 @@ async function undoDelete(post) {
   await refreshLinks();   // before the feed repaints, or links to the restored post render broken
   resetPaging(); loadPosts(true);
   showToast(`Restored “${postName(post)}”.`);
+}
+
+/* ── Three-column view (js/reader.js docks the panel) ─────────────────── */
+// A tag, folder or author change shows the new list's first note; any other
+// reload (search, sort, a restore) keeps the note that is open.
+let paneReselect = false;
+
+/** Dock or undock the post panel to match the view and the screen width. */
+function syncReader() {
+  if (!authed) return;
+  if (wantsReader() && !isDocked()) {
+    const shown = isPostOpen() ? _modalPost : null;
+    postModal.classList.remove('open');
+    dock();
+    setEmpty(!shown);
+    if (shown) markSelectedCard(); else showFirstInPane();
+  } else if (!wantsReader() && isDocked()) {
+    closePostModal();
+    undock();
+    markSelectedCard();
+  }
+}
+
+/** Open a note picked from the list: in the pane it replaces whatever is
+ *  there (followed links included) rather than stacking on it. */
+function openFromFeed(post) {
+  if (!isDocked()) { openPostModal(post); return; }
+  if (!confirmLeaveEditor()) return;
+  if (_historyDepth > 0) { _suppressPopstate = true; history.go(-_historyDepth); }
+  _modalStack = []; _historyDepth = 0; _externalOrigin = null; _modalPost = null;
+  openPostModal(post, { pushHistory: false });
+}
+
+function syncPaneSelection() {
+  if (!isDocked() || isEditing()) return;
+  const reselect = paneReselect;
+  paneReselect = false;
+  if (!reselect && _modalPost) { markSelectedCard(); return; }
+  showFirstInPane();
+}
+
+/** The list's first note (past the one-line master document), or nothing. */
+function showFirstInPane() {
+  if (!isDocked() || isEditing()) return;
+  const cards = getFeedCards();
+  const first = cards.find(c => c.dataset.id !== '0') ?? cards[0];
+  if (first) openFromFeed(first._post); else closePostModal();
+}
+
+function markSelectedCard() {
+  feed.querySelectorAll('.post.selected').forEach(c => c.classList.remove('selected'));
+  if (isDocked() && _modalPost) feed.querySelector(`.post[data-id="${_modalPost.id}"]`)?.classList.add('selected');
+}
+
+/** The note that takes a removed card's place: the next one, else the previous. */
+function neighbourPost(card) {
+  if (!card) return null;
+  for (const sib of [card.nextElementSibling, card.previousElementSibling]) {
+    if (sib?.classList.contains('post')) return sib._post;
+  }
+  return null;
+}
+
+/** j/k in the pane: step the selection through the list. */
+function stepPane(delta) {
+  const cards = getFeedCards();
+  if (!cards.length) return;
+  const cur = cards.findIndex(c => c.classList.contains('selected'));
+  const next = cards[Math.max(0, Math.min(cards.length - 1, cur + delta))];
+  openFromFeed(next._post);
+  next.scrollIntoView({ block: 'nearest' });
+}
+
+/** Edit in the pane when docked, in the edit sheet otherwise. */
+function editPost(post) {
+  if (!isDocked()) { openEditModal(post); return; }
+  if (_modalPost?.id !== post.id) openFromFeed(post);
+  if (_modalPost?.id !== post.id) return;   // kept an unsaved edit of another note
+  openEditor(post, {
+    onSave: updated => {
+      replaceCard(updated);
+      openPostModal(updated, { pushHistory: false });
+      refreshSidebarCounts();
+      refreshLinks();   // a new title changes what [[links]] resolve to
+    },
+  });
 }
 
 /* ── Keyboard shortcuts modal ─────────────────────────────── */
@@ -1416,7 +1519,7 @@ document.addEventListener('keydown', e => {
   // modal is on top (dialog.js), then the j/k selection.
   if (e.key === 'Escape') {
     if (isThemeMenuOpen()) closeThemeMenu();
-    else if (!dismissTopModal()) clearFeedFocus();
+    else if (!dismissTopModal()) { if (isEditing()) confirmLeaveEditor(); else clearFeedFocus(); }
     return;
   }
 
@@ -1424,7 +1527,7 @@ document.addEventListener('keydown', e => {
   if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
 
   // Post modal shortcuts, while it is the modal on top.
-  if (topModal() === postModal) {
+  if (topModal() === postModal || (isDocked() && !anyModalOpen() && _modalPost && !isEditing())) {
     // preventDefault: the click moves focus into the editor's Title field
     // before the key's character is inserted, which typed an "e" into it.
     if (e.key === 'e') { e.preventDefault(); pmEdit.click(); return; }
@@ -1440,6 +1543,7 @@ document.addEventListener('keydown', e => {
 
   // Feed navigation — only when no modal is open.
   if (!isThemeMenuOpen() && !anyModalOpen()) {
+    if (isDocked() && (e.key === 'j' || e.key === 'k')) { e.preventDefault(); stepPane(e.key === 'j' ? 1 : -1); return; }
     if (e.key === 'j') { e.preventDefault(); moveFeedFocus(1);  return; }
     if (e.key === 'k') { e.preventDefault(); moveFeedFocus(-1); return; }
     // Not when Enter lands on a link or button: it activates that already, and
@@ -1469,6 +1573,7 @@ window.addEventListener('popstate', e => {
     }
   } else {
     resetPostModal();
+    showFirstInPane();
   }
 });
 
