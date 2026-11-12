@@ -3,7 +3,7 @@
 # ships. uv is its own stage rather than a bare `COPY --from=` so dependabot can
 # see it too.
 FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
-FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 # git backs the vault history (a commit per write, see relay/history.py). Without
 # it relay still runs — history disables itself with a warning — but every write
