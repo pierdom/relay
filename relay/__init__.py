@@ -1,3 +1,3 @@
 """relay — personal Markdown knowledge base with an AI-integration layer."""
 
-__version__ = "1.26.0"
+__version__ = "1.27.0"

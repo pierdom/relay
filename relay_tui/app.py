@@ -11,7 +11,8 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import Hit, Hits, Provider
-from textual.containers import Horizontal
+from textual.containers import Horizontal, VerticalScroll
+from textual.css.query import NoMatches
 from textual.filter import NO_DIM, dim_color
 from textual.filter import ANSIToTruecolor as _ANSIToTruecolor
 from textual.widgets import Footer, Header
@@ -25,13 +26,18 @@ from .widgets.modals import (
     ConfirmModal,
     DeletedPostsModal,
     EditModal,
-    PostDetailModal,
     RenameTagModal,
     SearchModal,
     TagConfigModal,
 )
 from .widgets.post_panel import PostPanel
+from .widgets.post_view import PostDetailModal, PostView
+from .widgets.reader import ReaderPane
 from .widgets.tag_panel import TagPanel
+
+# Below this many columns the three-column layout falls back to the list and
+# the detail modal: the note column would be too narrow to read.
+READER_MIN_WIDTH = 110
 
 
 def _dated_stream_offset(posts: list[api.Post], pinned_id: int | None) -> int:
@@ -113,6 +119,9 @@ class RelayTuiCommands(Provider):
 
 class RelayTuiApp(App):
     TITLE = "relay"
+    # Class-level: a Resize can arrive before on_mount has run.
+    _reader_pref = True     # the three-column layout, when the terminal is wide enough
+    _reader_active = False
     COMMANDS = App.COMMANDS | {RelayTuiCommands}
     CSS = f"""
     Screen {{ background: {HEADER_BG}; layers: base overlay; }}
@@ -136,6 +145,9 @@ class RelayTuiApp(App):
     #main {{ height: 1fr; layout: horizontal; }}
     TagPanel {{ width: 26; border-right: solid $accent; }}
     PostPanel {{ width: 1fr; }}
+    ReaderPane {{ display: none; }}
+    #main.-reader PostPanel {{ width: 34%; min-width: 36; max-width: 56; border-right: solid $accent; }}
+    #main.-reader ReaderPane {{ display: block; width: 1fr; }}
     Footer {{ background: {HEADER_BG}; }}
     FooterKey .footer-key--key {{ background: {BORDER}; color: {ACCENT}; }}
     FooterKey .footer-key--description {{ color: {ACCENT}; background: {HEADER_BG}; }}
@@ -151,6 +163,13 @@ class RelayTuiApp(App):
         Binding("s", "cycle_sort", "Sort field"),
         Binding("o", "cycle_order", "Sort order"),
         Binding("r", "reload", "Refresh"),
+        Binding("l", "toggle_layout", "Layout"),
+        Binding("j", "step(1)", "Next post", show=False),
+        Binding("k", "step(-1)", "Previous post", show=False),
+        Binding("f", "follow_link", "Follow link", show=False),
+        Binding("h", "history", "History", show=False),
+        Binding("left_square_bracket", "pane_back", "Back", show=False),
+        Binding("right_square_bracket", "pane_forward", "Forward", show=False),
         Binding("tab", "focus_next_panel", "Switch panel", show=False),
         Binding("shift+tab", "focus_prev_panel", "Switch panel", show=False),
     ]
@@ -198,6 +217,7 @@ class RelayTuiApp(App):
         with Horizontal(id="main"):
             yield TagPanel(id="tag-panel")
             yield PostPanel(id="post-panel")
+            yield ReaderPane(id="reader-pane")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -227,6 +247,8 @@ class RelayTuiApp(App):
         self._offset = 0
         self._total = 0
         self._loading_more = False
+        self._pane_reselect = False  # the next load opens its first post (a tag/folder change)
+        self._pane_anchor: int | None = None  # the feed post the pane was opened from
         self._sse = SSESubscriber(
             on_post=self._on_sse_post,
             on_connect=self._on_sse_connect,
@@ -234,6 +256,7 @@ class RelayTuiApp(App):
             on_delete=self._on_sse_delete,
         )
         self._sse.start()
+        self._apply_layout()
         self._reload()
         self._load_caller_scope()
 
@@ -273,14 +296,13 @@ class RelayTuiApp(App):
         if self._scope_mode is None or self._scope_mode == "full":
             return ""
         if self._scope_mode == "read":
-            return "[dim]read-only[/]"
+            return "read-only"
         tags = ",".join(sorted(self._scope_tags)) or "(none)"
-        return f"[dim]write:{tags}[/]"
+        return f"write:{tags}"
 
     def _render_subtitle(self) -> None:
-        dot = f"[{ACCENT}]●[/]" if self._connected else "[dim]○[/]"
-        status = "live" if self._connected else "offline"
-        parts = [f"{dot} {status}"]
+        # Plain text: the Header prints its sub-title literally, markup and all.
+        parts = ["● live" if self._connected else "○ offline"]
         badge = self._scope_badge()
         if badge:
             parts.append(badge)
@@ -319,10 +341,26 @@ class RelayTuiApp(App):
 
     def _remove_post_live(self, post_id: int) -> None:
         try:
-            self.query_one(PostPanel).remove_post(post_id)
+            self._drop_post(post_id)
             self._refresh_tags()
         except Exception:
             pass
+
+    def _drop_post(self, post_id: int) -> None:
+        """Take a deleted post out of the feed; an open pane moves to its neighbour."""
+        panel = self.query_one(PostPanel)
+        neighbour = panel.neighbour(post_id)
+        panel.remove_post(post_id)
+        pane = self._pane()
+        if not self._reader_active or pane.post is None or pane.post.id != post_id:
+            return
+        if neighbour is None:
+            self._pane_anchor = None
+            pane.set_empty()
+            return
+        self._pane_anchor = neighbour.id
+        pane.show(neighbour)
+        self.call_after_refresh(panel.select, neighbour.id)
 
     def _prepend_post(self, post: api.Post) -> None:
         try:
@@ -330,6 +368,8 @@ class RelayTuiApp(App):
             # A 'post' event is either new or an edit streamed in from outside
             # relay (e.g. an Obsidian save). If we already show it, update in
             # place; otherwise prepend it (respecting the active-tag filter).
+            if self._reader_active:
+                self._pane().refresh_post(post)
             if panel.has_post(post.id):
                 panel.update_post(post, flash=True)
             elif (
@@ -382,6 +422,11 @@ class RelayTuiApp(App):
         self._offset = _dated_stream_offset(posts, pinned_id)
         self._loading_more = False
         self.query_one(PostPanel).set_posts(posts, search=self._search, pinned_id=pinned_id)
+        pane = self._pane()
+        pane.link_index, pane.link_titles = self._link_index, self._link_titles
+        reselect, self._pane_reselect = self._pane_reselect, False
+        if self._reader_active:
+            self.call_after_refresh(self._sync_pane, reselect)
         if self._topics_mode == "tags":
             self.query_one(TagPanel).set_tags(tags, active=self._active_tag)
 
@@ -436,6 +481,7 @@ class RelayTuiApp(App):
     def on_tag_panel_tag_selected(self, event: TagPanel.TagSelected) -> None:
         self._active_tag = event.tag
         self._active_folder = None
+        self._pane_reselect = True
         self._reload()
         try:
             self.query_one(PostPanel).focus()
@@ -445,6 +491,7 @@ class RelayTuiApp(App):
     def on_tag_panel_folder_selected(self, event: TagPanel.FolderSelected) -> None:
         self._active_folder = event.folder
         self._active_tag = None
+        self._pane_reselect = True
         self._reload()
         try:
             self.query_one(PostPanel).focus()
@@ -471,7 +518,123 @@ class RelayTuiApp(App):
         self.call_from_thread(panel.focus)
 
     def on_post_panel_view_post(self, event: PostPanel.ViewPost) -> None:
+        if self._reader_active:
+            # The post is already in the pane: Enter moves there to read it.
+            self._pane().view.query_one(VerticalScroll).focus()
+            return
         self.push_screen(PostDetailModal(event.post, self._link_index, self._link_titles))
+
+    # ── three-column layout ──────────────────────────────────────────────────
+
+    def _pane(self) -> ReaderPane:
+        return self.query_one(ReaderPane)
+
+    def on_resize(self, event) -> None:
+        self._apply_layout()
+
+    def _apply_layout(self) -> None:
+        active = self._reader_pref and self.size.width >= READER_MIN_WIDTH
+        if active == self._reader_active:
+            return
+        try:
+            main = self.query_one("#main")
+        except NoMatches:
+            return  # a Resize before the layout is composed; on_mount applies it
+        self._reader_active = active
+        main.set_class(active, "-reader")
+        if active:
+            self.call_after_refresh(self._sync_pane, False)
+
+    def _sync_pane(self, reselect: bool) -> None:
+        """After a load: a tag/folder change (or an empty pane) opens the first
+        post; any other reload keeps the open one and re-selects it."""
+        panel, pane = self.query_one(PostPanel), self._pane()
+        if pane.editing:
+            return
+        if not reselect and pane.post is not None:
+            if not panel.select(self._pane_anchor):
+                panel.select(pane.post.id)
+            return
+        post = panel.first_post() if reselect else (panel.selected_post or panel.first_post())
+        if post is None:
+            self._pane_anchor = None
+            pane.set_empty()
+            return
+        self._pane_anchor = post.id
+        pane.show(post)
+        panel.select(post.id)
+
+    def on_post_panel_highlighted(self, event: PostPanel.Highlighted) -> None:
+        if not self._reader_active:
+            return
+        pane = self._pane()
+        if pane.editing:
+            return
+        if event.post.id == self._pane_anchor and pane.post is not None:
+            # The same feed post highlighted again (a reload, a live edit):
+            # keep any link trail the reader followed from it.
+            pane.refresh_post(event.post)
+            return
+        self._pane_anchor = event.post.id
+        pane.show(event.post)
+
+    def on_post_view_open_link(self, event: PostView.OpenLink) -> None:
+        self._navigate_pane(event.post_id)
+
+    @work(thread=True)
+    def _navigate_pane(self, post_id: int) -> None:
+        try:
+            post = api.get_post(post_id)
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Open failed: {e}", severity="error")
+            return
+        self.call_from_thread(self._pane().navigate, post)
+
+    def on_post_view_restored(self, event: PostView.Restored) -> None:
+        panel = self.query_one(PostPanel)
+        if panel.has_post(event.post.id):
+            panel.update_post(event.post)
+        self._refresh_tags()
+
+    def on_reader_pane_saved(self, event: ReaderPane.Saved) -> None:
+        self._on_post_updated(event.post)
+
+    def on_reader_pane_editor_closed(self, event: ReaderPane.EditorClosed) -> None:
+        self.query_one(PostPanel).focus()
+
+    def action_toggle_layout(self) -> None:
+        if self._pane().editing:
+            self.notify("Finish the edit first", severity="warning")
+            return
+        self._reader_pref = not self._reader_pref
+        self._apply_layout()
+        if self._reader_pref and not self._reader_active:
+            self.notify(f"Three columns need a terminal {READER_MIN_WIDTH} columns wide", severity="warning")
+        else:
+            self.notify("Three columns" if self._reader_pref else "List", timeout=2)
+
+    def action_step(self, delta: int) -> None:
+        self.query_one(PostPanel).step(delta)
+
+    def _pane_ready(self) -> bool:
+        pane = self._pane()
+        return self._reader_active and pane.post is not None and not pane.editing
+
+    def action_follow_link(self) -> None:
+        if self._pane_ready():
+            self._pane().view.follow_link()
+
+    def action_history(self) -> None:
+        if self._pane_ready():
+            self._pane().view.history()
+
+    def action_pane_back(self) -> None:
+        if self._pane_ready():
+            self._pane().go_back()
+
+    def action_pane_forward(self) -> None:
+        if self._pane_ready():
+            self._pane().go_forward()
 
     def open_post(self, post_id: int) -> None:
         """Open a post by id (from a clicked wikilink) in a stacked detail modal."""
@@ -568,29 +731,25 @@ class RelayTuiApp(App):
     def action_edit_post(self) -> None:
         if self._reject_if_read_only():
             return
-        post = self.query_one(PostPanel).selected_post
+        post = self._target_post()
         if post is None:
             self.notify("No post selected", severity="warning")
             return
-        def _on_result(result: dict | None) -> None:
-            if result:
-                self._do_update_post(post.id, result)
+        if self._reader_active:
+            self._pane().edit()
+            return
+
+        def _on_result(saved: api.Post | None) -> None:
+            if saved is not None:
+                self._on_post_updated(saved)
+
         self.push_screen(EditModal(post), callback=_on_result)
 
-    @work(thread=True)
-    def _do_update_post(self, post_id: int, data: dict) -> None:
-        try:
-            post = api.update_post(
-                post_id,
-                content=data.get("content"),
-                title=data.get("title"),
-                tags=data.get("tags"),
-                source=data.get("source"),
-                expires_at=data["expires_at"],
-            )
-            self.call_from_thread(self._on_post_updated, post)
-        except Exception as e:
-            self.call_from_thread(self.notify, f"Update failed: {e}", severity="error")
+    def _target_post(self) -> api.Post | None:
+        """The post e/d act on: the open one in the pane, else the selected one."""
+        if self._reader_active:
+            return self._pane().post
+        return self.query_one(PostPanel).selected_post
 
     def _on_post_updated(self, post: api.Post) -> None:
         self.query_one(PostPanel).update_post(post)
@@ -599,7 +758,7 @@ class RelayTuiApp(App):
     def action_delete_post(self) -> None:
         if self._reject_if_read_only():
             return
-        post = self.query_one(PostPanel).selected_post
+        post = self._target_post()
         if post is None:
             self.notify("No post selected", severity="warning")
             return
@@ -617,7 +776,7 @@ class RelayTuiApp(App):
             self.call_from_thread(self.notify, f"Delete failed: {e}", severity="error")
 
     def _on_post_deleted(self, post_id: int) -> None:
-        self.query_one(PostPanel).remove_post(post_id)
+        self._drop_post(post_id)
         self.notify("Deleted", severity="information", timeout=3)
         self._refresh_tags()
 
@@ -664,17 +823,27 @@ class RelayTuiApp(App):
         except Exception as e:
             self.call_from_thread(self.notify, f"Config failed: {e}", severity="error")
 
+    def _panels(self) -> list:
+        panels = [self.query_one("#tag-listview"), self.query_one("#post-listview")]
+        if self._reader_active and self._pane().post is not None:
+            panels.append(self._pane().view.query_one(VerticalScroll))
+        return panels
+
+    def _cycle_panels(self, delta: int) -> None:
+        pane = self._pane()
+        if pane.editing and self.focused is not None and pane in self.focused.ancestors:
+            # Inside the pane's editor Tab moves between its fields.
+            (self.screen.focus_next if delta > 0 else self.screen.focus_previous)()
+            return
+        panels = self._panels()
+        current = next((i for i, w in enumerate(panels) if w is self.focused), 0)
+        panels[(current + delta) % len(panels)].focus()
+
     def action_focus_next_panel(self) -> None:
-        focused = self.focused
-        tag_lv = self.query_one("#tag-listview")
-        post_lv = self.query_one("#post-listview")
-        if focused is post_lv:
-            tag_lv.focus()
-        else:
-            post_lv.focus()
+        self._cycle_panels(1)
 
     def action_focus_prev_panel(self) -> None:
-        self.action_focus_next_panel()  # only 2 panels, same behavior
+        self._cycle_panels(-1)
 
 
 def main() -> None:

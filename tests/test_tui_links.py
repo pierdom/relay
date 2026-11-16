@@ -5,7 +5,7 @@ import os
 
 os.environ.setdefault("API_KEY", "test-key")
 
-from relay_tui.widgets.modals import _linkify_markdown, _outbound_link_ids
+from relay_tui.render import _linkify_markdown, _outbound_link_ids
 
 INDEX = {"qth": 155, "homelab inventory": 83, "audio setup": 63}
 
@@ -83,3 +83,10 @@ def test_dotted_note_title_is_not_an_attachment():
     out = _linkify_markdown("[[Section 2.1]]", INDEX)
     assert out == "Section 2.1"
     assert "/attachments/" not in out
+
+
+def test_a_leading_heading_that_restates_the_title_is_dropped():
+    from relay_tui.render import strip_title_heading
+    assert strip_title_heading("# Pay: Q3/Q4\n\nbody", "Pay Q3Q4") == "body"
+    assert strip_title_heading("## Part 1\n\nbody", "Notes") == "## Part 1\n\nbody"
+    assert strip_title_heading("body", "body") == "body"

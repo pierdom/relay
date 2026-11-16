@@ -126,6 +126,10 @@ Single-page app on REST + SSE: ES modules, no build step, `marked` and `DOMPurif
 
 `relay_tui/` (Textual). `RELAY_PALETTE=<name>` picks a palette from `relay_tui/palettes/*.toml` (most mirror a browser theme); `RELAY_TRANSPARENT=1` lets the terminal background show. docs/tui.md.
 
+- **One post renderer, `widgets/post_view.PostView`**, hosted by both `PostDetailModal` and the three-column `widgets/reader.ReaderPane` (≥ `READER_MIN_WIDTH` columns, `l` toggles). Links inside it post `PostView.OpenLink`; the modal stops it and stacks another modal, the app moves the pane. Markdown preprocessing (wikilinks, `#N`, embeds, `strip_title_heading`) is `relay_tui/render.py`.
+- **One editor, `widgets/edit_form.EditForm`**, in `EditModal` and in the pane. It saves itself with `if_match` = the etag it opened on; `api.Conflict` (409) keeps the form open with a notice and adopts the current etag, so the next save overwrites on purpose.
+- **ListView mounts and removals are async**: re-highlight a card only after awaiting them (`PostPanel._remove_item`/`_replace_item`) — an index set straight after `remove()` landed on the card being removed. The pane follows `PostPanel.Highlighted`; `_pane_anchor` keeps a re-highlight of the same feed post from discarding the link trail.
+
 ## Tags · master doc · TTL
 
 - **Master document (`id=0`)**: `Master Document.md` at the vault root, seeded at startup, undeletable, TTL-exempt; it holds the taxonomy and house rules agents read first.

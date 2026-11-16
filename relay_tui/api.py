@@ -21,6 +21,9 @@ class Post:
     created_at: str
     updated_at: str | None = None
     expires_at: str | None = None
+    updated_by: str | None = None
+    # The version token a later edit sends back as `if_match`.
+    etag: str = ""
 
     @classmethod
     def from_dict(cls, d: dict) -> Post:
@@ -33,6 +36,8 @@ class Post:
             created_at=d.get("created_at", ""),
             updated_at=d.get("updated_at"),
             expires_at=d.get("expires_at"),
+            updated_by=d.get("updated_by"),
+            etag=d.get("etag") or "",
         )
 
 
@@ -102,6 +107,15 @@ class CallerScope:
 
     mode: str  # "full" | "read" | "write"
     tags: list[str] | None = None
+
+
+class Conflict(Exception):
+    """A save's ``if_match`` no longer matched: the post changed since the
+    editor opened. ``current`` is the post as it is now."""
+
+    def __init__(self, current: Post | None) -> None:
+        super().__init__("This post changed since you opened it")
+        self.current = current
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -180,7 +194,10 @@ def update_post(
     tags: list[str] | None = None,
     source: str | None = None,
     expires_at: object = _UNSET,
+    if_match: str | None = None,
 ) -> Post:
+    """PATCH a post. With ``if_match`` (the etag the editor opened on), a post
+    changed meanwhile raises `Conflict` instead of being overwritten."""
     body: dict[str, object] = {}
     if content is not None:
         body["content"] = content
@@ -192,12 +209,18 @@ def update_post(
         body["source"] = source
     if expires_at is not _UNSET:
         body["expires_at"] = expires_at
+    if if_match:
+        body["if_match"] = if_match
     resp = requests.patch(
         f"{_base()}/posts/{post_id}",
         headers=_headers(),
         json=body,
         timeout=10,
     )
+    if resp.status_code == 409:
+        detail = resp.json().get("detail") or {}
+        current = detail.get("current") if isinstance(detail, dict) else None
+        raise Conflict(Post.from_dict(current) if current else None)
     resp.raise_for_status()
     return Post.from_dict(resp.json())
 
