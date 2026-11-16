@@ -77,7 +77,7 @@ A read-only key blocks `n`/`e`/`d` locally with a toast (`This key is read-only`
 
 ## Palettes
 
-Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`default`) matches the browser UI's Relay Dark theme.
+`Ctrl+P` → *Change theme* switches the colour scheme while the TUI runs and remembers it (in `$XDG_STATE_HOME/relay-tui/settings.json`, or `RELAY_TUI_STATE_DIR`). Each palette below is listed as `relay-<name>`, beside Textual's own themes. `RELAY_PALETTE=<name>` picks one at start and wins over the remembered choice. The default (`default`) matches the browser UI's Relay Dark theme.
 
 | Name | Description |
 |------|-------------|
@@ -111,7 +111,9 @@ Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`default`) matc
 | `pastel` | Pastel (TUI only) |
 | `tango` | Tango — sky-blue accent (TUI only) |
 
-Palette files live in `relay_tui/palettes/`. Each is a small TOML file — copy one to create your own. Whether it is light or dark is read from `bg`; add `dark = true` or `dark = false` to say so yourself.
+Palette files live in `relay_tui/palettes/`. Each is a small TOML file — copy one to create your own. Whether it is light or dark is read from `bg`; add `dark = true` or `dark = false` to say so yourself. `RELAY_PALETTE` can also be the path of a palette file of your own.
+
+Every colour on screen comes from the theme: secondary and accent text, the selection and the health colours are worked out for each theme and moved until they read (WCAG AA, 4.5:1), so a palette only has to give its accent, background, border and three status colours.
 
 ## Background transparency
 

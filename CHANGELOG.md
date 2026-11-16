@@ -4,6 +4,18 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.31.0] — 2026-11-16
+
+### Added
+- **Change the TUI's theme while it runs**: `Ctrl+P` → *Change theme* lists every palette (as `relay-<name>`) and Textual's own themes, and switches at once. The choice is remembered for next time; an explicit `RELAY_PALETTE` still wins
+
+### Changed
+- **A new look for the TUI**, after the music player qobit: Topics, the feed and the open post are framed panels with their title in the top border and their state in the bottom one. The feed names its filter (`Feed · #homelab`, `⌕ wireguard · hybrid`) and shows its order and count (`↓ updated · 42`) or the live posts waiting (`● 2 new · r shows`). The panel with focus is lit; the others step back
+- **Selections read in every theme**: a focused list's selection is a solid pair whose text is chosen to read on it, an unfocused list's a faint tint, so two lists no longer both look selected. Secondary text, accent text and the health colours are computed per theme and checked against WCAG AA (4.5:1) on every surface they sit on, and a test holds every palette to it
+- Rounded frames for panels, dialogs and fields (a field lights while you type in it), a thin scrollbar with no track, a footer without a bar, and only state painted (the selection, a new post, a dialog), so the transparent background looks like the opaque one
+
+---
+
 ## [1.30.0] — 2026-11-16
 
 ### Added
