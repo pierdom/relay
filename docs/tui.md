@@ -6,21 +6,36 @@ uv run relay-tui
 
 Requires a running relay instance. Set `RELAY_BASE_URL` and `API_KEY` (or put them in `.env`).
 
+## Layout
+
+On a terminal at least 110 columns wide the TUI shows three columns: **topics** (tags, or the folder tree) · **the feed** · **the open post**. Moving through the feed shows each post in the right-hand column as you go; the first post opens on its own, and again when you pick another tag or folder. Following a link moves that column, and `[` / `]` walk back and forward along the links you followed. Editing happens in the column too.
+
+`l` switches between three columns and the plain list, where `Enter` opens a post in a full-screen view. A narrower terminal always gets the list.
+
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
-| `n` / `e` / `d` | New / edit / delete post |
-| `Enter` | Open post detail |
-| `h` | Post history (inside detail view) |
+| `n` / `e` / `d` | New / edit / delete post (in three columns, `e` and `d` act on the open post) |
+| `j` / `k` (or ↓ / ↑) | Next / previous post |
+| `Enter` | Three columns: move into the post to scroll it (`Esc` returns to the feed). List: open the post |
+| `f` | Follow a link from the open post (outbound and backlinks) |
+| `[` / `]` | Back / forward along followed links (three columns) |
+| `h` | Post history |
+| `l` | Three columns ⇄ list |
 | `v` | Recovery — browse and restore deleted posts |
 | `/` | Search (title / content / source) |
 | `a` | Attachment browser (open externally / delete) |
 | `t` | Toggle TOPICS: Tags ⇄ Tree (folder) |
 | `c` / `R` | Tag expiry and retention (TTL, date, keep-newest-N) / rename (from TOPICS panel) |
 | `s` / `o` | Sort field (updated ⇄ created) / order (desc ⇄ asc) |
-| `r` / `Tab` | Refresh feed / switch panel |
+| `r` / `Tab` | Refresh feed / move between columns |
+| `Ctrl+S` / `Esc` | Save / leave the editor (asks first when there are unsaved changes) |
 | `q` | Quit |
+
+## Edit conflicts
+
+A save carries the version of the post the editor opened on. If the post changed in the meantime (an agent appended to it, or you saved it in Obsidian), the save is refused instead of overwriting that change. The editor says who changed it and keeps your text; save again to overwrite on purpose.
 
 SSE runs in a background thread (`● live` / `○ offline`). On reconnect the client replays missed posts via `Last-Event-ID`.
 
@@ -54,6 +69,7 @@ Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`default`) matc
 | `github-dark` | GitHub Dark — blue accent |
 | `github-light` | GitHub Light (light) — blue accent |
 | `ayu-dark` | Ayu Dark — gold accent |
+| `ayu-darker` | Ayu Darker — darker canvas, brighter gold |
 | `night-owl` | Night Owl — periwinkle accent |
 | `candy` | Candy — hot-pink accent (TUI only) |
 | `earthy` | Earthy (TUI only) |

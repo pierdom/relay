@@ -4,6 +4,20 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.27.0] — 2026-11-16
+
+### Added
+- **A three-column layout in the TUI**: topics · the feed · the open post, read beside the list instead of in a full-screen modal. Moving through the feed (arrows or `j`/`k`) shows each post as you go; the first post opens on its own, and again when you pick another tag or folder. Followed links (`f`, or a click) move the pane, with `[` / `]` to go back and forward. `e` edits in the pane, `Enter` moves into it to scroll and `Esc` goes back to the list, and deleting the open post shows the next one. `l` switches between this and the list; a terminal under 110 columns keeps the list and the modal
+- The TUI shows who last wrote a post (`by …`) under its title
+
+### Fixed
+- **Saving an edit in the TUI could overwrite a change made meanwhile** (an agent's append, a save in Obsidian): it sent no version token. It now sends `if_match`; a post that changed since the editor opened is left alone, the editor says who changed it and keeps your text, and saving again overwrites on purpose
+- The TUI's header printed its live dot and scope badge as raw markup (`[#f59e0b]●[/]`)
+- The TUI's post view no longer repeats a post's title as the first heading of its body
+- Leaving the TUI editor with unsaved changes asks before discarding them
+
+---
+
 ## [1.26.0] — 2026-11-06
 
 ### Added

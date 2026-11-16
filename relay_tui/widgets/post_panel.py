@@ -136,6 +136,13 @@ class PostPanel(Widget):
     class LoadMore(Message):
         """Posted when the highlight nears the end of the loaded feed."""
 
+    class Highlighted(Message):
+        """The highlight moved to a post (the reader pane follows it)."""
+
+        def __init__(self, post: api.Post) -> None:
+            super().__init__()
+            self.post = post
+
     DEFAULT_CSS = """
     PostPanel ListView { background: transparent; border: none; height: 1fr; }
     PostPanel ListView:focus { border: none; }
@@ -241,12 +248,34 @@ class PostPanel(Widget):
         self._apply_visibility()
 
     def remove_post(self, post_id: int) -> None:
-        for item in list(self.query_one(ListView).children):
-            if isinstance(item, PostItem) and item.post.id == post_id:
-                item.remove()
-                self._count -= 1
-                break
+        lv = self.query_one(ListView)
+        items = self._items()
+        ids = [i.post.id for i in items]
+        if post_id not in ids:
+            return
+        i = ids.index(post_id)
+        # Where the highlight belongs once the card is gone: the same post when
+        # one above it went, the neighbour when it was the highlighted one.
+        target: int | None = None
+        if lv.index is not None and i <= lv.index < len(items):
+            if i < lv.index:
+                target = ids[lv.index]
+            elif (after := self.neighbour(post_id)) is not None:
+                target = after.id
+        self._count -= 1
         self._apply_visibility()
+        self.call_later(self._remove_item, items[i], target)
+
+    async def _remove_item(self, item: PostItem, target: int | None) -> None:
+        await item.remove()
+        if target is not None:
+            self._reselect(target)
+
+    def _reselect(self, post_id: int) -> None:
+        """Highlight ``post_id`` afresh: a card mounted or removed under the
+        index leaves the ListView pointing at a card it hasn't drawn as such."""
+        self.query_one(ListView).index = None
+        self.select(post_id)
 
     def has_post(self, post_id: int) -> bool:
         return any(
@@ -256,20 +285,20 @@ class PostPanel(Widget):
 
     def update_post(self, post: api.Post, *, flash: bool = False) -> None:
         lv = self.query_one(ListView)
-        children = list(lv.children)
-        for i, item in enumerate(children):
-            if isinstance(item, PostItem) and item.post.id == post.id:
-                new_item = PostItem(post)
-                item.remove()
-                current_children = list(lv.children)
-                if i < len(current_children):
-                    lv.mount(new_item, before=current_children[i])
-                else:
-                    lv.mount(new_item)
-                if flash:
-                    new_item.add_class("flash")
-                    self.set_timer(1.2, lambda item=new_item: item.remove_class("flash"))
+        for i, item in enumerate(self._items()):
+            if item.post.id == post.id:
+                self.call_later(self._replace_item, item, post, flash, lv.index == i)
                 break
+
+    async def _replace_item(self, old: PostItem, post: api.Post, flash: bool, highlighted: bool) -> None:
+        new_item = PostItem(post)
+        await self.query_one(ListView).mount(new_item, before=old)
+        await old.remove()
+        if highlighted:
+            self._reselect(post.id)
+        if flash:
+            new_item.add_class("flash")
+            self.set_timer(1.2, lambda: new_item.remove_class("flash"))
 
     def focus(self, scroll_visible: bool = True) -> PostPanel:
         self.query_one("#post-listview", ListView).focus(scroll_visible)
@@ -280,7 +309,48 @@ class PostPanel(Widget):
         if isinstance(event.item, PostItem):
             self.post_message(self.ViewPost(event.item.post))
 
+    def _items(self) -> list[PostItem]:
+        return [c for c in self.query_one(ListView).children if isinstance(c, PostItem)]
+
+    def select(self, post_id: int | None) -> bool:
+        """Highlight a post by id; False when it isn't in the feed."""
+        for i, item in enumerate(self._items()):
+            if item.post.id == post_id:
+                self.query_one(ListView).index = i
+                return True
+        return False
+
+    def first_post(self) -> api.Post | None:
+        """The first post a reader would open: the master document is skipped,
+        it is pinned for reference, not for reading first."""
+        items = self._items()
+        for item in items:
+            if item.post.id != 0:
+                return item.post
+        return items[0].post if items else None
+
+    def neighbour(self, post_id: int) -> api.Post | None:
+        """The post after ``post_id`` (or before it, at the end) — where the
+        selection lands when that post goes away. Never the master document:
+        it is pinned for reference, and an emptied list says so instead."""
+        items = [i for i in self._items() if i.post.id == post_id or i.post.id != 0]
+        ids = [i.post.id for i in items]
+        if post_id not in ids:
+            return None
+        i = ids.index(post_id)
+        rest = items[i + 1:] or items[:i][-1:]
+        return rest[0].post if rest else None
+
+    def step(self, delta: int) -> None:
+        lv = self.query_one(ListView)
+        n = len(lv.children)
+        if not n:
+            return
+        lv.index = max(0, min(n - 1, (lv.index if lv.index is not None else -1) + delta))
+
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if isinstance(event.item, PostItem):
+            self.post_message(self.Highlighted(event.item.post))
         lv = event.list_view
         if lv.index is not None and lv.index >= len(lv.children) - 5:
             self.post_message(self.LoadMore())
