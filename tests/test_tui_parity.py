@@ -257,7 +257,7 @@ async def test_s_in_the_status_panel_switches_semantic_search(fake):
     app = tui_app.RelayTuiApp()
     async with app.run_test(size=WIDE) as pilot:
         await _settle(pilot)
-        await pilot.press("i")
+        await pilot.press("I")
         await _settle(pilot)
         assert isinstance(app.screen, StatusModal)
         await pilot.press("s")

@@ -4,6 +4,20 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.32.0] — 2026-11-16
+
+### Added
+- **A trail in the TUI's top row** shows where you are: `All posts › #homelab › Docker Services › Home Network Map` — the feed, its filter, the open post and the links followed from it. Click a crumb to go back there. The row's right end shows `● live` (the dot lights as changes arrive), the key's scope, and `◢◤ relay`; it replaces Textual's header
+- **`i` opens a menu** of everything you can do with what's highlighted — a post (edit, delete, follow a link, history, outline, copy, filter by its tag or writer, open in the browser) or a tag in Topics (show its posts, expiry and retention, rename) — then the vault-wide actions. Each shows its own key and a number to pick it
+- **Page keys in the TUI's lists**: PageUp, PageDown, Home and End move the selection (they scrolled the view and left the selection behind)
+
+### Changed
+- **`Esc` goes back one level, always the same way**: along the links followed, then out of the post to the feed, then off the search, then off the filter
+- **The TUI's footer lists only the keys that apply** where you are — `f Links` once a post is open, `[ Back` after following a link, `u Undo` after a delete — and leaves the rest to the `i` menu
+- **Status moved from `i` to `I`** (it's also in the `i` menu)
+
+---
+
 ## [1.31.0] — 2026-11-16
 
 ### Added

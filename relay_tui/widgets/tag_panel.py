@@ -8,6 +8,7 @@ from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView
 
 from .. import api
+from .lists import PagedListView
 
 
 class TagItem(ListItem):
@@ -69,7 +70,7 @@ class TagPanel(Widget):
     """
 
     def compose(self) -> ComposeResult:
-        yield ListView(id="tag-listview")
+        yield PagedListView(id="tag-listview")
 
     def on_mount(self) -> None:
         self.add_class("panel")

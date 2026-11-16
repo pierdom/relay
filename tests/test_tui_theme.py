@@ -72,7 +72,6 @@ async def test_the_theme_changes_while_running_and_is_remembered(fake):
         app.theme = "relay-light"
         await _settle(pilot)
         assert app.theme_variables["relay-accent-text"] != before
-        assert "[light]" in app.sub_title
         assert theme.load_settings()["theme"] == "relay-light"
         app.theme = "textual-dark"   # a built-in theme gets relay's variables too
         await _settle(pilot)

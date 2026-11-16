@@ -16,6 +16,7 @@ from relay_tui import app as tui_app
 from relay_tui.widgets.edit_form import EditForm
 from relay_tui.widgets.post_view import PostDetailModal, PostView
 from relay_tui.widgets.reader import ReaderPane
+from relay_tui.widgets.topbar import Breadcrumb
 
 WIDE, NARROW = (150, 40), (90, 40)
 
@@ -165,7 +166,7 @@ async def test_a_link_moves_the_pane_and_back_returns(fake):
         view.post_message(PostView.OpenLink(3))
         await _settle(pilot)
         assert _pane_title(app) == "Gamma"
-        assert "Alpha" in str(app.query_one(".reader-back", Label).render())
+        assert app.query_one(Breadcrumb).text.endswith("Alpha › Gamma")
         await pilot.press("left_square_bracket")
         await _settle(pilot)
         assert _pane_title(app) == "Alpha"

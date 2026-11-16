@@ -12,12 +12,21 @@ On a terminal at least 110 columns wide the TUI shows three columns: **topics** 
 
 `l` switches between three columns and the plain list, where `Enter` opens a post in a full-screen view. A narrower terminal always gets the list.
 
+The top row says where you are: `All posts › #homelab › Docker Services › Home Network Map` is the feed, its filter, the open post and the links followed from it. Click a crumb to go back there. On the right, `● live` (the dot lights as changes arrive), the key's scope when it has one, and `◢◤ relay`.
+
+`Esc` always goes back one level: along the links you followed, then out of the post to the feed, then off the search, then off the filter.
+
+The footer lists only the keys that do something where you are (`f Links` once a post is open, `[ Back` once you've followed a link, `u Undo` after a delete). `i` opens a menu of everything you can do with what's highlighted — a post, or a tag in Topics — and the vault-wide actions after it, each with its own key and a number to pick it.
+
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
+| `i` | Menu: every action for the highlighted post or tag, then the vault-wide ones |
+| `Esc` | Back one level (link trail → feed → search → filter) |
 | `n` / `e` / `d` | New / edit / delete post (in three columns, `e` and `d` act on the open post) |
 | `j` / `k` (or ↓ / ↑) | Next / previous post |
+| `PageUp` / `PageDown` / `Home` / `End` | Move the selection a page at a time, or to the first / last |
 | `Enter` | Three columns: move into the post to scroll it (`Esc` returns to the feed). List: open the post |
 | `Ctrl+K` | Go to any post by title or `#id` |
 | `f` | Follow a link from the open post (outbound and backlinks) |
@@ -27,7 +36,7 @@ On a terminal at least 110 columns wide the TUI shows three columns: **topics** 
 | `#` | Filter the feed by one of the post's tags |
 | `y` | Copy the post's Markdown, or one of its code blocks |
 | `l` | Three columns ⇄ list |
-| `i` | Status: health, access, vault, server, lint summary, recent activity, recovery; `s` switches semantic search, `B` re-runs its backfill |
+| `I` | Status: health, access, vault, server, lint summary, recent activity, recovery; `s` switches semantic search, `B` re-runs its backfill |
 | `L` | Vault lint: browse findings, `e` fixes the post, `o` opens it |
 | `v` | Recovery — browse and restore deleted posts |
 | `/` | Search (title / content / source); keyword, semantic or hybrid when the server has semantic search on |

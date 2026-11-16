@@ -6,12 +6,10 @@ happens here too, in the same `EditForm` the edit modal uses.
 """
 from __future__ import annotations
 
-from rich.markup import escape
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Vertical
 from textual.message import Message
-from textual.widgets import Label, Static
+from textual.widgets import Static
 
 from .. import api
 from .edit_form import EditForm
@@ -27,12 +25,12 @@ class ReaderPane(Vertical):
     class EditorClosed(Message):
         """The pane's editor closed, saved or not."""
 
-    BINDINGS = [Binding("escape", "leave", "Back to the list", show=False)]
+    class Moved(Message):
+        """The pane shows another post, or none, or opened or closed its
+        editor — the trail and the footer's keys follow it."""
 
     DEFAULT_CSS = """
     ReaderPane { padding: 0 2; }
-    ReaderPane > .reader-back { color: $accent; height: auto; display: none; }
-    ReaderPane.-trail > .reader-back { display: block; }
     ReaderPane > .reader-empty {
         height: 1fr; width: 1fr; content-align: center middle;
         color: $relay-muted; text-style: italic; display: none;
@@ -51,15 +49,11 @@ class ReaderPane(Vertical):
         self.link_titles: dict[int, str] = {}
 
     def compose(self) -> ComposeResult:
-        yield Label("", classes="reader-back", markup=True)
         yield Static("No note selected\n\nj / k to move through the list", classes="reader-empty")
         yield PostView()
 
     def on_mount(self) -> None:
         self.add_class("-empty", "panel")
-
-    def action_leave(self) -> None:
-        self.app.query_one("#post-listview").focus()
 
     # ── state ────────────────────────────────────────────────────────────────
 
@@ -75,12 +69,24 @@ class ReaderPane(Vertical):
     def editing(self) -> bool:
         return self.has_class("-editing")
 
+    @property
+    def trail(self) -> list[api.Post]:
+        """The posts followed through to reach this one, oldest first."""
+        return list(self._back)
+
+    @property
+    def can_go_forward(self) -> bool:
+        return bool(self._forward)
+
+    def back_to(self, depth: int) -> None:
+        """Walk the trail back until ``depth`` posts precede the open one."""
+        while len(self._back) > depth and self.go_back():
+            pass
+
     def _display(self, post: api.Post) -> None:
         self.remove_class("-empty")
         self.view.show(post, self.link_index, self.link_titles)
-        self.set_class(bool(self._back), "-trail")
-        if self._back:
-            self.query_one(".reader-back", Label).update(f"← {escape(self._back[-1].title)}  [$relay-muted]\\[[/]")
+        self.post_message(self.Moved())
 
     def show(self, post: api.Post) -> None:
         """A pick from the feed: the link trail starts over."""
@@ -122,8 +128,8 @@ class ReaderPane(Vertical):
     def set_empty(self) -> None:
         self._back.clear()
         self._forward.clear()
-        self.remove_class("-trail")
         self.add_class("-empty")
+        self.post_message(self.Moved())
 
     # ── editing ──────────────────────────────────────────────────────────────
 
@@ -133,6 +139,7 @@ class ReaderPane(Vertical):
             return False
         self.add_class("-editing")
         self.mount(EditForm(post))
+        self.post_message(self.Moved())
         return True
 
     def _close_editor(self) -> None:
@@ -140,6 +147,7 @@ class ReaderPane(Vertical):
         for form in self.query(EditForm):
             form.remove()
         self.post_message(self.EditorClosed())
+        self.post_message(self.Moved())
 
     def on_edit_form_saved(self, event: EditForm.Saved) -> None:
         event.stop()

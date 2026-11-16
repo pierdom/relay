@@ -15,12 +15,13 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.css.query import NoMatches
 from textual.filter import NO_DIM, dim_color
 from textual.filter import ANSIToTruecolor as _ANSIToTruecolor
-from textual.widgets import Footer, Header
+from textual.widgets import Footer, ListView
 
 from . import api
 from .sse import SSESubscriber
-from .theme import all_themes, display_name, initial_theme, relay_variable_defaults, save_setting, theme_for
+from .theme import all_themes, initial_theme, relay_variable_defaults, save_setting, theme_for
 from .widgets.lint import LintModal
+from .widgets.menu import ActionMenu, MenuItem
 from .widgets.modals import (
     AttachmentsModal,
     ConfirmModal,
@@ -36,6 +37,7 @@ from .widgets.reader import ReaderPane
 from .widgets.status import StatusModal
 from .widgets.switcher import SwitcherModal
 from .widgets.tag_panel import TagPanel
+from .widgets.topbar import Breadcrumb, Crumb, StatusMark, TopBar
 
 # Below this many columns the three-column layout falls back to the list and
 # the detail modal: the note column would be too narrow to read.
@@ -147,7 +149,6 @@ class RelayTuiApp(App):
         scrollbar-color-hover: $accent;
         scrollbar-color-active: $accent;
     }
-    Header { background: $background; }
     #main { height: 1fr; layout: horizontal; padding: 0 1; }
     /* Panels are framed, titled in the top border, with their state (sort,
        count, pending posts) in the bottom one. The focused one is lit. */
@@ -200,31 +201,35 @@ class RelayTuiApp(App):
     FooterKey .footer-key--key { color: $relay-accent-text; background: transparent; text-style: bold; }
     FooterKey .footer-key--description { color: $foreground; background: transparent; }
     """
+    # The footer shows the few keys that apply to what's in front of you
+    # (check_action hides the rest); `i` lists every action for it.
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
-        Binding("n", "compose_post", "New post"),
+        Binding("n", "compose_post", "New"),
         Binding("e", "edit_post", "Edit"),
         Binding("d", "delete_post", "Delete"),
+        Binding("f", "follow_link", "Links"),
+        Binding("left_square_bracket", "pane_back", "Back"),
+        Binding("u", "undo_delete", "Undo"),
         Binding("slash", "search", "Search"),
-        Binding("a", "attachments", "Attachments"),
-        Binding("v", "open_recovery", "Recovery"),
-        Binding("s", "cycle_sort", "Sort field"),
-        Binding("o", "cycle_order", "Sort order"),
-        Binding("r", "reload", "Refresh"),
-        Binding("l", "toggle_layout", "Layout"),
         Binding("ctrl+k", "switcher", "Go to"),
-        Binding("i", "status", "Status"),
+        Binding("i", "menu", "Menu"),
+        Binding("q", "quit", "Quit"),
+        Binding("escape", "back", "Back", show=False),
+        Binding("a", "attachments", "Attachments", show=False),
+        Binding("v", "open_recovery", "Recovery", show=False),
+        Binding("s", "cycle_sort", "Sort field", show=False),
+        Binding("o", "cycle_order", "Sort order", show=False),
+        Binding("r", "reload", "Refresh", show=False),
+        Binding("l", "toggle_layout", "Layout", show=False),
+        Binding("I", "status", "Status", show=False),
         Binding("L", "lint", "Lint", show=False),
         Binding("b", "filter_author", "By writer", show=False),
-        Binding("u", "undo_delete", "Undo delete", show=False),
         Binding("j", "step(1)", "Next post", show=False),
         Binding("k", "step(-1)", "Previous post", show=False),
-        Binding("f", "follow_link", "Follow link", show=False),
         Binding("h", "history", "History", show=False),
         Binding("g", "outline", "Outline", show=False),
         Binding("y", "copy", "Copy", show=False),
         Binding("number_sign", "filter_tag", "Filter by tag", show=False),
-        Binding("left_square_bracket", "pane_back", "Back", show=False),
         Binding("right_square_bracket", "pane_forward", "Forward", show=False),
         Binding("tab", "focus_next_panel", "Switch panel", show=False),
         Binding("shift+tab", "focus_prev_panel", "Switch panel", show=False),
@@ -280,7 +285,7 @@ class RelayTuiApp(App):
         self.refresh(layout=True)
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield TopBar(id="topbar")
         with Horizontal(id="main"):
             yield TagPanel(id="tag-panel")
             yield PostPanel(id="post-panel")
@@ -388,13 +393,11 @@ class RelayTuiApp(App):
         return f"write:{tags}"
 
     def _render_subtitle(self) -> None:
-        # Plain text: the Header prints its sub-title literally, markup and all.
-        parts = ["● live" if self._connected else "○ offline"]
-        badge = self._scope_badge()
-        if badge:
-            parts.append(badge)
-        parts.append(f"[{display_name(self.theme)}]")
-        self.sub_title = "  ".join(parts)
+        """The top bar's right end: live or offline, and the key's scope."""
+        try:
+            self.query_one(StatusMark).set_state(self._connected, self._scope_badge())
+        except NoMatches:
+            pass
 
     def _reject_if_read_only(self) -> bool:
         """True (and toasts) when the local key is read-only (relay #198,
@@ -428,6 +431,7 @@ class RelayTuiApp(App):
 
     def _remove_post_live(self, post_id: int) -> None:
         try:
+            self.query_one(StatusMark).pulse()
             self._drop_post(post_id)
             self._refresh_tags()
         except Exception:
@@ -451,6 +455,7 @@ class RelayTuiApp(App):
 
     def _prepend_post(self, post: api.Post) -> None:
         try:
+            self.query_one(StatusMark).pulse()
             panel = self.query_one(PostPanel)
             # A 'post' event is either new or an edit streamed in from outside
             # relay (e.g. an Obsidian save). If we already show it, update in
@@ -538,6 +543,7 @@ class RelayTuiApp(App):
             self.call_after_refresh(self._sync_pane, reselect)
         if self._topics_mode == "tags":
             self.query_one(TagPanel).set_tags(tags, active=self._active_tag)
+        self._update_trail()
 
     def on_post_panel_load_more(self, event: PostPanel.LoadMore) -> None:
         if self._loading_more or self._offset >= self._total:
@@ -677,6 +683,7 @@ class RelayTuiApp(App):
         panel.select(post.id)
 
     def on_post_panel_highlighted(self, event: PostPanel.Highlighted) -> None:
+        self.refresh_bindings()
         if not self._reader_active:
             return
         pane = self._pane()
@@ -713,6 +720,145 @@ class RelayTuiApp(App):
 
     def on_reader_pane_editor_closed(self, event: ReaderPane.EditorClosed) -> None:
         self.query_one(PostPanel).focus()
+
+    # ── where you are: the trail, Escape, the footer, the menu ──────────────
+
+    def _update_trail(self) -> None:
+        """``All posts › #homelab › Docker Services › Home Network Map``: the
+        feed, its filter, the post open in the reader and the links followed
+        from it. Each crumb but the last goes back to where it names."""
+        try:
+            bar = self.query_one(Breadcrumb)
+        except NoMatches:
+            return
+        pane = self._pane()
+        filtered = self._feed_label()
+        open_posts = (pane.trail + [pane.post]) if self._reader_active and pane.post is not None else []
+        crumbs = [Crumb("All posts", self._clear_filters if filtered else None)]
+        if filtered:
+            crumbs.append(Crumb(filtered, (lambda: pane.back_to(0)) if len(open_posts) > 1 else None))
+        for depth, post in enumerate(open_posts):
+            last = depth == len(open_posts) - 1
+            go = None if last else (lambda d=depth: pane.back_to(d))
+            crumbs.append(Crumb(post.title or f"#{post.id}", go))
+        bar.set_crumbs(crumbs)
+
+    def on_reader_pane_moved(self, event: ReaderPane.Moved) -> None:
+        self._update_trail()
+        self.refresh_bindings()
+
+    def _clear_filters(self) -> None:
+        self._active_tag = self._active_folder = self._author = self._search = None
+        self._pane_reselect = True
+        self._reload()
+
+    def action_back(self) -> None:
+        """Escape: back one level, always the same way — along the links
+        followed in the reader, then out of the reader to the feed, then off
+        the search, then off the filter. A dialog or the editor takes Escape
+        for itself first."""
+        pane = self._pane()
+        focus = self.focused
+        if self._reader_active and pane.trail and not pane.editing:
+            pane.go_back()
+        elif focus is not None and pane in focus.ancestors:
+            self.query_one(PostPanel).focus()
+        elif self._search:
+            self._search = None
+            self._reload()
+        elif self._active_tag or self._active_folder or self._author:
+            self._clear_filters()
+        else:
+            self.query_one(PostPanel).focus()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Hide (and disable) a key that does nothing here, so the footer lists
+        only what applies — qobit's footer."""
+        try:
+            pane = self._pane()
+        except NoMatches:
+            return True
+        if action in ("follow_link", "history", "outline", "copy"):
+            return self._pane_ready()
+        if action == "pane_back":
+            return self._pane_ready() and bool(pane.trail)
+        if action == "pane_forward":
+            return self._pane_ready() and pane.can_go_forward
+        if action in ("edit_post", "delete_post", "filter_tag", "filter_author", "open_browser"):
+            return self._target_post() is not None
+        if action == "undo_delete":
+            return self._last_deleted is not None
+        return True
+
+    def action_open_browser(self) -> None:
+        post = self._target_post()
+        if post is not None:
+            self.open_url(f"{api._base()}/id/{post.id}")
+
+    def action_menu(self) -> None:
+        if self._pane().editing:
+            return
+        title, sections = self._menu()
+
+        def _run(action: str | None) -> None:
+            if not action:
+                return
+            if action.startswith("tags:"):
+                tags = self.query_one(TagPanel)
+                name = action.split(":", 1)[1]
+                if name == "select":
+                    tags.query_one("#tag-listview", ListView).action_select_cursor()
+                else:
+                    self.call_later(tags.run_action, name)   # run_action is a coroutine
+            else:
+                self.call_later(self.run_action, action)
+
+        self.push_screen(ActionMenu(title, sections), _run)
+
+    def _menu(self) -> tuple[str, list[list[MenuItem]]]:
+        """What the menu offers: actions for what's highlighted, then the
+        vault-wide ones."""
+        vault = [
+            MenuItem("status", "●", "Status", "I"),
+            MenuItem("lint", "⚑", "Vault lint", "L"),
+            MenuItem("open_recovery", "↶", "Recover deleted posts", "v"),
+            MenuItem("attachments", "▤", "Attachments", "a"),
+            MenuItem("cycle_sort", "⇅", "Sort by created / updated", "s"),
+            MenuItem("cycle_order", "↕", "Oldest / newest first", "o"),
+            MenuItem("toggle_layout", "▥", "Three columns / list", "l"),
+            MenuItem("reload", "↻", "Refresh", "r"),
+        ]
+        tag_list = self.query_one("#tag-listview", ListView)
+        if self.focused is tag_list:
+            item = tag_list.highlighted_child
+            name = getattr(item, "tag_name", "")
+            if self._topics_mode == "tags" and name:
+                return f"#{name}", [[
+                    MenuItem("tags:select", "▸", "Show its posts", "enter"),
+                    MenuItem("tags:configure_tag", "◷", "Expiry and retention", "c"),
+                    MenuItem("tags:rename_tag", "▸", "Rename", "R"),
+                ], vault]
+            return "Topics", [[MenuItem("tags:toggle_view", "⇄", "Tags / folders", "t")], vault]
+        post = self._target_post()
+        if post is None:
+            return "relay", [vault]
+        actions = [
+            MenuItem("edit_post", "▸", "Edit", "e"),
+            MenuItem("delete_post", "✕", "Delete", "d"),
+        ]
+        if self._pane_ready():
+            actions += [
+                MenuItem("follow_link", "→", "Follow a link", "f"),
+                MenuItem("history", "↺", "History", "h"),
+                MenuItem("outline", "≡", "Outline", "g"),
+                MenuItem("copy", "⧉", "Copy", "y"),
+            ]
+        if post.tags:
+            actions.append(MenuItem("filter_tag", "#", "Posts with its tag", "#"))
+        if post.updated_by:
+            actions.append(MenuItem("filter_author", "@", f"Posts by {post.updated_by}", "b"))
+        actions.append(MenuItem("open_browser", "↗", "Open in the browser", ""))
+        return post.title or f"#{post.id}", [actions, vault]
 
     def action_toggle_layout(self) -> None:
         if self._pane().editing:
@@ -1011,6 +1157,7 @@ class RelayTuiApp(App):
         name = f"“{post.title}”" if post is not None and post.title else f"#{post_id}"
         if self._history_on and post is not None:
             self._last_deleted = post
+            self.refresh_bindings()
             self.notify(f"Deleted {name} — u to undo", timeout=8)
         else:
             self.notify(f"Deleted {name}", timeout=3)
@@ -1018,6 +1165,7 @@ class RelayTuiApp(App):
 
     def action_undo_delete(self) -> None:
         post, self._last_deleted = self._last_deleted, None
+        self.refresh_bindings()
         if post is None:
             self.notify("Nothing to undo", severity="warning", timeout=2)
             return

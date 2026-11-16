@@ -121,7 +121,7 @@ async def test_i_opens_the_status_panel_and_an_activity_row_opens_its_post(fake)
     app = tui_app.RelayTuiApp()
     async with app.run_test(size=WIDE) as pilot:
         await _settle(pilot)
-        await pilot.press("i")
+        await pilot.press("I")
         await _settle(pilot)
         assert isinstance(app.screen, StatusModal)
         activity = app.screen.query_one("#st-activity", OptionList)
@@ -139,7 +139,7 @@ async def test_lint_browses_findings_and_opens_the_post(fake):
     app = tui_app.RelayTuiApp()
     async with app.run_test(size=WIDE) as pilot:
         await _settle(pilot)
-        await pilot.press("i")
+        await pilot.press("I")
         await _settle(pilot)
         await pilot.press("L")
         await _settle(pilot)
