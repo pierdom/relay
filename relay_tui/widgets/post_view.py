@@ -125,14 +125,17 @@ class PostView(Vertical):
             items = api.get_backlinks(post_id)
         except Exception:
             items = []
-        related: list[tuple[int, str]] = []
+        # Linked mentions show at once; a similarity query may take longer.
+        self.app.call_from_thread(self._set_backlinks, items, generation)
         # "Related, not linked" needs semantic search; the server 503s without it.
-        if getattr(self.app, "_embeddings_on", False):
-            try:
-                related = api.get_related(post_id)
-            except Exception:
-                related = []
-        self.app.call_from_thread(self._set_backlinks, items, generation, related)
+        if not getattr(self.app, "_embeddings_on", False):
+            return
+        try:
+            related = api.get_related(post_id)
+        except Exception:
+            return
+        if related:
+            self.app.call_from_thread(self._set_backlinks, items, generation, related)
 
     def _set_backlinks(
         self, items: list[tuple[int, str]], generation: int, related: list[tuple[int, str]] | None = None

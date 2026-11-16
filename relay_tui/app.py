@@ -264,7 +264,7 @@ class RelayTuiApp(App):
         self._history_on = False         # deletes are undoable
         self._embeddings_on = False
         self._last_deleted: api.Post | None = None
-        self._pending_new = 0   # live posts held back from a filtered feed
+        self._pending_ids: set[int] = set()   # live posts held back from a filtered feed
         self._link_index: dict[str, int] = {}   # normalised title -> id
         self._link_titles: dict[int, str] = {}   # id -> title
         self._page_size = 50
@@ -410,7 +410,7 @@ class RelayTuiApp(App):
             elif self._plain_feed():
                 panel.prepend_post(post)
             else:
-                self._note_pending()
+                self._note_pending(post.id)
             # A streamed post may carry a brand-new tag or bump a count, so
             # refresh the sidebar regardless of the active-tag filter.
             self._refresh_tags()
@@ -425,12 +425,14 @@ class RelayTuiApp(App):
         return (self._sort == "updated" and self._order == "desc"
                 and not (self._search or self._active_folder or self._author))
 
-    def _note_pending(self) -> None:
+    def _note_pending(self, post_id: int) -> None:
         """A post arrived that this feed may or may not show: count it in the
         header (`r` reloads), as the browser's "new posts" pill does, rather
-        than drop it into a list it might not belong to."""
-        self._pending_new += 1
-        self.query_one(PostPanel).set_pending(self._pending_new)
+        than drop it into a list it might not belong to. Counted once per
+        post: a create here is followed by its own echo on the stream, and an
+        agent may save the same post several times."""
+        self._pending_ids.add(post_id)
+        self.query_one(PostPanel).set_pending(len(self._pending_ids))
 
     @work(thread=True)
     def _reload(self) -> None:
@@ -474,7 +476,7 @@ class RelayTuiApp(App):
         )
         pane = self._pane()
         pane.link_index, pane.link_titles = self._link_index, self._link_titles
-        self._pending_new = 0
+        self._pending_ids.clear()
         reselect, self._pane_reselect = self._pane_reselect, False
         if self._reader_active:
             self.call_after_refresh(self._sync_pane, reselect)
@@ -876,8 +878,8 @@ class RelayTuiApp(App):
                 self._pane().show(post)
                 self.call_after_refresh(panel.select, post.id)
         else:
-            self._note_pending()
-            if self._reader_active:
+            self._note_pending(post.id)
+            if self._reader_active and not self._pane().editing:
                 self._pane().navigate(post)   # still shown, without claiming a place in this feed
         # K-13: no self._sse.set_last_id(post.id) here — a post's database id
         # is not a changes.seq (see _reload's comment). The server broadcasts

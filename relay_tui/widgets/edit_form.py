@@ -298,6 +298,11 @@ class EditForm(Vertical):
         self.app.call_from_thread(self._insert_ref, result.get("ref") or f"![[{result.get('filename', name)}]]")
 
     def _insert_ref(self, ref: str) -> None:
+        if not self.is_attached:
+            # The editor closed while the file uploaded: it is in the vault,
+            # so say how to embed it rather than lose it silently.
+            self.app.notify(f"Uploaded — the editor had closed; embed it with {ref}", timeout=10)
+            return
         if self.has_class("-preview"):
             self.action_toggle_preview()
         ta = self.query_one("#content-input", TextArea)

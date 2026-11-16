@@ -105,7 +105,42 @@ async def test_a_live_post_waits_behind_a_count_in_a_filtered_feed(fake):
         app._active_tag = "other"
         app._prepend_post(_post(52, "Elsewhere", tags=["notes"]))
         await _settle(pilot)
-        assert 52 not in _feed_ids(app) and app._pending_new == 0   # another tag's post: never this feed's
+        assert 52 not in _feed_ids(app) and not app._pending_ids   # another tag's post: never this feed's
+
+
+@pytest.mark.asyncio
+async def test_a_post_is_counted_once_however_often_it_arrives(fake):
+    """A create under a filter is followed by its own echo on the stream, and
+    an agent may save one post several times: one post, one count."""
+    app = tui_app.RelayTuiApp()
+    async with app.run_test(size=WIDE) as pilot:
+        await _settle(pilot)
+        app._search = "alp"
+        app._reload()
+        await _settle(pilot)
+        created = _post(60, "Mine")
+        app._on_post_created(created)
+        app._prepend_post(created)            # the stream's echo of it
+        app._prepend_post(_post(61, "Other"))
+        app._prepend_post(_post(61, "Other, saved again"))
+        await _settle(pilot)
+        assert "2 new" in str(app.query_one(PostPanel).query_one(Label).render())
+
+
+@pytest.mark.asyncio
+async def test_an_upload_that_outlives_its_editor_still_says_where_it_went(fake):
+    app = tui_app.RelayTuiApp()
+    async with app.run_test(size=WIDE) as pilot:
+        await _settle(pilot)
+        await pilot.press("e")
+        await _settle(pilot)
+        form = app.query_one(ReaderPane).query_one(EditForm)
+        await pilot.press("escape")      # unchanged, so it closes at once
+        await _settle(pilot)
+        assert not form.is_attached
+        form._insert_ref("![[late.png]]")   # what the upload worker calls when it finishes
+        await _settle(pilot)
+        assert any("![[late.png]]" in str(n.message) for n in app._notifications)
 
 
 @pytest.mark.asyncio
