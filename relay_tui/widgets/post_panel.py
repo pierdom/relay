@@ -196,9 +196,9 @@ class PostPanel(Widget):
         label: str | None = None,
         empty: str | None = None,
     ) -> None:
-        header = self.query_one(Label)
         label = label if label is not None else (f"search: {search}" if search else None)
-        header.update(f"[bold]FEED[/]  [dim]{escape(label)}[/dim]" if label else "FEED")
+        self._header = f"[bold]FEED[/]  [dim]{escape(label)}[/dim]" if label else "FEED"
+        self.set_pending(0)
         self._empty_message = escape(
             empty if empty is not None else (f'No posts match "{search}"' if search else "No posts yet.")
         )
@@ -209,6 +209,13 @@ class PostPanel(Widget):
         self._apply_visibility()
         for p in posts:
             lv.mount(PostItem(p))
+
+    _header = "FEED"
+
+    def set_pending(self, n: int) -> None:
+        """Say how many live posts are waiting for a reload (`r`)."""
+        note = f"  [{ACCENT}]● {n} new · r shows[/]" if n else ""
+        self.query_one(Label).update(self._header + note)
 
     def prepend_post(self, post: api.Post) -> None:
         lv = self.query_one("#post-listview", ListView)

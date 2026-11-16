@@ -7,21 +7,25 @@ says so and keeps the edit, and a second save overwrites on purpose.
 
 Writing aids, as in the browser: ``[[`` and ``#`` complete posts from the link
 index, the Tags field suggests the vault's tags (→ accepts), ``Ctrl+T`` swaps
-the text for a preview, and a new post's draft is kept on disk until it is
-published or discarded.
+the text for a preview, ``Ctrl+O`` uploads a local file and inserts its
+``![[embed]]``, and a new post's draft is kept on disk until it is published or
+discarded.
 """
 from __future__ import annotations
+
+import os
 
 from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
+from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Markdown, OptionList, TextArea
 from textual.widgets.option_list import Option
 
 from .. import api, drafts
-from ..completion import Span, TagSuggester, accepted_text, link_span, match_posts
+from ..completion import PathSuggester, Span, TagSuggester, accepted_text, link_span, match_posts
 from ..render import _linkify_markdown
 from ..theme import ACCENT, BORDER
 
@@ -59,6 +63,7 @@ class EditForm(Vertical):
         Binding("escape", "cancel", "Cancel"),
         Binding("ctrl+s", "save", "Save"),
         Binding("ctrl+t", "toggle_preview", "Preview"),
+        Binding("ctrl+o", "attach", "Attach file"),
     ]
 
     DEFAULT_CSS = f"""
@@ -120,6 +125,7 @@ class EditForm(Vertical):
         with Horizontal(classes="modal-actions"):
             if self.creating:
                 yield Button("Discard", id="discard-btn", variant="error")
+            yield Button("Attach", id="attach-btn", variant="default")
             yield Button("Preview", id="preview-btn", variant="default")
             yield Button("Cancel", id="cancel-btn", variant="default")
             yield Button("Publish" if self.creating else "Save", id="submit-btn", variant="primary")
@@ -267,6 +273,48 @@ class EditForm(Vertical):
         if not showing:
             self.query_one("#content-input", TextArea).focus()
 
+    # ── attachments ──────────────────────────────────────────────────────────
+
+    def action_attach(self) -> None:
+        """Upload a local file and insert its embed at the cursor — the
+        browser's drop, paste or file picker. An edit files it beside the post;
+        a new post where the post will file (by its tags)."""
+        def _chosen(path: str | None) -> None:
+            if path:
+                tags = None if self.post is not None else self.values()["tags"]
+                self._upload(path, self.post.id if self.post is not None else None, tags)
+
+        self.app.push_screen(AttachFileModal(), _chosen)
+
+    @work(thread=True, group="attach")
+    def _upload(self, path: str, post_id: int | None, tags: list[str] | None) -> None:
+        name = os.path.basename(path)
+        self.app.call_from_thread(self.app.notify, f"Uploading {name}…", timeout=2)
+        try:
+            result = api.upload_attachment(path, post_id=post_id, tags=tags)
+        except Exception as exc:
+            self.app.call_from_thread(self.app.notify, f"Couldn’t attach {name}: {exc}", severity="error")
+            return
+        self.app.call_from_thread(self._insert_ref, result.get("ref") or f"![[{result.get('filename', name)}]]")
+
+    def _insert_ref(self, ref: str) -> None:
+        if not self.is_attached:
+            # The editor closed while the file uploaded: it is in the vault,
+            # so say how to embed it rather than lose it silently.
+            self.app.notify(f"Uploaded — the editor had closed; embed it with {ref}", timeout=10)
+            return
+        if self.has_class("-preview"):
+            self.action_toggle_preview()
+        ta = self.query_one("#content-input", TextArea)
+        row, col = ta.cursor_location
+        line = ta.document.get_line(row)
+        # On a line of its own, so the embed renders as a block.
+        before = "" if not line[:col].strip() else "\n"
+        after = "" if not line[col:].strip() else "\n"
+        ta.insert(f"{before}{ref}{after}")
+        ta.focus()
+        self.app.notify(f"Attached {ref}", timeout=3)
+
     # ── leaving and saving ───────────────────────────────────────────────────
 
     def action_cancel(self) -> None:
@@ -363,7 +411,43 @@ class EditForm(Vertical):
             "cancel-btn": self.action_cancel,
             "submit-btn": self.action_save,
             "preview-btn": self.action_toggle_preview,
+            "attach-btn": self.action_attach,
             "discard-btn": self._discard,
         }
         if (action := actions.get(event.button.id or "")) is not None:
             action()
+
+
+class AttachFileModal(ModalScreen["str | None"]):
+    """Ask for a local file to attach; → accepts a path suggestion."""
+
+    BINDINGS = [Binding("escape", "dismiss", "Cancel")]
+
+    DEFAULT_CSS = f"""
+    AttachFileModal {{ align: center middle; }}
+    AttachFileModal > Vertical {{
+        width: 76; max-width: 92%; height: auto; background: $background;
+        border: solid {ACCENT}; padding: 1 2;
+    }}
+    AttachFileModal .af-title {{ color: {ACCENT}; text-style: bold; }}
+    AttachFileModal Input {{ margin-top: 1; border: solid {BORDER}; }}
+    AttachFileModal .af-hint {{ color: $text-muted; }}
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Attach a file", classes="af-title")
+            yield Input(placeholder="~/Pictures/diagram.png", id="af-path", suggester=PathSuggester())
+            yield Label("→ completes the path · Enter uploads · Esc cancels", classes="af-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#af-path", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        path = os.path.expanduser(event.value.strip())
+        if not path:
+            return
+        if not os.path.isfile(path):
+            self.app.notify(f"No such file: {event.value.strip()}", severity="warning", timeout=3)
+            return
+        self.dismiss(path)

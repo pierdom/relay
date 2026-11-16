@@ -4,6 +4,21 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.30.0] — 2026-11-16
+
+### Added
+- **Attach files from the TUI editor**: `Ctrl+O` (or Attach) asks for a local path, with → completing it from the filesystem, uploads the file and inserts its `![[embed]]` at the cursor. An edit files it beside the post, a new post where the post will file by its tags. The bytes stream through an upload slot, so a large file is never held in memory as base64
+- **Related posts in the TUI**: with semantic search on, a post lists "Related, not linked" under its linked mentions, and `f` offers them too
+- **An outline in the TUI**: `g` lists a post's H2/H3 headings and jumps to the one you pick
+- **Filter by a post's tag in the TUI**: `#` filters the feed by the open post's tag, asking which when it has several — the browser's tag pills
+- **Copy from the TUI**: `y` copies a post's Markdown, or one of its code blocks, to the clipboard through the terminal (OSC 52, which works over SSH)
+- **Semantic-search switches in the TUI status panel**: `s` turns semantic search on or off without a restart, and `B` re-runs the embedding backfill; with it on, the panel shows the model, its coverage and the backfill
+
+### Fixed
+- **A live post landed in a TUI feed it might not belong to**: with a search, folder or writer filter on, every post arriving over the live stream went to the top of the list. It now waits behind a "● N new · r shows" note in the feed header, as the browser's "new posts" pill does
+
+---
+
 ## [1.29.0] — 2026-11-16
 
 ### Added

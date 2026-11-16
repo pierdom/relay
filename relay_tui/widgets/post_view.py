@@ -13,11 +13,13 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
+from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Markdown, OptionList, Static
+from textual.widgets._markdown import MarkdownHeader  # not re-exported in Textual 8; tested
 from textual.widgets.option_list import Option
 
 from .. import api
-from ..render import _linkify_markdown, _outbound_link_ids, strip_title_heading
+from ..render import _linkify_markdown, _outbound_link_ids, code_blocks, strip_title_heading
 from ..theme import ACCENT, BORDER, HEADER_BG
 from .post_panel import _time_ago, _time_until
 
@@ -71,6 +73,7 @@ class PostView(Vertical):
         self._link_index: dict[str, int] = {}
         self._link_titles: dict[int, str] = {}
         self._backlinks: list[tuple[int, str]] = []
+        self._related: list[tuple[int, str]] = []
         self._backlink_timer = None
         self._generation = 0
 
@@ -106,6 +109,7 @@ class PostView(Vertical):
         if not same:
             self.query_one(".pv-scroll", VerticalScroll).scroll_home(animate=False)
             self._backlinks = []
+            self._related = []
             self.query_one(".pv-backlinks", Markdown).update("")
         self._generation += 1
         if self._backlink_timer is not None:
@@ -120,18 +124,36 @@ class PostView(Vertical):
         try:
             items = api.get_backlinks(post_id)
         except Exception:
-            return
+            items = []
+        # Linked mentions show at once; a similarity query may take longer.
         self.app.call_from_thread(self._set_backlinks, items, generation)
+        # "Related, not linked" needs semantic search; the server 503s without it.
+        if not getattr(self.app, "_embeddings_on", False):
+            return
+        try:
+            related = api.get_related(post_id)
+        except Exception:
+            return
+        if related:
+            self.app.call_from_thread(self._set_backlinks, items, generation, related)
 
-    def _set_backlinks(self, items: list[tuple[int, str]], generation: int) -> None:
+    def _set_backlinks(
+        self, items: list[tuple[int, str]], generation: int, related: list[tuple[int, str]] | None = None
+    ) -> None:
         if generation != self._generation:
             return  # the view moved on to another post meanwhile
         self._backlinks = items
-        md = ""
+        self._related = related or []
+        parts = []
         if items:
-            md = "\n---\n\n**Linked mentions**  ([b]f[/b] to follow)\n\n" + "\n".join(
+            parts.append("**Linked mentions**  ([b]f[/b] to follow)\n\n" + "\n".join(
                 f"- [#{i} {t}](relay:{i})" for i, t in items
-            )
+            ))
+        if self._related:
+            parts.append("**Related, not linked**\n\n" + "\n".join(
+                f"- [#{i} {t}](relay:{i})" for i, t in self._related
+            ))
+        md = "\n---\n\n" + "\n\n".join(parts) if parts else ""
         self.query_one(".pv-backlinks", Markdown).update(md)
 
     def follow_link(self) -> None:
@@ -147,6 +169,10 @@ class PostView(Vertical):
             if pid not in seen:
                 seen.add(pid)
                 items.append((pid, title, "←"))
+        for pid, title in self._related:
+            if pid not in seen:
+                seen.add(pid)
+                items.append((pid, title, "≈"))
         if not items:
             self.app.notify("No links in this post", severity="warning")
             return
@@ -156,6 +182,59 @@ class PostView(Vertical):
                 self.post_message(self.OpenLink(pid))
 
         self.app.push_screen(LinkPickerModal(items), _on_pick)
+
+    def headings(self) -> list[tuple[int, str, Widget]]:
+        """The body's H2/H3s as (level, text, heading widget) — the outline.
+        Read off the rendered blocks: the Markdown widget's cached table of
+        contents can name ids from a previous render."""
+        md = self.query_one(".pv-body", Markdown)
+        heads = []
+        for h in md.query(MarkdownHeader):
+            if h.LEVEL in (2, 3):
+                content = getattr(h, "_content", None)
+                heads.append((h.LEVEL, getattr(content, "plain", str(content or "")), h))
+        return heads
+
+    def goto_heading(self) -> None:
+        """Pick a heading and scroll to it — the browser's outline beside a
+        long post. A post with fewer than two has none, as there."""
+        heads = self.headings()
+        if len(heads) < 2:
+            self.app.notify("No outline: this post has fewer than two headings", severity="warning", timeout=2)
+            return
+        from .picker import PickerModal
+
+        def _go(block: Widget | None) -> None:
+            if block is not None and block.is_attached:
+                self.query_one(".pv-scroll", VerticalScroll).scroll_to_widget(block, top=True, animate=False)
+
+        items = [(("    " if lvl == 3 else "") + text, h) for lvl, text, h in heads]
+        self.app.push_screen(PickerModal("Outline", items), _go)
+
+    def copy(self) -> None:
+        """Copy the post's Markdown, or one of its code blocks, through the
+        terminal's clipboard (OSC 52 — most terminals, and over SSH)."""
+        if self.post is None:
+            return
+        post = self.post
+        blocks = code_blocks(post.content)
+
+        def _copy(text: str | None) -> None:
+            if text is None:
+                return
+            self.app.copy_to_clipboard(text)
+            self.app.notify(f"Copied {len(text.splitlines()) or 1} line(s)", timeout=2)
+
+        if not blocks:
+            _copy(post.content)
+            return
+        from .picker import PickerModal
+
+        items = [("The whole post (Markdown)", post.content)] + [
+            (f"Code {n}{f' · {lang}' if lang else ''}: {(code.strip().splitlines() or [''])[0][:60]}", code)
+            for n, (lang, code) in enumerate(blocks, 1)
+        ]
+        self.app.push_screen(PickerModal("Copy", items), _copy)
 
     def history(self) -> None:
         if self.post is None:
@@ -191,6 +270,9 @@ class PostDetailModal(ModalScreen[None]):
         Binding("escape", "dismiss", "Close"),
         Binding("f", "follow_link", "Follow link"),
         Binding("h", "history", "History"),
+        Binding("g", "outline", "Outline"),
+        Binding("y", "copy", "Copy"),
+        Binding("number_sign", "filter_tag", "Filter by tag"),
     ]
 
     DEFAULT_CSS = f"""
@@ -230,6 +312,19 @@ class PostDetailModal(ModalScreen[None]):
 
     def action_history(self) -> None:
         self.query_one(PostView).history()
+
+    def action_outline(self) -> None:
+        self.query_one(PostView).goto_heading()
+
+    def action_copy(self) -> None:
+        self.query_one(PostView).copy()
+
+    def action_filter_tag(self) -> None:
+        post = self.query_one(PostView).post
+        if post is None:
+            return
+        self.dismiss()
+        self.app.filter_by_tag_of(post)
 
     def on_post_view_open_link(self, event: PostView.OpenLink) -> None:
         event.stop()  # the app's own handler moves the reader pane

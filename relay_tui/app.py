@@ -183,6 +183,9 @@ class RelayTuiApp(App):
         Binding("k", "step(-1)", "Previous post", show=False),
         Binding("f", "follow_link", "Follow link", show=False),
         Binding("h", "history", "History", show=False),
+        Binding("g", "outline", "Outline", show=False),
+        Binding("y", "copy", "Copy", show=False),
+        Binding("number_sign", "filter_tag", "Filter by tag", show=False),
         Binding("left_square_bracket", "pane_back", "Back", show=False),
         Binding("right_square_bracket", "pane_forward", "Forward", show=False),
         Binding("tab", "focus_next_panel", "Switch panel", show=False),
@@ -261,6 +264,7 @@ class RelayTuiApp(App):
         self._history_on = False         # deletes are undoable
         self._embeddings_on = False
         self._last_deleted: api.Post | None = None
+        self._pending_ids: set[int] = set()   # live posts held back from a filtered feed
         self._link_index: dict[str, int] = {}   # normalised title -> id
         self._link_titles: dict[int, str] = {}   # id -> title
         self._page_size = 50
@@ -401,19 +405,34 @@ class RelayTuiApp(App):
                 self._pane().refresh_post(post)
             if panel.has_post(post.id):
                 panel.update_post(post, flash=True)
-            elif (
-                # A new post belongs at the top only under the default sort
-                # (updated · desc). Under any other order, prepending would
-                # misplace it — leave it for the next refresh (`r`) instead.
-                self._sort == "updated" and self._order == "desc"
-                and (self._active_tag is None or self._active_tag in post.tags)
-            ):
+            elif self._active_tag is not None and self._active_tag not in post.tags:
+                pass  # another tag's post: never this feed's
+            elif self._plain_feed():
                 panel.prepend_post(post)
+            else:
+                self._note_pending(post.id)
             # A streamed post may carry a brand-new tag or bump a count, so
             # refresh the sidebar regardless of the active-tag filter.
             self._refresh_tags()
         except Exception:
             pass
+
+    def _plain_feed(self) -> bool:
+        """Whether a new post belongs at the top of the feed as it stands: the
+        default order, and no search, folder or writer filter it might not
+        match. The stream can't tell which of those a post meets (the browser
+        filters its stream by tag alone, too)."""
+        return (self._sort == "updated" and self._order == "desc"
+                and not (self._search or self._active_folder or self._author))
+
+    def _note_pending(self, post_id: int) -> None:
+        """A post arrived that this feed may or may not show: count it in the
+        header (`r` reloads), as the browser's "new posts" pill does, rather
+        than drop it into a list it might not belong to. Counted once per
+        post: a create here is followed by its own echo on the stream, and an
+        agent may save the same post several times."""
+        self._pending_ids.add(post_id)
+        self.query_one(PostPanel).set_pending(len(self._pending_ids))
 
     @work(thread=True)
     def _reload(self) -> None:
@@ -457,6 +476,7 @@ class RelayTuiApp(App):
         )
         pane = self._pane()
         pane.link_index, pane.link_titles = self._link_index, self._link_titles
+        self._pending_ids.clear()
         reselect, self._pane_reselect = self._pane_reselect, False
         if self._reader_active:
             self.call_after_refresh(self._sync_pane, reselect)
@@ -664,6 +684,42 @@ class RelayTuiApp(App):
         if self._pane_ready():
             self._pane().view.history()
 
+    def action_outline(self) -> None:
+        if self._pane_ready():
+            self._pane().view.goto_heading()
+
+    def action_copy(self) -> None:
+        if self._pane_ready():
+            self._pane().view.copy()
+
+    def action_filter_tag(self) -> None:
+        post = self._target_post()
+        if post is not None:
+            self.filter_by_tag_of(post)
+
+    def filter_by_tag_of(self, post: api.Post) -> None:
+        """Filter the feed by one of ``post``'s tags — the browser's tag pills
+        in a post's header. One tag applies at once; several ask which."""
+        if not post.tags:
+            self.notify("This post has no tags", severity="warning", timeout=2)
+            return
+        if len(post.tags) == 1:
+            self._filter_by_tag(post.tags[0])
+            return
+        from .widgets.picker import PickerModal
+
+        self.push_screen(
+            PickerModal("Filter by tag", [(f"#{t}", t) for t in post.tags]),
+            lambda tag: self._filter_by_tag(tag) if tag else None,
+        )
+
+    def _filter_by_tag(self, tag: str) -> None:
+        self._active_tag, self._active_folder, self._author = tag, None, None
+        self._pane_reselect = True
+        if self._topics_mode != "tags":
+            self._topics_mode = "tags"   # so the sidebar shows the tag that is now active
+        self._reload()
+
     def action_pane_back(self) -> None:
         if self._pane_ready():
             self._pane().go_back()
@@ -815,12 +871,16 @@ class RelayTuiApp(App):
 
     def _on_post_created(self, post: api.Post) -> None:
         panel = self.query_one(PostPanel)
-        if (self._active_tag is None or self._active_tag in post.tags) and self._author in (None, post.updated_by):
+        if (self._active_tag is None or self._active_tag in post.tags) and self._plain_feed():
             panel.prepend_post(post)
             if self._reader_active:
                 self._pane_anchor = post.id
                 self._pane().show(post)
                 self.call_after_refresh(panel.select, post.id)
+        else:
+            self._note_pending(post.id)
+            if self._reader_active and not self._pane().editing:
+                self._pane().navigate(post)   # still shown, without claiming a place in this feed
         # K-13: no self._sse.set_last_id(post.id) here — a post's database id
         # is not a changes.seq (see _reload's comment). The server broadcasts
         # this create over SSE like any other write, so the real seq arrives

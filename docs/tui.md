@@ -23,8 +23,11 @@ On a terminal at least 110 columns wide the TUI shows three columns: **topics** 
 | `f` | Follow a link from the open post (outbound and backlinks) |
 | `[` / `]` | Back / forward along followed links (three columns) |
 | `h` | Post history |
+| `g` | Outline: jump to one of the post's headings |
+| `#` | Filter the feed by one of the post's tags |
+| `y` | Copy the post's Markdown, or one of its code blocks |
 | `l` | Three columns ⇄ list |
-| `i` | Status: health, access, vault, server, lint summary, recent activity, recovery |
+| `i` | Status: health, access, vault, server, lint summary, recent activity, recovery; `s` switches semantic search, `B` re-runs its backfill |
 | `L` | Vault lint: browse findings, `e` fixes the post, `o` opens it |
 | `v` | Recovery — browse and restore deleted posts |
 | `/` | Search (title / content / source); keyword, semantic or hybrid when the server has semantic search on |
@@ -37,6 +40,7 @@ On a terminal at least 110 columns wide the TUI shows three columns: **topics** 
 | `r` / `Tab` | Refresh feed / move between columns |
 | `Ctrl+S` / `Esc` | Save / leave the editor (an edit asks first when there are unsaved changes; a new post keeps its draft) |
 | `Ctrl+T` | Preview the text in the editor |
+| `Ctrl+O` | Attach a local file and insert its embed |
 | `q` | Quit |
 
 ## Deleting
@@ -50,11 +54,18 @@ The editor is the same for a new post and an edit:
 - `[[` lists posts by title; `#` lists them by title or id and inserts `#id`. ↑/↓ choose, Tab or Enter accepts, Esc closes the list. After a bare `#` nothing is chosen until you press ↓ or Tab, so Enter is still a new line.
 - The Tags field suggests the vault's tags as you type; → accepts.
 - `Ctrl+T` swaps the text for a preview of how it will read, and back.
+- `Ctrl+O` attaches a file: type its path (→ completes it), Enter uploads it and inserts `![[file]]` at the cursor. It files beside the post being edited, or for a new post where the post will file by its tags.
 - A new post is kept as a draft while you write it (under `$XDG_STATE_HOME/relay-tui/`, or `RELAY_TUI_STATE_DIR`), so Esc or quitting loses nothing; `n` opens it again. Publishing or Discard drops it.
 
 ## Edit conflicts
 
 A save carries the version of the post the editor opened on. If the post changed in the meantime (an agent appended to it, or you saved it in Obsidian), the save is refused instead of overwriting that change. The editor says who changed it and keeps your text; save again to overwrite on purpose.
+
+## Live updates
+
+With the plain feed showing (newest first, no search, folder or writer filter), new posts appear at the top as they arrive. Under a filter the TUI can't tell whether a new post belongs, so the feed header counts it instead (`● 2 new · r shows`), and `r` reloads.
+
+Copying (`y`) goes through the terminal's clipboard escape (OSC 52), which most terminals support, over SSH too; some need it enabled.
 
 SSE runs in a background thread (`● live` / `○ offline`). On reconnect the client replays missed posts via `Last-Event-ID`.
 

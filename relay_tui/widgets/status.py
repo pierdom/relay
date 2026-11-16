@@ -42,6 +42,14 @@ def fmt_bytes(n: int) -> str:
     return f"{n} B"
 
 
+def fmt_backfill(b: dict) -> str:
+    if b.get("running"):
+        return f"running — {b.get('checked', 0)}/{b.get('total', 0)} checked"
+    if b.get("completed_at"):
+        return f"{b.get('checked', 0)}/{b.get('total', 0)} checked, finished {b['completed_at']}"
+    return "never run"
+
+
 def _feature(label: str, state: str, note: str) -> str:
     dot = {"ok": f"[{PERF_GREAT}]●[/]", "warn": f"[{PERF_BAD}]●[/]", "bad": f"[{PERF_TERRIBLE}]●[/]"}.get(
         state, "[dim]○[/]"
@@ -78,8 +86,8 @@ def render_status(d: dict) -> str:
     lines.append(_feature(
         "Semantic search",
         "ok" if e.get("available") else "warn" if e.get("enabled") else "off",
-        "on" if e.get("available") else "unavailable — sqlite-vec is not loaded" if e.get("enabled")
-        else "off — search matches words only",
+        "on — details below" if e.get("available") else "unavailable — sqlite-vec is not loaded" if e.get("enabled")
+        else "off — search matches words only  (s turns it on)",
     ))
     lines.append(_feature(
         "External edits", "ok" if watcher.get("running") else "warn",
@@ -96,6 +104,16 @@ def render_status(d: dict) -> str:
         else:
             tags = ", ".join(caller.get("tags") or []) or "(none — every write will be denied)"
             lines += _rows([("This session", "Write — restricted to tags"), ("Allowed tags", tags)])
+    if e.get("enabled"):
+        lines.append(_section("Semantic search"))
+        lines += _rows([
+            ("Model", str(e.get("model") or "—")),
+            ("Backend", "loaded (resident)" if e.get("backend_loaded") else "unloaded"),
+            ("Coverage", f"{e.get('posts_embedded', 0)} / {e.get('posts_total', 0)} posts"
+                         f" ({e.get('posts_missing', 0)} missing)"),
+            ("Backfill", fmt_backfill(e.get("backfill") or {})),
+        ])
+        lines.append("  [dim]s turns it off · B re-runs the backfill[/dim]")
     v = d.get("vault", {})
     lines.append(_section("Vault"))
     lines += _rows([
@@ -131,6 +149,8 @@ class StatusModal(ModalScreen["int | str | None"]):
         Binding("escape", "dismiss", "Close"),
         Binding("L", "lint", "Lint"),
         Binding("v", "recovery", "Recovery"),
+        Binding("s", "toggle_semantic", "Semantic search on/off"),
+        Binding("B", "backfill", "Re-run backfill"),
     ]
 
     DEFAULT_CSS = f"""
@@ -150,6 +170,8 @@ class StatusModal(ModalScreen["int | str | None"]):
     def __init__(self) -> None:
         super().__init__()
         self._activity_ids: list[int | None] = []
+        self._embeddings: dict = {}
+        self._busy = False
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -175,6 +197,7 @@ class StatusModal(ModalScreen["int | str | None"]):
             msg = f"[{PERF_TERRIBLE}]Could not read status: {escape(str(exc))}[/]"
             self.app.call_from_thread(self._show_body, msg)
             return
+        self._embeddings = report.get("embeddings") or {}
         self.app.call_from_thread(self._show_body, render_status(report))
         history = bool(report.get("features", {}).get("history", {}).get("effective"))
         try:
@@ -235,6 +258,36 @@ class StatusModal(ModalScreen["int | str | None"]):
         idx = event.option_index
         if 0 <= idx < len(self._activity_ids) and self._activity_ids[idx] is not None:
             self.dismiss(self._activity_ids[idx])
+
+    def action_toggle_semantic(self) -> None:
+        """Semantic search on or off at runtime (no restart), as the browser's
+        Turn on/off. Needs full access; the server says so otherwise."""
+        if not self._busy:
+            self._busy = True
+            self._embedding_action(lambda: api.set_embeddings_enabled(not self._embeddings.get("enabled")))
+
+    def action_backfill(self) -> None:
+        e = self._embeddings
+        if not (e.get("enabled") and e.get("available")):
+            self.app.notify("Turn semantic search on first", severity="warning", timeout=2)
+            return
+        if not self._busy:
+            self._busy = True
+            self._embedding_action(api.run_embedding_backfill)
+
+    @work(thread=True)
+    def _embedding_action(self, fn) -> None:
+        try:
+            fn()
+        except Exception as exc:
+            self.app.call_from_thread(self.app.notify, f"Failed: {exc}", severity="error")
+        else:
+            # The health row, the coverage and the app's search modes all move.
+            reload_status = getattr(self.app, "_load_status", None)
+            if reload_status is not None:
+                self.app.call_from_thread(reload_status)
+        self._busy = False
+        self.app.call_from_thread(self._load)
 
     def action_lint(self) -> None:
         self.dismiss("lint")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import requests
@@ -462,3 +463,58 @@ def get_lint() -> dict:
     resp = requests.get(f"{_base()}/lint", headers=_headers(), timeout=30)
     resp.raise_for_status()
     return resp.json()
+
+
+def get_related(post_id: int) -> list[tuple[int, str]]:
+    """Similar posts this one doesn't link either way — (id, title). The server
+    answers 503 with semantic search off; callers ask only when it is on."""
+    resp = requests.get(f"{_base()}/posts/{post_id}/related", headers=_headers(), timeout=20)
+    resp.raise_for_status()
+    return [(i["id"], i["title"]) for i in resp.json().get("items", [])]
+
+
+def set_embeddings_enabled(enabled: bool) -> dict:
+    resp = requests.patch(f"{_base()}/embeddings", headers=_headers(), json={"enabled": enabled}, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def run_embedding_backfill() -> dict:
+    resp = requests.post(f"{_base()}/embeddings/backfill", headers=_headers(), timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def upload_attachment(path: str, *, post_id: int | None = None, tags: list[str] | None = None) -> dict:
+    """Upload a local file through a presigned slot (the bytes stream, never
+    base64) and return the server's {filename, ref, folder, …}. With
+    ``post_id`` it files beside that post; with ``tags`` (a new post) where the
+    post will file. The caller inserts ``ref`` itself (``embed`` is false)."""
+    slot = requests.post(f"{_base()}/attachments/uploads", headers=_headers(), timeout=10)
+    slot.raise_for_status()
+    upload_id = slot.json()["upload_id"]
+    with open(path, "rb") as fh:
+        put = requests.put(f"{_base()}/attachments/uploads/{upload_id}", headers=_headers(), data=fh, timeout=300)
+    _raise_with_detail(put)
+    body: dict[str, object] = {"upload_id": upload_id, "filename": os.path.basename(path), "embed": False}
+    if post_id is not None:
+        body["post_id"] = post_id
+    elif tags:
+        body["tags"] = tags
+    resp = requests.post(f"{_base()}/attachments", headers=_headers(), json=body, timeout=30)
+    _raise_with_detail(resp)
+    return resp.json()
+
+
+def _raise_with_detail(resp: requests.Response) -> None:
+    """raise_for_status, carrying the server's own `detail` (a size cap, a
+    scope refusal) instead of a bare status line."""
+    if resp.ok:
+        return
+    try:
+        detail = resp.json().get("detail")
+    except ValueError:
+        detail = None
+    if detail:
+        raise RuntimeError(detail if isinstance(detail, str) else str(detail))
+    resp.raise_for_status()
