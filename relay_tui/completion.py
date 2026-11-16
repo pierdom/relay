@@ -3,6 +3,7 @@ rules as the browser's (`links.matchPosts`, `editor.js`), kept pure so they
 test without a running app."""
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 
@@ -77,4 +78,29 @@ class TagSuggester(Suggester):
         for tag in sorted(self.tags, key=lambda t: (not t.startswith(q), t)):
             if tag.startswith(q) and tag != q and tag not in have:
                 return value + tag[len(q):]
+        return None
+
+
+class PathSuggester(Suggester):
+    """Completes a local file path as you type it (→ accepts): the first entry
+    of the directory typed so far that starts with the last part, with a
+    trailing ``/`` on a directory. ``~`` is the home directory."""
+
+    def __init__(self) -> None:
+        super().__init__(use_cache=False, case_sensitive=True)
+
+    async def get_suggestion(self, value: str) -> str | None:
+        if not value:
+            return None
+        head, _, part = value.rpartition("/")
+        base = os.path.expanduser(head + "/" if head or value.startswith("/") else ".")
+        try:
+            names = sorted(os.listdir(base))
+        except OSError:
+            return None
+        show_hidden = part.startswith(".")
+        for name in names:
+            if name.startswith(part) and name != part and (show_hidden or not name.startswith(".")):
+                slash = "/" if os.path.isdir(os.path.join(base, name)) else ""
+                return value + name[len(part):] + slash
         return None

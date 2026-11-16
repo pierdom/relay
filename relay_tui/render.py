@@ -140,3 +140,25 @@ def preview_line(content: str, title: str = "", limit: int = 240) -> str:
         if line:
             return line[:limit]
     return ""
+
+
+_FENCE_OPEN = re.compile(r"^\s*(```+|~~~+)\s*([\w+-]*)")
+
+
+def code_blocks(content: str) -> list[tuple[str, str]]:
+    """The fenced code blocks in ``content``, in order, as (language, code) —
+    what `y` offers to copy, beside the whole post."""
+    blocks: list[tuple[str, str]] = []
+    fence = lang = ""
+    lines: list[str] = []
+    for line in (content or "").splitlines():
+        if not fence:
+            m = _FENCE_OPEN.match(line)
+            if m:
+                fence, lang, lines = m.group(1), m.group(2), []
+        elif line.strip().startswith(fence):
+            blocks.append((lang, "\n".join(lines)))
+            fence = ""
+        else:
+            lines.append(line)
+    return blocks
