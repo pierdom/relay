@@ -22,7 +22,6 @@ from .sse import SSESubscriber
 from .theme import ACCENT, BORDER, HEADER_BG, build_textual_theme, palette_name
 from .widgets.modals import (
     AttachmentsModal,
-    ComposeModal,
     ConfirmModal,
     DeletedPostsModal,
     EditModal,
@@ -33,6 +32,7 @@ from .widgets.modals import (
 from .widgets.post_panel import PostPanel
 from .widgets.post_view import PostDetailModal, PostView
 from .widgets.reader import ReaderPane
+from .widgets.switcher import SwitcherModal
 from .widgets.tag_panel import TagPanel
 
 # Below this many columns the three-column layout falls back to the list and
@@ -164,6 +164,9 @@ class RelayTuiApp(App):
         Binding("o", "cycle_order", "Sort order"),
         Binding("r", "reload", "Refresh"),
         Binding("l", "toggle_layout", "Layout"),
+        Binding("ctrl+k", "switcher", "Go to"),
+        Binding("b", "filter_author", "By writer", show=False),
+        Binding("u", "undo_delete", "Undo delete", show=False),
         Binding("j", "step(1)", "Next post", show=False),
         Binding("k", "step(-1)", "Previous post", show=False),
         Binding("f", "follow_link", "Follow link", show=False),
@@ -241,6 +244,11 @@ class RelayTuiApp(App):
         self._sort = "updated"       # "updated" | "created"
         self._order = "desc"         # "desc" | "asc"
         self._search: str | None = None
+        self._search_mode = "keyword"   # hybrid once /status says semantic search is on
+        self._author: str | None = None  # the third feed filter, beside tag and folder
+        self._history_on = False         # deletes are undoable
+        self._embeddings_on = False
+        self._last_deleted: api.Post | None = None
         self._link_index: dict[str, int] = {}   # normalised title -> id
         self._link_titles: dict[int, str] = {}   # id -> title
         self._page_size = 50
@@ -258,7 +266,7 @@ class RelayTuiApp(App):
         self._sse.start()
         self._apply_layout()
         self._reload()
-        self._load_caller_scope()
+        self._load_status()
 
     def on_unmount(self) -> None:
         self._sse.stop()
@@ -274,15 +282,24 @@ class RelayTuiApp(App):
         self._render_subtitle()
 
     @work(thread=True)
-    def _load_caller_scope(self) -> None:
-        """Fetch this key's own effective scope (relay #198, B-8) once at
-        startup, so a read-only/tag-restricted key shows up in the header
-        instead of only being discovered from a rejected write."""
+    def _load_status(self) -> None:
+        """Once at startup: this key's own scope (so a read-only or
+        tag-restricted key shows in the header instead of surfacing as a
+        rejected write), whether deletes are undoable, and whether semantic
+        search is on."""
         try:
-            scope = api.get_caller_scope()
-            self.call_from_thread(self._set_caller_scope, scope.mode, scope.tags or [])
+            status = api.get_status()
         except Exception as e:
-            self.call_from_thread(self.notify, f"Could not check key scope: {e}", severity="warning")
+            self.call_from_thread(self.notify, f"Could not read server status: {e}", severity="warning")
+            return
+        self.call_from_thread(self._set_status, status)
+
+    def _set_status(self, status: api.ServerStatus) -> None:
+        self._history_on = status.history
+        self._embeddings_on = status.embeddings
+        # Hybrid beats keyword alone on this relay's eval, as in the browser.
+        self._search_mode = "hybrid" if status.embeddings else "keyword"
+        self._set_caller_scope(status.caller.mode, status.caller.tags or [])
 
     def _set_caller_scope(self, mode: str, tags: list[str]) -> None:
         self._scope_mode = mode
@@ -393,6 +410,7 @@ class RelayTuiApp(App):
                 tag=self._active_tag, folder=self._active_folder,
                 search=self._search, limit=self._page_size,
                 sort=self._sort, order=self._order,
+                author=self._author, mode=self._search_mode,
             )
             tags = api.list_tags()
             try:
@@ -421,7 +439,10 @@ class RelayTuiApp(App):
         self._total = total
         self._offset = _dated_stream_offset(posts, pinned_id)
         self._loading_more = False
-        self.query_one(PostPanel).set_posts(posts, search=self._search, pinned_id=pinned_id)
+        self.query_one(PostPanel).set_posts(
+            posts, search=self._search, pinned_id=pinned_id,
+            label=self._feed_label(), empty=self._empty_message(),
+        )
         pane = self._pane()
         pane.link_index, pane.link_titles = self._link_index, self._link_titles
         reselect, self._pane_reselect = self._pane_reselect, False
@@ -447,6 +468,7 @@ class RelayTuiApp(App):
                 offset=offset,
                 sort=self._sort,
                 order=self._order,
+                author=self._author, mode=self._search_mode,
             )
             self.call_from_thread(self._append_page, posts, total)
         except Exception as e:
@@ -481,6 +503,7 @@ class RelayTuiApp(App):
     def on_tag_panel_tag_selected(self, event: TagPanel.TagSelected) -> None:
         self._active_tag = event.tag
         self._active_folder = None
+        self._author = None
         self._pane_reselect = True
         self._reload()
         try:
@@ -491,6 +514,7 @@ class RelayTuiApp(App):
     def on_tag_panel_folder_selected(self, event: TagPanel.FolderSelected) -> None:
         self._active_folder = event.folder
         self._active_tag = None
+        self._author = None
         self._pane_reselect = True
         self._reload()
         try:
@@ -668,12 +692,62 @@ class RelayTuiApp(App):
         self.notify(f"Order: {label}", severity="information", timeout=2)
 
     def action_search(self) -> None:
-        def _on_result(query: str | None) -> None:
-            if query is None:
+        def _on_result(result: tuple[str, str] | None) -> None:
+            if result is None:
                 return
+            query, mode = result
             self._search = query or None
+            self._search_mode = mode
             self._reload()
-        self.push_screen(SearchModal(current=self._search or ""), callback=_on_result)
+
+        modal = SearchModal(current=self._search or "", mode=self._search_mode, semantic=self._embeddings_on)
+        self.push_screen(modal, callback=_on_result)
+
+    def _feed_label(self) -> str | None:
+        parts = []
+        if self._search:
+            mode = f" · {self._search_mode}" if self._embeddings_on else ""
+            parts.append(f"search: {self._search}{mode}")
+        if self._author:
+            parts.append(f"by {self._author}  (b clears)")
+        return "  ".join(parts) or None
+
+    def _empty_message(self) -> str:
+        if self._search:
+            return f'No posts match "{self._search}"'
+        if self._author:
+            return f"No posts by {self._author}"
+        return "No posts yet."
+
+    def action_filter_author(self) -> None:
+        """Show only the posts the open (or selected) post's writer last wrote;
+        again on the same writer clears it — the browser's author chip."""
+        post = self._target_post()
+        writer = post.updated_by if post is not None else None
+        if self._author is not None and (writer is None or writer == self._author):
+            self._author = None
+        elif writer is None:
+            self.notify("This post has no recorded writer", severity="warning")
+            return
+        else:
+            self._author = writer
+            self._active_tag = self._active_folder = None
+        self._pane_reselect = True
+        self._reload()
+
+    def action_switcher(self) -> None:
+        if self._pane().editing or isinstance(self.screen, (EditModal, SwitcherModal)):
+            return  # never over an editor, as in the browser
+
+        def _on_pick(post_id: int | None) -> None:
+            if post_id is None:
+                return
+            if self._reader_active and len(self.screen_stack) == 1:
+                self._navigate_pane(post_id)
+            else:
+                self.open_post(post_id)
+
+        self.push_screen(SwitcherModal(self._link_titles), _on_pick)
 
     def action_attachments(self) -> None:
         self.push_screen(AttachmentsModal())
@@ -699,28 +773,20 @@ class RelayTuiApp(App):
     def action_compose_post(self) -> None:
         if self._reject_if_read_only():
             return
-        def _on_result(result: dict | None) -> None:
-            if result:
-                self._do_create_post(result)
-        self.push_screen(ComposeModal(), callback=_on_result)
+        def _on_result(post: api.Post | None) -> None:
+            if post is not None:
+                self._on_post_created(post)
 
-    @work(thread=True)
-    def _do_create_post(self, data: dict) -> None:
-        try:
-            post = api.create_post(
-                content=data["content"],
-                title=data["title"],
-                tags=data.get("tags", []),
-                source=data.get("source"),
-                expires_at=data.get("expires_at"),
-            )
-            self.call_from_thread(self._on_post_created, post)
-        except Exception as e:
-            self.call_from_thread(self.notify, f"Failed: {e}", severity="error")
+        self.push_screen(EditModal(None), callback=_on_result)
 
     def _on_post_created(self, post: api.Post) -> None:
-        if self._active_tag is None or self._active_tag in post.tags:
-            self.query_one(PostPanel).prepend_post(post)
+        panel = self.query_one(PostPanel)
+        if (self._active_tag is None or self._active_tag in post.tags) and self._author in (None, post.updated_by):
+            panel.prepend_post(post)
+            if self._reader_active:
+                self._pane_anchor = post.id
+                self._pane().show(post)
+                self.call_after_refresh(panel.select, post.id)
         # K-13: no self._sse.set_last_id(post.id) here — a post's database id
         # is not a changes.seq (see _reload's comment). The server broadcasts
         # this create over SSE like any other write, so the real seq arrives
@@ -762,23 +828,62 @@ class RelayTuiApp(App):
         if post is None:
             self.notify("No post selected", severity="warning")
             return
+        if self._history_on:
+            # Recoverable, so no question up front: the toast offers Undo.
+            self._do_delete_post(post)
+            return
+
         def _on_result(confirmed: bool) -> None:
             if confirmed:
-                self._do_delete_post(post.id)
-        self.push_screen(ConfirmModal(f"Delete post #{post.id}?"), callback=_on_result)
+                self._do_delete_post(post)
+
+        name = post.title or f"#{post.id}"
+        self.push_screen(
+            ConfirmModal(f"Delete “{name}”? History is off, so this can’t be undone."), callback=_on_result
+        )
 
     @work(thread=True)
-    def _do_delete_post(self, post_id: int) -> None:
+    def _do_delete_post(self, post: api.Post) -> None:
         try:
-            api.delete_post(post_id)
-            self.call_from_thread(self._on_post_deleted, post_id)
+            api.delete_post(post.id)
+            self.call_from_thread(self._on_post_deleted, post.id, post)
         except Exception as e:
             self.call_from_thread(self.notify, f"Delete failed: {e}", severity="error")
 
-    def _on_post_deleted(self, post_id: int) -> None:
+    def _on_post_deleted(self, post_id: int, post: api.Post | None = None) -> None:
         self._drop_post(post_id)
-        self.notify("Deleted", severity="information", timeout=3)
+        name = f"“{post.title}”" if post is not None and post.title else f"#{post_id}"
+        if self._history_on and post is not None:
+            self._last_deleted = post
+            self.notify(f"Deleted {name} — u to undo", timeout=8)
+        else:
+            self.notify(f"Deleted {name}", timeout=3)
         self._refresh_tags()
+
+    def action_undo_delete(self) -> None:
+        post, self._last_deleted = self._last_deleted, None
+        if post is None:
+            self.notify("Nothing to undo", severity="warning", timeout=2)
+            return
+        self._undo_delete(post)
+
+    @work(thread=True)
+    def _undo_delete(self, post: api.Post) -> None:
+        # The restorable revision is the one before the delete commit; the
+        # recovery list already resolves it, so ask it rather than walk history.
+        try:
+            gone = next((d for d in api.list_deleted_posts(limit=100) if d.id == post.id), None)
+            if gone is None:
+                raise RuntimeError("it is no longer in the recovery list")
+            restored = api.restore_post(post.id, gone.sha)
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Couldn’t undo: {e}", severity="error")
+            return
+        self.call_from_thread(self._after_undo, restored)
+
+    def _after_undo(self, restored: api.Post) -> None:
+        self._reload()
+        self.notify(f"Restored “{restored.title}”", timeout=3)
 
     def on_tag_panel_configure_tag(self, event: TagPanel.ConfigureTag) -> None:
         tag_name = event.tag_name

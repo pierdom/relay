@@ -34,15 +34,23 @@ class FakeApi:
             3: _post(3, "Gamma", tags=["other"]),
         }
         self.saves: list[dict] = []
+        self.listed: list[dict] = []
+        self.deleted: dict[int, api.Post] = {}
         self.conflict_once = False
+        self.history = False
+        self.embeddings = False
         for name in ("list_posts", "list_tags", "list_folders", "link_targets", "get_backlinks",
-                     "get_caller_scope", "get_post", "update_post", "delete_post"):
+                     "get_status", "get_post", "update_post", "delete_post", "create_post",
+                     "list_deleted_posts", "restore_post"):
             monkeypatch.setattr(api, name, getattr(self, name))
         monkeypatch.setattr(tui_app.SSESubscriber, "start", lambda self: None)
         monkeypatch.setattr(tui_app.SSESubscriber, "stop", lambda self: None)
 
-    def list_posts(self, tag=None, folder=None, search=None, limit=50, offset=0, sort="updated", order="desc"):
-        items = [p for i, p in sorted(self.posts.items()) if i != 0 and (tag is None or tag in p.tags)]
+    def list_posts(self, tag=None, folder=None, search=None, limit=50, offset=0, sort="updated", order="desc",
+                   author=None, mode="keyword"):
+        self.listed.append({"tag": tag, "search": search, "author": author, "mode": mode})
+        items = [p for i, p in sorted(self.posts.items())
+                 if i != 0 and (tag is None or tag in p.tags) and (author is None or p.updated_by == author)]
         return items, len(items), self.posts[0]
 
     def list_tags(self):
@@ -57,8 +65,22 @@ class FakeApi:
     def get_backlinks(self, post_id):
         return []
 
-    def get_caller_scope(self):
-        return api.CallerScope(mode="full")
+    def get_status(self):
+        return api.ServerStatus(api.CallerScope(mode="full"), history=self.history, embeddings=self.embeddings)
+
+    def create_post(self, *, title, content, tags=None, source=None, expires_at=None):
+        post = _post(max(self.posts) + 1, title, content, tags)
+        self.posts[post.id] = post
+        return post
+
+    def list_deleted_posts(self, limit=50, include_expiry=False):
+        return [api.DeletedPost(id=p.id, title=p.title, sha="abc", short_sha="abc", when="", reason="deleted",
+                                path=f"{p.title}.md") for p in self.deleted.values()]
+
+    def restore_post(self, post_id, sha):
+        post = self.deleted.pop(post_id)
+        self.posts[post_id] = post
+        return post
 
     def get_post(self, post_id):
         return self.posts[post_id]
@@ -76,7 +98,7 @@ class FakeApi:
         return saved
 
     def delete_post(self, post_id):
-        del self.posts[post_id]
+        self.deleted[post_id] = self.posts.pop(post_id)
 
 
 @pytest.fixture

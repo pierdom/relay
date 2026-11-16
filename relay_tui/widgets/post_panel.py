@@ -111,6 +111,8 @@ class PostItem(ListItem):
         meta_parts = [_time_ago(self.post.created_at)]
         if self.post.updated_at:
             meta_parts.append(f"edited {_time_ago(self.post.updated_at)}")
+        if self.post.updated_by:
+            meta_parts.append(f"by {escape(self.post.updated_by)}")
         if self.post.source:
             meta_parts.append(escape(self.post.source[:40]))
         id_badge = f"[on {BORDER}] #{self.post.id} [/on {BORDER}]"
@@ -194,15 +196,18 @@ class PostPanel(Widget):
             empty.display = True
 
     def set_posts(
-        self, posts: list[api.Post], search: str | None = None, pinned_id: int | None = None
+        self,
+        posts: list[api.Post],
+        search: str | None = None,
+        pinned_id: int | None = None,
+        label: str | None = None,
+        empty: str | None = None,
     ) -> None:
         header = self.query_one(Label)
-        if search:
-            header.update(f"[bold]FEED[/]  [dim]search: {escape(search)}[/dim]")
-        else:
-            header.update("FEED")
-        self._empty_message = (
-            f'No posts match "{escape(search)}"' if search else "No posts yet."
+        label = label if label is not None else (f"search: {search}" if search else None)
+        header.update(f"[bold]FEED[/]  [dim]{escape(label)}[/dim]" if label else "FEED")
+        self._empty_message = escape(
+            empty if empty is not None else (f'No posts match "{search}"' if search else "No posts yet.")
         )
         lv = self.query_one("#post-listview", ListView)
         lv.clear()

@@ -13,8 +13,8 @@ from textual.widgets import (
     Input,
     Label,
     OptionList,
+    Select,
     Static,
-    TextArea,
 )
 from textual.widgets.option_list import Option
 
@@ -47,107 +47,12 @@ def _line_diff(current: str, revision: str) -> str:
     return "\n".join(parts)
 
 
-# ── ComposeModal ──────────────────────────────────────────────────────────────
-
-
-class ComposeModal(ModalScreen[dict | None]):
-    """Modal for composing a new post."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("ctrl+s", "submit", "Publish"),
-    ]
-
-    DEFAULT_CSS = f"""
-    ComposeModal > Vertical {{
-        width: 84;
-        height: auto;
-        max-height: 90%;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
-        padding: 1 2;
-    }}
-    ComposeModal .modal-title {{
-        color: {ACCENT};
-        text-style: bold;
-        margin-bottom: 1;
-    }}
-    ComposeModal Input {{
-        margin-bottom: 1;
-        width: 1fr;
-        border: solid {BORDER};
-    }}
-    ComposeModal Select {{
-        margin-bottom: 1;
-        width: 1fr;
-        border: solid {BORDER};
-    }}
-    ComposeModal TextArea {{
-        height: 12;
-        width: 1fr;
-        margin-bottom: 1;
-        border: solid {BORDER};
-    }}
-    ComposeModal .modal-actions {{
-        height: 3;
-        align: right middle;
-        margin-top: 1;
-    }}
-    ComposeModal .modal-actions Button {{
-        margin-left: 1;
-    }}
-    """
-
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("New Post", classes="modal-title")
-            yield Input(placeholder="Title (required — becomes the filename)", id="title-input")
-            yield Input(placeholder="Tags (comma-separated)", id="tags-input")
-            yield Input(placeholder="Source (optional)", id="source-input")
-            yield TextArea(id="content-input", language="markdown")
-            yield Input(placeholder="Expires at (ISO, optional)", id="expires-input")
-            with Horizontal(classes="modal-actions"):
-                yield Button("Cancel", id="cancel-btn", variant="default")
-                yield Button("Publish", id="submit-btn", variant="primary")
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def action_submit(self) -> None:
-        title = self.query_one("#title-input", Input).value.strip()
-        if not title:
-            self.app.notify("Title is required", severity="warning")
-            return
-        tags_raw = self.query_one("#tags-input", Input).value.strip()
-        tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
-        content = self.query_one("#content-input", TextArea).text
-        if not content.strip():
-            self.app.notify("Content cannot be empty", severity="warning")
-            return
-        expires_val = self.query_one("#expires-input", Input).value.strip() or None
-        source = self.query_one("#source-input", Input).value.strip() or None
-        self.dismiss(
-            {
-                "title": title,
-                "tags": tags,
-                "content": content,
-                "expires_at": expires_val,
-                "source": source,
-            }
-        )
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "cancel-btn":
-            self.action_cancel()
-        elif event.button.id == "submit-btn":
-            self.action_submit()
-
-
 # ── EditModal ─────────────────────────────────────────────────────────────────
 
 
 class EditModal(ModalScreen["api.Post | None"]):
-    """The editor over the feed; dismisses with the saved post, or None."""
+    """The editor over the feed — a new post (``post=None``) or an edit;
+    dismisses with the saved post, or None."""
 
     DEFAULT_CSS = f"""
     EditModal > EditForm {{
@@ -159,7 +64,7 @@ class EditModal(ModalScreen["api.Post | None"]):
     }}
     """
 
-    def __init__(self, post: api.Post) -> None:
+    def __init__(self, post: api.Post | None = None) -> None:
         super().__init__()
         self._post = post
 
@@ -394,8 +299,9 @@ class TagConfigModal(ModalScreen[dict | None]):
 # ── SearchModal ───────────────────────────────────────────────────────────────
 
 
-class SearchModal(ModalScreen[str | None]):
-    """Prompt for a search query; returns the string or None on cancel."""
+class SearchModal(ModalScreen["tuple[str, str] | None"]):
+    """Prompt for a search; returns (query, mode) or None on cancel. The mode
+    picker shows only when the server has semantic search on."""
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
@@ -414,7 +320,7 @@ class SearchModal(ModalScreen[str | None]):
         text-style: bold;
         margin-bottom: 1;
     }}
-    SearchModal Input {{
+    SearchModal Input, SearchModal Select {{
         width: 1fr;
         margin-bottom: 1;
         border: solid {BORDER};
@@ -428,14 +334,24 @@ class SearchModal(ModalScreen[str | None]):
     }}
     """
 
-    def __init__(self, current: str = "") -> None:
+    MODES = [
+        ("Hybrid — meaning and words", "hybrid"),
+        ("Semantic — meaning", "semantic"),
+        ("Keyword — exact words", "keyword"),
+    ]
+
+    def __init__(self, current: str = "", mode: str = "keyword", semantic: bool = False) -> None:
         super().__init__()
         self._current = current
+        self._mode = mode
+        self._semantic = semantic
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("Search posts", classes="search-label")
             yield Input(value=self._current, placeholder="title, content or source…", id="search-input")
+            if self._semantic:
+                yield Select(self.MODES, value=self._mode, allow_blank=False, id="search-mode")
             with Horizontal(classes="search-actions"):
                 yield Button("Cancel", id="cancel-btn", variant="default")
                 yield Button("Search", id="search-btn", variant="primary")
@@ -446,14 +362,18 @@ class SearchModal(ModalScreen[str | None]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+    def _submit(self) -> None:
+        mode = self.query_one("#search-mode", Select).value if self._semantic else "keyword"
+        self.dismiss((self.query_one("#search-input", Input).value.strip(), str(mode)))
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel-btn":
             self.dismiss(None)
         elif event.button.id == "search-btn":
-            self.dismiss(self.query_one("#search-input", Input).value.strip() or "")
+            self._submit()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss(event.value.strip() or "")
+        self._submit()
 
 
 # ── PostHistoryModal ──────────────────────────────────────────────────────────

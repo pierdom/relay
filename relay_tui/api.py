@@ -140,10 +140,16 @@ def list_posts(
     search: str | None = None,
     sort: str = "updated",
     order: str = "desc",
+    author: str | None = None,
+    mode: str = "keyword",
 ) -> tuple[list[Post], int, Post | None]:
     params: dict[str, object] = {"limit": limit, "offset": offset, "sort": sort, "order": order}
     if tag is not None:
         params["tag"] = tag
+    if author is not None:
+        params["author"] = author
+    if search is not None and mode != "keyword":
+        params["mode"] = mode
     if folder is not None:
         params["folder"] = folder
     if search is not None:
@@ -254,15 +260,28 @@ def delete_post(post_id: int) -> None:
     resp.raise_for_status()
 
 
-def get_caller_scope() -> CallerScope:
-    """GET /status, reduced to the caller's own effective scope (relay #198,
-    B-8) — everything else /status reports has no TUI consumer yet."""
+@dataclass
+class ServerStatus:
+    """What the TUI needs from GET /status: the key's own scope, and whether
+    deletes are undoable (history) and semantic search is on."""
+
+    caller: CallerScope
+    history: bool = False
+    embeddings: bool = False
+
+
+def get_status() -> ServerStatus:
     resp = requests.get(f"{_base()}/status", headers=_headers(), timeout=10)
     resp.raise_for_status()
-    caller = resp.json().get("caller")
-    if caller is None:
-        return CallerScope(mode="full")
-    return CallerScope(mode=caller["mode"], tags=caller.get("tags"))
+    data = resp.json()
+    caller = data.get("caller")
+    scope = CallerScope(mode=caller["mode"], tags=caller.get("tags")) if caller else CallerScope(mode="full")
+    features = data.get("features") or {}
+    return ServerStatus(
+        caller=scope,
+        history=bool((features.get("history") or {}).get("effective")),
+        embeddings=bool((features.get("search") or {}).get("embeddings")),
+    )
 
 
 def list_tags() -> list[Tag]:

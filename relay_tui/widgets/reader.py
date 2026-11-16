@@ -41,7 +41,7 @@ class ReaderPane(Vertical):
     ReaderPane.-empty > .reader-empty {{ display: block; }}
     ReaderPane.-empty > PostView, ReaderPane.-editing > PostView {{ display: none; }}
     ReaderPane > EditForm {{ height: 1fr; }}
-    ReaderPane > EditForm TextArea {{ height: 1fr; }}
+    ReaderPane > EditForm TextArea, ReaderPane > EditForm #ef-preview {{ height: 1fr; }}
     """
 
     def __init__(self, **kwargs) -> None:
