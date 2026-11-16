@@ -14,7 +14,6 @@ from textual.widgets import Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
 from .. import api
-from ..theme import ACCENT, BORDER, HEADER_BG, PERF_BAD, PERF_TERRIBLE
 from .post_view import PostView
 
 # Fixed, readable order — not by count, so the filter doesn't reshuffle as the
@@ -60,20 +59,20 @@ class LintModal(ModalScreen["int | None"]):
         Binding("r", "rerun", "Check again"),
     ]
 
-    DEFAULT_CSS = f"""
-    LintModal {{ align: center middle; background: {HEADER_BG}; }}
-    LintModal > Vertical {{
-        width: 96%; height: 94%; background: {HEADER_BG}; border: solid {ACCENT}; padding: 1 2;
-    }}
-    LintModal .lm-title {{ color: {ACCENT}; text-style: bold; }}
-    LintModal .lm-panes {{ height: 1fr; }}
-    LintModal .lm-left {{ width: 42%; min-width: 34; border-right: solid {BORDER}; padding-right: 1; }}
-    LintModal .lm-right {{ width: 1fr; padding-left: 2; }}
-    LintModal Select {{ margin-bottom: 1; }}
-    LintModal #lm-list {{ height: 1fr; background: transparent; border: none; }}
-    LintModal #lm-detail {{ height: auto; margin-bottom: 1; }}
-    LintModal .lm-empty {{ color: $text-muted; text-style: italic; }}
-    LintModal .lm-hint {{ color: $text-muted; border-top: solid {BORDER}; }}
+    DEFAULT_CSS = """
+    LintModal { align: center middle; background: $background; }
+    LintModal > Vertical {
+        width: 96%; height: 94%; background: $background; border: round $accent; padding: 1 2;
+    }
+    LintModal .lm-title { color: $accent; text-style: bold; }
+    LintModal .lm-panes { height: 1fr; }
+    LintModal .lm-left { width: 42%; min-width: 34; border-right: solid $relay-badge; padding-right: 1; }
+    LintModal .lm-right { width: 1fr; padding-left: 2; }
+    LintModal Select { margin-bottom: 1; }
+    LintModal #lm-list { height: 1fr; background: transparent; border: none; }
+    LintModal #lm-detail { height: auto; margin-bottom: 1; }
+    LintModal .lm-empty { color: $relay-muted; text-style: italic; }
+    LintModal .lm-hint { color: $relay-muted; border-top: solid $relay-badge; }
     """
 
     def __init__(self) -> None:
@@ -104,7 +103,7 @@ class LintModal(ModalScreen["int | None"]):
         try:
             report = api.get_lint()
         except Exception as exc:
-            msg = f"[{PERF_TERRIBLE}]Could not run the vault lint: {escape(str(exc))}[/]"
+            msg = f"[$relay-terrible]Could not run the vault lint: {escape(str(exc))}[/]"
             self.app.call_from_thread(self._detail, msg)
             return
         self.app.call_from_thread(self._show_report, report)
@@ -115,10 +114,10 @@ class LintModal(ModalScreen["int | None"]):
     def _show_report(self, report: dict) -> None:
         self._items = report.get("items", [])
         n, checked = len(self._items), report.get("checked_posts", 0)
-        title = f"Vault lint  [dim]{n} issue{'s' if n != 1 else ''} across {checked} posts"
+        title = f"Vault lint  [$relay-muted]{n} issue{'s' if n != 1 else ''} across {checked} posts"
         if report.get("skipped_rules"):
             title += f" · skipped: {escape(', '.join(report['skipped_rules']))}"
-        self.query_one("#lm-title", Label).update(title + "[/dim]")
+        self.query_one("#lm-title", Label).update(title + "[/]")
         select = self.query_one("#lm-rule", Select)
         options = rule_options(self._items)
         if self._rule not in {v for _, v in options}:
@@ -136,26 +135,26 @@ class LintModal(ModalScreen["int | None"]):
         ol = self.query_one("#lm-list", OptionList)
         ol.clear_options()
         for f in self._shown:
-            colour = PERF_TERRIBLE if f.get("severity") == "error" else PERF_BAD
+            colour = "$relay-terrible" if f.get("severity") == "error" else "$relay-bad"
             where = escape(f.get("title") or ("vault" if f.get("post_id") is None else f"#{f['post_id']}"))
-            ol.add_option(Option(f"[{colour}]●[/] {where}\n  [dim]{escape(rule_label(f['rule']))}[/dim]"))
+            ol.add_option(Option(f"[{colour}]●[/] {where}\n  [$relay-muted]{escape(rule_label(f['rule']))}[/]"))
         if self._shown:
             ol.highlighted = 0
             ol.focus()
         else:
             self._post = None
             self.query_one("#lm-post").display = False
-            self._detail("[dim]No issues — nothing to fix.[/dim]")
+            self._detail("[$relay-muted]No issues — nothing to fix.[/]")
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         idx = event.option_index
         if not 0 <= idx < len(self._shown):
             return
         f = self._shown[idx]
-        lines = [f"[bold]{escape(rule_label(f['rule']))}[/]  [dim]{escape(f.get('severity', ''))}[/dim]",
+        lines = [f"[bold]{escape(rule_label(f['rule']))}[/]  [$relay-muted]{escape(f.get('severity', ''))}[/]",
                  escape(f.get("detail", ""))]
         if f.get("match"):
-            lines.append(f"[{ACCENT}]{escape(f['match'])}[/]")
+            lines.append(f"[$relay-accent-text]{escape(f['match'])}[/]")
         self._detail("\n".join(lines))
         self._post = None
         self.query_one("#lm-post").display = False

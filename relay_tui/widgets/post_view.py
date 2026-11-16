@@ -20,7 +20,6 @@ from textual.widgets.option_list import Option
 
 from .. import api
 from ..render import _linkify_markdown, _outbound_link_ids, code_blocks, strip_title_heading
-from ..theme import ACCENT, BORDER, HEADER_BG
 from .post_panel import _time_ago, _time_until
 
 # Backlinks are fetched once the selection settles, not on every j/k step.
@@ -38,9 +37,9 @@ def post_meta(post: api.Post) -> str:
         parts.append(post.source)
     if post.expires_at:
         parts.append(f"expires {_time_until(post.expires_at)}")
-    meta = f"[dim]{escape('  •  '.join(parts))}[/dim]"
+    meta = f"[$relay-muted]{escape('  •  '.join(parts))}[/]"
     if post.tags:
-        meta += "  " + "  ".join(f"[{ACCENT}]#{escape(t)}[/]" for t in post.tags)
+        meta += "  " + "  ".join(f"[$relay-accent-text]#{escape(t)}[/]" for t in post.tags)
     return meta
 
 
@@ -57,13 +56,13 @@ class PostView(Vertical):
             super().__init__()
             self.post = post
 
-    DEFAULT_CSS = f"""
-    PostView {{ height: 1fr; width: 1fr; }}
-    PostView .pv-title {{ text-style: bold; color: {ACCENT}; width: 1fr; height: auto; }}
-    PostView .pv-meta {{ width: 1fr; height: auto; }}
-    PostView .pv-rule {{ border-bottom: solid {BORDER}; height: 1; width: 1fr; }}
-    PostView VerticalScroll {{ height: 1fr; width: 1fr; border: none; background: transparent; }}
-    PostView Markdown {{ width: 1fr; height: auto; }}
+    DEFAULT_CSS = """
+    PostView { height: 1fr; width: 1fr; }
+    PostView .pv-title { text-style: bold; color: $accent; width: 1fr; height: auto; }
+    PostView .pv-meta { width: 1fr; height: auto; }
+    PostView .pv-rule { border-bottom: solid $relay-badge; height: 1; width: 1fr; }
+    PostView VerticalScroll { height: 1fr; width: 1fr; border: none; background: transparent; }
+    PostView Markdown { width: 1fr; height: auto; }
     """
 
     post: api.Post | None = None
@@ -99,8 +98,8 @@ class PostView(Vertical):
             self._link_index = link_index
         if link_titles is not None:
             self._link_titles = link_titles
-        badge = f"[on {BORDER}] #{post.id} [/on {BORDER}]"
-        master = f"  [{ACCENT}]✦ Master document[/]" if post.id == 0 else ""
+        badge = f"[on $relay-badge] #{post.id} [/on $relay-badge]"
+        master = "  [$relay-accent-text]✦ Master document[/]" if post.id == 0 else ""
         title = post.title or post.content.split("\n")[0][:80]
         self.query_one(".pv-title", Label).update(f"{badge}{master}  [bold]{escape(title)}[/]")
         self.query_one(".pv-meta", Label).update(post_meta(post))
@@ -275,16 +274,16 @@ class PostDetailModal(ModalScreen[None]):
         Binding("number_sign", "filter_tag", "Filter by tag"),
     ]
 
-    DEFAULT_CSS = f"""
-    PostDetailModal {{ align: center middle; background: {HEADER_BG}; }}
-    PostDetailModal > Vertical {{
+    DEFAULT_CSS = """
+    PostDetailModal { align: center middle; background: $background; }
+    PostDetailModal > Vertical {
         width: 92%;
         height: 92%;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
+        background: $background;
+        border: round $accent;
         padding: 1 2;
-    }}
-    PostDetailModal .detail-actions {{ height: 3; align: center middle; margin-top: 1; }}
+    }
+    PostDetailModal .detail-actions { height: 3; align: center middle; margin-top: 1; }
     """
 
     def __init__(
@@ -348,17 +347,17 @@ class LinkPickerModal(ModalScreen[int | None]):
 
     BINDINGS = [Binding("escape", "dismiss", "Cancel")]
 
-    DEFAULT_CSS = f"""
-    LinkPickerModal {{ align: center middle; background: {HEADER_BG}; }}
-    LinkPickerModal > Vertical {{
+    DEFAULT_CSS = """
+    LinkPickerModal { align: center middle; background: $background; }
+    LinkPickerModal > Vertical {
         width: 64; max-width: 90%; height: auto; max-height: 80%;
-        background: {HEADER_BG}; border: solid {ACCENT}; padding: 1 2;
-    }}
-    LinkPickerModal .picker-title {{ text-style: bold; color: {ACCENT}; width: 1fr; }}
-    LinkPickerModal Input {{ margin: 1 0; }}
-    LinkPickerModal OptionList {{
+        background: $background; border: round $accent; padding: 1 2;
+    }
+    LinkPickerModal .picker-title { text-style: bold; color: $accent; width: 1fr; }
+    LinkPickerModal Input { margin: 1 0; }
+    LinkPickerModal OptionList {
         height: auto; max-height: 16; background: transparent; border: none;
-    }}
+    }
     """
 
     def __init__(self, items: list[tuple[int, str, str]]) -> None:

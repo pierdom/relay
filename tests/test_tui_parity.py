@@ -8,7 +8,7 @@ import os
 os.environ.setdefault("API_KEY", "test-key")
 
 import pytest
-from textual.widgets import Input, Label, TextArea
+from textual.widgets import Input, TextArea
 
 from relay_tui import api
 from relay_tui import app as tui_app
@@ -94,11 +94,11 @@ async def test_a_live_post_waits_behind_a_count_in_a_filtered_feed(fake):
         app._prepend_post(_post(50, "Unrelated", "nothing to do with it"))
         await _settle(pilot)
         assert _feed_ids(app) == before   # not dropped into a search it may not match
-        assert "1 new" in str(app.query_one(PostPanel).query_one(Label).render())
+        assert "1 new" in str(app.query_one(PostPanel).border_subtitle)
         app._search = None
         app._reload()
         await _settle(pilot)
-        assert "new" not in str(app.query_one(PostPanel).query_one(Label).render())
+        assert "new" not in str(app.query_one(PostPanel).border_subtitle)
         app._prepend_post(_post(51, "Fresh"))
         await _settle(pilot)
         assert 51 in _feed_ids(app)       # the plain feed takes it at the top
@@ -124,7 +124,7 @@ async def test_a_post_is_counted_once_however_often_it_arrives(fake):
         app._prepend_post(_post(61, "Other"))
         app._prepend_post(_post(61, "Other, saved again"))
         await _settle(pilot)
-        assert "2 new" in str(app.query_one(PostPanel).query_one(Label).render())
+        assert "2 new" in str(app.query_one(PostPanel).border_subtitle)
 
 
 @pytest.mark.asyncio

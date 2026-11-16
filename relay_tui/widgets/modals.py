@@ -19,7 +19,6 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from .. import api
-from ..theme import ACCENT, BORDER, HEADER_BG
 from .edit_form import EditForm
 from .post_panel import _time_ago
 
@@ -30,20 +29,20 @@ def _line_diff(current: str, revision: str) -> str:
     b = revision.splitlines(keepends=True)
     lines = list(difflib.unified_diff(a, b, fromfile="current", tofile="revision", lineterm=""))
     if not lines:
-        return "[dim](identical to current version)[/dim]"
+        return "[$relay-muted](identical to current version)[/]"
     parts = []
     for line in lines[:500]:
         s = line.rstrip("\n")
         if s.startswith(("+++", "---", "@@")):
-            parts.append(f"[dim]{escape(s)}[/dim]")
+            parts.append(f"[$relay-muted]{escape(s)}[/]")
         elif s.startswith("+"):
-            parts.append(f"[green]{escape(s)}[/green]")
+            parts.append(f"[$relay-great]{escape(s)}[/]")
         elif s.startswith("-"):
-            parts.append(f"[red]{escape(s)}[/red]")
+            parts.append(f"[$relay-terrible]{escape(s)}[/]")
         else:
             parts.append(escape(s))
     if len(lines) > 500:
-        parts.append("[dim]… diff truncated[/dim]")
+        parts.append("[$relay-muted]… diff truncated[/]")
     return "\n".join(parts)
 
 
@@ -54,14 +53,14 @@ class EditModal(ModalScreen["api.Post | None"]):
     """The editor over the feed — a new post (``post=None``) or an edit;
     dismisses with the saved post, or None."""
 
-    DEFAULT_CSS = f"""
-    EditModal > EditForm {{
+    DEFAULT_CSS = """
+    EditModal > EditForm {
         width: 84;
         max-height: 90%;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
+        background: $background;
+        border: round $accent;
         padding: 1 2;
-    }}
+    }
     """
 
     def __init__(self, post: api.Post | None = None) -> None:
@@ -88,26 +87,26 @@ class ConfirmModal(ModalScreen[bool]):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    DEFAULT_CSS = f"""
-    ConfirmModal > Vertical {{
+    DEFAULT_CSS = """
+    ConfirmModal > Vertical {
         width: 50;
         height: auto;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
+        background: $background;
+        border: round $accent;
         padding: 1 2;
-    }}
-    ConfirmModal .confirm-message {{
+    }
+    ConfirmModal .confirm-message {
         width: 1fr;
         margin-bottom: 1;
         text-align: center;
-    }}
-    ConfirmModal .confirm-actions {{
+    }
+    ConfirmModal .confirm-actions {
         height: 3;
         align: center middle;
-    }}
-    ConfirmModal .confirm-actions Button {{
+    }
+    ConfirmModal .confirm-actions Button {
         margin: 0 1;
-    }}
+    }
     """
 
     def __init__(self, message: str) -> None:
@@ -141,32 +140,32 @@ class RenameTagModal(ModalScreen[str | None]):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    DEFAULT_CSS = f"""
-    RenameTagModal > Vertical {{
+    DEFAULT_CSS = """
+    RenameTagModal > Vertical {
         width: 50;
         height: auto;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
+        background: $background;
+        border: round $accent;
         padding: 1 2;
-    }}
-    RenameTagModal .rename-label {{
-        color: {ACCENT};
+    }
+    RenameTagModal .rename-label {
+        color: $accent;
         text-style: bold;
         margin-bottom: 1;
-    }}
-    RenameTagModal Input {{
+    }
+    RenameTagModal Input {
         width: 1fr;
         margin-bottom: 1;
-        border: solid {BORDER};
-    }}
-    RenameTagModal .rename-actions {{
+        border: round $relay-frame;
+    }
+    RenameTagModal .rename-actions {
         height: 3;
         align: right middle;
         margin-top: 1;
-    }}
-    RenameTagModal .rename-actions Button {{
+    }
+    RenameTagModal .rename-actions Button {
         margin-left: 1;
-    }}
+    }
     """
 
     def __init__(self, tag: str) -> None:
@@ -217,32 +216,32 @@ class TagConfigModal(ModalScreen[dict | None]):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    DEFAULT_CSS = f"""
-    TagConfigModal > Vertical {{
+    DEFAULT_CSS = """
+    TagConfigModal > Vertical {
         width: 60;
         height: auto;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
+        background: $background;
+        border: round $accent;
         padding: 1 2;
-    }}
-    TagConfigModal .config-label {{
-        color: {ACCENT};
+    }
+    TagConfigModal .config-label {
+        color: $accent;
         text-style: bold;
         margin-bottom: 1;
-    }}
-    TagConfigModal Input {{
+    }
+    TagConfigModal Input {
         width: 1fr;
         margin-bottom: 1;
-        border: solid {BORDER};
-    }}
-    TagConfigModal .config-actions {{
+        border: round $relay-frame;
+    }
+    TagConfigModal .config-actions {
         height: 3;
         align: right middle;
         margin-top: 1;
-    }}
-    TagConfigModal .config-actions Button {{
+    }
+    TagConfigModal .config-actions Button {
         margin-left: 1;
-    }}
+    }
     """
 
     def __init__(self, tag: str, current: api.Tag | None = None) -> None:
@@ -307,31 +306,31 @@ class SearchModal(ModalScreen["tuple[str, str] | None"]):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    DEFAULT_CSS = f"""
-    SearchModal > Vertical {{
+    DEFAULT_CSS = """
+    SearchModal > Vertical {
         width: 60;
         height: auto;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
+        background: $background;
+        border: round $accent;
         padding: 1 2;
-    }}
-    SearchModal .search-label {{
-        color: {ACCENT};
+    }
+    SearchModal .search-label {
+        color: $accent;
         text-style: bold;
         margin-bottom: 1;
-    }}
-    SearchModal Input, SearchModal Select {{
+    }
+    SearchModal Input, SearchModal Select {
         width: 1fr;
         margin-bottom: 1;
-        border: solid {BORDER};
-    }}
-    SearchModal .search-actions {{
+        border: round $relay-frame;
+    }
+    SearchModal .search-actions {
         height: 3;
         align: right middle;
-    }}
-    SearchModal .search-actions Button {{
+    }
+    SearchModal .search-actions Button {
         margin-left: 1;
-    }}
+    }
     """
 
     MODES = [
@@ -388,55 +387,55 @@ class PostHistoryModal(ModalScreen[api.Post | None]):
         Binding("tab", "toggle_diff", "Body/Diff"),
     ]
 
-    DEFAULT_CSS = f"""
-    PostHistoryModal {{
+    DEFAULT_CSS = """
+    PostHistoryModal {
         align: center middle;
-    }}
-    PostHistoryModal > Vertical {{
+    }
+    PostHistoryModal > Vertical {
         width: 95%;
         height: 90%;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
-    }}
-    PostHistoryModal .hist-title {{
-        color: {ACCENT};
+        background: $background;
+        border: round $accent;
+    }
+    PostHistoryModal .hist-title {
+        color: $accent;
         text-style: bold;
         height: 1;
         padding: 0 1;
-        background: {BORDER};
-    }}
-    PostHistoryModal .hist-left {{
+        background: $relay-badge;
+    }
+    PostHistoryModal .hist-left {
         width: 40;
-        border-right: solid {BORDER};
+        border-right: solid $relay-badge;
         height: 1fr;
-    }}
-    PostHistoryModal #rev-list {{
+    }
+    PostHistoryModal #rev-list {
         height: 1fr;
-        background: {HEADER_BG};
+        background: $background;
         border: none;
-    }}
-    PostHistoryModal #rev-preview {{
+    }
+    PostHistoryModal #rev-preview {
         width: 1fr;
         height: 1fr;
         padding: 0 1;
-        background: {HEADER_BG};
-    }}
-    PostHistoryModal #rev-body {{
+        background: $background;
+    }
+    PostHistoryModal #rev-body {
         width: 1fr;
-    }}
-    PostHistoryModal .hist-footer {{
+    }
+    PostHistoryModal .hist-footer {
         height: 3;
-        border-top: solid {BORDER};
+        border-top: solid $relay-badge;
         align: left middle;
         padding: 0 2;
-    }}
-    PostHistoryModal .hist-hint {{
-        color: #888888;
+    }
+    PostHistoryModal .hist-hint {
+        color: $relay-muted;
         width: 1fr;
-    }}
-    PostHistoryModal .hist-footer Button {{
+    }
+    PostHistoryModal .hist-footer Button {
         margin-left: 1;
-    }}
+    }
     """
 
     def __init__(self, post: api.Post) -> None:
@@ -460,7 +459,7 @@ class PostHistoryModal(ModalScreen[api.Post | None]):
                     yield Static("Loading…", id="rev-body", markup=True)
             with Horizontal(classes="hist-footer"):
                 yield Label(
-                    "[dim]↑↓ select · tab body/diff · r restore · esc close[/dim]",
+                    "[$relay-muted]↑↓ select · tab body/diff · r restore · esc close[/]",
                     markup=True,
                     classes="hist-hint",
                 )
@@ -476,7 +475,7 @@ class PostHistoryModal(ModalScreen[api.Post | None]):
         except Exception as exc:
             self.app.call_from_thread(
                 self.query_one("#rev-body", Static).update,
-                f"[red]Failed to load history: {escape(str(exc))}[/red]",
+                f"[$relay-terrible]Failed to load history: {escape(str(exc))}[/]",
             )
             return
         self.app.call_from_thread(self._populate_list, revisions)
@@ -485,14 +484,14 @@ class PostHistoryModal(ModalScreen[api.Post | None]):
         ol = self.query_one("#rev-list", OptionList)
         ol.clear_options()
         if not revisions:
-            self.query_one("#rev-body", Static).update("[dim]No history available.[/dim]")
+            self.query_one("#rev-body", Static).update("[$relay-muted]No history available.[/]")
             return
         for i, rev in enumerate(revisions):
             msg = rev.message if len(rev.message) <= 36 else rev.message[:33] + "…"
-            badge = f"  [bold {ACCENT}]current[/]" if i == 0 else ""
+            badge = "  [bold $relay-accent-text]current[/]" if i == 0 else ""
             label = (
                 f"[bold]{escape(msg)}[/bold]{badge}\n"
-                f"[dim]{rev.short_sha} · {_time_ago(rev.when)}[/dim]"
+                f"[$relay-muted]{rev.short_sha} · {_time_ago(rev.when)}[/]"
             )
             ol.add_option(Option(label, id=rev.sha))
         ol.highlighted = 0
@@ -510,7 +509,7 @@ class PostHistoryModal(ModalScreen[api.Post | None]):
         except Exception as exc:
             self.app.call_from_thread(
                 self.query_one("#rev-body", Static).update,
-                f"[red]Failed: {escape(str(exc))}[/red]",
+                f"[$relay-terrible]Failed: {escape(str(exc))}[/]",
             )
             return
         self._current_rev = rev
@@ -530,8 +529,8 @@ class PostHistoryModal(ModalScreen[api.Post | None]):
         else:
             tags_str = "  ".join(f"[{escape(t)}]" for t in rev.tags) if rev.tags else ""
             header = (
-                f"[bold {ACCENT}]{escape(rev.title)}[/bold {ACCENT}]  "
-                f"[dim]{rev.short_sha} · {_time_ago(rev.when)}[/dim]\n"
+                f"[bold $relay-accent-text]{escape(rev.title)}[/bold $accent]  "
+                f"[$relay-muted]{rev.short_sha} · {_time_ago(rev.when)}[/]\n"
             )
             if tags_str:
                 header += tags_str + "\n"
@@ -580,55 +579,55 @@ class DeletedPostsModal(ModalScreen[api.Post | None]):
         Binding("r", "restore", "Restore"),
     ]
 
-    DEFAULT_CSS = f"""
-    DeletedPostsModal {{
+    DEFAULT_CSS = """
+    DeletedPostsModal {
         align: center middle;
-    }}
-    DeletedPostsModal > Vertical {{
+    }
+    DeletedPostsModal > Vertical {
         width: 95%;
         height: 90%;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
-    }}
-    DeletedPostsModal .del-title {{
-        color: {ACCENT};
+        background: $background;
+        border: round $accent;
+    }
+    DeletedPostsModal .del-title {
+        color: $accent;
         text-style: bold;
         height: 1;
         padding: 0 1;
-        background: {BORDER};
-    }}
-    DeletedPostsModal .del-left {{
+        background: $relay-badge;
+    }
+    DeletedPostsModal .del-left {
         width: 40;
-        border-right: solid {BORDER};
+        border-right: solid $relay-badge;
         height: 1fr;
-    }}
-    DeletedPostsModal #del-list {{
+    }
+    DeletedPostsModal #del-list {
         height: 1fr;
-        background: {HEADER_BG};
+        background: $background;
         border: none;
-    }}
-    DeletedPostsModal #del-preview {{
+    }
+    DeletedPostsModal #del-preview {
         width: 1fr;
         height: 1fr;
         padding: 0 1;
-        background: {HEADER_BG};
-    }}
-    DeletedPostsModal #del-body {{
+        background: $background;
+    }
+    DeletedPostsModal #del-body {
         width: 1fr;
-    }}
-    DeletedPostsModal .del-footer {{
+    }
+    DeletedPostsModal .del-footer {
         height: 3;
-        border-top: solid {BORDER};
+        border-top: solid $relay-badge;
         align: left middle;
         padding: 0 2;
-    }}
-    DeletedPostsModal .del-hint {{
-        color: #888888;
+    }
+    DeletedPostsModal .del-hint {
+        color: $relay-muted;
         width: 1fr;
-    }}
-    DeletedPostsModal .del-footer Button {{
+    }
+    DeletedPostsModal .del-footer Button {
         margin-left: 1;
-    }}
+    }
     """
 
     def __init__(self) -> None:
@@ -646,7 +645,7 @@ class DeletedPostsModal(ModalScreen[api.Post | None]):
                     yield Static("Select a post to preview.", id="del-body", markup=True)
             with Horizontal(classes="del-footer"):
                 yield Label(
-                    "[dim]↑↓ select · r restore · esc close[/dim]",
+                    "[$relay-muted]↑↓ select · r restore · esc close[/]",
                     markup=True,
                     classes="del-hint",
                 )
@@ -662,7 +661,7 @@ class DeletedPostsModal(ModalScreen[api.Post | None]):
         except Exception as exc:
             self.app.call_from_thread(
                 self.query_one("#del-body", Static).update,
-                f"[red]Failed to load: {escape(str(exc))}[/red]",
+                f"[$relay-terrible]Failed to load: {escape(str(exc))}[/]",
             )
             return
         self._deleted = items
@@ -672,15 +671,15 @@ class DeletedPostsModal(ModalScreen[api.Post | None]):
         ol = self.query_one("#del-list", OptionList)
         ol.clear_options()
         if not items:
-            self.query_one("#del-body", Static).update("[dim]Nothing to recover.[/dim]")
+            self.query_one("#del-body", Static).update("[$relay-muted]Nothing to recover.[/]")
             return
-        reason_colors = {"deleted": ACCENT, "external": "yellow", "expiry": "dim"}
+        reason_colors = {"deleted": "$relay-accent-text", "external": "$relay-bad", "expiry": "$relay-muted"}
         for d in items:
             title = d.title if len(d.title) <= 28 else d.title[:25] + "…"
-            rc = reason_colors.get(d.reason, "dim")
+            rc = reason_colors.get(d.reason, "$relay-muted")
             label = (
-                f"[bold {ACCENT}]#{d.id}[/]  {escape(title)}\n"
-                f"[{rc}]{d.reason}[/]  [dim]{d.short_sha} · {_time_ago(d.when)}[/dim]"
+                f"[bold $relay-accent-text]#{d.id}[/]  {escape(title)}\n"
+                f"[{rc}]{d.reason}[/]  [$relay-muted]{d.short_sha} · {_time_ago(d.when)}[/]"
             )
             ol.add_option(Option(label, id=str(d.id)))
         ol.highlighted = 0
@@ -705,13 +704,13 @@ class DeletedPostsModal(ModalScreen[api.Post | None]):
         except Exception as exc:
             self.app.call_from_thread(
                 self.query_one("#del-body", Static).update,
-                f"[red]Failed to load preview: {escape(str(exc))}[/red]",
+                f"[$relay-terrible]Failed to load preview: {escape(str(exc))}[/]",
             )
             return
         tags_str = "  ".join(f"[{escape(t)}]" for t in rev.tags) if rev.tags else ""
         header = (
-            f"[bold {ACCENT}]{escape(rev.title)}[/bold {ACCENT}]  "
-            f"[dim]#{d.id} · {d.short_sha} · {_time_ago(d.when)}[/dim]\n"
+            f"[bold $relay-accent-text]{escape(rev.title)}[/bold $accent]  "
+            f"[$relay-muted]#{d.id} · {d.short_sha} · {_time_ago(d.when)}[/]\n"
         )
         if tags_str:
             header += tags_str + "\n"
@@ -773,30 +772,30 @@ class AttachmentsModal(ModalScreen[None]):
         Binding("r", "reload", "Refresh"),
     ]
 
-    DEFAULT_CSS = f"""
-    AttachmentsModal {{
+    DEFAULT_CSS = """
+    AttachmentsModal {
         align: center middle;
-    }}
-    AttachmentsModal > Vertical {{
+    }
+    AttachmentsModal > Vertical {
         width: 80%;
         height: 80%;
-        background: {HEADER_BG};
-        border: solid {ACCENT};
+        background: $background;
+        border: round $accent;
         padding: 1 2;
-    }}
-    AttachmentsModal .att-title {{
+    }
+    AttachmentsModal .att-title {
         text-style: bold;
-        color: {ACCENT};
+        color: $accent;
         margin-bottom: 1;
-    }}
-    AttachmentsModal OptionList {{
+    }
+    AttachmentsModal OptionList {
         height: 1fr;
-        background: {HEADER_BG};
-    }}
-    AttachmentsModal .att-hint {{
-        color: #888888;
+        background: $background;
+    }
+    AttachmentsModal .att-hint {
+        color: $relay-muted;
         margin-top: 1;
-    }}
+    }
     """
 
     def __init__(self) -> None:

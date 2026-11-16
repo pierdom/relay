@@ -14,7 +14,6 @@ from textual.message import Message
 from textual.widgets import Label, Static
 
 from .. import api
-from ..theme import ACCENT
 from .edit_form import EditForm
 from .post_view import PostView
 
@@ -30,18 +29,18 @@ class ReaderPane(Vertical):
 
     BINDINGS = [Binding("escape", "leave", "Back to the list", show=False)]
 
-    DEFAULT_CSS = f"""
-    ReaderPane {{ padding: 0 2; }}
-    ReaderPane > .reader-back {{ color: {ACCENT}; height: auto; display: none; }}
-    ReaderPane.-trail > .reader-back {{ display: block; }}
-    ReaderPane > .reader-empty {{
+    DEFAULT_CSS = """
+    ReaderPane { padding: 0 2; }
+    ReaderPane > .reader-back { color: $accent; height: auto; display: none; }
+    ReaderPane.-trail > .reader-back { display: block; }
+    ReaderPane > .reader-empty {
         height: 1fr; width: 1fr; content-align: center middle;
-        color: $text-muted; text-style: italic; display: none;
-    }}
-    ReaderPane.-empty > .reader-empty {{ display: block; }}
-    ReaderPane.-empty > PostView, ReaderPane.-editing > PostView {{ display: none; }}
-    ReaderPane > EditForm {{ height: 1fr; }}
-    ReaderPane > EditForm TextArea, ReaderPane > EditForm #ef-preview {{ height: 1fr; }}
+        color: $relay-muted; text-style: italic; display: none;
+    }
+    ReaderPane.-empty > .reader-empty { display: block; }
+    ReaderPane.-empty > PostView, ReaderPane.-editing > PostView { display: none; }
+    ReaderPane > EditForm { height: 1fr; }
+    ReaderPane > EditForm TextArea, ReaderPane > EditForm #ef-preview { height: 1fr; }
     """
 
     def __init__(self, **kwargs) -> None:
@@ -57,7 +56,7 @@ class ReaderPane(Vertical):
         yield PostView()
 
     def on_mount(self) -> None:
-        self.add_class("-empty")
+        self.add_class("-empty", "panel")
 
     def action_leave(self) -> None:
         self.app.query_one("#post-listview").focus()
@@ -81,7 +80,7 @@ class ReaderPane(Vertical):
         self.view.show(post, self.link_index, self.link_titles)
         self.set_class(bool(self._back), "-trail")
         if self._back:
-            self.query_one(".reader-back", Label).update(f"← {escape(self._back[-1].title)}  [dim]\\[[/dim]")
+            self.query_one(".reader-back", Label).update(f"← {escape(self._back[-1].title)}  [$relay-muted]\\[[/]")
 
     def show(self, post: api.Post) -> None:
         """A pick from the feed: the link trail starts over."""
