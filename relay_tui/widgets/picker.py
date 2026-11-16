@@ -14,21 +14,19 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Label, OptionList
 from textual.widgets.option_list import Option
 
-from ..theme import ACCENT, BORDER, HEADER_BG
-
 
 class PickerModal(ModalScreen[Any]):
     BINDINGS = [Binding("escape", "dismiss", "Cancel")]
 
-    DEFAULT_CSS = f"""
-    PickerModal {{ align: center middle; background: {HEADER_BG}; }}
-    PickerModal > Vertical {{
+    DEFAULT_CSS = """
+    PickerModal { align: center middle; background: $background; }
+    PickerModal > Vertical {
         width: 72; max-width: 92%; height: auto; max-height: 80%;
-        background: {HEADER_BG}; border: solid {ACCENT}; padding: 1 2;
-    }}
-    PickerModal .pk-title {{ color: {ACCENT}; text-style: bold; }}
-    PickerModal Input {{ margin: 1 0; border: solid {BORDER}; }}
-    PickerModal OptionList {{ height: auto; max-height: 16; background: transparent; border: none; }}
+        background: $background; border: round $accent; padding: 1 2;
+    }
+    PickerModal .pk-title { color: $accent; text-style: bold; }
+    PickerModal Input { margin: 1 0; border: round $relay-frame; }
+    PickerModal OptionList { height: auto; max-height: 16; background: transparent; border: none; }
     """
 
     def __init__(self, title: str, items: list[tuple[str, Any]]) -> None:

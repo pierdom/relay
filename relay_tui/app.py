@@ -19,7 +19,7 @@ from textual.widgets import Footer, Header
 
 from . import api
 from .sse import SSESubscriber
-from .theme import ACCENT, BORDER, HEADER_BG, build_textual_theme, palette_name
+from .theme import all_themes, display_name, initial_theme, relay_variable_defaults, save_setting, theme_for
 from .widgets.lint import LintModal
 from .widgets.modals import (
     AttachmentsModal,
@@ -125,42 +125,80 @@ class RelayTuiApp(App):
     _reader_pref = True     # the three-column layout, when the terminal is wide enough
     _reader_active = False
     COMMANDS = App.COMMANDS | {RelayTuiCommands}
-    CSS = f"""
-    Screen {{ background: {HEADER_BG}; layers: base overlay; }}
+    CSS = """
+    Screen { background: $background; layers: base overlay; }
     Screen.-transparent,
-    Screen.-transparent * {{ background: ansi_default; }}
-    Screen.-transparent Widget {{
+    Screen.-transparent * { background: ansi_default; }
+    Screen.-transparent Widget {
         scrollbar-background: ansi_default;
         scrollbar-background-hover: ansi_default;
         scrollbar-background-active: ansi_default;
         scrollbar-corner-color: ansi_default;
-    }}
-    Widget {{
-        scrollbar-background: {HEADER_BG};
-        scrollbar-background-hover: {HEADER_BG};
-        scrollbar-background-active: {HEADER_BG};
-        scrollbar-color: {BORDER};
-        scrollbar-color-hover: {ACCENT};
-        scrollbar-corner-color: {HEADER_BG};
-    }}
-    Header {{ background: {HEADER_BG}; }}
-    #main {{ height: 1fr; layout: horizontal; }}
-    TagPanel {{ width: 26; border-right: solid $accent; }}
-    PostPanel {{ width: 1fr; }}
-    /* The feed's selection is a tint and a bar, not a solid accent block: a
-       card's own accent text (tags, the id badge) has to stay readable in it.
-       Here, not in PostItem's DEFAULT_CSS, which ListView's own rule outranks. */
-    #post-listview > PostItem.-highlight {{
-        color: $foreground; background: {ACCENT} 14%; text-style: none;
-        border-left: outer {ACCENT}; padding-left: 0;
-    }}
-    #post-listview:focus > PostItem.-highlight {{ background: {ACCENT} 22%; }}
-    ReaderPane {{ display: none; }}
-    #main.-reader PostPanel {{ width: 34%; min-width: 36; max-width: 56; border-right: solid $accent; }}
-    #main.-reader ReaderPane {{ display: block; width: 1fr; }}
-    Footer {{ background: {HEADER_BG}; }}
-    FooterKey .footer-key--key {{ background: {BORDER}; color: {ACCENT}; }}
-    FooterKey .footer-key--description {{ color: {ACCENT}; background: {HEADER_BG}; }}
+    }
+    /* One scrollbar everywhere: a thin thumb on no track. */
+    * {
+        scrollbar-size-vertical: 1;
+        scrollbar-size-horizontal: 1;
+        scrollbar-background: $background 0%;
+        scrollbar-background-hover: $background 0%;
+        scrollbar-background-active: $background 0%;
+        scrollbar-corner-color: $background 0%;
+        scrollbar-color: $relay-frame;
+        scrollbar-color-hover: $accent;
+        scrollbar-color-active: $accent;
+    }
+    Header { background: $background; }
+    #main { height: 1fr; layout: horizontal; padding: 0 1; }
+    /* Panels are framed, titled in the top border, with their state (sort,
+       count, pending posts) in the bottom one. The focused one is lit. */
+    .panel {
+        border: round $relay-frame;
+        border-title-color: $relay-muted;
+        border-subtitle-color: $relay-muted;
+        border-title-align: left;
+        border-subtitle-align: right;
+    }
+    .panel:focus-within {
+        border: round $accent;
+        border-title-color: $relay-accent-text;
+        border-title-style: bold;
+        border-subtitle-color: $relay-accent-text;
+    }
+    TagPanel { width: 28; }
+    PostPanel { width: 1fr; }
+    ReaderPane { display: none; }
+    #main.-reader PostPanel { width: 34%; min-width: 38; max-width: 58; }
+    #main.-reader ReaderPane { display: block; width: 1fr; }
+    /* Fills mean state only — the selection, a flashed arrival, a floating
+       menu — so the page reads the same with the background on or off. */
+    ListView { background: transparent; }
+    /* A focused list's selection is a solid pair measured to read; an
+       unfocused list's is a faint tint, so two lists don't both look chosen.
+       Here, not in a widget's DEFAULT_CSS, which ListView's own rule outranks. */
+    ListView > ListItem.-highlight { background: $relay-select-dim; text-style: none; }
+    ListView:focus > ListItem.-highlight { background: $relay-select; text-style: none; }
+    ListView:focus > ListItem.-highlight Label { color: $relay-select-text; }
+    ListItem.-highlight > Label { background: transparent; }
+    /* Feed cards keep their own colours (accent tags, the id badge): a tint
+       measured for them, and a bar that is accent while the feed has focus. */
+    #post-listview > PostItem.-highlight,
+    #post-listview:focus > PostItem.-highlight {
+        background: $relay-select-dim;
+        border-left: outer $relay-frame;
+        padding-left: 0;
+    }
+    #post-listview:focus > PostItem.-highlight { border-left: outer $accent; }
+    #post-listview:focus > PostItem.-highlight Label { color: $foreground; }
+    #post-listview:focus > PostItem.-highlight .pi-preview { color: $relay-muted; }
+    /* Fields: a frame like the panels', lit while typing in it. */
+    Input:focus, TextArea:focus { border: round $accent; }
+    Input, TextArea { background: transparent; }
+    Input > .input--placeholder, Input > .input--suggestion { color: $relay-muted; }
+    /* One look for an empty or failed list. */
+    .status-line { color: $relay-muted; text-style: italic; }
+    Footer, Footer > * { background: transparent; }
+    FooterKey .footer-key--key { color: $relay-accent-text; background: transparent; text-style: bold; }
+    FooterKey .footer-key--description { color: $foreground; background: transparent; }
     """
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -191,6 +229,17 @@ class RelayTuiApp(App):
         Binding("tab", "focus_next_panel", "Switch panel", show=False),
         Binding("shift+tab", "focus_prev_panel", "Switch panel", show=False),
     ]
+
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        """relay's own theme variables (theme.py), computed for whichever theme
+        is current — a Textual built-in included — and checked for contrast."""
+        return relay_variable_defaults(self.current_theme)
+
+    def watch_theme(self, theme: str) -> None:
+        # Remember a theme picked from Ctrl+P → Theme (not the one started with).
+        if getattr(self, "_theme_ready", False):
+            save_setting("theme", theme)
+            self._render_subtitle()
 
     def _refresh_truecolor_filter(self, theme) -> None:
         if not getattr(self, "_transparent", False) or self.native_ansi_color:
@@ -239,9 +288,14 @@ class RelayTuiApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        theme = build_textual_theme()
-        self.register_theme(theme)
-        self.theme = theme.name
+        from relay.config import settings
+
+        for theme in all_themes():
+            self.register_theme(theme)
+        if os.path.isabs(settings.relay_palette) and os.path.isfile(settings.relay_palette):
+            self.register_theme(theme_for(settings.relay_palette))   # a palette file of your own
+        self.theme = initial_theme(settings.relay_palette, set(self.available_themes))
+        self._theme_ready = True
 
         self._connected = False
         self._scope_mode: str | None = None
@@ -339,7 +393,7 @@ class RelayTuiApp(App):
         badge = self._scope_badge()
         if badge:
             parts.append(badge)
-        parts.append(f"[{palette_name()}]")
+        parts.append(f"[{display_name(self.theme)}]")
         self.sub_title = "  ".join(parts)
 
     def _reject_if_read_only(self) -> bool:
@@ -470,9 +524,11 @@ class RelayTuiApp(App):
         self._total = total
         self._offset = _dated_stream_offset(posts, pinned_id)
         self._loading_more = False
+        arrow = "↓" if self._order == "desc" else "↑"
         self.query_one(PostPanel).set_posts(
             posts, search=self._search, pinned_id=pinned_id,
             label=self._feed_label(), empty=self._empty_message(),
+            summary=f"{arrow} {self._sort} · {total}",
         )
         pane = self._pane()
         pane.link_index, pane.link_titles = self._link_index, self._link_titles
@@ -772,12 +828,18 @@ class RelayTuiApp(App):
         self.push_screen(modal, callback=_on_result)
 
     def _feed_label(self) -> str | None:
+        """What the feed is showing, for its title: ``#homelab``, ``Homelab/``,
+        ``by agent``, ``⌕ wireguard · hybrid``."""
         parts = []
+        if self._active_tag:
+            parts.append(f"#{self._active_tag}")
+        if self._active_folder:
+            parts.append(f"{self._active_folder}/")
+        if self._author:
+            parts.append(f"by {self._author}")
         if self._search:
             mode = f" · {self._search_mode}" if self._embeddings_on else ""
-            parts.append(f"search: {self._search}{mode}")
-        if self._author:
-            parts.append(f"by {self._author}  (b clears)")
+            parts.append(f"⌕ {self._search}{mode}")
         return "  ".join(parts) or None
 
     def _empty_message(self) -> str:

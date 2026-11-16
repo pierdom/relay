@@ -10,7 +10,6 @@ from textual.widgets import Label, ListItem, ListView, Static
 
 from .. import api
 from ..render import preview_line
-from ..theme import ACCENT, BORDER, PERF_BAD, PERF_TERRIBLE
 
 
 def _skip_pinned(first_child_id: int | None, pinned_id: int | None) -> int:
@@ -75,21 +74,21 @@ def _expiry_markup(iso: str) -> str:
     except Exception:
         return ""
     if s < 86400:
-        color = PERF_TERRIBLE
+        color = "$relay-terrible"
     elif s < 3 * 86400:
-        color = PERF_BAD
+        color = "$relay-bad"
     else:
-        color = ACCENT
-    return f"[{color} on {BORDER}] expires {_time_until(iso)} [/]"
+        color = "$relay-accent-text"
+    return f"[{color} on $relay-badge] expires {_time_until(iso)} [/]"
 
 
 class PostItem(ListItem):
-    DEFAULT_CSS = f"""
-    PostItem {{ height: 4; padding: 0 1; border-bottom: solid $surface; }}
-    PostItem.master {{ height: 5; border: solid {ACCENT}; background: $boost; }}
-    PostItem.flash {{ background: {ACCENT} 25%; }}
-    PostItem Label {{ width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }}
-    PostItem .pi-preview {{ color: $text-muted; }}
+    DEFAULT_CSS = """
+    PostItem { height: 4; padding: 0 1; border-bottom: solid $relay-badge; }
+    PostItem.master { height: 5; border: round $relay-frame; }
+    PostItem.flash { background: $accent 20%; }
+    PostItem Label { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }
+    PostItem .pi-preview { color: $relay-muted; }
     """
 
     def __init__(self, post: api.Post) -> None:
@@ -101,8 +100,8 @@ class PostItem(ListItem):
     def compose(self) -> ComposeResult:
         post = self.post
         title = post.title or post.content.split("\n")[0]
-        id_badge = f"[on {BORDER}] #{post.id} [/on {BORDER}]"
-        mark = f"[{ACCENT}]✦[/] " if post.id == 0 else ""
+        id_badge = f"[on $relay-badge] #{post.id} [/on $relay-badge]"
+        mark = "[$relay-accent-text]✦[/] " if post.id == 0 else ""
         yield Label(f"{id_badge} {mark}[bold]{escape(title)}[/]", markup=True)
         yield Label(escape(preview_line(post.content, post.title)), markup=True, classes="pi-preview")
         meta_parts = [_time_ago(post.created_at)]
@@ -112,13 +111,13 @@ class PostItem(ListItem):
             meta_parts.append(f"by {escape(post.updated_by)}")
         if post.source:
             meta_parts.append(escape(post.source[:40]))
-        meta_line = f"[dim]{'  •  '.join(meta_parts)}[/dim]"
+        meta_line = f"[$relay-muted]{'  •  '.join(meta_parts)}[/]"
         if post.expires_at:
             pill = _expiry_markup(post.expires_at)
             if pill:
                 meta_line += f"  {pill}"
         if post.tags:
-            meta_line += "  " + " ".join(f"[{ACCENT}]#{escape(t)}[/]" for t in post.tags)
+            meta_line += "  " + " ".join(f"[$relay-accent-text]#{escape(t)}[/]" for t in post.tags)
         yield Label(meta_line, markup=True)
 
 
@@ -142,15 +141,11 @@ class PostPanel(Widget):
     PostPanel ListView { background: transparent; border: none; height: 1fr; }
     PostPanel ListView:focus { border: none; }
     PostPanel { padding: 0; }
-    PostPanel > Label { color: $surface; text-style: bold; padding: 0 1; }
-    PostPanel:focus-within > Label { color: $accent; }
     PostPanel #post-empty {
         display: none;
         height: 1fr;
         width: 1fr;
         content-align: center middle;
-        color: $surface;
-        text-style: italic;
     }
     """
 
@@ -172,9 +167,12 @@ class PostPanel(Widget):
         return None
 
     def compose(self) -> ComposeResult:
-        yield Label("FEED")
         yield ListView(id="post-listview")
-        yield Static("", id="post-empty")
+        yield Static("", id="post-empty", classes="status-line")
+
+    def on_mount(self) -> None:
+        self.add_class("panel")
+        self.border_title = "Feed"
 
     def _apply_visibility(self) -> None:
         """Show the feed when it has posts, the empty-state placeholder otherwise."""
@@ -195,9 +193,13 @@ class PostPanel(Widget):
         pinned_id: int | None = None,
         label: str | None = None,
         empty: str | None = None,
+        summary: str = "",
     ) -> None:
-        label = label if label is not None else (f"search: {search}" if search else None)
-        self._header = f"[bold]FEED[/]  [dim]{escape(label)}[/dim]" if label else "FEED"
+        """``label`` names the filter (the title: ``Feed · #homelab``);
+        ``summary`` is the order and count (the bottom border: ``↓ updated · 42``)."""
+        label = label if label is not None else (f"⌕ {search}" if search else None)
+        self.border_title = f"Feed · {escape(label)}" if label else "Feed"
+        self._summary = summary
         self.set_pending(0)
         self._empty_message = escape(
             empty if empty is not None else (f'No posts match "{search}"' if search else "No posts yet.")
@@ -210,12 +212,12 @@ class PostPanel(Widget):
         for p in posts:
             lv.mount(PostItem(p))
 
-    _header = "FEED"
+    _summary = ""
 
     def set_pending(self, n: int) -> None:
-        """Say how many live posts are waiting for a reload (`r`)."""
-        note = f"  [{ACCENT}]● {n} new · r shows[/]" if n else ""
-        self.query_one(Label).update(self._header + note)
+        """Say how many live posts are waiting for a reload (`r`), in place of
+        the order and count while there are any."""
+        self.border_subtitle = f"● {n} new · r shows" if n else self._summary
 
     def prepend_post(self, post: api.Post) -> None:
         lv = self.query_one("#post-listview", ListView)

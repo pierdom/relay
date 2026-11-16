@@ -14,7 +14,6 @@ from textual.widgets import Input, Label, OptionList
 from textual.widgets.option_list import Option
 
 from ..completion import match_posts
-from ..theme import ACCENT, BORDER, HEADER_BG
 
 _LIMIT = 12
 
@@ -22,17 +21,17 @@ _LIMIT = 12
 class SwitcherModal(ModalScreen["int | None"]):
     BINDINGS = [Binding("escape", "dismiss", "Close")]
 
-    DEFAULT_CSS = f"""
-    SwitcherModal {{ align: center top; background: {HEADER_BG} 60%; }}
-    SwitcherModal > Vertical {{
+    DEFAULT_CSS = """
+    SwitcherModal { align: center top; background: $background 60%; }
+    SwitcherModal > Vertical {
         width: 72; max-width: 92%; height: auto; margin-top: 3;
-        background: {HEADER_BG}; border: solid {ACCENT}; padding: 1 2;
-    }}
-    SwitcherModal .sw-title {{ color: {ACCENT}; text-style: bold; }}
-    SwitcherModal Input {{ margin: 1 0; border: solid {BORDER}; }}
-    SwitcherModal OptionList {{ height: auto; max-height: 14; background: transparent; border: none; }}
-    SwitcherModal .sw-empty {{ color: $text-muted; text-style: italic; display: none; }}
-    SwitcherModal.-none .sw-empty {{ display: block; }}
+        background: $background; border: round $accent; padding: 1 2;
+    }
+    SwitcherModal .sw-title { color: $accent; text-style: bold; }
+    SwitcherModal Input { margin: 1 0; border: round $relay-frame; }
+    SwitcherModal OptionList { height: auto; max-height: 14; background: transparent; border: none; }
+    SwitcherModal .sw-empty { color: $relay-muted; text-style: italic; display: none; }
+    SwitcherModal.-none .sw-empty { display: block; }
     """
 
     def __init__(self, titles: dict[int, str]) -> None:
@@ -56,7 +55,7 @@ class SwitcherModal(ModalScreen["int | None"]):
         self._ids = [pid for pid, _ in hits]
         ol = self.query_one("#sw-list", OptionList)
         ol.clear_options()
-        ol.add_options([Option(f"{escape(title)}  [dim]#{pid}[/dim]") for pid, title in hits])
+        ol.add_options([Option(f"{escape(title)}  [$relay-muted]#{pid}[/]") for pid, title in hits])
         ol.highlighted = 0 if hits else None
         self.set_class(not hits, "-none")
 

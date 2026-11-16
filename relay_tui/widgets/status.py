@@ -16,7 +16,6 @@ from textual.widgets import Label, OptionList, Static
 from textual.widgets.option_list import Option
 
 from .. import api
-from ..theme import ACCENT, BORDER, HEADER_BG, PERF_BAD, PERF_GREAT, PERF_TERRIBLE
 from .post_panel import _time_ago
 
 ACTIONS = {
@@ -51,10 +50,10 @@ def fmt_backfill(b: dict) -> str:
 
 
 def _feature(label: str, state: str, note: str) -> str:
-    dot = {"ok": f"[{PERF_GREAT}]●[/]", "warn": f"[{PERF_BAD}]●[/]", "bad": f"[{PERF_TERRIBLE}]●[/]"}.get(
-        state, "[dim]○[/]"
+    dot = {"ok": "[$relay-great]●[/]", "warn": "[$relay-bad]●[/]", "bad": "[$relay-terrible]●[/]"}.get(
+        state, "[$relay-muted]○[/]"
     )
-    return f"  {dot} {label:<18} [dim]{escape(note)}[/dim]"
+    return f"  {dot} {label:<18} [$relay-muted]{escape(note)}[/]"
 
 
 def _rows(pairs: list[tuple[str, str]]) -> list[str]:
@@ -62,7 +61,7 @@ def _rows(pairs: list[tuple[str, str]]) -> list[str]:
 
 
 def _section(title: str) -> str:
-    return f"\n[bold {ACCENT}]{title}[/]"
+    return f"\n[bold $relay-accent-text]{title}[/]"
 
 
 def render_status(d: dict) -> str:
@@ -113,7 +112,7 @@ def render_status(d: dict) -> str:
                          f" ({e.get('posts_missing', 0)} missing)"),
             ("Backfill", fmt_backfill(e.get("backfill") or {})),
         ])
-        lines.append("  [dim]s turns it off · B re-runs the backfill[/dim]")
+        lines.append("  [$relay-muted]s turns it off · B re-runs the backfill[/]")
     v = d.get("vault", {})
     lines.append(_section("Vault"))
     lines += _rows([
@@ -153,18 +152,18 @@ class StatusModal(ModalScreen["int | str | None"]):
         Binding("B", "backfill", "Re-run backfill"),
     ]
 
-    DEFAULT_CSS = f"""
-    StatusModal {{ align: center middle; background: {HEADER_BG}; }}
-    StatusModal > Vertical {{
+    DEFAULT_CSS = """
+    StatusModal { align: center middle; background: $background; }
+    StatusModal > Vertical {
         width: 84; max-width: 96%; height: 92%;
-        background: {HEADER_BG}; border: solid {ACCENT}; padding: 1 2;
-    }}
-    StatusModal .st-title {{ color: {ACCENT}; text-style: bold; }}
-    StatusModal VerticalScroll {{ height: 1fr; }}
-    StatusModal #st-body {{ height: auto; }}
-    StatusModal .st-section {{ color: {ACCENT}; text-style: bold; margin-top: 1; }}
-    StatusModal #st-activity {{ height: auto; max-height: 14; background: transparent; border: none; }}
-    StatusModal .st-hint {{ color: $text-muted; border-top: solid {BORDER}; }}
+        background: $background; border: round $accent; padding: 1 2;
+    }
+    StatusModal .st-title { color: $accent; text-style: bold; }
+    StatusModal VerticalScroll { height: 1fr; }
+    StatusModal #st-body { height: auto; }
+    StatusModal .st-section { color: $accent; text-style: bold; margin-top: 1; }
+    StatusModal #st-activity { height: auto; max-height: 14; background: transparent; border: none; }
+    StatusModal .st-hint { color: $relay-muted; border-top: solid $relay-badge; }
     """
 
     def __init__(self) -> None:
@@ -194,7 +193,7 @@ class StatusModal(ModalScreen["int | str | None"]):
         try:
             report = api.get_status_report()
         except Exception as exc:
-            msg = f"[{PERF_TERRIBLE}]Could not read status: {escape(str(exc))}[/]"
+            msg = f"[$relay-terrible]Could not read status: {escape(str(exc))}[/]"
             self.app.call_from_thread(self._show_body, msg)
             return
         self._embeddings = report.get("embeddings") or {}
@@ -204,7 +203,7 @@ class StatusModal(ModalScreen["int | str | None"]):
             lint = lint_line(api.get_lint())
         except Exception:
             lint = "Could not run the vault lint."
-        self.app.call_from_thread(self._set, "#st-lint", lint + "  [dim](L to browse)[/dim]")
+        self.app.call_from_thread(self._set, "#st-lint", lint + "  [$relay-muted](L to browse)[/]")
         if not history:
             self.app.call_from_thread(self._no_history)
             return
@@ -216,7 +215,7 @@ class StatusModal(ModalScreen["int | str | None"]):
         try:
             deleted = [d for d in api.list_deleted_posts(limit=100, include_expiry=True) if d.reason != "expiry"]
             n = len(deleted)
-            line = (f"{n} deleted post{'s' if n != 1 else ''} can be restored  [dim](v to browse)[/dim]" if n
+            line = (f"{n} deleted post{'s' if n != 1 else ''} can be restored  [$relay-muted](v to browse)[/]" if n
                     else "Nothing deleted — or nothing left to recover.")
         except Exception:
             line = "Could not read deleted posts."
@@ -250,7 +249,7 @@ class StatusModal(ModalScreen["int | str | None"]):
             exists = c.get("id") in titles
             title = escape(c.get("title") or f"#{c.get('id')}")
             meta = f"{escape(verb + who)} · {_time_ago(c.get('when', ''))}"
-            label = f"{title if exists else f'[dim]{title}[/dim]'}  [dim]{meta}[/dim]"
+            label = f"{title if exists else f'[$relay-muted]{title}[/]'}  [$relay-muted]{meta}[/]"
             ol.add_option(Option(label))
             self._activity_ids.append(c.get("id") if exists else None)
 

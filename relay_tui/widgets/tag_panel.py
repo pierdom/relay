@@ -21,7 +21,7 @@ class TagItem(ListItem):
     def compose(self) -> ComposeResult:
         display = "all posts" if not self.tag_name else self.tag_name
         yield Label(
-            f"{escape(display):<18}[dim]({self.count})[/dim]",
+            f"{escape(display):<18}[$relay-muted]({self.count})[/]",
             markup=True,
         )
 
@@ -66,23 +66,24 @@ class TagPanel(Widget):
     TagPanel ListView { background: transparent; border: none; height: 1fr; }
     TagPanel ListView:focus { border: none; }
     TagPanel { padding: 0; }
-    TagPanel > Label { color: $surface; text-style: bold; padding: 0 1; }
-    TagPanel:focus-within > Label { color: $accent; }
     """
 
     def compose(self) -> ComposeResult:
-        yield Label("TOPICS")
         yield ListView(id="tag-listview")
+
+    def on_mount(self) -> None:
+        self.add_class("panel")
+        self.border_title = "Topics"
 
     def set_tags(self, tags: list[api.Tag], active: str | None = None) -> None:
         self._mode = "tags"
         self._tags = {t.name: t for t in tags}
-        self.query_one(Label).update("TOPICS · [dim]tags[/]")
+        self.border_subtitle = "tags · t"
         self._fill([("", sum(t.count for t in tags))] + [(t.name, t.count) for t in tags], active)
 
     def set_folders(self, folders: list[tuple[str, int]], active: str | None = None) -> None:
         self._mode = "tree"
-        self.query_one(Label).update("TOPICS · [dim]tree[/]")
+        self.border_subtitle = "folders · t"
         items = [("", sum(c for _, c in folders))] + [(f, c) for f, c in folders]
         self._fill(items, active)
 

@@ -12,6 +12,7 @@ from textual.app import App
 from textual.widgets import Button, Input
 
 from relay_tui import api
+from relay_tui.theme import relay_variable_defaults
 from relay_tui.widgets.modals import TagConfigModal
 
 
@@ -19,6 +20,10 @@ async def _run(current: api.Tag | None, edits: dict[str, str]) -> dict | None:
     result: dict = {}
 
     class Host(App):
+        # The widgets draw with relay's theme variables; RelayTuiApp supplies them.
+        def get_theme_variable_defaults(self) -> dict[str, str]:
+            return relay_variable_defaults(self.current_theme)
+
         def on_mount(self) -> None:
             self.push_screen(TagConfigModal("digest", current), callback=lambda r: result.setdefault("r", r))
 

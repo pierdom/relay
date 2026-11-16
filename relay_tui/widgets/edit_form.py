@@ -27,7 +27,6 @@ from textual.widgets.option_list import Option
 from .. import api, drafts
 from ..completion import PathSuggester, Span, TagSuggester, accepted_text, link_span, match_posts
 from ..render import _linkify_markdown
-from ..theme import ACCENT, BORDER
 
 _DRAFT_DELAY = 0.5
 
@@ -66,23 +65,23 @@ class EditForm(Vertical):
         Binding("ctrl+o", "attach", "Attach file"),
     ]
 
-    DEFAULT_CSS = f"""
-    EditForm {{ height: auto; }}
-    EditForm .modal-title {{ color: {ACCENT}; text-style: bold; margin-bottom: 1; }}
-    EditForm Input {{ margin-bottom: 1; width: 1fr; border: solid {BORDER}; }}
-    EditForm TextArea {{ height: 12; width: 1fr; margin-bottom: 1; border: solid {BORDER}; }}
-    EditForm #ef-preview {{ height: 12; width: 1fr; margin-bottom: 1; border: solid {BORDER}; display: none; }}
-    EditForm.-preview #ef-preview {{ display: block; }}
-    EditForm.-preview TextArea {{ display: none; }}
-    EditForm #ef-complete {{
+    DEFAULT_CSS = """
+    EditForm { height: auto; }
+    EditForm .modal-title { color: $accent; text-style: bold; margin-bottom: 1; }
+    EditForm Input { margin-bottom: 1; width: 1fr; border: round $relay-frame; }
+    EditForm TextArea { height: 12; width: 1fr; margin-bottom: 1; border: round $relay-frame; }
+    EditForm #ef-preview { height: 12; width: 1fr; margin-bottom: 1; border: round $relay-frame; display: none; }
+    EditForm.-preview #ef-preview { display: block; }
+    EditForm.-preview TextArea { display: none; }
+    EditForm #ef-complete {
         height: auto; max-height: 8; width: 1fr; margin-bottom: 1;
-        border: solid {ACCENT}; display: none;
-    }}
-    EditForm.-completing #ef-complete {{ display: block; }}
-    EditForm .ef-conflict {{ color: $warning; height: auto; display: none; }}
-    EditForm.-conflict .ef-conflict {{ display: block; }}
-    EditForm .modal-actions {{ height: 3; align: right middle; margin-top: 1; }}
-    EditForm .modal-actions Button {{ margin-left: 1; }}
+        border: round $accent; display: none;
+    }
+    EditForm.-completing #ef-complete { display: block; }
+    EditForm .ef-conflict { color: $warning; height: auto; display: none; }
+    EditForm.-conflict .ef-conflict { display: block; }
+    EditForm .modal-actions { height: 3; align: right middle; margin-top: 1; }
+    EditForm .modal-actions Button { margin-left: 1; }
     """
 
     def __init__(self, post: api.Post | None = None, **kwargs) -> None:
@@ -216,7 +215,7 @@ class EditForm(Vertical):
         self._span, self._choices = span, choices
         ol = self.query_one("#ef-complete", OptionList)
         ol.clear_options()
-        ol.add_options([Option(f"{title}  [dim]#{pid}[/dim]") for pid, title in choices])
+        ol.add_options([Option(f"{title}  [$relay-muted]#{pid}[/]") for pid, title in choices])
         ol.highlighted = 0 if span.pick else None
         self.add_class("-completing")
 
@@ -423,15 +422,15 @@ class AttachFileModal(ModalScreen["str | None"]):
 
     BINDINGS = [Binding("escape", "dismiss", "Cancel")]
 
-    DEFAULT_CSS = f"""
-    AttachFileModal {{ align: center middle; }}
-    AttachFileModal > Vertical {{
+    DEFAULT_CSS = """
+    AttachFileModal { align: center middle; }
+    AttachFileModal > Vertical {
         width: 76; max-width: 92%; height: auto; background: $background;
-        border: solid {ACCENT}; padding: 1 2;
-    }}
-    AttachFileModal .af-title {{ color: {ACCENT}; text-style: bold; }}
-    AttachFileModal Input {{ margin-top: 1; border: solid {BORDER}; }}
-    AttachFileModal .af-hint {{ color: $text-muted; }}
+        border: round $accent; padding: 1 2;
+    }
+    AttachFileModal .af-title { color: $accent; text-style: bold; }
+    AttachFileModal Input { margin-top: 1; border: round $relay-frame; }
+    AttachFileModal .af-hint { color: $relay-muted; }
     """
 
     def compose(self) -> ComposeResult:
