@@ -9,6 +9,7 @@ from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Static
 
 from .. import api
+from ..render import preview_line
 from ..theme import ACCENT, BORDER, PERF_BAD, PERF_TERRIBLE
 
 
@@ -85,9 +86,10 @@ def _expiry_markup(iso: str) -> str:
 class PostItem(ListItem):
     DEFAULT_CSS = f"""
     PostItem {{ height: 4; padding: 0 1; border-bottom: solid $surface; }}
-    PostItem.master {{ border: solid {ACCENT}; background: $boost; }}
+    PostItem.master {{ height: 5; border: solid {ACCENT}; background: $boost; }}
     PostItem.flash {{ background: {ACCENT} 25%; }}
-    PostItem Label {{ width: 1fr; }}
+    PostItem Label {{ width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }}
+    PostItem .pi-preview {{ color: $text-muted; }}
     """
 
     def __init__(self, post: api.Post) -> None:
@@ -97,35 +99,26 @@ class PostItem(ListItem):
             self.add_class("master")
 
     def compose(self) -> ComposeResult:
-        is_master = self.post.id == 0
-        title = self.post.title or self.post.content.split("\n")[0]
-        if len(title) > 60:
-            title = title[:57] + "…"
-        tags_markup = (
-            "  ".join(
-                f"[bold {ACCENT} on {BORDER}] {escape(t)} [/]" for t in self.post.tags
-            )
-            if self.post.tags
-            else ""
-        )
-        meta_parts = [_time_ago(self.post.created_at)]
-        if self.post.updated_at:
-            meta_parts.append(f"edited {_time_ago(self.post.updated_at)}")
-        if self.post.updated_by:
-            meta_parts.append(f"by {escape(self.post.updated_by)}")
-        if self.post.source:
-            meta_parts.append(escape(self.post.source[:40]))
-        id_badge = f"[on {BORDER}] #{self.post.id} [/on {BORDER}]"
-        master_prefix = f"[bold {ACCENT}]✦ MASTER  [/]" if is_master else ""
-        yield Label(
-            f"{id_badge}  {master_prefix}[bold]{escape(title)}[/]  {tags_markup}",
-            markup=True,
-        )
+        post = self.post
+        title = post.title or post.content.split("\n")[0]
+        id_badge = f"[on {BORDER}] #{post.id} [/on {BORDER}]"
+        mark = f"[{ACCENT}]✦[/] " if post.id == 0 else ""
+        yield Label(f"{id_badge} {mark}[bold]{escape(title)}[/]", markup=True)
+        yield Label(escape(preview_line(post.content, post.title)), markup=True, classes="pi-preview")
+        meta_parts = [_time_ago(post.created_at)]
+        if post.updated_at:
+            meta_parts.append(f"edited {_time_ago(post.updated_at)}")
+        if post.updated_by:
+            meta_parts.append(f"by {escape(post.updated_by)}")
+        if post.source:
+            meta_parts.append(escape(post.source[:40]))
         meta_line = f"[dim]{'  •  '.join(meta_parts)}[/dim]"
-        if self.post.expires_at:
-            pill = _expiry_markup(self.post.expires_at)
+        if post.expires_at:
+            pill = _expiry_markup(post.expires_at)
             if pill:
                 meta_line += f"  {pill}"
+        if post.tags:
+            meta_line += "  " + " ".join(f"[{ACCENT}]#{escape(t)}[/]" for t in post.tags)
         yield Label(meta_line, markup=True)
 
 

@@ -1,0 +1,13 @@
+# Relay Light
+# Matches the "Relay Light" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=light
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#935305"   # accent — accent, interactive elements, borders
+border  = "#d2ccbb"   # border — widget borders, badges, panel separators
+bg      = "#edeae1"   # bg     — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#047857"  # success / far-future expiry
+perf_bad      = "#7a4404"  # warning / expiry within 3 days
+perf_terrible = "#c81e1e"  # error / expired / expiry within 24h

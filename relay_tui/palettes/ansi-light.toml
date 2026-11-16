@@ -1,0 +1,13 @@
+# ANSI Light
+# Matches the "ANSI Light" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=ansi-light
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#0000aa"   # accent — accent, interactive elements, borders
+border  = "#aaaaaa"   # border — widget borders, badges, panel separators
+bg      = "#ffffff"   # bg     — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#00aa00"  # success / far-future expiry
+perf_bad      = "#aa5500"  # warning / expiry within 3 days
+perf_terrible = "#aa0000"  # error / expired / expiry within 24h

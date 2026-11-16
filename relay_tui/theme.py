@@ -51,6 +51,24 @@ PERF_BAD      = _c("perf_bad",      "yellow")
 PERF_TERRIBLE = _c("perf_terrible", "bright_red")
 
 
+def is_dark(bg: str) -> bool:
+    """Whether a palette is dark, from its background's relative luminance —
+    so a light palette gets dark text. A palette may say so itself with
+    ``dark = true|false``; a non-hex background counts as dark."""
+    explicit = _p.get("dark")
+    if isinstance(explicit, bool):
+        return explicit
+    if not (bg.startswith("#") and len(bg) == 7):
+        return True
+
+    def channel(hex2: str) -> float:
+        c = int(hex2, 16) / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (channel(bg[i:i + 2]) for i in (1, 3, 5))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.4
+
+
 def build_textual_theme() -> TextualTheme:
     """Return a Textual Theme derived from the active palette.
 
@@ -65,7 +83,7 @@ def build_textual_theme() -> TextualTheme:
 
     return Theme(
         name="relay",
-        dark=True,
+        dark=is_dark(HEADER_BG),
         primary=ACCENT,
         secondary=ACCENT,
         accent=ACCENT,

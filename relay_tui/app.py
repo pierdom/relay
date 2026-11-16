@@ -20,6 +20,7 @@ from textual.widgets import Footer, Header
 from . import api
 from .sse import SSESubscriber
 from .theme import ACCENT, BORDER, HEADER_BG, build_textual_theme, palette_name
+from .widgets.lint import LintModal
 from .widgets.modals import (
     AttachmentsModal,
     ConfirmModal,
@@ -32,6 +33,7 @@ from .widgets.modals import (
 from .widgets.post_panel import PostPanel
 from .widgets.post_view import PostDetailModal, PostView
 from .widgets.reader import ReaderPane
+from .widgets.status import StatusModal
 from .widgets.switcher import SwitcherModal
 from .widgets.tag_panel import TagPanel
 
@@ -145,6 +147,14 @@ class RelayTuiApp(App):
     #main {{ height: 1fr; layout: horizontal; }}
     TagPanel {{ width: 26; border-right: solid $accent; }}
     PostPanel {{ width: 1fr; }}
+    /* The feed's selection is a tint and a bar, not a solid accent block: a
+       card's own accent text (tags, the id badge) has to stay readable in it.
+       Here, not in PostItem's DEFAULT_CSS, which ListView's own rule outranks. */
+    #post-listview > PostItem.-highlight {{
+        color: $foreground; background: {ACCENT} 14%; text-style: none;
+        border-left: outer {ACCENT}; padding-left: 0;
+    }}
+    #post-listview:focus > PostItem.-highlight {{ background: {ACCENT} 22%; }}
     ReaderPane {{ display: none; }}
     #main.-reader PostPanel {{ width: 34%; min-width: 36; max-width: 56; border-right: solid $accent; }}
     #main.-reader ReaderPane {{ display: block; width: 1fr; }}
@@ -165,6 +175,8 @@ class RelayTuiApp(App):
         Binding("r", "reload", "Refresh"),
         Binding("l", "toggle_layout", "Layout"),
         Binding("ctrl+k", "switcher", "Go to"),
+        Binding("i", "status", "Status"),
+        Binding("L", "lint", "Lint", show=False),
         Binding("b", "filter_author", "By writer", show=False),
         Binding("u", "undo_delete", "Undo delete", show=False),
         Binding("j", "step(1)", "Next post", show=False),
@@ -740,14 +752,36 @@ class RelayTuiApp(App):
             return  # never over an editor, as in the browser
 
         def _on_pick(post_id: int | None) -> None:
-            if post_id is None:
-                return
-            if self._reader_active and len(self.screen_stack) == 1:
-                self._navigate_pane(post_id)
-            else:
-                self.open_post(post_id)
+            if post_id is not None:
+                self._open_anywhere(post_id)
 
         self.push_screen(SwitcherModal(self._link_titles), _on_pick)
+
+    def _open_anywhere(self, post_id: int) -> None:
+        """Open a post picked from a panel: in the pane when it is showing and
+        nothing covers it, else in a detail modal."""
+        if self._reader_active and len(self.screen_stack) == 1:
+            self._navigate_pane(post_id)
+        else:
+            self.open_post(post_id)
+
+    def action_status(self) -> None:
+        def _next(choice: int | str | None) -> None:
+            if choice == "lint":
+                self.action_lint()
+            elif choice == "recovery":
+                self.action_open_recovery()
+            elif isinstance(choice, int):
+                self._open_anywhere(choice)
+
+        self.push_screen(StatusModal(), _next)
+
+    def action_lint(self) -> None:
+        def _next(post_id: int | None) -> None:
+            if post_id is not None:
+                self._open_anywhere(post_id)
+
+        self.push_screen(LintModal(), _next)
 
     def action_attachments(self) -> None:
         self.push_screen(AttachmentsModal())

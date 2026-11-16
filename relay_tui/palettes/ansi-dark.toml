@@ -1,0 +1,13 @@
+# ANSI Dark
+# Matches the "ANSI Dark" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=ansi-dark
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#55ffff"   # accent — accent, interactive elements, borders
+border  = "#555555"   # border — widget borders, badges, panel separators
+bg      = "#000000"   # bg     — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#55ff55"  # success / far-future expiry
+perf_bad      = "#ffff55"  # warning / expiry within 3 days
+perf_terrible = "#ff5555"  # error / expired / expiry within 24h

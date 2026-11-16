@@ -1,0 +1,13 @@
+# Gruvbox Light
+# Matches the "Gruvbox Light" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=gruvbox-light
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#af3a03"   # accent — accent, interactive elements, borders
+border  = "#d5c4a1"   # border — widget borders, badges, panel separators
+bg      = "#f2e5bc"   # bg     — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#79740e"  # success / far-future expiry
+perf_bad      = "#b57614"  # warning / expiry within 3 days
+perf_terrible = "#9d0006"  # error / expired / expiry within 24h

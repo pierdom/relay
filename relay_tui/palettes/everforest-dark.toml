@@ -1,0 +1,13 @@
+# Everforest Dark
+# Matches the "Everforest Dark" theme from the web UI; see its app.css block.
+# Select with: RELAY_PALETTE=everforest-dark
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#a7c080"   # accent — accent, interactive elements, borders
+border  = "#475258"   # border — widget borders, badges, panel separators
+bg      = "#232a2e"   # bg     — screen, header, footer background
+
+# ── Semantic colours ───────────────────────────────────────────────────────────
+perf_great    = "#83c092"  # success / far-future expiry
+perf_bad      = "#dbbc7f"  # warning / expiry within 3 days
+perf_terrible = "#e67e80"  # error / expired / expiry within 24h
