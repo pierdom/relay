@@ -24,6 +24,8 @@ On a terminal at least 110 columns wide the TUI shows three columns: **topics** 
 | `[` / `]` | Back / forward along followed links (three columns) |
 | `h` | Post history |
 | `l` | Three columns ⇄ list |
+| `i` | Status: health, access, vault, server, lint summary, recent activity, recovery |
+| `L` | Vault lint: browse findings, `e` fixes the post, `o` opens it |
 | `v` | Recovery — browse and restore deleted posts |
 | `/` | Search (title / content / source); keyword, semantic or hybrid when the server has semantic search on |
 | `b` | Only posts by the open post's writer (again clears) |
@@ -69,6 +71,11 @@ Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`default`) matc
 | Name | Description |
 |------|-------------|
 | `default` | Relay Dark (amber accent, near-black background) |
+| `light` | Relay Light (light) — amber-brown accent |
+| `ansi-dark` | ANSI Dark — the 16 terminal colours, cyan accent |
+| `ansi-light` | ANSI Light (light) — the 16 terminal colours, blue accent |
+| `everforest-dark` | Everforest Dark — green accent |
+| `gruvbox-light` | Gruvbox Light (light) — orange accent |
 | `dracula` | Dracula — purple accent |
 | `gruvbox` | Gruvbox Dark — yellow accent |
 | `molokai` | Molokai — cyan accent |
@@ -93,7 +100,7 @@ Set `RELAY_PALETTE=<name>` to pick a colour scheme. The default (`default`) matc
 | `pastel` | Pastel (TUI only) |
 | `tango` | Tango — sky-blue accent (TUI only) |
 
-Palette files live in `relay_tui/palettes/`. Each is a small TOML file — copy one to create your own.
+Palette files live in `relay_tui/palettes/`. Each is a small TOML file — copy one to create your own. Whether it is light or dark is read from `bg`; add `dark = true` or `dark = false` to say so yourself.
 
 ## Background transparency
 

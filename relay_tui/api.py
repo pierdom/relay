@@ -441,3 +441,24 @@ def list_deleted_posts(limit: int = 50, include_expiry: bool = False) -> list[De
         )
         for i in data.get("items", [])
     ]
+
+
+def get_status_report() -> dict:
+    """GET /status as it comes — the status panel shows most of it."""
+    resp = requests.get(f"{_base()}/status", headers=_headers(), timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def list_changes(limit: int = 12) -> list[dict]:
+    """Recent vault changes, newest first: {seq, id, title, action, when, sha, author}."""
+    resp = requests.get(f"{_base()}/changes", headers=_headers(), params={"limit": limit}, timeout=10)
+    resp.raise_for_status()
+    return resp.json().get("items", [])
+
+
+def get_lint() -> dict:
+    """GET /lint: {items: [{rule, severity, post_id, title, detail, match}], checked_posts, skipped_rules}."""
+    resp = requests.get(f"{_base()}/lint", headers=_headers(), timeout=30)
+    resp.raise_for_status()
+    return resp.json()

@@ -4,6 +4,22 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.29.0] — 2026-11-16
+
+### Added
+- **A status panel in the TUI** (`i`), as in the browser: health (history, full-text and semantic search, external edits), this key's access, the vault and server figures, a lint summary, recent activity (Enter opens a post) and how many deleted posts can be restored
+- **The vault lint in the TUI** (`L`, or from the status panel): findings on the left, filterable by rule; the finding and its post on the right. `e` fixes the post in the editor and checks again, `o` opens it
+- **TUI palettes for every browser theme**: Relay Light (`light`), ANSI Dark and ANSI Light, Everforest Dark and Gruvbox Light
+
+### Changed
+- **TUI feed cards** show a line of each post's text under its title, titles use the whole width and end in an ellipsis, and tags sit with the dates. The master document is marked ✦ instead of "MASTER"
+- **The TUI feed's selection is a tint with an accent bar** instead of a solid accent block, which hid a card's accent-coloured tags
+
+### Fixed
+- **Light palettes drew light text on their light background** in the TUI (Catppuccin Latte, GitHub Light, Solarized Light): the theme is now dark or light by its background
+
+---
+
 ## [1.28.0] — 2026-11-16
 
 ### Added

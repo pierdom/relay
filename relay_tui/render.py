@@ -116,3 +116,27 @@ def _bare(text: str) -> str:
 def strip_title_heading(content: str, title: str) -> str:
     m = _LEADING_HEADING_RE.match(content)
     return content[m.end():] if m and title and _bare(m.group(1)) == _bare(title) else content
+
+
+_MD_LINE_NOISE = re.compile(r"^\s*(?:#{1,6}\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|>\s*)+")
+_MD_INLINE = re.compile(r"!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]|\[([^\]]*)\]\([^)]*\)|[*_`~]+")
+
+
+def preview_line(content: str, title: str = "", limit: int = 240) -> str:
+    """The first line of prose a feed card shows under its title: the title
+    heading dropped, list and quote markers and inline markup stripped, code
+    fences and tables skipped — the card's version of the browser's preview."""
+    body = strip_title_heading(content or "", title)
+    in_fence = False
+    for raw in body.splitlines():
+        line = raw.strip()
+        if line.startswith(("```", "~~~")):
+            in_fence = not in_fence
+            continue
+        if in_fence or not line or line.startswith(("|", "---", "<!--")):
+            continue
+        line = _MD_LINE_NOISE.sub("", line)
+        line = _MD_INLINE.sub(lambda m: m.group(2) or m.group(1) or m.group(3) or "", line).strip()
+        if line:
+            return line[:limit]
+    return ""
