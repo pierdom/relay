@@ -19,19 +19,36 @@ On a terminal at least 110 columns wide the TUI shows three columns: **topics** 
 | `n` / `e` / `d` | New / edit / delete post (in three columns, `e` and `d` act on the open post) |
 | `j` / `k` (or ↓ / ↑) | Next / previous post |
 | `Enter` | Three columns: move into the post to scroll it (`Esc` returns to the feed). List: open the post |
+| `Ctrl+K` | Go to any post by title or `#id` |
 | `f` | Follow a link from the open post (outbound and backlinks) |
 | `[` / `]` | Back / forward along followed links (three columns) |
 | `h` | Post history |
 | `l` | Three columns ⇄ list |
 | `v` | Recovery — browse and restore deleted posts |
-| `/` | Search (title / content / source) |
+| `/` | Search (title / content / source); keyword, semantic or hybrid when the server has semantic search on |
+| `b` | Only posts by the open post's writer (again clears) |
+| `u` | Undo the last delete (history on) |
 | `a` | Attachment browser (open externally / delete) |
 | `t` | Toggle TOPICS: Tags ⇄ Tree (folder) |
 | `c` / `R` | Tag expiry and retention (TTL, date, keep-newest-N) / rename (from TOPICS panel) |
 | `s` / `o` | Sort field (updated ⇄ created) / order (desc ⇄ asc) |
 | `r` / `Tab` | Refresh feed / move between columns |
-| `Ctrl+S` / `Esc` | Save / leave the editor (asks first when there are unsaved changes) |
+| `Ctrl+S` / `Esc` | Save / leave the editor (an edit asks first when there are unsaved changes; a new post keeps its draft) |
+| `Ctrl+T` | Preview the text in the editor |
 | `q` | Quit |
+
+## Deleting
+
+With vault history on, `d` deletes straight away and the notice offers `u` to undo it. With history off a delete can't be undone, so it asks first, naming the post. Older deletes are in Recovery (`v`).
+
+## Writing
+
+The editor is the same for a new post and an edit:
+
+- `[[` lists posts by title; `#` lists them by title or id and inserts `#id`. ↑/↓ choose, Tab or Enter accepts, Esc closes the list. After a bare `#` nothing is chosen until you press ↓ or Tab, so Enter is still a new line.
+- The Tags field suggests the vault's tags as you type; → accepts.
+- `Ctrl+T` swaps the text for a preview of how it will read, and back.
+- A new post is kept as a draft while you write it (under `$XDG_STATE_HOME/relay-tui/`, or `RELAY_TUI_STATE_DIR`), so Esc or quitting loses nothing; `n` opens it again. Publishing or Discard drops it.
 
 ## Edit conflicts
 

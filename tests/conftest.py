@@ -53,6 +53,13 @@ def mcp_auth_context():
 
 
 @pytest.fixture(autouse=True)
+def isolated_tui_state(tmp_path, monkeypatch):
+    """The TUI keeps its Compose draft under ~/.local/state; a test must
+    never read or overwrite the developer's real one."""
+    monkeypatch.setenv("RELAY_TUI_STATE_DIR", str(tmp_path / "_tui_state"))
+
+
+@pytest.fixture(autouse=True)
 def isolated_vault(tmp_path, monkeypatch):
     """Point every test at a throwaway vault.
 

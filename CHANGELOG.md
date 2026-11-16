@@ -4,6 +4,18 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.28.0] — 2026-11-16
+
+### Added
+- **Ctrl+K in the TUI jumps to any post** by title or `#id`, from the feed or an open post (never over an editor). In three columns the post opens in the right-hand column and `[` comes back
+- **Semantic and hybrid search in the TUI**: with semantic search on, `/` offers keyword, semantic or hybrid (hybrid by default, as in the browser), and the feed header names the mode
+- **Filter by writer in the TUI**: `b` shows only the posts last written by the open post's writer, and `b` again clears it. Feed cards now say who last wrote each post
+- **Undo after a delete in the TUI**: with history on, `d` deletes at once and `u` brings the post back, instead of a "Delete post #N?" question up front. With history off it still asks, now by name
+- **Writing aids in the TUI editor**, for new posts and edits alike: `[[` completes post titles and `#` completes post ids from the link index (Tab or Enter accepts; after a bare `#` Enter stays a new line); the Tags field suggests the vault's tags (→ accepts); `Ctrl+T` previews the text as it will read
+- **The TUI keeps a draft of a new post** on disk while you write it, so Esc, a crash or quitting loses nothing; `n` brings it back. Publishing or Discard drops it
+
+---
+
 ## [1.27.0] — 2026-11-16
 
 ### Added
