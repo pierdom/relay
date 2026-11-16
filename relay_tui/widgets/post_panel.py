@@ -83,9 +83,40 @@ def _expiry_markup(iso: str) -> str:
     return f"[{color} on $relay-badge] expires {_time_until(iso)} [/]"
 
 
+def date_group(iso: str | None, now: datetime | None = None) -> str:
+    """The feed's date group for a timestamp, in the reader's local days:
+    Today, Yesterday, Earlier this week, Earlier this month, then the month
+    (``March``) within this year and the year before that."""
+    if not iso:
+        return "Undated"
+    try:
+        when = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return "Undated"
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    now = now or datetime.now(UTC)
+    local, today = when.astimezone(), now.astimezone().date()
+    days = (today - local.date()).days
+    if days <= 0:
+        return "Today"
+    if days == 1:
+        return "Yesterday"
+    if days < 7:
+        return "Earlier this week"
+    if days < 31:
+        return "Earlier this month"
+    if local.year == today.year:
+        return local.strftime("%B")
+    return str(local.year)
+
+
 class PostItem(ListItem):
     DEFAULT_CSS = """
     PostItem { height: 4; padding: 0 1; border-bottom: solid $relay-badge; }
+    PostItem.-grouped { height: 5; }
+    PostItem .pi-group { display: none; color: $relay-accent-text; text-style: bold; text-overflow: clip; }
+    PostItem.-grouped .pi-group { display: block; }
     PostItem.master { height: 5; border: round $relay-frame; }
     PostItem.flash { background: $accent 20%; }
     PostItem Label { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }
@@ -103,6 +134,7 @@ class PostItem(ListItem):
         title = post.title or post.content.split("\n")[0]
         id_badge = f"[on $relay-badge] #{post.id} [/on $relay-badge]"
         mark = "[$relay-accent-text]✦[/] " if post.id == 0 else ""
+        yield Label("", classes="pi-group")
         yield Label(f"{id_badge} {mark}[bold]{escape(title)}[/]", markup=True)
         yield Label(escape(preview_line(post.content, post.title)), markup=True, classes="pi-preview")
         meta_parts = [_time_ago(post.created_at)]
@@ -120,6 +152,24 @@ class PostItem(ListItem):
         if post.tags:
             meta_line += "  " + " ".join(f"[$relay-accent-text]#{escape(t)}[/]" for t in post.tags)
         yield Label(meta_line, markup=True)
+
+    group: str | None = None
+
+    def set_group(self, label: str | None) -> None:
+        """Open a date group with a divider line above the card, or not."""
+        if label == self.group:
+            return
+        self.group = label
+        self.set_class(label is not None, "-grouped")
+        self._show_group()
+
+    def on_mount(self) -> None:
+        self._show_group()
+
+    def _show_group(self) -> None:
+        # Not there yet while the card mounts (on_mount then draws it).
+        for line in self.query(".pi-group").results(Label):
+            line.update(f"── {escape(self.group)} " + "─" * 60 if self.group else "")
 
 
 class PostPanel(Widget):
@@ -195,6 +245,7 @@ class PostPanel(Widget):
         label: str | None = None,
         empty: str | None = None,
         summary: str = "",
+        group_by: str | None = None,
     ) -> None:
         """``label`` names the filter (the title: ``Feed · #homelab``);
         ``summary`` is the order and count (the bottom border: ``↓ updated · 42``)."""
@@ -209,9 +260,28 @@ class PostPanel(Widget):
         lv.clear()
         self._count = len(posts)
         self._pinned_id = pinned_id
+        self._group_by = group_by
         self._apply_visibility()
         for p in posts:
             lv.mount(PostItem(p))
+        self.call_after_refresh(self._regroup)
+
+    # The feed's date groups: by the date it is sorted on (none for a search,
+    # ranked by relevance, not by date). A divider sits in the first card of a
+    # group rather than as a row of its own, so every index stays a post's.
+    _group_by: str | None = None
+
+    def _regroup(self) -> None:
+        previous = None
+        for item in self._items():
+            if self._group_by is None or item.post.id == self._pinned_id:
+                item.set_group(None)
+                continue
+            post = item.post
+            stamp = post.created_at if self._group_by == "created" else (post.updated_at or post.created_at)
+            label = date_group(stamp)
+            item.set_group(label if label != previous else None)
+            previous = label
 
     _summary = ""
 
@@ -243,6 +313,7 @@ class PostPanel(Widget):
         # Briefly highlight live arrivals so the eye catches new posts.
         item.add_class("flash")
         self.set_timer(1.2, lambda: item.remove_class("flash"))
+        self.call_after_refresh(self._regroup)
 
     def append_posts(self, posts: list[api.Post]) -> None:
         lv = self.query_one("#post-listview", ListView)
@@ -254,6 +325,7 @@ class PostPanel(Widget):
                 lv.mount(PostItem(p))
                 self._count += 1
         self._apply_visibility()
+        self.call_after_refresh(self._regroup)
 
     def remove_post(self, post_id: int) -> None:
         lv = self.query_one(ListView)
@@ -276,6 +348,7 @@ class PostPanel(Widget):
 
     async def _remove_item(self, item: PostItem, target: int | None) -> None:
         await item.remove()
+        self._regroup()
         if target is not None:
             self._reselect(target)
 
@@ -302,6 +375,7 @@ class PostPanel(Widget):
         new_item = PostItem(post)
         await self.query_one(ListView).mount(new_item, before=old)
         await old.remove()
+        self._regroup()
         if highlighted:
             self._reselect(post.id)
         if flash:

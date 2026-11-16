@@ -19,7 +19,7 @@ from textual.widgets import Footer, ListView
 
 from . import api
 from .sse import SSESubscriber
-from .theme import all_themes, initial_theme, relay_variable_defaults, save_setting, theme_for
+from .theme import all_themes, initial_theme, load_settings, relay_variable_defaults, save_setting, theme_for
 from .widgets.lint import LintModal
 from .widgets.menu import ActionMenu, MenuItem
 from .widgets.modals import (
@@ -332,6 +332,9 @@ class RelayTuiApp(App):
         self._loading_more = False
         self._pane_reselect = False  # the next load opens its first post (a tag/folder change)
         self._pane_anchor: int | None = None  # the feed post the pane was opened from
+        self._restore_post_id: int | None = None
+        self._save_timer = None
+        self._restore_session()
         self._sse = SSESubscriber(
             on_post=self._on_sse_post,
             on_connect=self._on_sse_connect,
@@ -341,6 +344,10 @@ class RelayTuiApp(App):
         self._sse.start()
         self._apply_layout()
         self._reload()
+        if self._topics_mode == "tree":
+            self._load_topics()
+        # Start in the feed: it's what j/k, Enter and the menu act on.
+        self.call_after_refresh(self.query_one(PostPanel).focus)
         self._load_status()
 
     def on_unmount(self) -> None:
@@ -534,7 +541,9 @@ class RelayTuiApp(App):
             posts, search=self._search, pinned_id=pinned_id,
             label=self._feed_label(), empty=self._empty_message(),
             summary=f"{arrow} {self._sort} · {total}",
+            group_by=None if self._search else self._sort,
         )
+        self._save_feed()
         pane = self._pane()
         pane.link_index, pane.link_titles = self._link_index, self._link_titles
         self._pending_ids.clear()
@@ -669,6 +678,13 @@ class RelayTuiApp(App):
         panel, pane = self.query_one(PostPanel), self._pane()
         if pane.editing:
             return
+        restore, self._restore_post_id = self._restore_post_id, None
+        if restore is not None:
+            # The post open when the TUI last closed: selected in the feed if
+            # it's there (which shows it), else fetched and shown on its own.
+            if not panel.select(restore):
+                self._restore_post(restore)
+            return
         if not reselect and pane.post is not None:
             if not panel.select(self._pane_anchor):
                 panel.select(pane.post.id)
@@ -746,6 +762,48 @@ class RelayTuiApp(App):
     def on_reader_pane_moved(self, event: ReaderPane.Moved) -> None:
         self._update_trail()
         self.refresh_bindings()
+        # Remembered for next time — once the reader settles, not per j/k step.
+        if self._save_timer is not None:
+            self._save_timer.stop()
+        post = self._pane().post
+        self._save_timer = self.set_timer(1.0, lambda: save_setting("open_post", post.id if post else None))
+
+    # ── remembered between runs ──────────────────────────────────────────────
+
+    def _restore_session(self) -> None:
+        """Start where the last run ended: the layout, the feed's filter and
+        order, and the open post. A search is not kept — it's a moment's
+        question, not a place."""
+        saved = load_settings()
+        if saved.get("layout") in ("reader", "list"):
+            self._reader_pref = saved["layout"] == "reader"
+        feed = saved.get("feed") if isinstance(saved.get("feed"), dict) else {}
+        self._active_tag = feed.get("tag") or None
+        self._active_folder = feed.get("folder") or None
+        self._author = feed.get("author") or None
+        if feed.get("sort") in ("updated", "created"):
+            self._sort = feed["sort"]
+        if feed.get("order") in ("desc", "asc"):
+            self._order = feed["order"]
+        if self._active_folder:
+            self._topics_mode = "tree"
+        if isinstance(saved.get("open_post"), int):
+            self._restore_post_id = saved["open_post"]
+
+    def _save_feed(self) -> None:
+        save_setting("feed", {
+            "tag": self._active_tag, "folder": self._active_folder, "author": self._author,
+            "sort": self._sort, "order": self._order,
+        })
+
+    @work(thread=True)
+    def _restore_post(self, post_id: int) -> None:
+        try:
+            post = api.get_post(post_id)
+        except Exception:
+            self.call_from_thread(self._sync_pane, True)   # gone since: open the first post instead
+            return
+        self.call_from_thread(self._pane().show, post)
 
     def _clear_filters(self) -> None:
         self._active_tag = self._active_folder = self._author = self._search = None
@@ -865,6 +923,7 @@ class RelayTuiApp(App):
             self.notify("Finish the edit first", severity="warning")
             return
         self._reader_pref = not self._reader_pref
+        save_setting("layout", "reader" if self._reader_pref else "list")
         self._apply_layout()
         if self._reader_pref and not self._reader_active:
             self.notify(f"Three columns need a terminal {READER_MIN_WIDTH} columns wide", severity="warning")
