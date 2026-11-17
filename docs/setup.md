@@ -51,6 +51,8 @@ echo "API_KEY=$(openssl rand -hex 32)" >> .env
 | `RELAY_API_KEY_SCOPES` | `""` | Restrict a named key: `name:read`, `name:write:tag1+tag2`, `name:full`. No entry = full access — [auth.md](auth.md) |
 | `RELAY_VAULT_PATH` | `/data/vault` | The vault; relay's index and state live in `<vault>/.relay/` |
 | `RELAY_BASE_URL` | `http://localhost:8000` | Public URL (stdio proxy, OAuth redirects) |
+| `RELAY_DOMAINS` | `finance,career,homelab,dev,audio,photography,music,auto,gaming,radio,watches,reading` | The vault's domain tags, one folder each: `tag` (folder = the tag capitalised) or `tag:Folder`. A new post files into the folder of its first domain tag; lint's `missing_domain_tag` checks against this list. Keep it in step with the taxonomy in master document #0 |
+| `RELAY_FOLDER_FALLBACKS` | `financial-analyst:finance,briefing:finance,daily-digest:Digests,news-digest:Digests,digest:Digests,news:Digests,meta:Inbox,index:Inbox` | Where a post with no domain tag files, by a series or type tag: `tag:target`, the target a domain tag or a folder name. Anything else goes to `Inbox/` |
 | `DEFAULT_TTL_HOURS` | `0` | Global expiry; `0` = off (per-tag rules still apply) |
 | `CLEANUP_INTERVAL_MINUTES` | `60` | How often expired posts are swept |
 | `RELAY_WATCH_ENABLED` | `true` | Reindex + SSE for edits made outside relay (Obsidian, nvim) |

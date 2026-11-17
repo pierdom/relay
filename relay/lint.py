@@ -49,7 +49,7 @@ from .config import settings
 from .models import LintFinding, LintReport, tags_from_sentinel
 
 # Type axis (relay #0's tag table, second column). Kept in sync by hand, same
-# footing as folders.DOMAINS for the domain axis — #0 is the source of truth.
+# footing as the configured domains (folders.domains()) — #0 is the source of truth.
 TYPE_TAGS = {"reference", "plan", "briefing", "digest", "project", "profile", "hub", "playlist"}
 
 # Hub/plan posts are meant to be kept current; flag one that hasn't been
@@ -147,11 +147,12 @@ def _tag_findings(pid: int, title: str, path: str, tags: list[str]) -> list[Lint
             post_id=pid, title=title,
         )]
     found = []
-    has_domain = any(t in folders.DOMAINS for t in tags)
+    domain_tags = folders.domains()
+    has_domain = any(t in domain_tags for t in tags)
     if not has_domain:
         found.append(_finding(
             "missing_domain_tag", "error",
-            f"No domain tag ({', '.join(sorted(folders.DOMAINS))}).", post_id=pid, title=title,
+            f"No domain tag ({', '.join(sorted(domain_tags))}).", post_id=pid, title=title,
         ))
     if not any(t in TYPE_TAGS for t in tags):
         found.append(_finding(

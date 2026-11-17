@@ -210,6 +210,19 @@ class Settings(BaseSettings):
     # cost of a several-second reload on the next search/write. 0 disables
     # (never unload, previous always-resident behavior).
     embedding_idle_unload_seconds: int = 300
+    # The vault's domain tags — one folder each — and the series/type tags that
+    # route a post without a domain tag (folders.py). Comma-separated; a domain
+    # is `tag` or `tag:Folder` (default: the tag capitalised), a fallback
+    # `tag:target` (a domain tag, or a folder name). Keep in step with the
+    # taxonomy in master document #0. Malformed entries are skipped with a
+    # warning. Changing them never moves an existing file.
+    relay_domains: str = (
+        "finance,career,homelab,dev,audio,photography,music,auto,gaming,radio,watches,reading"
+    )
+    relay_folder_fallbacks: str = (
+        "financial-analyst:finance,briefing:finance,daily-digest:Digests,news-digest:Digests,"
+        "digest:Digests,news:Digests,meta:Inbox,index:Inbox"
+    )
     relay_palette: str = "default"
     relay_transparent: bool = False
     secure_cookies: bool = True

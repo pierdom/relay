@@ -109,3 +109,40 @@ async def test_domain_folder_not_moved_on_retag(client, vault_dir):
     r = await client.patch(f"/posts/{post['id']}", json={"tags": ["dev"]}, headers=AUTH)
     assert r.status_code == 200
     assert _folder_of(vault_dir, post["id"]) == "Homelab"  # unchanged
+
+
+# ── a configurable taxonomy (RELAY_DOMAINS, RELAY_FOLDER_FALLBACKS) ──────────
+
+
+def test_domains_and_fallbacks_come_from_configuration(monkeypatch):
+    monkeypatch.setattr(settings, "relay_domains", "olimar, homelab:Home Lab, finance")
+    monkeypatch.setattr(settings, "relay_folder_fallbacks", "digest:Digests, briefing:finance, meta:inbox")
+    assert folders.domains() == ["olimar", "homelab", "finance"]
+    assert folders.folder_for(5, ["profile", "olimar"]) == "Olimar"       # capitalised by default
+    assert folders.folder_for(5, ["homelab"]) == "Home Lab"               # an explicit folder name
+    assert folders.folder_for(5, ["dev"]) == folders.INBOX                # no longer a domain
+    assert folders.folder_for(5, ["briefing"]) == "Finance"               # fallback to a domain's folder
+    assert folders.folder_for(5, ["digest"]) == "Digests"                 # fallback to a folder
+    assert folders.folder_for(5, ["meta"]) == folders.INBOX
+
+
+def test_a_malformed_entry_is_skipped_with_a_warning(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "relay_domains", "finance, Bad Tag, ../x:..,finance:Again,dev")
+    monkeypatch.setattr(settings, "relay_folder_fallbacks", "digest, news:../up, finance:Digests, digest:Digests")
+    with caplog.at_level("WARNING"):
+        assert folders.domains() == ["finance", "dev"]
+        assert folders.taxonomy().fallbacks == {"digest": "Digests"}
+    text = caplog.text
+    assert "RELAY_DOMAINS: skipping malformed entry 'Bad Tag'" in text
+    assert "duplicate domain 'finance'" in text
+    assert "RELAY_FOLDER_FALLBACKS: 'finance' is a domain already" in text
+
+
+@pytest.mark.asyncio
+async def test_a_configured_domain_files_new_posts_and_satisfies_lint(client, vault_dir, monkeypatch):
+    monkeypatch.setattr(settings, "relay_domains", settings.relay_domains + ",olimar")
+    r = await client.post("/posts", json={"title": "Olimar notes", "content": "x", "tags": ["olimar", "profile"]})
+    post = r.json()
+    assert _folder_of(vault_dir, post["id"]) == "Olimar"
+    report = (await client.get("/lint")).json()
+    assert not [i for i in report["items"] if i["rule"] == "missing_domain_tag" and i["post_id"] == post["id"]]
