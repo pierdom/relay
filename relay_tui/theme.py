@@ -16,6 +16,15 @@ mirror them:
 - ``relay-frame``: a panel's frame while it doesn't have focus
 - ``relay-badge``: the id badge's fill (the palette's ``border``)
 - ``relay-great`` / ``relay-bad`` / ``relay-terrible``: health and expiry
+- ``relay-signal``: what stands out in content — tags (qobit's HI-RES/heart pink)
+- ``relay-readout``: state read off the chrome, like an LED display — footer
+  keys, a panel's order/count line, the live dot (qobit's amber readout)
+
+A palette needs only ``primary`` (the accent), ``bg``, ``border`` and the three
+``perf_*`` colours. It may also split the accent from Textual's own primary
+(``accent``), and set ``secondary``, ``foreground``, ``surface``, ``panel``,
+``boost``, ``muted``, ``signal``, ``readout`` and ``select_alpha`` — cyberdeck
+does. Those text colours are still moved until they read.
 
 ANSI themes can't blend: they get the terminal's own colours and no tints.
 """
@@ -63,30 +72,43 @@ def is_dark(bg: str, explicit: object = None) -> bool:
     return _luminance(Color.parse(bg)) < 0.4
 
 
+# Palette hints relay_variable_defaults reads and checks for contrast; never
+# CSS variables in their own right (the checked values are the relay-* ones).
+_HINTS = {"muted": "palette-muted", "signal": "palette-signal", "readout": "palette-readout"}
+
+
 def theme_for(name: str, palette: dict | None = None) -> Theme:
     """The Textual theme for one palette file."""
     p = load_palette(name) if palette is None else palette
-    accent = str(p.get("primary", "#f59e0b"))
-    bg = str(p.get("bg", "#1c1007"))
-    border = str(p.get("border", "#92400e"))
 
     def hex_or_none(key: str) -> str | None:
         v = str(p.get(key, ""))
         return v if v.startswith("#") else None
 
+    primary = str(p.get("primary", "#f59e0b"))
+    accent = hex_or_none("accent") or primary
+    bg = str(p.get("bg", "#1c1007"))
+    border = str(p.get("border", "#92400e"))
+    variables = {"relay-badge": border}
+    variables.update({hint: v for key, hint in _HINTS.items() if (v := hex_or_none(key))})
+    if (boost := hex_or_none("boost")):
+        variables["boost"] = boost
+    if isinstance(p.get("select_alpha"), int | float) and bg.startswith("#"):
+        variables["palette-select"] = Color.parse(bg).blend(Color.parse(accent), float(p["select_alpha"])).hex
     return Theme(
         name=THEME_PREFIX + Path(name).stem,
         dark=is_dark(bg, p.get("dark")),
-        primary=accent,
-        secondary=accent,
+        primary=primary,
+        secondary=hex_or_none("secondary") or accent,
         accent=accent,
+        foreground=hex_or_none("foreground"),
         background=bg,
-        surface=border,
-        panel=border,
+        surface=hex_or_none("surface") or border,
+        panel=hex_or_none("panel") or border,
         warning=hex_or_none("perf_bad"),
         error=hex_or_none("perf_terrible"),
         success=hex_or_none("perf_great"),
-        variables={"relay-badge": border},
+        variables=variables,
     )
 
 
@@ -143,12 +165,15 @@ def relay_variable_defaults(theme: Theme) -> dict[str, str]:
             "relay-great": theme.success or "ansi_green",
             "relay-bad": theme.warning or "ansi_yellow",
             "relay-terrible": theme.error or "ansi_red",
+            "relay-signal": accent_name,
+            "relay-readout": accent_name,
         }
     system = theme.to_color_system().generate()
     bg = Color.parse(system["background"])
     accent = Color.parse(system["accent"])
     fg = Color.parse(system["foreground"])
-    select = bg.blend(accent, 0.30)
+    hints = theme.variables
+    select = Color.parse(hints["palette-select"]) if "palette-select" in hints else bg.blend(accent, 0.30)
     select_dim = bg.blend(accent, 0.12)
     # Text on a selected row: the first of accent, foreground, black/white
     # that reads on it.
@@ -159,10 +184,14 @@ def relay_variable_defaults(theme: Theme) -> dict[str, str]:
     )
     # Every surface ordinary text sits on: the page and an unfocused highlight.
     surfaces = (bg, select_dim)
-    accent_text, muted = accent, bg.blend(fg, 0.62)
+    accent_text = accent
+    muted = Color.parse(hints["palette-muted"]) if "palette-muted" in hints else bg.blend(fg, 0.62)
+    signal = Color.parse(hints["palette-signal"]) if "palette-signal" in hints else accent
+    readout = Color.parse(hints["palette-readout"]) if "palette-readout" in hints else accent
     great, bad, terrible = (Color.parse(system[k]) for k in ("success", "warning", "error"))
     for under in surfaces:
         accent_text, muted = readable(accent_text, under), readable(muted, under)
+        signal, readout = readable(signal, under), readable(readout, under)
         great, bad, terrible = readable(great, under), readable(bad, under), readable(terrible, under)
     return {
         "relay-muted": muted.hex,
@@ -175,6 +204,8 @@ def relay_variable_defaults(theme: Theme) -> dict[str, str]:
         "relay-great": great.hex,
         "relay-bad": bad.hex,
         "relay-terrible": terrible.hex,
+        "relay-signal": signal.hex,
+        "relay-readout": readout.hex,
     }
 
 

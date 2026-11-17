@@ -120,6 +120,7 @@ A read-only key blocks `n`/`e`/`d` locally with a toast (`This key is read-only`
 | `ayu-dark` | Ayu Dark — gold accent |
 | `ayu-darker` | Ayu Darker — darker canvas, brighter gold |
 | `night-owl` | Night Owl — periwinkle accent |
+| `cyberdeck` | Cyberdeck — qobit's signature: cyan chrome on violet-black, neon-pink tags, amber readouts (TUI only) |
 | `candy` | Candy — hot-pink accent (TUI only) |
 | `earthy` | Earthy (TUI only) |
 | `pastel` | Pastel (TUI only) |
@@ -128,6 +129,8 @@ A read-only key blocks `n`/`e`/`d` locally with a toast (`This key is read-only`
 Palette files live in `relay_tui/palettes/`. Each is a small TOML file — copy one to create your own. Whether it is light or dark is read from `bg`; add `dark = true` or `dark = false` to say so yourself. `RELAY_PALETTE` can also be the path of a palette file of your own.
 
 Every colour on screen comes from the theme: secondary and accent text, the selection and the health colours are worked out for each theme and moved until they read (WCAG AA, 4.5:1), so a palette only has to give its accent, background, border and three status colours.
+
+A palette can say more, as `cyberdeck` does: `accent` apart from `primary` (relay's chrome versus Textual's buttons and command palette), `secondary`, `foreground`, `surface`, `panel`, `boost`, `muted` (secondary text), `signal` (tags), `readout` (footer keys, a panel's state line, the live dot) and `select_alpha` (how strong the accent is behind a selected row). Its text colours are still checked and moved if they don't read.
 
 ## Background transparency
 

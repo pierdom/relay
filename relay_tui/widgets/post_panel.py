@@ -150,7 +150,7 @@ class PostItem(ListItem):
             if pill:
                 meta_line += f"  {pill}"
         if post.tags:
-            meta_line += "  " + " ".join(f"[$relay-accent-text]#{escape(t)}[/]" for t in post.tags)
+            meta_line += "  " + " ".join(f"[$relay-signal]#{escape(t)}[/]" for t in post.tags)
         yield Label(meta_line, markup=True)
 
     group: str | None = None

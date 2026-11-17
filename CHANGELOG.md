@@ -4,6 +4,14 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.34.0] — 2026-11-17
+
+### Added
+- **The Cyberdeck theme in the TUI** (`relay-cyberdeck`; `RELAY_PALETTE=cyberdeck` or `Ctrl+P` → *Change theme*): qobit's signature look, value for value, for one style across terminal apps — cyan chrome on a violet-black night, neon-pink tags, amber LED readouts (footer keys, a panel's order and count, the live dot), magenta for Textual's own buttons and command palette
+- **Palettes can say more**: besides the accent, background, border and status colours, a palette may set its own `accent` apart from Textual's `primary`, `secondary`, `foreground`, `surface`, `panel`, `boost`, secondary text (`muted`), a `signal` colour for tags, a `readout` colour for state and keys, and the selection's strength. Every text colour is still checked against WCAG AA and moved if it doesn't read; other themes are unchanged
+
+---
+
 ## [1.33.0] — 2026-11-16
 
 ### Added

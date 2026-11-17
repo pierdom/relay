@@ -1,0 +1,28 @@
+# Cyberdeck — qobit's signature theme, for one look across terminal apps.
+# Neon noir meets cassette futurism: cyan chrome on a violet-black night,
+# neon pink for signal (tags here; HI-RES and favourites in qobit), amber
+# LED readouts (footer keys, a panel's state line, the live dot) as on a tape
+# deck or a CRT terminal. Same values as qobit's CYBERDECK_THEME (qobit/ui/themes.py).
+# Select with: RELAY_PALETTE=cyberdeck, or Ctrl+P → Change theme → relay-cyberdeck
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+primary = "#ff2ec4"   # hot magenta: Textual's own chrome (buttons, the command palette)
+accent  = "#00e5ff"   # electric cyan: relay's chrome (frames, focus, selection, titles)
+secondary = "#8f5cff" # electric violet
+border  = "#2f2252"   # panel violet: badges, separators
+bg      = "#0a0612"   # near-black with a violet undertone
+surface = "#140d24"
+panel   = "#2f2252"
+boost   = "#231a3d"
+foreground = "#d6faff" # pale cyan-white body text (18:1)
+
+# ── Roles ─────────────────────────────────────────────────────────────────────
+muted   = "#9ec3d2"   # secondary text tinted cyan, not a neutral grey (10.7:1)
+signal  = "#ff5cd3"   # neon pink: tags
+readout = "#ffb000"   # amber LED: footer keys, panel state, the live dot
+select_alpha = 0.28   # cyan 28% for a selected row (35% made pink on it hard to read)
+
+# ── Semantic colours ──────────────────────────────────────────────────────────
+perf_great    = "#39ff88"  # acid green
+perf_bad      = "#ffb000"  # amber
+perf_terrible = "#ff2965"  # hot red

@@ -33,11 +33,31 @@ def test_every_palettes_text_reads_where_it_sits(t):
         pytest.skip("ANSI themes take the terminal's own colours")
     v = theme.relay_variable_defaults(t)
     bg = _c(t.to_color_system().generate()["background"])
-    for name in ("relay-muted", "relay-accent-text", "relay-great", "relay-bad", "relay-terrible"):
+    for name in ("relay-muted", "relay-accent-text", "relay-signal", "relay-readout",
+                 "relay-great", "relay-bad", "relay-terrible"):
         for under in (bg, _c(v["relay-select-dim"])):
             assert theme.contrast(_c(v[name]), under) >= 4.5, (t.name, name)
     ratio = theme.contrast(_c(v["relay-select-text"]), _c(v["relay-select"]))
     assert ratio >= 4.5, (t.name, ratio)
+
+
+def test_cyberdeck_is_qobits_signature_look():
+    """One look across terminal apps: relay-cyberdeck keeps qobit's cyan
+    chrome, magenta primary, violet-black night, cyan-tinted muted text, pink
+    signal and amber readout — each already readable, so none is moved."""
+    t = next(t for t in THEMES if t.name == "relay-cyberdeck")
+    assert t.dark
+    def low(*values):
+        return tuple(x.lower() for x in values)
+
+    assert low(t.accent, t.primary, t.secondary) == ("#00e5ff", "#ff2ec4", "#8f5cff")
+    assert low(t.background, t.foreground, t.surface, t.panel) == ("#0a0612", "#d6faff", "#140d24", "#2f2252")
+    v = theme.relay_variable_defaults(t)
+    assert low(v["relay-muted"], v["relay-signal"], v["relay-readout"]) == ("#9ec3d2", "#ff5cd3", "#ffb000")
+    assert v["relay-select"] == Color.parse("#0a0612").blend(Color.parse("#00e5ff"), 0.28).hex
+    # Everyone else is unchanged: signal and readout fall back to the accent text.
+    plain = theme.relay_variable_defaults(next(t for t in THEMES if t.name == "relay-default"))
+    assert plain["relay-signal"] == plain["relay-readout"] == plain["relay-accent-text"]
 
 
 def test_light_palettes_are_light_themes():
