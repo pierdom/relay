@@ -14,6 +14,10 @@ On a terminal at least 110 columns wide the TUI shows three columns: **topics** 
 
 The top row says where you are: `All posts › #homelab › Docker Services › Home Network Map` is the feed, its filter, the open post and the links followed from it. Click a crumb to go back there. On the right, `● live` (the dot lights as changes arrive), the key's scope when it has one, and `◢◤ relay`.
 
+The feed is grouped by the date it's sorted on — Today, Yesterday, Earlier this week, Earlier this month, then by month and by year — with a divider opening each group. Search results, ranked rather than dated, aren't grouped.
+
+The TUI starts where it last stopped: the same layout, the same tag, folder or writer filter and order, and the same post open (a search isn't kept). It's remembered beside the theme, in `settings.json`.
+
 `Esc` always goes back one level: along the links you followed, then out of the post to the feed, then off the search, then off the filter.
 
 The footer lists only the keys that do something where you are (`f Links` once a post is open, `[ Back` once you've followed a link, `u Undo` after a delete). `i` opens a menu of everything you can do with what's highlighted — a post, or a tag in Topics — and the vault-wide actions after it, each with its own key and a number to pick it.
@@ -44,6 +48,7 @@ The footer lists only the keys that do something where you are (`f Links` once a
 | `u` | Undo the last delete (history on) |
 | `a` | Attachment browser (open externally / delete) |
 | `t` | Toggle TOPICS: Tags ⇄ Tree (folder) |
+| `/` (in Topics) | Filter the tags or folders as you type; `Enter` picks, `Esc` clears |
 | `c` / `R` | Tag expiry and retention (TTL, date, keep-newest-N) / rename (from TOPICS panel) |
 | `s` / `o` | Sort field (updated ⇄ created) / order (desc ⇄ asc) |
 | `r` / `Tab` | Refresh feed / move between columns |

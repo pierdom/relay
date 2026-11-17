@@ -4,6 +4,18 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.33.0] — 2026-11-16
+
+### Added
+- **The TUI's feed in date groups**: Today, Yesterday, Earlier this week, Earlier this month, then by month and by year, by whichever date it's sorted on, with a divider opening each group. Search results, ranked rather than dated, aren't grouped
+- **Filter Topics as you type**: `/` with Topics focused narrows the tags or folders to those matching, with `/ que_` in the panel's frame; `Enter` picks one, `Esc` clears the filter
+- **The TUI starts where it last stopped**: the layout, the feed's tag, folder or writer filter and its order, and the post that was open (a search isn't kept)
+
+### Changed
+- The TUI starts with the feed focused, where `j`/`k`, `Enter` and `i` act, instead of Topics
+
+---
+
 ## [1.32.0] — 2026-11-16
 
 ### Added
