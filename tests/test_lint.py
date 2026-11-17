@@ -441,7 +441,7 @@ async def test_zero_backlinks_excludes_exempt_tags(client):
     lonely = await _create(client, title="Lonely", tags=["dev", "reference"])
     await _create(client, title="Briefing 2026-01-01", tags=["finance", "briefing"])
     # daily-digest/news-digest route to Digests/ exactly like digest/news do
-    # (folders.FALLBACK) — the exemption must name all four, not just two.
+    # (RELAY_FOLDER_FALLBACKS) — the exemption must name all four, not just two.
     await _create(client, title="Daily Digest 2026-01-01", tags=["daily-digest"])
     report = await _lint(client)
     assert _find(report, "zero_backlinks", lonely["id"]) is not None

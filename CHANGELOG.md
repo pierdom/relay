@@ -4,6 +4,13 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.35.0] — 2026-11-17
+
+### Added
+- **The vault's domains are configuration**: `RELAY_DOMAINS` lists the domain tags, each with its folder (`tag`, filed under the tag capitalised, or `tag:Folder`), and `RELAY_FOLDER_FALLBACKS` says where a post without one files by a series or type tag (`tag:domain-or-folder`). They were hard-coded in `folders.py`. The defaults are the previous lists, so nothing changes until you set them; lint's *Missing domain tag* follows the same list. As before, a new post files by its first domain tag and existing files are never moved, so adding a domain doesn't relocate the posts already carrying its tag
+
+---
+
 ## [1.34.0] — 2026-11-17
 
 ### Added
