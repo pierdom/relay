@@ -10,6 +10,7 @@ from textual.widgets import Label, ListItem, ListView, Static
 
 from .. import api
 from ..render import preview_line
+from .lists import PagedListView
 
 
 def _skip_pinned(first_child_id: int | None, pinned_id: int | None) -> int:
@@ -167,7 +168,7 @@ class PostPanel(Widget):
         return None
 
     def compose(self) -> ComposeResult:
-        yield ListView(id="post-listview")
+        yield PagedListView(id="post-listview")
         yield Static("", id="post-empty", classes="status-line")
 
     def on_mount(self) -> None:
