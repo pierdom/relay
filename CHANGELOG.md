@@ -4,6 +4,14 @@ All notable changes to relay are documented here. Releases follow [semantic vers
 
 ---
 
+## [1.34.0] — 2026-11-17
+
+### Added
+- **Relay Cyberdeck**, qobit's signature theme, in the browser and the TUI alike, for one look across relay, qobit and the terminal: cyan chrome on a violet-black night, neon pink for signal, amber for readouts, magenta for the hover fill. In the browser it sits in the Relay group of the theme picker, beside Relay Dark and Light; in the TUI it is `relay-cyberdeck` (`RELAY_PALETTE=cyberdeck` or `Ctrl+P` → *Change theme*), where the pink marks tags and the amber the footer keys, a panel's order and count, and the live dot. Both carry qobit's values unchanged — all of them clear relay's own contrast targets
+- **Palettes can say more**: besides the accent, background, border and status colours, a palette may set its own `accent` apart from Textual's `primary`, `secondary`, `foreground`, `surface`, `panel`, `boost`, secondary text (`muted`), a `signal` colour for tags, a `readout` colour for state and keys, and the selection's strength. Every text colour is still checked against WCAG AA and moved if it doesn't read; other themes are unchanged
+
+---
+
 ## [1.33.0] — 2026-11-16
 
 ### Added

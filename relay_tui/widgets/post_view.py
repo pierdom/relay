@@ -39,7 +39,7 @@ def post_meta(post: api.Post) -> str:
         parts.append(f"expires {_time_until(post.expires_at)}")
     meta = f"[$relay-muted]{escape('  •  '.join(parts))}[/]"
     if post.tags:
-        meta += "  " + "  ".join(f"[$relay-accent-text]#{escape(t)}[/]" for t in post.tags)
+        meta += "  " + "  ".join(f"[$relay-signal]#{escape(t)}[/]" for t in post.tags)
     return meta
 
 

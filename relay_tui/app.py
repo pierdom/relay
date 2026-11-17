@@ -163,7 +163,7 @@ class RelayTuiApp(App):
         border: round $accent;
         border-title-color: $relay-accent-text;
         border-title-style: bold;
-        border-subtitle-color: $relay-accent-text;
+        border-subtitle-color: $relay-readout;
     }
     TagPanel { width: 28; }
     PostPanel { width: 1fr; }
@@ -198,7 +198,7 @@ class RelayTuiApp(App):
     /* One look for an empty or failed list. */
     .status-line { color: $relay-muted; text-style: italic; }
     Footer, Footer > * { background: transparent; }
-    FooterKey .footer-key--key { color: $relay-accent-text; background: transparent; text-style: bold; }
+    FooterKey .footer-key--key { color: $relay-readout; background: transparent; text-style: bold; }
     FooterKey .footer-key--description { color: $foreground; background: transparent; }
     """
     # The footer shows the few keys that apply to what's in front of you

@@ -993,6 +993,39 @@ html {
   --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.70);
   --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.70);
 }
+/* Relay Cyberdeck — qobit's signature theme, so relay and qobit look alike
+   in the browser and the terminal (the TUI's `relay-cyberdeck` palette has the
+   same values). Neon noir meets cassette futurism: cyan chrome on a
+   violet-black night, neon pink for signal, amber for readouts, magenta for
+   the hover fill. Values are qobit's CYBERDECK_THEME (qobit/ui/themes.py). */
+:root[data-theme="cyberdeck"], [data-theme="cyberdeck"] {
+  color-scheme: dark;
+  --bg:          #0a0612;   /* near-black with a violet undertone */
+  --surface:     #140d24;
+  --border:      #2f2252;   /* panel violet */
+  --text:        #d6faff;   /* pale cyan-white, 17:1 */
+  --muted:       #9ec3d2;   /* tinted cyan rather than grey, 10:1 */
+  --accent:      #00e5ff;   /* electric cyan: the chrome */
+  --accent-dim:  #ff2ec4;   /* hot magenta: qobit's primary, the hover fill */
+  --accent-glow: rgba(0, 229, 255, 0.12);
+  --tag-bg:      #1d1336;
+  --tag-active:  #231a3d;   /* boost */
+  --green:       #39ff88;   /* acid green */
+  --red:         #ff2965;   /* hot red */
+  --body:        #d6faff;
+  --body-strong: #d6faff;
+  --wash-raise:  rgba(214, 250, 255, 0.04);
+  --accent-2:      #ff5cd3; /* neon pink: signal */
+  --accent-3:      #ffb000; /* amber: readout */
+  --on-accent:     #0a0612;
+  --on-scrim:      #d6faff;
+  --border-hover:  #4a3a7a;
+  --scrim-rgb:     10, 6, 18;
+  --shadow-card:   0 4px 24px rgba(0, 0, 0, 0.50);
+  --shadow-pill:   0 2px 10px rgba(0, 0, 0, 0.50);
+  --shadow-modal:  0 24px 64px rgba(0, 0, 0, 0.70);
+  --shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.70);
+}
 /* Night Owl (sdras/night-owl-vscode-theme). Cards on the editor's deep navy,
    the canvas one step darker at the inactive-tab tone, chips on the input
    background. `#5f7e97` is the theme's own UI grey and its brightest muted

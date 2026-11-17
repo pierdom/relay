@@ -107,7 +107,7 @@ class StatusMark(Widget):
         return " · ".join(parts) + "   ◢◤ relay"
 
     def render(self) -> Content:
-        dot_style = ("bold $relay-great" if self._pulsing else "$relay-accent-text") if self._live else "$relay-muted"
+        dot_style = ("bold $relay-great" if self._pulsing else "$relay-readout") if self._live else "$relay-muted"
         parts: list[tuple[str, str] | str] = [
             ("●" if self._live else "○", dot_style),
             (" live" if self._live else " offline", "$relay-muted"),
