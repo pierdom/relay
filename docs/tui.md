@@ -120,7 +120,7 @@ A read-only key blocks `n`/`e`/`d` locally with a toast (`This key is read-only`
 | `ayu-dark` | Ayu Dark — gold accent |
 | `ayu-darker` | Ayu Darker — darker canvas, brighter gold |
 | `night-owl` | Night Owl — periwinkle accent |
-| `cyberdeck` | Cyberdeck — qobit's signature: cyan chrome on violet-black, neon-pink tags, amber readouts (TUI only) |
+| `cyberdeck` | Relay Cyberdeck — qobit's signature: cyan chrome on violet-black, neon-pink tags, amber readouts |
 | `candy` | Candy — hot-pink accent (TUI only) |
 | `earthy` | Earthy (TUI only) |
 | `pastel` | Pastel (TUI only) |

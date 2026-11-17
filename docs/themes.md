@@ -1,6 +1,6 @@
 # Themes
 
-relay ships 25 themes. Pick one from the palette button in the header; the choice is saved per browser. Relay Dark is the default.
+relay ships 26 themes. Pick one from the palette button in the header; the choice is saved per browser. Relay Dark is the default.
 
 Every theme is a block of colour tokens in `relay/static/ui/app.css` plus an entry in `relay/static/ui/js/theme.js`. Reproductions of existing schemes (Catppuccin, Gruvbox, Nord…) use only their palette's own colours. Every theme clears the contrast floors in `tests/test_css_tokens.py`: body text at least 7:1, small text (meta, links, tags, buttons) at WCAG AA. Where a palette has no colour that reaches a floor for some role, the shortfall is recorded there with its measured value.
 
@@ -13,13 +13,14 @@ Regenerate this page and its screenshots with `scripts/theme_gallery.py` (see it
 
 | | |
 |---|---|
-| <b>Relay Dark</b> · dark · TUI: `default`<br><img src="screenshots/themes/dark.png" alt="Relay Dark" width="420"> | <b>Relay Light</b> · light · browser only<br><img src="screenshots/themes/light.png" alt="Relay Light" width="420"> |
+| <b>Relay Dark</b> · dark · TUI: `default`<br><img src="screenshots/themes/dark.png" alt="Relay Dark" width="420"> | <b>Relay Light</b> · light · TUI: `light`<br><img src="screenshots/themes/light.png" alt="Relay Light" width="420"> |
+| <b>Relay Cyberdeck</b> · dark · TUI: `cyberdeck`<br><img src="screenshots/themes/cyberdeck.png" alt="Relay Cyberdeck" width="420"> | |
 
 ## ANSI
 
 | | |
 |---|---|
-| <b>ANSI Dark</b> · dark · browser only<br><img src="screenshots/themes/ansi-dark.png" alt="ANSI Dark" width="420"> | <b>ANSI Light</b> · light · browser only<br><img src="screenshots/themes/ansi-light.png" alt="ANSI Light" width="420"> |
+| <b>ANSI Dark</b> · dark · TUI: `ansi-dark`<br><img src="screenshots/themes/ansi-dark.png" alt="ANSI Dark" width="420"> | <b>ANSI Light</b> · light · TUI: `ansi-light`<br><img src="screenshots/themes/ansi-light.png" alt="ANSI Light" width="420"> |
 
 ## Ayu
 
@@ -44,7 +45,7 @@ Regenerate this page and its screenshots with `scripts/theme_gallery.py` (see it
 
 | | |
 |---|---|
-| <b>Gruvbox</b> · dark · TUI: `gruvbox`<br><img src="screenshots/themes/gruvbox.png" alt="Gruvbox" width="420"> | <b>Gruvbox Light</b> · light · browser only<br><img src="screenshots/themes/gruvbox-light.png" alt="Gruvbox Light" width="420"> |
+| <b>Gruvbox</b> · dark · TUI: `gruvbox`<br><img src="screenshots/themes/gruvbox.png" alt="Gruvbox" width="420"> | <b>Gruvbox Light</b> · light · TUI: `gruvbox-light`<br><img src="screenshots/themes/gruvbox-light.png" alt="Gruvbox Light" width="420"> |
 
 ## Solarized
 
@@ -56,7 +57,7 @@ Regenerate this page and its screenshots with `scripts/theme_gallery.py` (see it
 
 | | |
 |---|---|
-| <b>Dracula</b> · dark · TUI: `dracula`<br><img src="screenshots/themes/dracula.png" alt="Dracula" width="420"> | <b>Everforest Dark</b> · dark · browser only<br><img src="screenshots/themes/everforest-dark.png" alt="Everforest Dark" width="420"> |
+| <b>Dracula</b> · dark · TUI: `dracula`<br><img src="screenshots/themes/dracula.png" alt="Dracula" width="420"> | <b>Everforest Dark</b> · dark · TUI: `everforest-dark`<br><img src="screenshots/themes/everforest-dark.png" alt="Everforest Dark" width="420"> |
 | <b>Kanagawa</b> · dark · TUI: `kanagawa`<br><img src="screenshots/themes/kanagawa.png" alt="Kanagawa" width="420"> | <b>Molokai</b> · dark · TUI: `molokai`<br><img src="screenshots/themes/molokai.png" alt="Molokai" width="420"> |
 | <b>Night Owl</b> · dark · TUI: `night-owl`<br><img src="screenshots/themes/night-owl.png" alt="Night Owl" width="420"> | <b>Nord</b> · dark · TUI: `nord`<br><img src="screenshots/themes/nord.png" alt="Nord" width="420"> |
 | <b>One Dark</b> · dark · TUI: `one-dark`<br><img src="screenshots/themes/one-dark.png" alt="One Dark" width="420"> | <b>Rosé Pine</b> · dark · TUI: `rose-pine`<br><img src="screenshots/themes/rose-pine.png" alt="Rosé Pine" width="420"> |

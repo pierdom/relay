@@ -19,6 +19,7 @@ import { closeStatusModal, isStatusOpen } from './status.js';
 const CATALOGUE = [
   { id: 'dark',                label: 'Relay Dark',          dark: true,  signature: true, group: 'relay' },
   { id: 'light',               label: 'Relay Light',         dark: false, signature: true, group: 'relay' },
+  { id: 'cyberdeck',           label: 'Relay Cyberdeck',     dark: true,  signature: true, group: 'relay' },
   { id: 'ansi-dark',           label: 'ANSI Dark',           dark: true,  group: 'ansi' },
   { id: 'ansi-light',          label: 'ANSI Light',          dark: false, group: 'ansi' },
   { id: 'catppuccin-latte',    label: 'Catppuccin Latte',    dark: false, group: 'catppuccin' },
@@ -48,7 +49,7 @@ const GROUP_ORDER = ['relay', 'ansi', 'ayu', 'catppuccin', 'github', 'gruvbox', 
 const GROUP_LABELS = { relay: 'Relay', ansi: 'ANSI', ayu: 'Ayu', catppuccin: 'Catppuccin', github: 'GitHub', gruvbox: 'Gruvbox', solarized: 'Solarized' };
 
 const THEMES = [
-  // Signature themes (Relay Dark then Relay Light) always lead in declaration order.
+  // Signature themes (Relay Dark, Light, Cyberdeck) always lead in declaration order.
   ...CATALOGUE.filter(t => t.signature),
   // Named family groups in GROUP_ORDER (skipping 'relay' which already led).
   ...GROUP_ORDER.slice(1).flatMap(g =>
